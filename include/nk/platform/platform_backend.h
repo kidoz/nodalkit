@@ -6,14 +6,14 @@
 /// This is a private interface — application code does not use it
 /// directly. Application and Window delegate to the active backend.
 
-#include <nk/foundation/result.h>
-#include <nk/foundation/types.h>
-#include <nk/platform/events.h>
-#include <nk/platform/system_preferences.h>
-
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <nk/foundation/types.h>
+#include <nk/platform/events.h>
+#include <nk/platform/file_dialog.h>
+#include <nk/platform/system_preferences.h>
+#include <nk/ui_core/cursor_shape.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,7 +31,7 @@ using NativeWindowHandle = void*;
 using EventCallback = std::function<void(Window&)>;
 
 /// Callback for backend-driven system preference changes.
-using SystemPreferencesObserver = std::function<void(SystemPreferences const&)>;
+using SystemPreferencesObserver = std::function<void(const SystemPreferences&)>;
 
 /// Abstract native surface for a single window.
 class NativeSurface {
@@ -53,11 +53,14 @@ public:
     /// Current content area size.
     [[nodiscard]] virtual Size size() const = 0;
 
+    /// Device pixel ratio for the current content area.
+    [[nodiscard]] virtual float scale_factor() const = 0;
+
     /// Present a rendered pixel buffer to the screen.
     /// @param rgba  Pixel data in RGBA8 format, row-major.
     /// @param w     Pixel width.
     /// @param h     Pixel height.
-    virtual void present(uint8_t const* rgba, int w, int h) = 0;
+    virtual void present(const uint8_t* rgba, int w, int h) = 0;
 
     /// Toggle fullscreen mode.
     virtual void set_fullscreen(bool fullscreen) = 0;
@@ -65,6 +68,9 @@ public:
 
     /// Get the platform-native handle (NSWindow*, wl_surface*, etc.).
     [[nodiscard]] virtual NativeWindowHandle native_handle() const = 0;
+
+    /// Apply a platform cursor shape for the current pointer location.
+    virtual void set_cursor_shape(CursorShape shape) = 0;
 };
 
 /// Abstract platform backend. One per Application.
@@ -79,8 +85,8 @@ public:
     virtual void shutdown() = 0;
 
     /// Create a native surface for a Window.
-    [[nodiscard]] virtual std::unique_ptr<NativeSurface> create_surface(
-        WindowConfig const& config, Window& owner) = 0;
+    [[nodiscard]] virtual std::unique_ptr<NativeSurface> create_surface(const WindowConfig& config,
+                                                                        Window& owner) = 0;
 
     /// Run the platform event loop. Drives EventLoop polling and
     /// platform event dispatch. Returns the exit code.
@@ -92,23 +98,31 @@ public:
     /// Request the event loop to stop.
     virtual void request_quit(int exit_code) = 0;
 
+    /// Whether the backend implements a native single-file open dialog.
+    [[nodiscard]] virtual bool supports_open_file_dialog() const { return false; }
+
     /// Show a native "open file" dialog.
-    [[nodiscard]] virtual Result<std::string> show_open_file_dialog(
-        std::string_view title,
-        std::vector<std::string> const& filters) = 0;
+    [[nodiscard]] virtual OpenFileDialogResult
+    show_open_file_dialog(std::string_view title, const std::vector<std::string>& filters) = 0;
+
+    /// Whether the backend implements clipboard text integration.
+    [[nodiscard]] virtual bool supports_clipboard_text() const { return false; }
+
+    /// Read UTF-8 text from the platform clipboard.
+    [[nodiscard]] virtual std::string clipboard_text() const { return {}; }
+
+    /// Write UTF-8 text to the platform clipboard.
+    virtual void set_clipboard_text(std::string_view text) { (void)text; }
 
     /// Query current visual/system preferences used for theme selection.
     [[nodiscard]] virtual SystemPreferences system_preferences() const = 0;
 
     /// Whether the backend can push native system-preference updates.
-    [[nodiscard]] virtual bool supports_system_preferences_observation() const {
-        return false;
-    }
+    [[nodiscard]] virtual bool supports_system_preferences_observation() const { return false; }
 
     /// Start native system-preference observation.
     /// Backends that do not support this may ignore the request.
-    virtual void start_system_preferences_observation(
-        SystemPreferencesObserver observer) {
+    virtual void start_system_preferences_observation(SystemPreferencesObserver observer) {
         (void)observer;
     }
 

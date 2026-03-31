@@ -1,11 +1,9 @@
-#include <nk/platform/application.h>
-
+#include <cassert>
 #include <nk/foundation/logging.h>
+#include <nk/platform/application.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_selection.h>
-
-#include <cassert>
 
 namespace nk {
 
@@ -20,27 +18,39 @@ struct Application::Impl {
     SystemPreferences system_preferences;
     ThemeSelection theme_selection;
     ResolvedThemeSelection resolved_theme_selection;
-    Signal<SystemPreferences const&> system_preferences_changed;
-    Signal<ThemeSelection const&> theme_selection_changed;
+    std::string clipboard_text;
+    Signal<const SystemPreferences&> system_preferences_changed;
+    Signal<const ThemeSelection&> theme_selection_changed;
     CallbackHandle system_preferences_observer;
-    std::chrono::milliseconds system_preferences_poll_interval{
-        std::chrono::seconds(1)};
+    std::chrono::milliseconds system_preferences_poll_interval{std::chrono::seconds(1)};
     bool system_preferences_observation_enabled = true;
     bool using_native_system_preferences_observer = false;
 };
 
 namespace {
 
-template <typename ImplT>
-void apply_visual_policy(ImplT& impl) {
-    impl.resolved_theme_selection = resolve_theme_selection(
-        impl.theme_selection, impl.system_preferences);
-    Theme::set_active(
-        make_theme(impl.resolved_theme_selection, impl.system_preferences));
+template <typename ImplT> void initialize_platform_backend(ImplT& impl) {
+    impl.backend = PlatformBackend::create();
+    if (!impl.backend) {
+        return;
+    }
+
+    auto result = impl.backend->initialize();
+    if (result) {
+        return;
+    }
+
+    NK_LOG_ERROR("App", result.error().c_str());
+    impl.backend.reset();
 }
 
-template <typename ImplT>
-void initialize_visual_policy(ImplT& impl) {
+template <typename ImplT> void apply_visual_policy(ImplT& impl) {
+    impl.resolved_theme_selection =
+        resolve_theme_selection(impl.theme_selection, impl.system_preferences);
+    Theme::set_active(make_theme(impl.resolved_theme_selection, impl.system_preferences));
+}
+
+template <typename ImplT> void initialize_visual_policy(ImplT& impl) {
     if (impl.backend) {
         impl.system_preferences = impl.backend->system_preferences();
     }
@@ -58,8 +68,7 @@ void handle_system_preferences_update(ImplT& impl, SystemPreferences latest) {
     impl.system_preferences_changed.emit(impl.system_preferences);
 }
 
-template <typename ImplT>
-void stop_system_preferences_observer(ImplT& impl) {
+template <typename ImplT> void stop_system_preferences_observer(ImplT& impl) {
     if (impl.system_preferences_observer.valid()) {
         impl.event_loop.cancel(impl.system_preferences_observer);
         impl.system_preferences_observer = {};
@@ -70,8 +79,7 @@ void stop_system_preferences_observer(ImplT& impl) {
     }
 }
 
-template <typename ImplT>
-void start_system_preferences_observer(ImplT& impl) {
+template <typename ImplT> void start_system_preferences_observer(ImplT& impl) {
     stop_system_preferences_observer(impl);
     if (!impl.system_preferences_observation_enabled || !impl.backend) {
         return;
@@ -79,7 +87,7 @@ void start_system_preferences_observer(ImplT& impl) {
 
     if (impl.backend->supports_system_preferences_observation()) {
         impl.backend->start_system_preferences_observation(
-            [&impl](SystemPreferences const& latest) {
+            [&impl](const SystemPreferences& latest) {
                 impl.event_loop.post(
                     [&impl, latest] { handle_system_preferences_update(impl, latest); });
             });
@@ -87,43 +95,28 @@ void start_system_preferences_observer(ImplT& impl) {
         return;
     }
 
-    impl.system_preferences_observer = impl.event_loop.set_interval(
-        impl.system_preferences_poll_interval,
-        [&impl] {
+    impl.system_preferences_observer =
+        impl.event_loop.set_interval(impl.system_preferences_poll_interval, [&impl] {
             handle_system_preferences_update(impl, impl.backend->system_preferences());
         });
 }
 
 } // namespace
 
-Application::Application(int /*argc*/, char** /*argv*/)
-    : impl_(std::make_unique<Impl>()) {
+Application::Application(int /*argc*/, char** /*argv*/) : impl_(std::make_unique<Impl>()) {
     assert(g_instance == nullptr && "Only one Application may exist at a time");
     g_instance = this;
-    impl_->backend = PlatformBackend::create();
-    if (impl_->backend) {
-        auto result = impl_->backend->initialize();
-        if (!result) {
-            NK_LOG_ERROR("App", "Platform backend init failed");
-        }
-    }
+    initialize_platform_backend(*impl_);
     initialize_visual_policy(*impl_);
     start_system_preferences_observer(*impl_);
     NK_LOG_DEBUG("App", "Application created (from argv)");
 }
 
-Application::Application(ApplicationConfig config)
-    : impl_(std::make_unique<Impl>()) {
+Application::Application(ApplicationConfig config) : impl_(std::make_unique<Impl>()) {
     impl_->config = std::move(config);
     assert(g_instance == nullptr && "Only one Application may exist at a time");
     g_instance = this;
-    impl_->backend = PlatformBackend::create();
-    if (impl_->backend) {
-        auto result = impl_->backend->initialize();
-        if (!result) {
-            NK_LOG_ERROR("App", "Platform backend init failed");
-        }
-    }
+    initialize_platform_backend(*impl_);
     initialize_visual_policy(*impl_);
     start_system_preferences_observer(*impl_);
     NK_LOG_DEBUG("App", "Application created");
@@ -166,20 +159,19 @@ std::string_view Application::app_name() const {
     return impl_->config.app_name;
 }
 
-SystemPreferences const& Application::system_preferences() const {
+const SystemPreferences& Application::system_preferences() const {
     return impl_->system_preferences;
 }
 
 void Application::refresh_system_preferences() {
     if (impl_->backend) {
-        handle_system_preferences_update(
-            *impl_, impl_->backend->system_preferences());
+        handle_system_preferences_update(*impl_, impl_->backend->system_preferences());
     } else {
         handle_system_preferences_update(*impl_, {});
     }
 }
 
-ThemeSelection const& Application::theme_selection() const {
+const ThemeSelection& Application::theme_selection() const {
     return impl_->theme_selection;
 }
 
@@ -208,8 +200,7 @@ bool Application::is_system_preferences_observation_enabled() const {
     return impl_->system_preferences_observation_enabled;
 }
 
-void Application::set_system_preferences_observation_interval(
-    std::chrono::milliseconds interval) {
+void Application::set_system_preferences_observation_interval(std::chrono::milliseconds interval) {
     if (interval <= std::chrono::milliseconds{0}) {
         interval = std::chrono::milliseconds{250};
     }
@@ -222,8 +213,7 @@ void Application::set_system_preferences_observation_interval(
     }
 }
 
-std::chrono::milliseconds
-Application::system_preferences_observation_interval() const {
+std::chrono::milliseconds Application::system_preferences_observation_interval() const {
     return impl_->system_preferences_poll_interval;
 }
 
@@ -231,25 +221,53 @@ Application* Application::instance() {
     return g_instance;
 }
 
+bool Application::has_platform_backend() const {
+    return impl_->backend != nullptr;
+}
+
 PlatformBackend& Application::platform_backend() {
     assert(impl_->backend && "No platform backend available");
     return *impl_->backend;
 }
 
-Result<std::string> Application::open_file_dialog(
-    std::string_view title,
-    std::vector<std::string> const& filters) {
-    if (impl_->backend) {
-        return impl_->backend->show_open_file_dialog(title, filters);
-    }
-    return Unexpected<std::string>("No platform backend");
+bool Application::supports_open_file_dialog() const {
+    return impl_->backend != nullptr && impl_->backend->supports_open_file_dialog();
 }
 
-Signal<SystemPreferences const&>& Application::on_system_preferences_changed() {
+OpenFileDialogResult Application::open_file_dialog(std::string_view title,
+                                                   const std::vector<std::string>& filters) {
+    if (!impl_->backend) {
+        return Unexpected(FileDialogError::Unavailable);
+    }
+    if (!impl_->backend->supports_open_file_dialog()) {
+        return Unexpected(FileDialogError::Unsupported);
+    }
+    return impl_->backend->show_open_file_dialog(title, filters);
+}
+
+bool Application::supports_clipboard_text() const {
+    return impl_->backend != nullptr && impl_->backend->supports_clipboard_text();
+}
+
+std::string Application::clipboard_text() const {
+    if (impl_->backend != nullptr && impl_->backend->supports_clipboard_text()) {
+        return impl_->backend->clipboard_text();
+    }
+    return impl_->clipboard_text;
+}
+
+void Application::set_clipboard_text(std::string text) {
+    impl_->clipboard_text = std::move(text);
+    if (impl_->backend != nullptr && impl_->backend->supports_clipboard_text()) {
+        impl_->backend->set_clipboard_text(impl_->clipboard_text);
+    }
+}
+
+Signal<const SystemPreferences&>& Application::on_system_preferences_changed() {
     return impl_->system_preferences_changed;
 }
 
-Signal<ThemeSelection const&>& Application::on_theme_selection_changed() {
+Signal<const ThemeSelection&>& Application::on_theme_selection_changed() {
     return impl_->theme_selection_changed;
 }
 

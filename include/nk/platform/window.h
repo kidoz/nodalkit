@@ -3,10 +3,11 @@
 /// @file window.h
 /// @brief Top-level window abstraction.
 
+#include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
-
-#include <memory>
+#include <nk/platform/key_codes.h>
+#include <nk/ui_core/cursor_shape.h>
 #include <string>
 #include <string_view>
 
@@ -15,6 +16,7 @@ namespace nk {
 class NativeSurface;
 class TextShaper;
 class Widget;
+class Dialog;
 struct MouseEvent;
 struct KeyEvent;
 struct WindowEvent;
@@ -36,8 +38,8 @@ public:
     explicit Window(WindowConfig config = {});
     ~Window();
 
-    Window(Window const&) = delete;
-    Window& operator=(Window const&) = delete;
+    Window(const Window&) = delete;
+    Window& operator=(const Window&) = delete;
 
     /// Set the window title.
     void set_title(std::string_view title);
@@ -59,7 +61,7 @@ public:
     /// Hide the window.
     void hide();
 
-    /// Close the window (triggers on_close_request).
+    /// Close the window by emitting a close-request notification and hiding it.
     void close();
 
     /// Whether the window is currently visible.
@@ -76,17 +78,23 @@ public:
     void invalidate_layout();
 
     /// Deliver a platform event to this window.
-    void dispatch_mouse_event(MouseEvent const& event);
-    void dispatch_key_event(KeyEvent const& event);
-    void dispatch_window_event(WindowEvent const& event);
+    void dispatch_mouse_event(const MouseEvent& event);
+    void dispatch_key_event(const KeyEvent& event);
+    void dispatch_window_event(const WindowEvent& event);
 
     /// Access the native surface (nullptr until present() is called).
     [[nodiscard]] NativeSurface* native_surface() const;
 
+    /// Current cursor shape resolved from the hovered widget.
+    [[nodiscard]] CursorShape current_cursor_shape() const;
+
+    /// Whether the given key is currently pressed according to window input state.
+    [[nodiscard]] bool is_key_pressed(KeyCode key) const;
+
     // --- Signals ---
 
-    /// Emitted when the window is about to close.
-    /// Returning true from a connected slot prevents the close.
+    /// Emitted when the window receives a close request.
+    /// This is notification-only; connected slots cannot veto the close.
     Signal<>& on_close_request();
 
     /// Emitted when the window is resized.
@@ -94,8 +102,14 @@ public:
 
 private:
     friend class Widget;
+    friend class Dialog;
 
     [[nodiscard]] TextShaper* text_shaper() const;
+    void focus_widget(Widget* widget);
+    void handle_widget_state_change(Widget& widget);
+    void handle_widget_detached(Widget& widget);
+    void show_overlay(std::shared_ptr<Widget> overlay, bool modal);
+    void dismiss_overlay(Widget& overlay);
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -3,14 +3,13 @@
 /// @file application.h
 /// @brief Application lifecycle and global state.
 
-#include <nk/foundation/result.h>
+#include <chrono>
+#include <memory>
 #include <nk/foundation/signal.h>
+#include <nk/platform/file_dialog.h>
 #include <nk/platform/system_preferences.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/style/theme_selection.h>
-
-#include <chrono>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -21,8 +20,8 @@ class PlatformBackend;
 
 /// Configuration for Application construction.
 struct ApplicationConfig {
-    std::string app_id;    ///< Reverse-DNS application identifier.
-    std::string app_name;  ///< Human-readable application name.
+    std::string app_id;   ///< Reverse-DNS application identifier.
+    std::string app_name; ///< Human-readable application name.
 };
 
 /// Represents the top-level application. Owns the event loop and manages
@@ -45,8 +44,8 @@ public:
 
     ~Application();
 
-    Application(Application const&) = delete;
-    Application& operator=(Application const&) = delete;
+    Application(const Application&) = delete;
+    Application& operator=(const Application&) = delete;
 
     /// Run the application event loop. Blocks until quit() is called.
     int run();
@@ -64,14 +63,14 @@ public:
     [[nodiscard]] std::string_view app_name() const;
 
     /// Current platform-derived visual preferences.
-    [[nodiscard]] SystemPreferences const& system_preferences() const;
+    [[nodiscard]] const SystemPreferences& system_preferences() const;
 
     /// Refresh platform-derived visual preferences and re-apply theme
     /// selection policy.
     void refresh_system_preferences();
 
     /// Current application theme selection policy.
-    [[nodiscard]] ThemeSelection const& theme_selection() const;
+    [[nodiscard]] const ThemeSelection& theme_selection() const;
 
     /// Set the theme selection policy and immediately re-resolve the active
     /// theme.
@@ -87,30 +86,46 @@ public:
 
     /// Set the fallback polling interval used when native backend
     /// observation is unavailable.
-    void set_system_preferences_observation_interval(
-        std::chrono::milliseconds interval);
+    void set_system_preferences_observation_interval(std::chrono::milliseconds interval);
 
     /// Fallback polling interval used for automatic preference observation.
-    [[nodiscard]] std::chrono::milliseconds
-    system_preferences_observation_interval() const;
+    [[nodiscard]] std::chrono::milliseconds system_preferences_observation_interval() const;
 
     /// Get the running Application instance (nullptr if none).
     [[nodiscard]] static Application* instance();
 
+    /// Whether a native platform backend is available for surface creation and
+    /// native integrations.
+    [[nodiscard]] bool has_platform_backend() const;
+
     /// Access the platform backend.
     [[nodiscard]] PlatformBackend& platform_backend();
 
-    /// Show a native "open file" dialog. Returns the selected path
-    /// or an error if cancelled.
-    [[nodiscard]] Result<std::string> open_file_dialog(
-        std::string_view title = "Open",
-        std::vector<std::string> const& filters = {});
+    /// Whether open-file dialogs are implemented by the active backend.
+    [[nodiscard]] bool supports_open_file_dialog() const;
+
+    /// Show a native "open file" dialog.
+    /// Returns the selected path or a FileDialogError describing why no path
+    /// was produced.
+    [[nodiscard]] OpenFileDialogResult
+    open_file_dialog(std::string_view title = "Open", const std::vector<std::string>& filters = {});
+
+    /// Whether clipboard text is bridged to the active platform backend.
+    [[nodiscard]] bool supports_clipboard_text() const;
+
+    /// Read clipboard text, falling back to a process-local buffer when no
+    /// native clipboard is available.
+    [[nodiscard]] std::string clipboard_text() const;
+
+    /// Write clipboard text, falling back to a process-local buffer when no
+    /// native clipboard is available.
+    void set_clipboard_text(std::string text);
 
     /// Emitted when system preferences are refreshed.
-    [[nodiscard]] Signal<SystemPreferences const&>& on_system_preferences_changed();
+    [[nodiscard]] Signal<const SystemPreferences&>& on_system_preferences_changed();
 
     /// Emitted when theme selection policy changes.
-    [[nodiscard]] Signal<ThemeSelection const&>& on_theme_selection_changed();
+    [[nodiscard]] Signal<const ThemeSelection&>& on_theme_selection_changed();
 
 private:
     struct Impl;
