@@ -1,0 +1,63 @@
+BasedOnStyle: LLVM
+
+Language: Cpp
+Standard: c++23
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+
+AccessModifierOffset: -4
+NamespaceIndentation: None
+FixNamespaceComments: true
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+QualifierAlignment: Left
+
+IncludeBlocks: Regroup
+IncludeCategories:
+  # Project headers (quoted includes)
+  - Regex: '^"'
+    Priority: 1
+  # System/third-party headers
+  - Regex: '^<'
+    Priority: 2
+SortIncludes: CaseSensitive
+
+AlignAfterOpenBracket: Align
+AlignOperands: Align
+AlignTrailingComments:
+  Kind: Always
+  OverEmptyLines: 0
+BinPackArguments: false
+BinPackParameters: false
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: true
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceInEmptyBlock: false
+SpacesInAngles: Never
+SpacesInParens: Never
+
+EmptyLineAfterAccessModifier: Never
+EmptyLineBeforeAccessModifier: LogicalBlock
+SeparateDefinitionBlocks: Always
+
+PackConstructorInitializers: NextLine
+BreakConstructorInitializers: BeforeComma
+
+InsertBraces: true
+InsertNewlineAtEOF: true

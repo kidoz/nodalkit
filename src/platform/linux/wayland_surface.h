@@ -1,0 +1,75 @@
+#pragma once
+
+/// @file wayland_surface.h
+/// @brief Wayland native surface (private header).
+
+#include <nk/platform/platform_backend.h>
+#include <nk/platform/window.h>
+
+#include <cstdint>
+#include <vector>
+
+struct wl_surface;
+struct wl_buffer;
+struct xdg_surface;
+struct xdg_toplevel;
+
+namespace nk {
+
+class WaylandBackend;
+
+class WaylandSurface : public NativeSurface {
+public:
+    WaylandSurface(WaylandBackend& backend, WindowConfig const& config,
+                   Window& owner);
+    ~WaylandSurface() override;
+
+    void show() override;
+    void hide() override;
+    void set_title(std::string_view title) override;
+    void resize(int width, int height) override;
+    [[nodiscard]] Size size() const override;
+    void present(uint8_t const* rgba, int w, int h) override;
+    void set_fullscreen(bool fullscreen) override;
+    [[nodiscard]] bool is_fullscreen() const override;
+    [[nodiscard]] NativeWindowHandle native_handle() const override;
+
+    /// Access the owning Window for event delivery.
+    Window& owner() { return owner_; }
+
+    /// The underlying wl_surface pointer.
+    [[nodiscard]] wl_surface* wl_surf() const { return surface_; }
+
+    // Called from XDG callbacks.
+    void handle_configure(int width, int height);
+    void handle_close();
+
+private:
+    struct ShmBuffer {
+        wl_buffer* buffer = nullptr;
+        uint8_t* data = nullptr;
+        int fd = -1;
+        size_t pool_size = 0;
+        bool busy = false;
+    };
+
+    void destroy_buffer(ShmBuffer& buf);
+    void ensure_buffer(ShmBuffer& buf, int w, int h);
+
+    WaylandBackend& backend_;
+    Window& owner_;
+
+    wl_surface* surface_ = nullptr;
+    xdg_surface* xdg_surface_ = nullptr;
+    xdg_toplevel* xdg_toplevel_ = nullptr;
+
+    ShmBuffer buffers_[2];
+    int current_buffer_ = 0;
+
+    int width_;
+    int height_;
+    bool fullscreen_ = false;
+    bool configured_ = false;
+};
+
+} // namespace nk
