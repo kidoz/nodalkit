@@ -1,15 +1,13 @@
 /// @file macos_window.mm
 /// @brief macOS Cocoa native surface implementation.
 
-#import <Cocoa/Cocoa.h>
-#import <Carbon/Carbon.h>
-
 #include "macos_window.h"
 
+#import <Carbon/Carbon.h>
+#import <Cocoa/Cocoa.h>
+#include <cstring>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
-
-#include <cstring>
 
 // ---------------------------------------------------------------------------
 // macOS virtual key code → nk::KeyCode mapping
@@ -17,125 +15,225 @@
 
 static nk::KeyCode macos_keycode_to_nk(unsigned short vk) {
     switch (vk) {
-        // Letters
-        case kVK_ANSI_A:          return nk::KeyCode::A;
-        case kVK_ANSI_B:          return nk::KeyCode::B;
-        case kVK_ANSI_C:          return nk::KeyCode::C;
-        case kVK_ANSI_D:          return nk::KeyCode::D;
-        case kVK_ANSI_E:          return nk::KeyCode::E;
-        case kVK_ANSI_F:          return nk::KeyCode::F;
-        case kVK_ANSI_G:          return nk::KeyCode::G;
-        case kVK_ANSI_H:          return nk::KeyCode::H;
-        case kVK_ANSI_I:          return nk::KeyCode::I;
-        case kVK_ANSI_J:          return nk::KeyCode::J;
-        case kVK_ANSI_K:          return nk::KeyCode::K;
-        case kVK_ANSI_L:          return nk::KeyCode::L;
-        case kVK_ANSI_M:          return nk::KeyCode::M;
-        case kVK_ANSI_N:          return nk::KeyCode::N;
-        case kVK_ANSI_O:          return nk::KeyCode::O;
-        case kVK_ANSI_P:          return nk::KeyCode::P;
-        case kVK_ANSI_Q:          return nk::KeyCode::Q;
-        case kVK_ANSI_R:          return nk::KeyCode::R;
-        case kVK_ANSI_S:          return nk::KeyCode::S;
-        case kVK_ANSI_T:          return nk::KeyCode::T;
-        case kVK_ANSI_U:          return nk::KeyCode::U;
-        case kVK_ANSI_V:          return nk::KeyCode::V;
-        case kVK_ANSI_W:          return nk::KeyCode::W;
-        case kVK_ANSI_X:          return nk::KeyCode::X;
-        case kVK_ANSI_Y:          return nk::KeyCode::Y;
-        case kVK_ANSI_Z:          return nk::KeyCode::Z;
+    // Letters
+    case kVK_ANSI_A:
+        return nk::KeyCode::A;
+    case kVK_ANSI_B:
+        return nk::KeyCode::B;
+    case kVK_ANSI_C:
+        return nk::KeyCode::C;
+    case kVK_ANSI_D:
+        return nk::KeyCode::D;
+    case kVK_ANSI_E:
+        return nk::KeyCode::E;
+    case kVK_ANSI_F:
+        return nk::KeyCode::F;
+    case kVK_ANSI_G:
+        return nk::KeyCode::G;
+    case kVK_ANSI_H:
+        return nk::KeyCode::H;
+    case kVK_ANSI_I:
+        return nk::KeyCode::I;
+    case kVK_ANSI_J:
+        return nk::KeyCode::J;
+    case kVK_ANSI_K:
+        return nk::KeyCode::K;
+    case kVK_ANSI_L:
+        return nk::KeyCode::L;
+    case kVK_ANSI_M:
+        return nk::KeyCode::M;
+    case kVK_ANSI_N:
+        return nk::KeyCode::N;
+    case kVK_ANSI_O:
+        return nk::KeyCode::O;
+    case kVK_ANSI_P:
+        return nk::KeyCode::P;
+    case kVK_ANSI_Q:
+        return nk::KeyCode::Q;
+    case kVK_ANSI_R:
+        return nk::KeyCode::R;
+    case kVK_ANSI_S:
+        return nk::KeyCode::S;
+    case kVK_ANSI_T:
+        return nk::KeyCode::T;
+    case kVK_ANSI_U:
+        return nk::KeyCode::U;
+    case kVK_ANSI_V:
+        return nk::KeyCode::V;
+    case kVK_ANSI_W:
+        return nk::KeyCode::W;
+    case kVK_ANSI_X:
+        return nk::KeyCode::X;
+    case kVK_ANSI_Y:
+        return nk::KeyCode::Y;
+    case kVK_ANSI_Z:
+        return nk::KeyCode::Z;
 
-        // Numbers (top row)
-        case kVK_ANSI_1:          return nk::KeyCode::Num1;
-        case kVK_ANSI_2:          return nk::KeyCode::Num2;
-        case kVK_ANSI_3:          return nk::KeyCode::Num3;
-        case kVK_ANSI_4:          return nk::KeyCode::Num4;
-        case kVK_ANSI_5:          return nk::KeyCode::Num5;
-        case kVK_ANSI_6:          return nk::KeyCode::Num6;
-        case kVK_ANSI_7:          return nk::KeyCode::Num7;
-        case kVK_ANSI_8:          return nk::KeyCode::Num8;
-        case kVK_ANSI_9:          return nk::KeyCode::Num9;
-        case kVK_ANSI_0:          return nk::KeyCode::Num0;
+    // Numbers (top row)
+    case kVK_ANSI_1:
+        return nk::KeyCode::Num1;
+    case kVK_ANSI_2:
+        return nk::KeyCode::Num2;
+    case kVK_ANSI_3:
+        return nk::KeyCode::Num3;
+    case kVK_ANSI_4:
+        return nk::KeyCode::Num4;
+    case kVK_ANSI_5:
+        return nk::KeyCode::Num5;
+    case kVK_ANSI_6:
+        return nk::KeyCode::Num6;
+    case kVK_ANSI_7:
+        return nk::KeyCode::Num7;
+    case kVK_ANSI_8:
+        return nk::KeyCode::Num8;
+    case kVK_ANSI_9:
+        return nk::KeyCode::Num9;
+    case kVK_ANSI_0:
+        return nk::KeyCode::Num0;
 
-        // Control keys
-        case kVK_Return:          return nk::KeyCode::Return;
-        case kVK_Escape:          return nk::KeyCode::Escape;
-        case kVK_Delete:          return nk::KeyCode::Backspace;
-        case kVK_Tab:             return nk::KeyCode::Tab;
-        case kVK_Space:           return nk::KeyCode::Space;
+    // Control keys
+    case kVK_Return:
+        return nk::KeyCode::Return;
+    case kVK_Escape:
+        return nk::KeyCode::Escape;
+    case kVK_Delete:
+        return nk::KeyCode::Backspace;
+    case kVK_Tab:
+        return nk::KeyCode::Tab;
+    case kVK_Space:
+        return nk::KeyCode::Space;
 
-        // Punctuation
-        case kVK_ANSI_Minus:      return nk::KeyCode::Minus;
-        case kVK_ANSI_Equal:      return nk::KeyCode::Equals;
-        case kVK_ANSI_LeftBracket:  return nk::KeyCode::LeftBracket;
-        case kVK_ANSI_RightBracket: return nk::KeyCode::RightBracket;
-        case kVK_ANSI_Backslash:  return nk::KeyCode::Backslash;
-        case kVK_ANSI_Semicolon:  return nk::KeyCode::Semicolon;
-        case kVK_ANSI_Quote:      return nk::KeyCode::Apostrophe;
-        case kVK_ANSI_Grave:      return nk::KeyCode::Grave;
-        case kVK_ANSI_Comma:      return nk::KeyCode::Comma;
-        case kVK_ANSI_Period:     return nk::KeyCode::Period;
-        case kVK_ANSI_Slash:      return nk::KeyCode::Slash;
+    // Punctuation
+    case kVK_ANSI_Minus:
+        return nk::KeyCode::Minus;
+    case kVK_ANSI_Equal:
+        return nk::KeyCode::Equals;
+    case kVK_ANSI_LeftBracket:
+        return nk::KeyCode::LeftBracket;
+    case kVK_ANSI_RightBracket:
+        return nk::KeyCode::RightBracket;
+    case kVK_ANSI_Backslash:
+        return nk::KeyCode::Backslash;
+    case kVK_ANSI_Semicolon:
+        return nk::KeyCode::Semicolon;
+    case kVK_ANSI_Quote:
+        return nk::KeyCode::Apostrophe;
+    case kVK_ANSI_Grave:
+        return nk::KeyCode::Grave;
+    case kVK_ANSI_Comma:
+        return nk::KeyCode::Comma;
+    case kVK_ANSI_Period:
+        return nk::KeyCode::Period;
+    case kVK_ANSI_Slash:
+        return nk::KeyCode::Slash;
 
-        case kVK_CapsLock:        return nk::KeyCode::CapsLock;
+    case kVK_CapsLock:
+        return nk::KeyCode::CapsLock;
 
-        // Function keys
-        case kVK_F1:              return nk::KeyCode::F1;
-        case kVK_F2:              return nk::KeyCode::F2;
-        case kVK_F3:              return nk::KeyCode::F3;
-        case kVK_F4:              return nk::KeyCode::F4;
-        case kVK_F5:              return nk::KeyCode::F5;
-        case kVK_F6:              return nk::KeyCode::F6;
-        case kVK_F7:              return nk::KeyCode::F7;
-        case kVK_F8:              return nk::KeyCode::F8;
-        case kVK_F9:              return nk::KeyCode::F9;
-        case kVK_F10:             return nk::KeyCode::F10;
-        case kVK_F11:             return nk::KeyCode::F11;
-        case kVK_F12:             return nk::KeyCode::F12;
+    // Function keys
+    case kVK_F1:
+        return nk::KeyCode::F1;
+    case kVK_F2:
+        return nk::KeyCode::F2;
+    case kVK_F3:
+        return nk::KeyCode::F3;
+    case kVK_F4:
+        return nk::KeyCode::F4;
+    case kVK_F5:
+        return nk::KeyCode::F5;
+    case kVK_F6:
+        return nk::KeyCode::F6;
+    case kVK_F7:
+        return nk::KeyCode::F7;
+    case kVK_F8:
+        return nk::KeyCode::F8;
+    case kVK_F9:
+        return nk::KeyCode::F9;
+    case kVK_F10:
+        return nk::KeyCode::F10;
+    case kVK_F11:
+        return nk::KeyCode::F11;
+    case kVK_F12:
+        return nk::KeyCode::F12;
 
-        // Navigation
-        case kVK_Home:            return nk::KeyCode::Home;
-        case kVK_PageUp:          return nk::KeyCode::PageUp;
-        case kVK_ForwardDelete:   return nk::KeyCode::Delete;
-        case kVK_End:             return nk::KeyCode::End;
-        case kVK_PageDown:        return nk::KeyCode::PageDown;
+    // Navigation
+    case kVK_Home:
+        return nk::KeyCode::Home;
+    case kVK_PageUp:
+        return nk::KeyCode::PageUp;
+    case kVK_ForwardDelete:
+        return nk::KeyCode::Delete;
+    case kVK_End:
+        return nk::KeyCode::End;
+    case kVK_PageDown:
+        return nk::KeyCode::PageDown;
 
-        // Arrow keys
-        case kVK_RightArrow:      return nk::KeyCode::Right;
-        case kVK_LeftArrow:       return nk::KeyCode::Left;
-        case kVK_DownArrow:       return nk::KeyCode::Down;
-        case kVK_UpArrow:         return nk::KeyCode::Up;
+    // Arrow keys
+    case kVK_RightArrow:
+        return nk::KeyCode::Right;
+    case kVK_LeftArrow:
+        return nk::KeyCode::Left;
+    case kVK_DownArrow:
+        return nk::KeyCode::Down;
+    case kVK_UpArrow:
+        return nk::KeyCode::Up;
 
-        // Numpad
-        case kVK_ANSI_KeypadDivide:   return nk::KeyCode::NumpadDivide;
-        case kVK_ANSI_KeypadMultiply: return nk::KeyCode::NumpadMultiply;
-        case kVK_ANSI_KeypadMinus:    return nk::KeyCode::NumpadMinus;
-        case kVK_ANSI_KeypadPlus:     return nk::KeyCode::NumpadPlus;
-        case kVK_ANSI_KeypadEnter:    return nk::KeyCode::NumpadEnter;
-        case kVK_ANSI_Keypad1:    return nk::KeyCode::Numpad1;
-        case kVK_ANSI_Keypad2:    return nk::KeyCode::Numpad2;
-        case kVK_ANSI_Keypad3:    return nk::KeyCode::Numpad3;
-        case kVK_ANSI_Keypad4:    return nk::KeyCode::Numpad4;
-        case kVK_ANSI_Keypad5:    return nk::KeyCode::Numpad5;
-        case kVK_ANSI_Keypad6:    return nk::KeyCode::Numpad6;
-        case kVK_ANSI_Keypad7:    return nk::KeyCode::Numpad7;
-        case kVK_ANSI_Keypad8:    return nk::KeyCode::Numpad8;
-        case kVK_ANSI_Keypad9:    return nk::KeyCode::Numpad9;
-        case kVK_ANSI_Keypad0:    return nk::KeyCode::Numpad0;
-        case kVK_ANSI_KeypadDecimal:  return nk::KeyCode::NumpadPeriod;
-        case kVK_ANSI_KeypadClear:    return nk::KeyCode::NumLock;
+    // Numpad
+    case kVK_ANSI_KeypadDivide:
+        return nk::KeyCode::NumpadDivide;
+    case kVK_ANSI_KeypadMultiply:
+        return nk::KeyCode::NumpadMultiply;
+    case kVK_ANSI_KeypadMinus:
+        return nk::KeyCode::NumpadMinus;
+    case kVK_ANSI_KeypadPlus:
+        return nk::KeyCode::NumpadPlus;
+    case kVK_ANSI_KeypadEnter:
+        return nk::KeyCode::NumpadEnter;
+    case kVK_ANSI_Keypad1:
+        return nk::KeyCode::Numpad1;
+    case kVK_ANSI_Keypad2:
+        return nk::KeyCode::Numpad2;
+    case kVK_ANSI_Keypad3:
+        return nk::KeyCode::Numpad3;
+    case kVK_ANSI_Keypad4:
+        return nk::KeyCode::Numpad4;
+    case kVK_ANSI_Keypad5:
+        return nk::KeyCode::Numpad5;
+    case kVK_ANSI_Keypad6:
+        return nk::KeyCode::Numpad6;
+    case kVK_ANSI_Keypad7:
+        return nk::KeyCode::Numpad7;
+    case kVK_ANSI_Keypad8:
+        return nk::KeyCode::Numpad8;
+    case kVK_ANSI_Keypad9:
+        return nk::KeyCode::Numpad9;
+    case kVK_ANSI_Keypad0:
+        return nk::KeyCode::Numpad0;
+    case kVK_ANSI_KeypadDecimal:
+        return nk::KeyCode::NumpadPeriod;
+    case kVK_ANSI_KeypadClear:
+        return nk::KeyCode::NumLock;
 
-        // Modifiers
-        case kVK_Control:         return nk::KeyCode::LeftCtrl;
-        case kVK_Shift:           return nk::KeyCode::LeftShift;
-        case kVK_Option:          return nk::KeyCode::LeftAlt;
-        case kVK_Command:         return nk::KeyCode::LeftSuper;
-        case kVK_RightControl:    return nk::KeyCode::RightCtrl;
-        case kVK_RightShift:      return nk::KeyCode::RightShift;
-        case kVK_RightOption:     return nk::KeyCode::RightAlt;
-        case kVK_RightCommand:    return nk::KeyCode::RightSuper;
+    // Modifiers
+    case kVK_Control:
+        return nk::KeyCode::LeftCtrl;
+    case kVK_Shift:
+        return nk::KeyCode::LeftShift;
+    case kVK_Option:
+        return nk::KeyCode::LeftAlt;
+    case kVK_Command:
+        return nk::KeyCode::LeftSuper;
+    case kVK_RightControl:
+        return nk::KeyCode::RightCtrl;
+    case kVK_RightShift:
+        return nk::KeyCode::RightShift;
+    case kVK_RightOption:
+        return nk::KeyCode::RightAlt;
+    case kVK_RightCommand:
+        return nk::KeyCode::RightSuper;
 
-        default:                  return nk::KeyCode::Unknown;
+    default:
+        return nk::KeyCode::Unknown;
     }
 }
 
@@ -160,10 +258,14 @@ static nk::Modifiers macos_modifiers(NSEventModifierFlags flags) {
 /// Convert NSEvent mouse button number to nk convention (1=left, 2=right, 3=middle).
 static int macos_button_number(NSEvent* event) {
     switch (event.buttonNumber) {
-        case 0: return 1;   // left
-        case 1: return 2;   // right
-        case 2: return 3;   // middle
-        default: return static_cast<int>(event.buttonNumber + 1);
+    case 0:
+        return 1; // left
+    case 1:
+        return 2; // right
+    case 2:
+        return 3; // middle
+    default:
+        return static_cast<int>(event.buttonNumber + 1);
     }
 }
 
@@ -172,7 +274,7 @@ static int macos_button_number(NSEvent* event) {
 // ---------------------------------------------------------------------------
 
 @interface NKView : NSView
-@property (nonatomic, assign) nk::MacosSurface* surface;
+@property(nonatomic, assign) nk::MacosSurface* surface;
 @end
 
 @implementation NKView {
@@ -205,10 +307,8 @@ static int macos_button_number(NSEvent* event) {
         tracking_area_ = nil;
     }
 
-    NSTrackingAreaOptions opts = NSTrackingMouseEnteredAndExited
-                              | NSTrackingMouseMoved
-                              | NSTrackingActiveInKeyWindow
-                              | NSTrackingInVisibleRect;
+    NSTrackingAreaOptions opts = NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
+                                 NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect;
     tracking_area_ = [[NSTrackingArea alloc] initWithRect:self.bounds
                                                   options:opts
                                                     owner:self
@@ -226,15 +326,15 @@ static int macos_button_number(NSEvent* event) {
 
     int w = _surface->pixel_width();
     int h = _surface->pixel_height();
-    uint8_t const* data = _surface->pixel_data();
+    const uint8_t* data = _surface->pixel_data();
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef bitmap = CGBitmapContextCreate(
         const_cast<uint8_t*>(data),
         static_cast<size_t>(w),
         static_cast<size_t>(h),
-        8,                                  // bits per component
-        static_cast<size_t>(w) * 4,         // bytes per row
+        8,                          // bits per component
+        static_cast<size_t>(w) * 4, // bytes per row
         cs,
         kCGImageAlphaPremultipliedLast | static_cast<CGBitmapInfo>(kCGBitmapByteOrderDefault));
     CGColorSpaceRelease(cs);
@@ -257,9 +357,7 @@ static int macos_button_number(NSEvent* event) {
         CGContextSaveGState(ctx);
         CGContextTranslateCTM(ctx, 0, bounds.size.height);
         CGContextScaleCTM(ctx, 1.0, -1.0);
-        CGContextDrawImage(ctx,
-                           CGRectMake(0, 0, bounds.size.width, bounds.size.height),
-                           image);
+        CGContextDrawImage(ctx, CGRectMake(0, 0, bounds.size.width, bounds.size.height), image);
         CGContextRestoreGState(ctx);
     }
 
@@ -269,7 +367,9 @@ static int macos_button_number(NSEvent* event) {
 // -- Mouse events --
 
 - (void)mouseDown:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Press;
@@ -281,7 +381,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)mouseUp:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Release;
@@ -293,7 +395,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Press;
@@ -305,7 +409,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)rightMouseUp:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Release;
@@ -317,7 +423,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)otherMouseDown:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Press;
@@ -329,7 +437,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)otherMouseUp:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Release;
@@ -341,7 +451,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)mouseMoved:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Move;
@@ -365,7 +477,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)mouseEntered:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Enter;
@@ -376,7 +490,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)mouseExited:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Leave;
@@ -387,7 +503,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)scrollWheel:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Scroll;
@@ -402,7 +520,9 @@ static int macos_button_number(NSEvent* event) {
 // -- Keyboard events --
 
 - (void)keyDown:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     nk::KeyEvent ke{};
     ke.type = nk::KeyEvent::Type::Press;
     ke.key = macos_keycode_to_nk(event.keyCode);
@@ -412,7 +532,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)keyUp:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     nk::KeyEvent ke{};
     ke.type = nk::KeyEvent::Type::Release;
     ke.key = macos_keycode_to_nk(event.keyCode);
@@ -422,34 +544,38 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)flagsChanged:(NSEvent*)event {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     nk::KeyCode key = macos_keycode_to_nk(event.keyCode);
-    if (key == nk::KeyCode::Unknown) return;
+    if (key == nk::KeyCode::Unknown) {
+        return;
+    }
 
     // Determine press vs release by checking if the modifier flag is set.
     bool pressed = false;
     switch (event.keyCode) {
-        case kVK_Shift:
-        case kVK_RightShift:
-            pressed = (event.modifierFlags & NSEventModifierFlagShift) != 0;
-            break;
-        case kVK_Control:
-        case kVK_RightControl:
-            pressed = (event.modifierFlags & NSEventModifierFlagControl) != 0;
-            break;
-        case kVK_Option:
-        case kVK_RightOption:
-            pressed = (event.modifierFlags & NSEventModifierFlagOption) != 0;
-            break;
-        case kVK_Command:
-        case kVK_RightCommand:
-            pressed = (event.modifierFlags & NSEventModifierFlagCommand) != 0;
-            break;
-        case kVK_CapsLock:
-            pressed = (event.modifierFlags & NSEventModifierFlagCapsLock) != 0;
-            break;
-        default:
-            return;
+    case kVK_Shift:
+    case kVK_RightShift:
+        pressed = (event.modifierFlags & NSEventModifierFlagShift) != 0;
+        break;
+    case kVK_Control:
+    case kVK_RightControl:
+        pressed = (event.modifierFlags & NSEventModifierFlagControl) != 0;
+        break;
+    case kVK_Option:
+    case kVK_RightOption:
+        pressed = (event.modifierFlags & NSEventModifierFlagOption) != 0;
+        break;
+    case kVK_Command:
+    case kVK_RightCommand:
+        pressed = (event.modifierFlags & NSEventModifierFlagCommand) != 0;
+        break;
+    case kVK_CapsLock:
+        pressed = (event.modifierFlags & NSEventModifierFlagCapsLock) != 0;
+        break;
+    default:
+        return;
     }
 
     nk::KeyEvent ke{};
@@ -467,7 +593,7 @@ static int macos_button_number(NSEvent* event) {
 // ---------------------------------------------------------------------------
 
 @interface NKWindowDelegate : NSObject <NSWindowDelegate>
-@property (nonatomic, assign) nk::MacosSurface* surface;
+@property(nonatomic, assign) nk::MacosSurface* surface;
 @end
 
 @implementation NKWindowDelegate
@@ -483,7 +609,9 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)windowDidResize:(NSNotification*)notification {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     nk::Size sz = _surface->size();
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::Resize;
@@ -493,21 +621,36 @@ static int macos_button_number(NSEvent* event) {
 }
 
 - (void)windowDidBecomeKey:(NSNotification*)notification {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::FocusIn;
     _surface->owner().dispatch_window_event(we);
 }
 
 - (void)windowDidResignKey:(NSNotification*)notification {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::FocusOut;
     _surface->owner().dispatch_window_event(we);
 }
 
 - (void)windowDidExpose:(NSNotification*)notification {
-    if (!_surface) return;
+    if (!_surface) {
+        return;
+    }
+    nk::WindowEvent we{};
+    we.type = nk::WindowEvent::Type::Expose;
+    _surface->owner().dispatch_window_event(we);
+}
+
+- (void)windowDidChangeBackingProperties:(NSNotification*)notification {
+    if (!_surface) {
+        return;
+    }
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::Expose;
     _surface->owner().dispatch_window_event(we);
@@ -521,12 +664,10 @@ static int macos_button_number(NSEvent* event) {
 
 namespace nk {
 
-MacosSurface::MacosSurface(WindowConfig const& config, Window& owner)
-    : owner_(owner) {
+MacosSurface::MacosSurface(const WindowConfig& config, Window& owner) : owner_(owner) {
     @autoreleasepool {
-        NSUInteger style_mask = NSWindowStyleMaskTitled
-                              | NSWindowStyleMaskClosable
-                              | NSWindowStyleMaskMiniaturizable;
+        NSUInteger style_mask =
+            NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
         if (config.resizable) {
             style_mask |= NSWindowStyleMaskResizable;
         }
@@ -582,8 +723,7 @@ void MacosSurface::hide() {
 
 void MacosSurface::set_title(std::string_view title) {
     @autoreleasepool {
-        [window_ setTitle:[NSString stringWithUTF8String:
-                               std::string(title).c_str()]];
+        [window_ setTitle:[NSString stringWithUTF8String:std::string(title).c_str()]];
     }
 }
 
@@ -596,12 +736,23 @@ void MacosSurface::resize(int width, int height) {
 Size MacosSurface::size() const {
     @autoreleasepool {
         NSRect frame = [[window_ contentView] frame];
-        return {static_cast<float>(frame.size.width),
-                static_cast<float>(frame.size.height)};
+        return {static_cast<float>(frame.size.width), static_cast<float>(frame.size.height)};
     }
 }
 
-void MacosSurface::present(uint8_t const* rgba, int w, int h) {
+float MacosSurface::scale_factor() const {
+    @autoreleasepool {
+        if (window_ != nullptr) {
+            CGFloat scale = window_.backingScaleFactor;
+            if (scale > 0.0) {
+                return static_cast<float>(scale);
+            }
+        }
+        return 1.0F;
+    }
+}
+
+void MacosSurface::present(const uint8_t* rgba, int w, int h) {
     size_t byte_count = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
     pixel_buffer_.resize(byte_count);
     std::memcpy(pixel_buffer_.data(), rgba, byte_count);
@@ -628,6 +779,29 @@ bool MacosSurface::is_fullscreen() const {
 
 NativeWindowHandle MacosSurface::native_handle() const {
     return (__bridge NativeWindowHandle)window_;
+}
+
+void MacosSurface::set_cursor_shape(CursorShape shape) {
+    @autoreleasepool {
+        switch (shape) {
+        case CursorShape::IBeam:
+            [[NSCursor IBeamCursor] set];
+            break;
+        case CursorShape::PointingHand:
+            [[NSCursor pointingHandCursor] set];
+            break;
+        case CursorShape::ResizeLeftRight:
+            [[NSCursor resizeLeftRightCursor] set];
+            break;
+        case CursorShape::ResizeUpDown:
+            [[NSCursor resizeUpDownCursor] set];
+            break;
+        case CursorShape::Default:
+        default:
+            [[NSCursor arrowCursor] set];
+            break;
+        }
+    }
 }
 
 } // namespace nk

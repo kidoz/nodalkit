@@ -1,14 +1,13 @@
 /// @file macos_backend.mm
 /// @brief macOS Cocoa platform backend implementation.
 
-#import <Cocoa/Cocoa.h>
-#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
-
 #include "macos_backend.h"
+
 #include "macos_window.h"
 
+#import <Cocoa/Cocoa.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <nk/runtime/event_loop.h>
-
 #include <utility>
 
 // ---------------------------------------------------------------------------
@@ -16,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 @interface NKAppDelegate : NSObject <NSApplicationDelegate>
-@property (nonatomic, assign) int exitCode;
+@property(nonatomic, assign) int exitCode;
 @end
 
 @implementation NKAppDelegate
@@ -27,11 +26,8 @@
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)notification {
-    // Stop the run loop from the initial [NSApp run] activation so
-    // that we can re-enter with our timer-based loop.
-    [NSApp stop:nil];
-
-    // Post a dummy event to break out of the modal loop immediately.
+    // Post a dummy event so the custom NK loop can immediately consume any
+    // queued Cocoa startup work.
     NSEvent* dummy = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
                                         location:NSMakePoint(0, 0)
                                    modifierFlags:0
@@ -75,9 +71,10 @@ SystemPreferences query_system_preferences() {
 
     @autoreleasepool {
         if (@available(macOS 10.14, *)) {
-            auto best_match = [NSApp.effectiveAppearance
-                bestMatchFromAppearancesWithNames:
-                    @[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+            auto best_match = [NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[
+                NSAppearanceNameAqua,
+                NSAppearanceNameDarkAqua
+            ]];
             if ([best_match isEqualToString:NSAppearanceNameDarkAqua]) {
                 preferences.color_scheme = ColorScheme::Dark;
             } else {
@@ -133,9 +130,7 @@ Result<void> MacosBackend::initialize() {
 
         impl_->delegate = [[NKAppDelegate alloc] init];
         [NSApp setDelegate:impl_->delegate];
-
-        // Run briefly to finish launching; the delegate stops the loop.
-        [NSApp run];
+        [NSApp finishLaunching];
     }
     return {};
 }
@@ -155,8 +150,8 @@ void MacosBackend::shutdown() {
     }
 }
 
-std::unique_ptr<NativeSurface> MacosBackend::create_surface(
-    WindowConfig const& config, Window& owner) {
+std::unique_ptr<NativeSurface> MacosBackend::create_surface(const WindowConfig& config,
+                                                            Window& owner) {
     @autoreleasepool {
         return std::make_unique<MacosSurface>(config, owner);
     }
@@ -176,8 +171,8 @@ int MacosBackend::run_event_loop(EventLoop& loop) {
         kCFAllocatorDefault,
         CFAbsoluteTimeGetCurrent() + interval,
         interval,
-        0,  // flags
-        0,  // order
+        0, // flags
+        0, // order
         [](CFRunLoopTimerRef /*timer*/, void* info) {
             auto* impl = static_cast<MacosBackend::Impl*>(info);
             if (impl->current_loop) {
@@ -189,16 +184,15 @@ int MacosBackend::run_event_loop(EventLoop& loop) {
         },
         &ctx);
 
-    CFRunLoopAddTimer(CFRunLoopGetMain(), impl_->poll_timer,
-                      kCFRunLoopCommonModes);
+    CFRunLoopAddTimer(CFRunLoopGetMain(), impl_->poll_timer, kCFRunLoopCommonModes);
 
     // Enter the Cocoa run loop.
     while (!impl_->quit_requested) {
         @autoreleasepool {
             NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                               untilDate:[NSDate distantFuture]
-                                                  inMode:NSDefaultRunLoopMode
-                                                 dequeue:YES];
+                                                untilDate:[NSDate distantFuture]
+                                                   inMode:NSDefaultRunLoopMode
+                                                  dequeue:YES];
             if (event) {
                 [NSApp sendEvent:event];
                 [NSApp updateWindows];
@@ -241,20 +235,22 @@ void MacosBackend::request_quit(int exit_code) {
     wake_event_loop();
 }
 
-Result<std::string> MacosBackend::show_open_file_dialog(
-    std::string_view title,
-    std::vector<std::string> const& filters) {
+bool MacosBackend::supports_open_file_dialog() const {
+    return true;
+}
+
+OpenFileDialogResult MacosBackend::show_open_file_dialog(std::string_view title,
+                                                         const std::vector<std::string>& filters) {
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
         [panel setCanChooseFiles:YES];
         [panel setCanChooseDirectories:NO];
         [panel setAllowsMultipleSelection:NO];
-        [panel setTitle:[NSString stringWithUTF8String:
-                             std::string(title).c_str()]];
+        [panel setTitle:[NSString stringWithUTF8String:std::string(title).c_str()]];
 
         if (!filters.empty()) {
             NSMutableArray<NSString*>* types = [NSMutableArray array];
-            for (auto const& ext : filters) {
+            for (const auto& ext : filters) {
                 // Strip leading "*." if present.
                 std::string_view sv = ext;
                 if (sv.starts_with("*.")) {
@@ -262,8 +258,7 @@ Result<std::string> MacosBackend::show_open_file_dialog(
                 } else if (sv.starts_with(".")) {
                     sv = sv.substr(1);
                 }
-                [types addObject:[NSString stringWithUTF8String:
-                                      std::string(sv).c_str()]];
+                [types addObject:[NSString stringWithUTF8String:std::string(sv).c_str()]];
             }
             if (@available(macOS 11.0, *)) {
                 NSMutableArray<UTType*>* content_types = [NSMutableArray array];
@@ -288,7 +283,35 @@ Result<std::string> MacosBackend::show_open_file_dialog(
         if (response == NSModalResponseOK && panel.URL) {
             return std::string(panel.URL.path.UTF8String);
         }
-        return Unexpected(std::string("Dialog cancelled"));
+        return Unexpected(FileDialogError::Cancelled);
+    }
+}
+
+bool MacosBackend::supports_clipboard_text() const {
+    return true;
+}
+
+std::string MacosBackend::clipboard_text() const {
+    @autoreleasepool {
+        NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+        NSString* value = [pasteboard stringForType:NSPasteboardTypeString];
+        if (value == nil) {
+            return {};
+        }
+        return std::string(value.UTF8String);
+    }
+}
+
+void MacosBackend::set_clipboard_text(std::string_view text) {
+    @autoreleasepool {
+        NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+        [pasteboard clearContents];
+        NSString* value = [[NSString alloc] initWithBytes:text.data()
+                                                   length:text.size()
+                                                 encoding:NSUTF8StringEncoding];
+        if (value != nil) {
+            [pasteboard setString:value forType:NSPasteboardTypeString];
+        }
     }
 }
 
@@ -300,8 +323,7 @@ bool MacosBackend::supports_system_preferences_observation() const {
     return true;
 }
 
-void MacosBackend::start_system_preferences_observation(
-    SystemPreferencesObserver observer) {
+void MacosBackend::start_system_preferences_observation(SystemPreferencesObserver observer) {
     stop_system_preferences_observation();
 
     impl_->system_preferences_observer = std::move(observer);
@@ -311,24 +333,21 @@ void MacosBackend::start_system_preferences_observation(
 
     auto* impl = impl_.get();
 
-    impl_->appearance_observer =
-        [[NSDistributedNotificationCenter defaultCenter]
-            addObserverForName:@"AppleInterfaceThemeChangedNotification"
-                        object:nil
-                         queue:[NSOperationQueue mainQueue]
-                    usingBlock:^(__unused NSNotification* notification) {
-                      Impl::emit_preferences_change(*impl);
-                    }];
+    impl_->appearance_observer = [[NSDistributedNotificationCenter defaultCenter]
+        addObserverForName:@"AppleInterfaceThemeChangedNotification"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(__unused NSNotification* notification) {
+                  Impl::emit_preferences_change(*impl);
+                }];
 
-    impl_->accessibility_observer =
-        [[[NSWorkspace sharedWorkspace] notificationCenter]
-            addObserverForName:
-                NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
-                        object:nil
-                         queue:[NSOperationQueue mainQueue]
-                    usingBlock:^(__unused NSNotification* notification) {
-                      Impl::emit_preferences_change(*impl);
-                    }];
+    impl_->accessibility_observer = [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(__unused NSNotification* notification) {
+                  Impl::emit_preferences_change(*impl);
+                }];
 }
 
 void MacosBackend::stop_system_preferences_observation() {

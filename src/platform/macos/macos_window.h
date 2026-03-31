@@ -3,11 +3,10 @@
 /// @file macos_window.h
 /// @brief macOS Cocoa native surface (private header).
 
-#include <nk/platform/platform_backend.h>
-#include <nk/platform/window.h>
-
 #include <cstdint>
 #include <memory>
+#include <nk/platform/platform_backend.h>
+#include <nk/platform/window.h>
 #include <string_view>
 #include <vector>
 
@@ -25,7 +24,7 @@ namespace nk {
 
 class MacosSurface : public NativeSurface {
 public:
-    MacosSurface(WindowConfig const& config, Window& owner);
+    MacosSurface(const WindowConfig& config, Window& owner);
     ~MacosSurface() override;
 
     void show() override;
@@ -33,18 +32,23 @@ public:
     void set_title(std::string_view title) override;
     void resize(int width, int height) override;
     [[nodiscard]] Size size() const override;
-    void present(uint8_t const* rgba, int w, int h) override;
+    [[nodiscard]] float scale_factor() const override;
+    void present(const uint8_t* rgba, int w, int h) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
+    void set_cursor_shape(CursorShape shape) override;
 
     /// Access the owning Window for event delivery from Objective-C code.
     Window& owner() { return owner_; }
 
     /// Access the pixel buffer for drawRect painting.
-    uint8_t const* pixel_data() const { return pixel_buffer_.data(); }
+    const uint8_t* pixel_data() const { return pixel_buffer_.data(); }
+
     int pixel_width() const { return pixel_width_; }
+
     int pixel_height() const { return pixel_height_; }
+
     bool has_pixels() const { return !pixel_buffer_.empty(); }
 
 private:
