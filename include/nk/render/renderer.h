@@ -3,9 +3,8 @@
 /// @file renderer.h
 /// @brief Abstract renderer backend.
 
-#include <nk/foundation/types.h>
-
 #include <memory>
+#include <nk/foundation/types.h>
 
 namespace nk {
 
@@ -19,14 +18,14 @@ class Renderer {
 public:
     virtual ~Renderer();
 
-    Renderer(Renderer const&) = delete;
-    Renderer& operator=(Renderer const&) = delete;
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
 
-    /// Begin a frame with the given viewport size.
-    virtual void begin_frame(Size viewport) = 0;
+    /// Begin a frame for the given logical viewport and device scale.
+    virtual void begin_frame(Size viewport, float scale_factor) = 0;
 
     /// Render the given render-node tree.
-    virtual void render(RenderNode const& root) = 0;
+    virtual void render(const RenderNode& root) = 0;
 
     /// End the frame and present.
     virtual void end_frame() = 0;
@@ -42,8 +41,8 @@ public:
     SoftwareRenderer();
     ~SoftwareRenderer() override;
 
-    void begin_frame(Size viewport) override;
-    void render(RenderNode const& root) override;
+    void begin_frame(Size viewport, float scale_factor) override;
+    void render(const RenderNode& root) override;
     void end_frame() override;
 
     /// Set the text shaper used for rendering TextNode.
@@ -51,7 +50,7 @@ public:
 
     /// Access the pixel buffer after end_frame().
     /// Format: RGBA8, row-major, top-left origin.
-    [[nodiscard]] uint8_t const* pixel_data() const;
+    [[nodiscard]] const uint8_t* pixel_data() const;
     [[nodiscard]] int pixel_width() const;
     [[nodiscard]] int pixel_height() const;
 
