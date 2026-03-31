@@ -5,8 +5,13 @@ namespace nk {
 EventController::EventController() = default;
 EventController::~EventController() = default;
 
-Widget* EventController::widget() const { return widget_; }
-void EventController::set_widget(Widget* w) { widget_ = w; }
+Widget* EventController::widget() const {
+    return widget_;
+}
+
+void EventController::set_widget(Widget* w) {
+    widget_ = w;
+}
 
 // --- PointerController ---
 
@@ -18,19 +23,26 @@ struct PointerController::Impl {
     Signal<float, float, int> on_released;
 };
 
-PointerController::PointerController()
-    : impl_(std::make_unique<Impl>()) {}
+PointerController::PointerController() : impl_(std::make_unique<Impl>()) {}
+
+PointerController::~PointerController() = default;
 
 Signal<float, float>& PointerController::on_enter() {
     return impl_->on_enter;
 }
-Signal<>& PointerController::on_leave() { return impl_->on_leave; }
+
+Signal<>& PointerController::on_leave() {
+    return impl_->on_leave;
+}
+
 Signal<float, float>& PointerController::on_motion() {
     return impl_->on_motion;
 }
+
 Signal<float, float, int>& PointerController::on_pressed() {
     return impl_->on_pressed;
 }
+
 Signal<float, float, int>& PointerController::on_released() {
     return impl_->on_released;
 }
@@ -42,12 +54,14 @@ struct KeyboardController::Impl {
     Signal<int, int> on_key_released;
 };
 
-KeyboardController::KeyboardController()
-    : impl_(std::make_unique<Impl>()) {}
+KeyboardController::KeyboardController() : impl_(std::make_unique<Impl>()) {}
+
+KeyboardController::~KeyboardController() = default;
 
 Signal<int, int>& KeyboardController::on_key_pressed() {
     return impl_->on_key_pressed;
 }
+
 Signal<int, int>& KeyboardController::on_key_released() {
     return impl_->on_key_released;
 }
@@ -59,10 +73,16 @@ struct FocusController::Impl {
     Signal<> on_focus_out;
 };
 
-FocusController::FocusController()
-    : impl_(std::make_unique<Impl>()) {}
+FocusController::FocusController() : impl_(std::make_unique<Impl>()) {}
 
-Signal<>& FocusController::on_focus_in() { return impl_->on_focus_in; }
-Signal<>& FocusController::on_focus_out() { return impl_->on_focus_out; }
+FocusController::~FocusController() = default;
+
+Signal<>& FocusController::on_focus_in() {
+    return impl_->on_focus_in;
+}
+
+Signal<>& FocusController::on_focus_out() {
+    return impl_->on_focus_out;
+}
 
 } // namespace nk

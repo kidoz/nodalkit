@@ -3,9 +3,8 @@
 /// @file event_controller.h
 /// @brief Base class for input event controllers attached to widgets.
 
-#include <nk/foundation/signal.h>
-
 #include <memory>
+#include <nk/foundation/signal.h>
 
 namespace nk {
 
@@ -21,8 +20,8 @@ class EventController {
 public:
     virtual ~EventController();
 
-    EventController(EventController const&) = delete;
-    EventController& operator=(EventController const&) = delete;
+    EventController(const EventController&) = delete;
+    EventController& operator=(const EventController&) = delete;
 
     /// The widget this controller is attached to (nullptr if detached).
     [[nodiscard]] Widget* widget() const;
@@ -41,6 +40,7 @@ private:
 class PointerController : public EventController {
 public:
     PointerController();
+    ~PointerController() override;
 
     Signal<float, float>& on_enter();
     Signal<>& on_leave();
@@ -57,6 +57,7 @@ private:
 class KeyboardController : public EventController {
 public:
     KeyboardController();
+    ~KeyboardController() override;
 
     /// key_code, modifiers
     Signal<int, int>& on_key_pressed();
@@ -71,6 +72,7 @@ private:
 class FocusController : public EventController {
 public:
     FocusController();
+    ~FocusController() override;
 
     Signal<>& on_focus_in();
     Signal<>& on_focus_out();
