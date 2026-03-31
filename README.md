@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 [![Meson](https://img.shields.io/badge/Build-Meson-blueviolet.svg)](https://mesonbuild.com/)
-[![Platform: Linux | macOS](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-lightgrey.svg)]()
+[![Platform: Linux Wayland primary | macOS secondary](https://img.shields.io/badge/Platform-Linux%20Wayland%20primary%20%7C%20macOS%20secondary-lightgrey.svg)]()
 
 A C++-first GUI toolkit for modern desktop applications.
 
@@ -18,13 +18,34 @@ buildable skeleton are in place. Core systems (signals, properties, widget tree,
 layout, model/view) have stub implementations with passing tests. The software
 renderer and platform backends are minimal.
 
+The current 0.x support policy is:
+
+- Linux Wayland is the primary release target.
+- macOS is a secondary target only while CI stays green.
+- X11 and Windows are not release targets yet.
+
 ## Quick Start
 
 ```bash
-# Requirements: Meson >= 0.60, a C++23 compiler
+# Requirements: Meson >= 1.10, a C++23 compiler
 meson setup buildDir
 meson compile -C buildDir
 meson test -C buildDir
+```
+
+Install the SDK to a local prefix:
+
+```bash
+meson setup buildDir --prefix="$PWD/.local" --libdir=lib
+meson compile -C buildDir
+meson install -C buildDir
+```
+
+Consume the installed SDK through `pkg-config`:
+
+```bash
+export PKG_CONFIG_PATH="$PWD/.local/lib/pkgconfig"
+pkg-config --cflags --libs nodalkit
 ```
 
 Run the examples:
