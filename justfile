@@ -47,12 +47,12 @@ format-check:
 
 # Run clang-tidy on all project sources
 lint:
-    find src include -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) \
+    find src tests examples -type f \( -name '*.cpp' -o -name '*.mm' \) \
         | xargs clang-tidy -p {{builddir}}
 
 # Run clang-tidy with automatic fixes
 lint-fix:
-    find src include -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' \) \
+    find src tests examples -type f \( -name '*.cpp' -o -name '*.mm' \) \
         | xargs clang-tidy -p {{builddir}} --fix
 
 # Install the library

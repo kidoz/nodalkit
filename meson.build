@@ -3,6 +3,7 @@ project('NodalKit', 'cpp',
         default_options : ['warning_level=3', 'werror=true', 'cpp_std=c++23'])
 
 nk_inc = include_directories('include')
+pkgconfig = import('pkgconfig')
 
 # --- Core sources (platform-agnostic) ---
 
@@ -17,6 +18,8 @@ nk_sources = files(
     'src/ui_core/widget.cpp',
     'src/layout/layout_manager.cpp',
     'src/layout/box_layout.cpp',
+    'src/layout/grid_layout.cpp',
+    'src/layout/stack_layout.cpp',
     'src/controllers/event_controller.cpp',
     'src/actions/action.cpp',
     'src/render/render_node.cpp',
@@ -91,6 +94,7 @@ elif host_system == 'linux'
 
     nk_sources += files(
         'src/platform/linux/wayland_backend.cpp',
+        'src/platform/linux/wayland_portal_helpers.cpp',
         'src/platform/linux/wayland_surface.cpp',
         'src/platform/linux/wayland_input.cpp',
         'src/text/linux/freetype_shaper.cpp',
@@ -112,6 +116,19 @@ nk_lib = shared_library('NodalKit', nk_sources,
 nk_dep = declare_dependency(
     include_directories : nk_inc,
     link_with : nk_lib,
+)
+
+install_subdir('include/nk',
+    install_dir : get_option('includedir') / 'nk',
+    strip_directory : true,
+)
+
+pkgconfig.generate(
+    libraries : nk_lib,
+    filebase : 'nodalkit',
+    name : 'NodalKit',
+    description : 'C++-first GUI toolkit for modern desktop applications',
+    version : meson.project_version(),
 )
 
 subdir('examples')

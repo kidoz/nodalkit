@@ -1,6 +1,6 @@
 catch2_test_dep = dependency('catch2-with-main', required : false)
 if not catch2_test_dep.found()
-    catch2_proj = subproject('catch2', default_options : ['tests=false'])
+    catch2_proj = subproject('catch2', default_options : ['tests=false', 'install=false'])
     catch2_test_dep = catch2_proj.get_variable('catch2_with_main_dep')
 endif
 
@@ -27,3 +27,17 @@ test_text_shaper = executable('test_text_shaper',
     dependencies : [nk_dep, catch2_test_dep],
 )
 test('text_shaper', test_text_shaper)
+
+test_renderer = executable('test_renderer',
+    'renderer_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('renderer', test_renderer)
+
+test_wayland_portal_contract = executable('test_wayland_portal_contract',
+    'wayland_portal_contract_test.cpp',
+    '../src/platform/linux/wayland_portal_helpers.cpp',
+    include_directories : include_directories('..'),
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('wayland_portal_contract', test_wayland_portal_contract)
