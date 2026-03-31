@@ -2,18 +2,16 @@
 /// @brief Wayland native surface implementation.
 
 #include "wayland_surface.h"
+
 #include "wayland_backend.h"
-
-#include <nk/foundation/logging.h>
-#include <nk/platform/events.h>
-
-#include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
 
+#include <cstring>
+#include <nk/foundation/logging.h>
+#include <nk/platform/events.h>
 #include <sys/mman.h>
 #include <unistd.h>
-
-#include <cstring>
+#include <wayland-client.h>
 
 namespace nk {
 
@@ -21,9 +19,8 @@ namespace nk {
 // XDG surface listener
 // ---------------------------------------------------------------------------
 
-static void xdg_surface_handle_configure(void* /*data*/,
-                                          struct xdg_surface* xdg_surface,
-                                          uint32_t serial) {
+static void
+xdg_surface_handle_configure(void* /*data*/, struct xdg_surface* xdg_surface, uint32_t serial) {
     xdg_surface_ack_configure(xdg_surface, serial);
 }
 
@@ -36,28 +33,29 @@ static constexpr struct xdg_surface_listener xdg_surface_listener = {
 // ---------------------------------------------------------------------------
 
 static void xdg_toplevel_handle_configure(void* data,
-                                           struct xdg_toplevel* /*toplevel*/,
-                                           int32_t width, int32_t height,
-                                           struct wl_array* /*states*/) {
+                                          struct xdg_toplevel* /*toplevel*/,
+                                          int32_t width,
+                                          int32_t height,
+                                          struct wl_array* /*states*/) {
     auto* self = static_cast<WaylandSurface*>(data);
     if (width > 0 && height > 0) {
         self->handle_configure(width, height);
     }
 }
 
-static void xdg_toplevel_handle_close(void* data,
-                                       struct xdg_toplevel* /*toplevel*/) {
+static void xdg_toplevel_handle_close(void* data, struct xdg_toplevel* /*toplevel*/) {
     auto* self = static_cast<WaylandSurface*>(data);
     self->handle_close();
 }
 
-static void xdg_toplevel_handle_configure_bounds(
-    void* /*data*/, struct xdg_toplevel* /*toplevel*/,
-    int32_t /*width*/, int32_t /*height*/) {}
+static void xdg_toplevel_handle_configure_bounds(void* /*data*/,
+                                                 struct xdg_toplevel* /*toplevel*/,
+                                                 int32_t /*width*/,
+                                                 int32_t /*height*/) {}
 
-static void xdg_toplevel_handle_wm_capabilities(
-    void* /*data*/, struct xdg_toplevel* /*toplevel*/,
-    struct wl_array* /*capabilities*/) {}
+static void xdg_toplevel_handle_wm_capabilities(void* /*data*/,
+                                                struct xdg_toplevel* /*toplevel*/,
+                                                struct wl_array* /*capabilities*/) {}
 
 static constexpr struct xdg_toplevel_listener xdg_toplevel_listener = {
     .configure = xdg_toplevel_handle_configure,
@@ -70,8 +68,7 @@ static constexpr struct xdg_toplevel_listener xdg_toplevel_listener = {
 // Buffer release callback
 // ---------------------------------------------------------------------------
 
-static void buffer_handle_release(void* data,
-                                   struct wl_buffer* /*buffer*/) {
+static void buffer_handle_release(void* data, struct wl_buffer* /*buffer*/) {
     auto* busy = static_cast<bool*>(data);
     *busy = false;
 }
@@ -100,12 +97,8 @@ static int create_shm_fd(size_t size) {
 // WaylandSurface
 // ---------------------------------------------------------------------------
 
-WaylandSurface::WaylandSurface(WaylandBackend& backend,
-                                 WindowConfig const& config, Window& owner)
-    : backend_(backend)
-    , owner_(owner)
-    , width_(config.width)
-    , height_(config.height) {
+WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& config, Window& owner)
+    : backend_(backend), owner_(owner), width_(config.width), height_(config.height) {
 
     surface_ = wl_compositor_create_surface(backend_.compositor());
 
@@ -169,8 +162,7 @@ void WaylandSurface::destroy_buffer(ShmBuffer& buf) {
 }
 
 void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
-    auto const needed =
-        static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    const auto needed = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
     if (buf.buffer && buf.pool_size == needed) {
         return;
     }
@@ -183,8 +175,8 @@ void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
         return;
     }
 
-    buf.data = static_cast<uint8_t*>(
-        mmap(nullptr, needed, PROT_READ | PROT_WRITE, MAP_SHARED, buf.fd, 0));
+    buf.data =
+        static_cast<uint8_t*>(mmap(nullptr, needed, PROT_READ | PROT_WRITE, MAP_SHARED, buf.fd, 0));
     if (buf.data == MAP_FAILED) {
         buf.data = nullptr;
         close(buf.fd);
@@ -194,10 +186,8 @@ void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
     }
 
     struct wl_shm_pool* pool =
-        wl_shm_create_pool(backend_.shm(), buf.fd,
-                           static_cast<int32_t>(needed));
-    buf.buffer = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4,
-                                           WL_SHM_FORMAT_ARGB8888);
+        wl_shm_create_pool(backend_.shm(), buf.fd, static_cast<int32_t>(needed));
+    buf.buffer = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4, WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool);
 
     wl_buffer_add_listener(buf.buffer, &buffer_listener, &buf.busy);
@@ -233,7 +223,11 @@ Size WaylandSurface::size() const {
     return {static_cast<float>(width_), static_cast<float>(height_)};
 }
 
-void WaylandSurface::present(uint8_t const* rgba, int w, int h) {
+float WaylandSurface::scale_factor() const {
+    return 1.0F;
+}
+
+void WaylandSurface::present(const uint8_t* rgba, int w, int h) {
     if (!configured_) {
         return;
     }
@@ -254,9 +248,9 @@ void WaylandSurface::present(uint8_t const* rgba, int w, int h) {
 
     // Convert RGBA8 (R,G,B,A) → WL_SHM_FORMAT_ARGB8888 (B,G,R,A on LE).
     uint8_t* dst = buffers_[idx].data;
-    int const pixel_count = w * h;
+    const int pixel_count = w * h;
     for (int i = 0; i < pixel_count; ++i) {
-        int const off = i * 4;
+        const int off = i * 4;
         dst[off + 0] = rgba[off + 2]; // B
         dst[off + 1] = rgba[off + 1]; // G
         dst[off + 2] = rgba[off + 0]; // R
@@ -291,6 +285,11 @@ bool WaylandSurface::is_fullscreen() const {
 
 NativeWindowHandle WaylandSurface::native_handle() const {
     return static_cast<NativeWindowHandle>(surface_);
+}
+
+void WaylandSurface::set_cursor_shape(CursorShape /*shape*/) {
+    // Window/runtime cursor routing is in place; Wayland-specific cursor
+    // surface integration still needs backend protocol work.
 }
 
 // ---------------------------------------------------------------------------

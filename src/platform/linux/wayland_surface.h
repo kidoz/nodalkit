@@ -3,10 +3,9 @@
 /// @file wayland_surface.h
 /// @brief Wayland native surface (private header).
 
+#include <cstdint>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
-
-#include <cstdint>
 #include <vector>
 
 struct wl_surface;
@@ -20,8 +19,7 @@ class WaylandBackend;
 
 class WaylandSurface : public NativeSurface {
 public:
-    WaylandSurface(WaylandBackend& backend, WindowConfig const& config,
-                   Window& owner);
+    WaylandSurface(WaylandBackend& backend, const WindowConfig& config, Window& owner);
     ~WaylandSurface() override;
 
     void show() override;
@@ -29,10 +27,12 @@ public:
     void set_title(std::string_view title) override;
     void resize(int width, int height) override;
     [[nodiscard]] Size size() const override;
-    void present(uint8_t const* rgba, int w, int h) override;
+    [[nodiscard]] float scale_factor() const override;
+    void present(const uint8_t* rgba, int w, int h) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
+    void set_cursor_shape(CursorShape shape) override;
 
     /// Access the owning Window for event delivery.
     Window& owner() { return owner_; }

@@ -3,9 +3,8 @@
 /// @file wayland_backend.h
 /// @brief Wayland platform backend (private header).
 
-#include <nk/platform/platform_backend.h>
-
 #include <memory>
+#include <nk/platform/platform_backend.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,21 +28,20 @@ public:
     Result<void> initialize() override;
     void shutdown() override;
 
-    [[nodiscard]] std::unique_ptr<NativeSurface> create_surface(
-        WindowConfig const& config, Window& owner) override;
+    [[nodiscard]] std::unique_ptr<NativeSurface> create_surface(const WindowConfig& config,
+                                                                Window& owner) override;
 
     int run_event_loop(EventLoop& loop) override;
     void wake_event_loop() override;
     void request_quit(int exit_code) override;
 
-    [[nodiscard]] Result<std::string> show_open_file_dialog(
-        std::string_view title,
-        std::vector<std::string> const& filters) override;
+    [[nodiscard]] bool supports_open_file_dialog() const override;
+    [[nodiscard]] OpenFileDialogResult
+    show_open_file_dialog(std::string_view title, const std::vector<std::string>& filters) override;
 
     [[nodiscard]] SystemPreferences system_preferences() const override;
     [[nodiscard]] bool supports_system_preferences_observation() const override;
-    void start_system_preferences_observation(
-        SystemPreferencesObserver observer) override;
+    void start_system_preferences_observation(SystemPreferencesObserver observer) override;
     void stop_system_preferences_observation() override;
 
     // Accessors for Wayland globals (used by WaylandSurface / WaylandInput).
