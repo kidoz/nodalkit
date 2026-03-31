@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: |
+          find src include tests examples -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
+            | xargs clang-format --dry-run --Werror
+
+  clang-tidy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and analysis dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            clang-tidy \
+            meson \
+            ninja-build \
+            pkg-config \
+            libwayland-dev \
+            libwayland-bin \
+            wayland-protocols \
+            libxkbcommon-dev \
+            libfreetype-dev \
+            libfontconfig1-dev \
+            libharfbuzz-dev \
+            libglib2.0-dev
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: meson setup build-clang-tidy
+      - name: Run clang-tidy
+        run: |
+          find src tests examples -type f \( -name '*.cpp' -o -name '*.mm' \) \
+            | xargs clang-tidy -p build-clang-tidy
+
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        buildtype: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            pkg-config \
+            libwayland-dev \
+            libwayland-bin \
+            wayland-protocols \
+            libxkbcommon-dev \
+            libfreetype-dev \
+            libfontconfig1-dev \
+            libharfbuzz-dev \
+            libglib2.0-dev
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install meson ninja pkg-config
+      - name: Configure
+        run: meson setup build-${{ matrix.os }}-${{ matrix.buildtype }} --buildtype=${{ matrix.buildtype }} --prefix="$PWD/.local" --libdir=lib
+      - name: Build
+        run: meson compile -C build-${{ matrix.os }}-${{ matrix.buildtype }}
+      - name: Test
+        run: meson test -C build-${{ matrix.os }}-${{ matrix.buildtype }} --print-errorlogs
+      - name: Install
+        run: meson install -C build-${{ matrix.os }}-${{ matrix.buildtype }}
+      - name: Install smoke
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/.local/lib/pkgconfig
+        run: |
+          meson setup build-install-smoke-${{ matrix.os }}-${{ matrix.buildtype }} tests/install_smoke
+          meson test -C build-install-smoke-${{ matrix.os }}-${{ matrix.buildtype }} --print-errorlogs
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sanitizer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            meson \
+            ninja-build \
+            pkg-config \
+            libwayland-dev \
+            libwayland-bin \
+            wayland-protocols \
+            libxkbcommon-dev \
+            libfreetype-dev \
+            libfontconfig1-dev \
+            libharfbuzz-dev \
+            libglib2.0-dev
+      - name: Configure sanitizer build
+        env:
+          CC: clang
+          CXX: clang++
+        run: meson setup build-asan-ubsan --buildtype=debug -Db_sanitize=address,undefined
+      - name: Build sanitizer target
+        run: meson compile -C build-asan-ubsan
+      - name: Test sanitizer target
+        run: meson test -C build-asan-ubsan --print-errorlogs
