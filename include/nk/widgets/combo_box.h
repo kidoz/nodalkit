@@ -3,10 +3,9 @@
 /// @file combo_box.h
 /// @brief Drop-down selection widget.
 
+#include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
-
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,11 +38,11 @@ public:
     Signal<int>& on_selection_changed();
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
-    bool handle_mouse_event(MouseEvent const& event) override;
-    bool handle_key_event(KeyEvent const& event) override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
     [[nodiscard]] bool hit_test(Point point) const override;
+    [[nodiscard]] CursorShape cursor_shape() const override;
     void on_focus_changed(bool focused) override;
 
 protected:

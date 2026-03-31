@@ -3,10 +3,9 @@
 /// @file button.h
 /// @brief Clickable button widget.
 
+#include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
-
-#include <memory>
 #include <string>
 #include <string_view>
 
@@ -16,8 +15,7 @@ namespace nk {
 class Button : public Widget {
 public:
     /// Create a button with the given label.
-    [[nodiscard]] static std::shared_ptr<Button> create(
-        std::string label = {});
+    [[nodiscard]] static std::shared_ptr<Button> create(std::string label = {});
 
     ~Button() override;
 
@@ -29,10 +27,10 @@ public:
     Signal<>& on_clicked();
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
-    bool handle_mouse_event(MouseEvent const& event) override;
-    bool handle_key_event(KeyEvent const& event) override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
+    [[nodiscard]] CursorShape cursor_shape() const override;
 
 protected:
     explicit Button(std::string label);

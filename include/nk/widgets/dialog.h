@@ -3,11 +3,10 @@
 /// @file dialog.h
 /// @brief Async dialog abstraction.
 
-#include <nk/foundation/signal.h>
-#include <nk/ui_core/widget.h>
-
 #include <functional>
 #include <memory>
+#include <nk/foundation/signal.h>
+#include <nk/ui_core/widget.h>
 #include <string>
 #include <vector>
 
@@ -37,8 +36,8 @@ enum class DialogResponse {
 /// @endcode
 class Dialog : public Widget {
 public:
-    [[nodiscard]] static std::shared_ptr<Dialog> create(
-        std::string title, std::string message = {});
+    [[nodiscard]] static std::shared_ptr<Dialog> create(std::string title,
+                                                        std::string message = {});
 
     ~Dialog() override;
 
@@ -50,6 +49,7 @@ public:
 
     /// Present the dialog modally relative to the given window.
     void present(Window& parent);
+    [[nodiscard]] bool is_presented() const;
 
     /// Close the dialog, emitting the given response.
     void close(DialogResponse response = DialogResponse::Close);
@@ -57,8 +57,15 @@ public:
     /// Emitted when the user responds.
     Signal<DialogResponse>& on_response();
 
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
+    bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
+    [[nodiscard]] bool hit_test(Point point) const override;
+
 protected:
     Dialog(std::string title, std::string message);
+    void snapshot(SnapshotContext& ctx) const override;
 
 private:
     struct Impl;

@@ -3,11 +3,10 @@
 /// @file list_view.h
 /// @brief Scrollable list view backed by a data model.
 
-#include <nk/foundation/signal.h>
-#include <nk/ui_core/widget.h>
-
 #include <functional>
 #include <memory>
+#include <nk/foundation/signal.h>
+#include <nk/ui_core/widget.h>
 
 namespace nk {
 
@@ -43,17 +42,19 @@ public:
     Signal<std::size_t>& on_row_activated();
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
-    void allocate(Rect const& allocation) override;
-    bool handle_mouse_event(MouseEvent const& event) override;
-    bool handle_key_event(KeyEvent const& event) override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
+    bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
 
 protected:
     ListView();
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    void clear_visible_items();
+    void sync_visible_items();
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

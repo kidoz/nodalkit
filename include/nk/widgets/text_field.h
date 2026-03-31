@@ -3,20 +3,19 @@
 /// @file text_field.h
 /// @brief Single-line text input widget.
 
+#include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
-
-#include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace nk {
 
 /// A single-line text entry field.
 class TextField : public Widget {
 public:
-    [[nodiscard]] static std::shared_ptr<TextField> create(
-        std::string initial_text = {});
+    [[nodiscard]] static std::shared_ptr<TextField> create(std::string initial_text = {});
 
     ~TextField() override;
 
@@ -32,6 +31,21 @@ public:
     [[nodiscard]] bool is_editable() const;
     void set_editable(bool editable);
 
+    /// Caret byte offset within the current UTF-8 buffer.
+    [[nodiscard]] std::size_t cursor_position() const;
+
+    /// Inclusive selection start byte offset.
+    [[nodiscard]] std::size_t selection_start() const;
+
+    /// Exclusive selection end byte offset.
+    [[nodiscard]] std::size_t selection_end() const;
+
+    /// Whether the field currently has a selection.
+    [[nodiscard]] bool has_selection() const;
+
+    /// Select the entire current text.
+    void select_all();
+
     /// Signal emitted when the text changes.
     Signal<std::string_view>& on_text_changed();
 
@@ -39,16 +53,33 @@ public:
     Signal<>& on_activate();
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
-    bool handle_mouse_event(MouseEvent const& event) override;
-    bool handle_key_event(KeyEvent const& event) override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
+    bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
+    [[nodiscard]] CursorShape cursor_shape() const override;
+    void on_focus_changed(bool focused) override;
 
 protected:
     explicit TextField(std::string text);
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    [[nodiscard]] Rect inner_body_rect() const;
+    [[nodiscard]] Rect text_rect() const;
+    [[nodiscard]] std::size_t hit_test_cursor(Point point) const;
+    void move_cursor(std::size_t position, bool extend_selection);
+    void replace_selection(std::string_view text, bool record_history);
+    void ensure_caret_visible();
+    void reset_history();
+    void push_history_state();
+    bool undo();
+    bool redo();
+    void copy_selection_to_clipboard() const;
+    bool delete_backward();
+    bool delete_forward();
+    bool paste_from_clipboard();
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

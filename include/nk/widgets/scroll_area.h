@@ -3,10 +3,9 @@
 /// @file scroll_area.h
 /// @brief Scrollable viewport container.
 
+#include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
-
-#include <memory>
 
 namespace nk {
 
@@ -36,9 +35,9 @@ public:
     Signal<float, float>& on_scroll_changed();
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
-    void allocate(Rect const& allocation) override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
+    bool handle_mouse_event(const MouseEvent& event) override;
 
 protected:
     ScrollArea();

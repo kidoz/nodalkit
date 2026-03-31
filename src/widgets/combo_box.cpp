@@ -1,10 +1,8 @@
-#include <nk/widgets/combo_box.h>
-
+#include <algorithm>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
-
-#include <algorithm>
+#include <nk/widgets/combo_box.h>
 #include <stdexcept>
 
 namespace nk {
@@ -25,10 +23,7 @@ struct PopupGeometry {
     int visible_count = 0;
 };
 
-PopupGeometry popup_geometry(
-    Rect field_bounds,
-    std::size_t item_count,
-    float item_height) {
+PopupGeometry popup_geometry(Rect field_bounds, std::size_t item_count, float item_height) {
     PopupGeometry geometry;
     geometry.item_height = item_height;
     geometry.visible_count = static_cast<int>(std::min<std::size_t>(6, item_count));
@@ -36,20 +31,18 @@ PopupGeometry popup_geometry(
         field_bounds.x,
         field_bounds.bottom() + 4.0F,
         field_bounds.width,
-        geometry.visible_count > 0
-            ? geometry.visible_count * item_height + 2.0F
-            : 0.0F,
+        geometry.visible_count > 0 ? geometry.visible_count * item_height + 2.0F : 0.0F,
     };
     return geometry;
 }
 
-int popup_index_at(PopupGeometry const& geometry, Point point) {
+int popup_index_at(const PopupGeometry& geometry, Point point) {
     if (geometry.visible_count <= 0 || !geometry.bounds.contains(point)) {
         return -1;
     }
 
-    float const local_y = point.y - geometry.bounds.y - 1.0F;
-    auto const index = static_cast<int>(local_y / geometry.item_height);
+    const float local_y = point.y - geometry.bounds.y - 1.0F;
+    const auto index = static_cast<int>(local_y / geometry.item_height);
     if (index < 0 || index >= geometry.visible_count) {
         return -1;
     }
@@ -72,8 +65,7 @@ std::shared_ptr<ComboBox> ComboBox::create() {
     return std::shared_ptr<ComboBox>(new ComboBox());
 }
 
-ComboBox::ComboBox()
-    : impl_(std::make_unique<Impl>()) {
+ComboBox::ComboBox() : impl_(std::make_unique<Impl>()) {
     set_focusable(true);
     add_style_class("combo-box");
 }
@@ -104,8 +96,7 @@ int ComboBox::selected_index() const {
 
 void ComboBox::set_selected_index(int index) {
     if (index >= static_cast<int>(impl_->items.size())) {
-        throw std::out_of_range(
-            "ComboBox::set_selected_index: index out of range");
+        throw std::out_of_range("ComboBox::set_selected_index: index out of range");
     }
     if (impl_->selected_index != index) {
         impl_->selected_index = index;
@@ -116,8 +107,7 @@ void ComboBox::set_selected_index(int index) {
 
 std::string_view ComboBox::selected_text() const {
     if (impl_->selected_index < 0 ||
-        impl_->selected_index >=
-            static_cast<int>(impl_->items.size())) {
+        impl_->selected_index >= static_cast<int>(impl_->items.size())) {
         return {};
     }
     return impl_->items[static_cast<std::size_t>(impl_->selected_index)];
@@ -127,22 +117,20 @@ Signal<int>& ComboBox::on_selection_changed() {
     return impl_->selection_changed;
 }
 
-SizeRequest ComboBox::measure(Constraints const& /*constraints*/) const {
-    float const w = theme_number("min-width", 240.0F);
-    float const h = theme_number("min-height", 36.0F);
+SizeRequest ComboBox::measure(const Constraints& /*constraints*/) const {
+    const float w = theme_number("min-width", 240.0F);
+    const float h = theme_number("min-height", 36.0F);
     return {120.0F, h, w, h};
 }
 
-bool ComboBox::handle_mouse_event(MouseEvent const& event) {
+bool ComboBox::handle_mouse_event(const MouseEvent& event) {
     if (event.button != 1 || impl_->items.empty()) {
         return false;
     }
 
-    auto const popup = popup_geometry(
-        allocation(),
-        impl_->items.size(),
-        theme_number("popup-item-height", 28.0F));
-    auto const point = Point{event.x, event.y};
+    const auto popup =
+        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
+    const auto point = Point{event.x, event.y};
 
     switch (event.type) {
     case MouseEvent::Type::Press:
@@ -150,8 +138,8 @@ bool ComboBox::handle_mouse_event(MouseEvent const& event) {
         impl_->armed_index = impl_->popup_open ? popup_index_at(popup, point) : -1;
         return impl_->armed || impl_->armed_index >= 0;
     case MouseEvent::Type::Release: {
-        bool const release_on_field = allocation().contains(point);
-        auto const release_index = popup_index_at(popup, point);
+        const bool release_on_field = allocation().contains(point);
+        const auto release_index = popup_index_at(popup, point);
         bool consumed = false;
 
         if (impl_->armed_index >= 0) {
@@ -167,7 +155,7 @@ bool ComboBox::handle_mouse_event(MouseEvent const& event) {
             return consumed;
         }
 
-        bool const activate = impl_->armed && release_on_field;
+        const bool activate = impl_->armed && release_on_field;
         impl_->armed = false;
         impl_->armed_index = -1;
         if (!activate) {
@@ -175,15 +163,13 @@ bool ComboBox::handle_mouse_event(MouseEvent const& event) {
         }
 
         impl_->popup_open = !impl_->popup_open;
-        impl_->highlighted_index = impl_->popup_open
-            ? std::max(0, impl_->selected_index)
-            : -1;
+        impl_->highlighted_index = impl_->popup_open ? std::max(0, impl_->selected_index) : -1;
         queue_redraw();
         return true;
     }
     case MouseEvent::Type::Move:
         if (impl_->popup_open) {
-            int const next_highlight = popup_index_at(popup, point);
+            const int next_highlight = popup_index_at(popup, point);
             if (impl_->highlighted_index != next_highlight) {
                 impl_->highlighted_index = next_highlight;
                 queue_redraw();
@@ -207,8 +193,8 @@ bool ComboBox::handle_mouse_event(MouseEvent const& event) {
             queue_redraw();
             return true;
         }
-        if (event.scroll_dy < 0.0F
-            && impl_->highlighted_index + 1 < static_cast<int>(impl_->items.size())) {
+        if (event.scroll_dy < 0.0F &&
+            impl_->highlighted_index + 1 < static_cast<int>(impl_->items.size())) {
             ++impl_->highlighted_index;
             queue_redraw();
             return true;
@@ -219,16 +205,16 @@ bool ComboBox::handle_mouse_event(MouseEvent const& event) {
     return false;
 }
 
-bool ComboBox::handle_key_event(KeyEvent const& event) {
+bool ComboBox::handle_key_event(const KeyEvent& event) {
     if (event.type != KeyEvent::Type::Press || impl_->items.empty()) {
         return false;
     }
 
-    auto const last_index = static_cast<int>(impl_->items.size()) - 1;
+    const auto last_index = static_cast<int>(impl_->items.size()) - 1;
     auto open_popup = [this](int highlight) {
         impl_->popup_open = true;
-        impl_->highlighted_index = std::clamp(highlight, 0,
-                                              static_cast<int>(impl_->items.size()) - 1);
+        impl_->highlighted_index =
+            std::clamp(highlight, 0, static_cast<int>(impl_->items.size()) - 1);
         queue_redraw();
     };
 
@@ -282,18 +268,15 @@ bool ComboBox::handle_key_event(KeyEvent const& event) {
         if (impl_->selected_index < 0) {
             set_selected_index(last_index);
         } else {
-            set_selected_index(
-                (impl_->selected_index + last_index)
-                % static_cast<int>(impl_->items.size()));
+            set_selected_index((impl_->selected_index + last_index) %
+                               static_cast<int>(impl_->items.size()));
         }
         return true;
     case KeyCode::Right:
         if (impl_->selected_index < 0) {
             set_selected_index(0);
         } else {
-            set_selected_index(
-                (impl_->selected_index + 1)
-                % static_cast<int>(impl_->items.size()));
+            set_selected_index((impl_->selected_index + 1) % static_cast<int>(impl_->items.size()));
         }
         return true;
     default:
@@ -310,11 +293,13 @@ bool ComboBox::hit_test(Point point) const {
         return false;
     }
 
-    auto const popup = popup_geometry(
-        allocation(),
-        impl_->items.size(),
-        theme_number("popup-item-height", 28.0F));
+    const auto popup =
+        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
     return popup.bounds.contains(point);
+}
+
+CursorShape ComboBox::cursor_shape() const {
+    return CursorShape::PointingHand;
 }
 
 void ComboBox::on_focus_changed(bool focused) {
@@ -328,74 +313,62 @@ void ComboBox::on_focus_changed(bool focused) {
 }
 
 void ComboBox::snapshot(SnapshotContext& ctx) const {
-    auto const a = allocation();
-    float const corner_radius = theme_number("corner-radius", 10.0F);
-    float const popup_radius = theme_number("popup-radius", 12.0F);
-    float const selection_radius = theme_number("selection-radius", 8.0F);
+    const auto a = allocation();
+    const float corner_radius = theme_number("corner-radius", 10.0F);
+    const float popup_radius = theme_number("popup-radius", 12.0F);
+    const float selection_radius = theme_number("selection-radius", 8.0F);
     auto body = a;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(
-            a,
-            theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-            corner_radius + 2.0F);
+        ctx.add_rounded_rect(a,
+                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
+                             corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 
     ctx.add_rounded_rect(
-        body,
-        theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}),
-        corner_radius);
+        body, theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}), corner_radius);
     ctx.add_border(
-        body,
-        theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}),
-        1.0F,
-        corner_radius);
-    Rect inner = {body.x + 1.0F, body.y + 1.0F,
+        body, theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}), 1.0F, corner_radius);
+    Rect inner = {body.x + 1.0F,
+                  body.y + 1.0F,
                   std::max(0.0F, body.width - 2.0F),
                   std::max(0.0F, body.height - 2.0F)};
 
-    float const arrow_width = 28.0F;
+    const float arrow_width = 28.0F;
     ctx.add_color_rect({inner.right() - arrow_width, inner.y, 1.0F, inner.height},
                        theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}));
 
-    auto const font = combo_box_font();
+    const auto font = combo_box_font();
     auto text = selected_text();
     if (!text.empty()) {
-        auto const measured = measure_text(text, font);
-        float const text_y =
-            inner.y + std::max(0.0F, (inner.height - measured.height) * 0.5F);
-        ctx.add_text(
-            {inner.x + 12.0F, text_y},
-            std::string(text),
-            theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
-            font);
+        const auto measured = measure_text(text, font);
+        const float text_y = inner.y + std::max(0.0F, (inner.height - measured.height) * 0.5F);
+        ctx.add_text({inner.x + 12.0F, text_y},
+                     std::string(text),
+                     theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
+                     font);
     }
 
-    auto const chevron_font = FontDescriptor{
+    const auto chevron_font = FontDescriptor{
         .family = {},
         .size = 13.0F,
         .weight = FontWeight::Medium,
     };
-    auto const chevron_text = impl_->popup_open ? "^" : "v";
-    auto const chevron_size = measure_text(chevron_text, chevron_font);
-    float const arrow_x =
-        inner.right() - ((arrow_width - chevron_size.width) * 0.5F)
-        - chevron_size.width;
-    float const arrow_y =
-        inner.y + std::max(0.0F, (inner.height - chevron_size.height) * 0.5F);
-    auto const arrow_color =
-        theme_color("chevron-color", Color{0.45F, 0.48F, 0.54F, 1.0F});
+    const auto chevron_text = impl_->popup_open ? "^" : "v";
+    const auto chevron_size = measure_text(chevron_text, chevron_font);
+    const float arrow_x =
+        inner.right() - ((arrow_width - chevron_size.width) * 0.5F) - chevron_size.width;
+    const float arrow_y = inner.y + std::max(0.0F, (inner.height - chevron_size.height) * 0.5F);
+    const auto arrow_color = theme_color("chevron-color", Color{0.45F, 0.48F, 0.54F, 1.0F});
     ctx.add_text({arrow_x, arrow_y}, chevron_text, arrow_color, chevron_font);
 
     if (!impl_->popup_open || impl_->items.empty()) {
         return;
     }
 
-    auto const popup = popup_geometry(
-        allocation(),
-        impl_->items.size(),
-        theme_number("popup-item-height", 28.0F));
+    const auto popup =
+        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
     if (popup.visible_count <= 0) {
         return;
     }
@@ -407,15 +380,13 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
         popup_radius + 1.0F);
     ctx.add_rounded_rect(
         popup.bounds,
-        theme_color("popup-background",
-                    theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F})),
+        theme_color("popup-background", theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F})),
         popup_radius);
-    ctx.add_border(
-        popup.bounds,
-        theme_color("popup-border-color",
-                    theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F})),
-        1.0F,
-        popup_radius);
+    ctx.add_border(popup.bounds,
+                   theme_color("popup-border-color",
+                               theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F})),
+                   1.0F,
+                   popup_radius);
     Rect popup_inner = {
         popup.bounds.x + 1.0F,
         popup.bounds.y + 1.0F,
@@ -423,38 +394,32 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
         std::max(0.0F, popup.bounds.height - 2.0F),
     };
 
-    auto const text_color =
-        theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    auto const hover_bg =
-        theme_color("popup-hover-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
-    auto const selected_bg =
+    const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+    const auto hover_bg = theme_color("popup-hover-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
+    const auto selected_bg =
         theme_color("popup-selected-background", Color{0.86F, 0.92F, 0.99F, 1.0F});
 
     float row_y = popup_inner.y;
     for (int index = 0; index < popup.visible_count; ++index) {
-        bool const selected = index == impl_->selected_index;
-        bool const highlighted = index == impl_->highlighted_index;
+        const bool selected = index == impl_->selected_index;
+        const bool highlighted = index == impl_->highlighted_index;
         Color row_bg = selected ? selected_bg : Color{};
         if (highlighted) {
             row_bg = hover_bg;
         }
         if (selected || highlighted) {
-            ctx.add_rounded_rect(
-                {popup_inner.x + 4.0F, row_y + 2.0F,
-                 popup_inner.width - 8.0F, popup.item_height - 4.0F},
-                row_bg,
-                selection_radius);
+            ctx.add_rounded_rect({popup_inner.x + 4.0F,
+                                  row_y + 2.0F,
+                                  popup_inner.width - 8.0F,
+                                  popup.item_height - 4.0F},
+                                 row_bg,
+                                 selection_radius);
         }
 
-        auto const item_text = impl_->items[index];
-        auto const item_size = measure_text(item_text, font);
-        float const text_y =
-            row_y + std::max(0.0F, (popup.item_height - item_size.height) * 0.5F);
-        ctx.add_text(
-            {popup_inner.x + 12.0F, text_y},
-            item_text,
-            text_color,
-            font);
+        const auto item_text = impl_->items[index];
+        const auto item_size = measure_text(item_text, font);
+        const float text_y = row_y + std::max(0.0F, (popup.item_height - item_size.height) * 0.5F);
+        ctx.add_text({popup_inner.x + 12.0F, text_y}, item_text, text_color, font);
         row_y += popup.item_height;
     }
     ctx.pop_container();

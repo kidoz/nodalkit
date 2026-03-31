@@ -3,10 +3,9 @@
 /// @file menu_bar.h
 /// @brief Horizontal menu bar widget with menu model.
 
+#include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
-
-#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,9 +15,9 @@ namespace nk {
 /// A single menu item (can have submenu children).
 struct MenuItem {
     std::string label;
-    std::string action_name;   ///< Links to ActionGroup (e.g. "app.open").
+    std::string action_name; ///< Links to ActionGroup (e.g. "app.open").
     bool enabled = true;
-    bool separator = false;    ///< If true, renders as a separator line.
+    bool separator = false; ///< If true, renders as a separator line.
     std::vector<MenuItem> children;
 
     /// Create an action item with a label and action name.
@@ -53,8 +52,12 @@ public:
     Signal<std::string_view>& on_action();
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
+    [[nodiscard]] bool hit_test(Point point) const override;
+    [[nodiscard]] CursorShape cursor_shape() const override;
+    void on_focus_changed(bool focused) override;
 
 protected:
     MenuBar();
