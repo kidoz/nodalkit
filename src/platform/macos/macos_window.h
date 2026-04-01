@@ -33,6 +33,7 @@ public:
     void resize(int width, int height) override;
     [[nodiscard]] Size size() const override;
     [[nodiscard]] float scale_factor() const override;
+    [[nodiscard]] RendererBackendSupport renderer_backend_support() const override;
     void present(const uint8_t* rgba, int w, int h) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;

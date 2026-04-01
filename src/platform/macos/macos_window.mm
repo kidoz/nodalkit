@@ -752,6 +752,15 @@ float MacosSurface::scale_factor() const {
     }
 }
 
+RendererBackendSupport MacosSurface::renderer_backend_support() const {
+    return {
+        .software = true,
+        .metal = true,
+        .open_gl = false,
+        .vulkan = false,
+    };
+}
+
 void MacosSurface::present(const uint8_t* rgba, int w, int h) {
     size_t byte_count = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
     pixel_buffer_.resize(byte_count);
