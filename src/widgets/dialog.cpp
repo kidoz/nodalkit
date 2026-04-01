@@ -4,7 +4,6 @@
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
 #include <nk/widgets/dialog.h>
-#include <optional>
 
 namespace nk {
 

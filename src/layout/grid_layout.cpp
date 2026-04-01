@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <limits>
 #include <nk/layout/grid_layout.h>
 #include <nk/ui_core/widget.h>
 #include <vector>
