@@ -1,20 +1,26 @@
-#include <nk/runtime/event_loop.h>
-
 #include <algorithm>
 #include <chrono>
 #include <deque>
 #include <mutex>
+#include <nk/runtime/event_loop.h>
+#include <string>
 #include <thread>
 #include <vector>
 
 namespace nk {
 
 struct EventLoop::Impl {
+    struct PostedTask {
+        std::chrono::steady_clock::time_point queued_at;
+        std::function<void()> callback;
+    };
+
     bool running = false;
     int exit_code = 0;
     uint64_t next_handle_id = 1;
 
-    std::deque<std::function<void()>> posted_tasks;
+    std::chrono::steady_clock::time_point diagnostics_origin = std::chrono::steady_clock::now();
+    std::deque<PostedTask> posted_tasks;
     std::mutex task_mutex;
 
     struct TimerEntry {
@@ -26,14 +32,55 @@ struct EventLoop::Impl {
     };
 
     std::vector<TimerEntry> timers;
-    std::vector<std::function<void()>> idle_callbacks;
 
-    [[nodiscard]] CallbackHandle next_handle() {
-        return {next_handle_id++};
-    }
+    struct IdleEntry {
+        CallbackHandle handle;
+        std::chrono::steady_clock::time_point queued_at;
+        std::function<void()> callback;
+        bool cancelled = false;
+    };
+
+    std::vector<IdleEntry> idle_callbacks;
+    std::vector<TraceEvent> trace_events;
+
+    [[nodiscard]] CallbackHandle next_handle() { return {next_handle_id++}; }
 };
 
+namespace {
+
+constexpr std::size_t kTraceEventHistoryLimit = 256;
+
+double elapsed_ms(std::chrono::steady_clock::time_point start,
+                  std::chrono::steady_clock::time_point end) {
+    return std::chrono::duration<double, std::milli>(end - start).count();
+}
+
+void append_trace_event(std::vector<TraceEvent>& trace_events,
+                        std::chrono::steady_clock::time_point diagnostics_origin,
+                        std::string name,
+                        std::string category,
+                        std::chrono::steady_clock::time_point start,
+                        std::chrono::steady_clock::time_point end,
+                        std::string detail = {}) {
+    trace_events.push_back({
+        .name = std::move(name),
+        .category = std::move(category),
+        .timestamp_ms = elapsed_ms(diagnostics_origin, start),
+        .duration_ms = elapsed_ms(start, end),
+        .detail = std::move(detail),
+    });
+    if (trace_events.size() > kTraceEventHistoryLimit) {
+        trace_events.erase(
+            trace_events.begin(),
+            trace_events.begin() +
+                static_cast<std::ptrdiff_t>(trace_events.size() - kTraceEventHistoryLimit));
+    }
+}
+
+} // namespace
+
 EventLoop::EventLoop() : impl_(std::make_unique<Impl>()) {}
+
 EventLoop::~EventLoop() = default;
 
 int EventLoop::run() {
@@ -61,7 +108,10 @@ void EventLoop::quit(int exit_code) {
 void EventLoop::post(std::function<void()> task) {
     {
         std::lock_guard lock(impl_->task_mutex);
-        impl_->posted_tasks.push_back(std::move(task));
+        impl_->posted_tasks.push_back({
+            .queued_at = std::chrono::steady_clock::now(),
+            .callback = std::move(task),
+        });
     }
     wake();
 }
@@ -72,11 +122,16 @@ void EventLoop::wake() {
     // For the fallback busy-spin loop this is a no-op.
 }
 
-bool EventLoop::is_running() const { return impl_->running; }
-int EventLoop::exit_code() const { return impl_->exit_code; }
+bool EventLoop::is_running() const {
+    return impl_->running;
+}
 
-CallbackHandle EventLoop::set_timeout(
-    std::chrono::milliseconds delay, std::function<void()> callback) {
+int EventLoop::exit_code() const {
+    return impl_->exit_code;
+}
+
+CallbackHandle EventLoop::set_timeout(std::chrono::milliseconds delay,
+                                      std::function<void()> callback) {
     auto h = impl_->next_handle();
     impl_->timers.push_back({
         h,
@@ -88,8 +143,8 @@ CallbackHandle EventLoop::set_timeout(
     return h;
 }
 
-CallbackHandle EventLoop::set_interval(
-    std::chrono::milliseconds interval, std::function<void()> callback) {
+CallbackHandle EventLoop::set_interval(std::chrono::milliseconds interval,
+                                       std::function<void()> callback) {
     auto h = impl_->next_handle();
     impl_->timers.push_back({
         h,
@@ -107,26 +162,45 @@ void EventLoop::cancel(CallbackHandle handle) {
             t.cancelled = true;
         }
     }
+    for (auto& idle : impl_->idle_callbacks) {
+        if (idle.handle.id == handle.id) {
+            idle.cancelled = true;
+        }
+    }
 }
 
 CallbackHandle EventLoop::add_idle(std::function<void()> callback) {
     auto h = impl_->next_handle();
-    impl_->idle_callbacks.push_back(std::move(callback));
+    impl_->idle_callbacks.push_back({
+        h,
+        std::chrono::steady_clock::now(),
+        std::move(callback),
+        false,
+    });
     return h;
 }
 
 bool EventLoop::poll() {
     bool did_work = false;
-    auto const now = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
 
     // Drain posted tasks.
-    std::deque<std::function<void()>> tasks;
+    std::deque<Impl::PostedTask> tasks;
     {
         std::lock_guard lock(impl_->task_mutex);
         tasks.swap(impl_->posted_tasks);
     }
     for (auto& task : tasks) {
-        task();
+        const auto started_at = std::chrono::steady_clock::now();
+        task.callback();
+        const auto finished_at = std::chrono::steady_clock::now();
+        append_trace_event(impl_->trace_events,
+                           impl_->diagnostics_origin,
+                           "posted-task",
+                           "event-loop-task",
+                           started_at,
+                           finished_at,
+                           "queued_ms=" + std::to_string(elapsed_ms(task.queued_at, started_at)));
         did_work = true;
     }
 
@@ -136,7 +210,16 @@ bool EventLoop::poll() {
             continue;
         }
         if (now >= t.fire_at) {
+            const auto started_at = std::chrono::steady_clock::now();
             t.callback();
+            const auto finished_at = std::chrono::steady_clock::now();
+            append_trace_event(impl_->trace_events,
+                               impl_->diagnostics_origin,
+                               t.interval.count() > 0 ? "interval" : "timeout",
+                               "event-loop-timer",
+                               started_at,
+                               finished_at,
+                               "lateness_ms=" + std::to_string(elapsed_ms(t.fire_at, started_at)));
             did_work = true;
             if (t.interval.count() > 0) {
                 t.fire_at = now + t.interval;
@@ -147,19 +230,40 @@ bool EventLoop::poll() {
     }
 
     // Purge cancelled timers.
-    std::erase_if(impl_->timers, [](auto const& t) { return t.cancelled; });
+    std::erase_if(impl_->timers, [](const auto& t) { return t.cancelled; });
 
     // Run idle callbacks if nothing else happened.
     if (!did_work) {
         auto idles = std::move(impl_->idle_callbacks);
         impl_->idle_callbacks.clear();
-        for (auto& cb : idles) {
-            cb();
+        for (auto& idle : idles) {
+            if (idle.cancelled) {
+                continue;
+            }
+            const auto started_at = std::chrono::steady_clock::now();
+            idle.callback();
+            const auto finished_at = std::chrono::steady_clock::now();
+            append_trace_event(impl_->trace_events,
+                               impl_->diagnostics_origin,
+                               "idle",
+                               "event-loop-idle",
+                               started_at,
+                               finished_at,
+                               "queued_ms=" +
+                                   std::to_string(elapsed_ms(idle.queued_at, started_at)));
             did_work = true;
         }
     }
 
     return did_work;
+}
+
+std::span<const TraceEvent> EventLoop::debug_trace_events() const {
+    return impl_->trace_events;
+}
+
+void EventLoop::clear_debug_trace_events() {
+    impl_->trace_events.clear();
 }
 
 } // namespace nk

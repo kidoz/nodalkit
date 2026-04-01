@@ -6,12 +6,16 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <nk/debug/diagnostics.h>
+#include <span>
 
 namespace nk {
 
 /// Opaque handle for a scheduled timer or idle callback.
 struct CallbackHandle {
     uint64_t id = 0;
+
     [[nodiscard]] bool valid() const { return id != 0; }
 };
 
@@ -22,8 +26,8 @@ public:
     EventLoop();
     ~EventLoop();
 
-    EventLoop(EventLoop const&) = delete;
-    EventLoop& operator=(EventLoop const&) = delete;
+    EventLoop(const EventLoop&) = delete;
+    EventLoop& operator=(const EventLoop&) = delete;
 
     /// Run the loop until quit() is called. Returns the exit code.
     int run();
@@ -35,12 +39,12 @@ public:
     void post(std::function<void()> task);
 
     /// Schedule a one-shot timer.
-    [[nodiscard]] CallbackHandle set_timeout(
-        std::chrono::milliseconds delay, std::function<void()> callback);
+    [[nodiscard]] CallbackHandle set_timeout(std::chrono::milliseconds delay,
+                                             std::function<void()> callback);
 
     /// Schedule a repeating timer.
-    [[nodiscard]] CallbackHandle set_interval(
-        std::chrono::milliseconds interval, std::function<void()> callback);
+    [[nodiscard]] CallbackHandle set_interval(std::chrono::milliseconds interval,
+                                              std::function<void()> callback);
 
     /// Cancel a previously scheduled timer or idle callback.
     void cancel(CallbackHandle handle);
@@ -61,6 +65,12 @@ public:
 
     /// The exit code set by quit().
     [[nodiscard]] int exit_code() const;
+
+    /// Recent runtime trace events captured from posted tasks, timers, and idles.
+    [[nodiscard]] std::span<const TraceEvent> debug_trace_events() const;
+
+    /// Clear retained runtime trace events.
+    void clear_debug_trace_events();
 
 private:
     struct Impl;
