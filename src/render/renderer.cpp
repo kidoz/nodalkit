@@ -2,18 +2,21 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
-#include <string>
-#include <tuple>
-#include <unordered_map>
-#include <vector>
-
+#include <nk/platform/platform_backend.h>
 #include <nk/render/image_node.h>
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/text/shaped_text.h>
 #include <nk/text/text_shaper.h>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace nk {
+
+#if defined(__APPLE__)
+std::unique_ptr<Renderer> create_metal_renderer();
+#endif
 
 namespace {
 
@@ -164,6 +167,64 @@ struct TextKeyHash {
 Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
 
+std::string_view renderer_backend_name(RendererBackend backend) noexcept {
+    switch (backend) {
+    case RendererBackend::Software:
+        return "software";
+    case RendererBackend::Metal:
+        return "metal";
+    case RendererBackend::OpenGL:
+        return "opengl";
+    case RendererBackend::Vulkan:
+        return "vulkan";
+    }
+    return "unknown";
+}
+
+bool renderer_backend_is_gpu(RendererBackend backend) noexcept {
+    return backend != RendererBackend::Software;
+}
+
+bool renderer_backend_supported(RendererBackendSupport support, RendererBackend backend) noexcept {
+    switch (backend) {
+    case RendererBackend::Software:
+        return support.software;
+    case RendererBackend::Metal:
+        return support.metal;
+    case RendererBackend::OpenGL:
+        return support.open_gl;
+    case RendererBackend::Vulkan:
+        return support.vulkan;
+    }
+    return false;
+}
+
+bool renderer_backend_available(RendererBackend backend) noexcept {
+    switch (backend) {
+    case RendererBackend::Software:
+        return true;
+    case RendererBackend::Metal:
+#if defined(__APPLE__)
+        return true;
+#else
+        return false;
+#endif
+    case RendererBackend::OpenGL:
+    case RendererBackend::Vulkan:
+        return false;
+    }
+    return false;
+}
+
+bool Renderer::attach_surface(NativeSurface& surface) {
+    (void)surface;
+    return true;
+}
+
+void Renderer::set_text_shaper(TextShaper* shaper) {
+    (void)shaper;
+}
+
 // --- SoftwareRenderer ---
 
 struct SoftwareRenderer::Impl {
@@ -180,6 +241,15 @@ SoftwareRenderer::SoftwareRenderer() : impl_(std::make_unique<Impl>()) {}
 
 SoftwareRenderer::~SoftwareRenderer() = default;
 
+RendererBackend SoftwareRenderer::backend() const {
+    return RendererBackend::Software;
+}
+
+bool SoftwareRenderer::attach_surface(NativeSurface& surface) {
+    (void)surface;
+    return true;
+}
+
 void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
     impl_->logical_viewport = viewport;
     impl_->scale_factor = normalize_scale_factor(scale_factor);
@@ -192,8 +262,13 @@ void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
 }
 
 void SoftwareRenderer::render(const RenderNode& root) {
-    auto render_node =
-        [&](auto&& self, const RenderNode& node, std::vector<ClipRegion>& clips, int c_x0, int c_y0, int c_x1, int c_y1) -> void {
+    auto render_node = [&](auto&& self,
+                           const RenderNode& node,
+                           std::vector<ClipRegion>& clips,
+                           int c_x0,
+                           int c_y0,
+                           int c_x1,
+                           int c_y1) -> void {
         if (c_x1 <= c_x0 || c_y1 <= c_y0) {
             return;
         }
@@ -305,11 +380,17 @@ void SoftwareRenderer::render(const RenderNode& root) {
             if (impl_->text_shaper && !text_node.text().empty()) {
                 auto font = text_node.font();
                 font.size *= impl_->scale_factor;
-                auto const color = text_node.text_color();
-                TextKey key{
-                    text_node.text(), font.family, font.size, static_cast<int>(font.weight),
-                    static_cast<int>(font.style), color.r, color.g, color.b, color.a, impl_->scale_factor
-                };
+                const auto color = text_node.text_color();
+                TextKey key{text_node.text(),
+                            font.family,
+                            font.size,
+                            static_cast<int>(font.weight),
+                            static_cast<int>(font.style),
+                            color.r,
+                            color.g,
+                            color.b,
+                            color.a,
+                            impl_->scale_factor};
 
                 std::shared_ptr<ShapedText> shaped_ptr;
                 auto it = impl_->shaped_text_cache.find(key);
@@ -393,9 +474,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
                         const float v = clamp01(((static_cast<float>(dy) + 0.5F) - b.y) * v_step);
                         const int sy = std::min(src_h - 1, static_cast<int>(v * src_h));
                         const int row_offset = sy * src_w;
-                        
+
                         for (int dx = dest_x; dx < dest_r; ++dx) {
-                            const float u = clamp01(((static_cast<float>(dx) + 0.5F) - b.x) * u_step);
+                            const float u =
+                                clamp01(((static_cast<float>(dx) + 0.5F) - b.x) * u_step);
                             const int sx = std::min(src_w - 1, static_cast<int>(u * src_w));
                             const uint32_t pixel = src[row_offset + sx]; // ARGB8888
                             const float coverage = clip_coverage(dx, dy, clips);
@@ -432,6 +514,10 @@ void SoftwareRenderer::end_frame() {
     // No-op for CPU renderer. A real backend would blit to the surface.
 }
 
+void SoftwareRenderer::present(NativeSurface& surface) {
+    surface.present(pixel_data(), pixel_width(), pixel_height());
+}
+
 void SoftwareRenderer::set_text_shaper(TextShaper* shaper) {
     impl_->text_shaper = shaper;
 }
@@ -446,6 +532,23 @@ int SoftwareRenderer::pixel_width() const {
 
 int SoftwareRenderer::pixel_height() const {
     return impl_->height;
+}
+
+std::unique_ptr<Renderer> create_renderer(RendererBackend backend) {
+    switch (backend) {
+    case RendererBackend::Software:
+        return std::make_unique<SoftwareRenderer>();
+    case RendererBackend::Metal:
+#if defined(__APPLE__)
+        return create_metal_renderer();
+#else
+        return nullptr;
+#endif
+    case RendererBackend::OpenGL:
+    case RendererBackend::Vulkan:
+        return nullptr;
+    }
+    return nullptr;
 }
 
 } // namespace nk

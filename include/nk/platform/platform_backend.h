@@ -13,6 +13,7 @@
 #include <nk/platform/events.h>
 #include <nk/platform/file_dialog.h>
 #include <nk/platform/system_preferences.h>
+#include <nk/render/renderer.h>
 #include <nk/ui_core/cursor_shape.h>
 #include <string>
 #include <string_view>
@@ -55,6 +56,9 @@ public:
 
     /// Device pixel ratio for the current content area.
     [[nodiscard]] virtual float scale_factor() const = 0;
+
+    /// Renderer backends that this surface can host.
+    [[nodiscard]] virtual RendererBackendSupport renderer_backend_support() const { return {}; }
 
     /// Present a rendered pixel buffer to the screen.
     /// @param rgba  Pixel data in RGBA8 format, row-major.
