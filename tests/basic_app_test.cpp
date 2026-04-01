@@ -2,6 +2,7 @@
 /// @brief Smoke test: create Application, Window, widgets, and quit.
 
 #include <algorithm>
+#include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -15,6 +16,7 @@
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
+#include <nk/render/snapshot_context.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
@@ -106,6 +108,134 @@ private:
     float height_ = 0.0F;
 };
 
+class PrimitiveClipWidget : public nk::Widget {
+public:
+    static std::shared_ptr<PrimitiveClipWidget> create(float width, float height) {
+        return std::shared_ptr<PrimitiveClipWidget>(new PrimitiveClipWidget(width, height));
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, height_, width_, height_};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        const auto rect = allocation();
+        ctx.add_rounded_rect(rect, nk::Color::from_rgb(235, 241, 247), 12.0F);
+        ctx.push_rounded_clip(
+            {rect.x + 8.0F, rect.y + 8.0F, rect.width - 16.0F, rect.height - 16.0F}, 10.0F);
+        ctx.add_color_rect({rect.x - 12.0F, rect.y + 18.0F, rect.width * 0.7F, rect.height * 0.45F},
+                           nk::Color::from_rgb(26, 153, 150));
+        ctx.add_border({rect.x + 14.0F, rect.y + 14.0F, rect.width - 28.0F, rect.height - 28.0F},
+                       nk::Color::from_rgb(12, 87, 84),
+                       3.0F,
+                       14.0F);
+        ctx.pop_container();
+    }
+
+private:
+    PrimitiveClipWidget(float width, float height) : width_(width), height_(height) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
+};
+
+class ImageClipWidget : public nk::Widget {
+public:
+    static std::shared_ptr<ImageClipWidget> create(float width, float height) {
+        return std::shared_ptr<ImageClipWidget>(new ImageClipWidget(width, height));
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, height_, width_, height_};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        static constexpr std::array<uint32_t, 16> kPixels = {
+            0xFF0C6B68,
+            0xFF149E98,
+            0xFF2AB7AF,
+            0xFF77D3CC,
+            0xFF1E3D7B,
+            0xFF3359AA,
+            0xFF567BD1,
+            0xFF8BAAF0,
+            0xFF6A167C,
+            0xFF8F229F,
+            0xFFB34DC1,
+            0xFFD08ADF,
+            0xFF2A3947,
+            0xFF526579,
+            0xFF7E93A9,
+            0xFFB8C5D3,
+        };
+
+        const auto rect = allocation();
+        ctx.add_rounded_rect(rect, nk::Color::from_rgb(239, 243, 247), 14.0F);
+        ctx.push_rounded_clip(
+            {rect.x + 10.0F, rect.y + 10.0F, rect.width - 20.0F, rect.height - 20.0F}, 12.0F);
+        ctx.add_image({rect.x + 4.0F, rect.y - 12.0F, rect.width * 0.78F, rect.height * 0.92F},
+                      kPixels.data(),
+                      4,
+                      4,
+                      nk::ScaleMode::Bilinear);
+        ctx.pop_container();
+    }
+
+private:
+    ImageClipWidget(float width, float height) : width_(width), height_(height) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
+};
+
+class MixedGpuWidget : public nk::Widget {
+public:
+    static std::shared_ptr<MixedGpuWidget> create(float width, float height) {
+        return std::shared_ptr<MixedGpuWidget>(new MixedGpuWidget(width, height));
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, height_, width_, height_};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        static constexpr std::array<uint32_t, 9> kPixels = {
+            0xFF0C6B68,
+            0xFF149E98,
+            0xFF2AB7AF,
+            0xFF3359AA,
+            0xFF567BD1,
+            0xFF8BAAF0,
+            0xFF8F229F,
+            0xFFB34DC1,
+            0xFFD08ADF,
+        };
+
+        const auto rect = allocation();
+        ctx.add_rounded_rect(rect, nk::Color::from_rgb(243, 246, 249), 12.0F);
+        ctx.add_text({rect.x + 16.0F, rect.y + 18.0F},
+                     "Metal text + image",
+                     nk::Color::from_rgb(30, 44, 63));
+        ctx.push_rounded_clip(
+            {rect.x + 14.0F, rect.y + 42.0F, rect.width - 28.0F, rect.height - 56.0F}, 10.0F);
+        ctx.add_image({rect.x + 10.0F, rect.y + 34.0F, rect.width * 0.65F, rect.height * 0.58F},
+                      kPixels.data(),
+                      3,
+                      3,
+                      nk::ScaleMode::Bilinear);
+        ctx.pop_container();
+    }
+
+private:
+    MixedGpuWidget(float width, float height) : width_(width), height_(height) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
+};
+
 } // namespace
 
 TEST_CASE("Application lifecycle can enter and exit the event loop", "[app]") {
@@ -139,6 +269,65 @@ TEST_CASE("Window and basic widgets support smoke-test interactions", "[app]") {
     REQUIRE(window.is_visible());
     window.hide();
     REQUIRE_FALSE(window.is_visible());
+}
+
+TEST_CASE("Window exposes the active renderer backend", "[app][render]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Renderer backend", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Renderer"));
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    const auto expected_backend = (window.native_surface() != nullptr &&
+                                   nk::renderer_backend_available(nk::RendererBackend::Metal))
+                                      ? nk::RendererBackend::Metal
+                                      : nk::RendererBackend::Software;
+    REQUIRE(window.renderer_backend() == expected_backend);
+    REQUIRE_FALSE(nk::renderer_backend_name(window.renderer_backend()).empty());
+    REQUIRE(nk::renderer_backend_is_gpu(window.renderer_backend()) ==
+            (window.renderer_backend() != nk::RendererBackend::Software));
+}
+
+TEST_CASE("Window presents clipped primitive content on the active renderer backend",
+          "[app][render]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Primitive renderer", .width = 240, .height = 180});
+    auto widget = PrimitiveClipWidget::create(180.0F, 120.0F);
+    window.set_child(widget);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    REQUIRE_FALSE(nk::renderer_backend_name(window.renderer_backend()).empty());
+}
+
+TEST_CASE("Window presents clipped image content on the active renderer backend", "[app][render]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Image renderer", .width = 260, .height = 200});
+    auto widget = ImageClipWidget::create(200.0F, 140.0F);
+    window.set_child(widget);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    REQUIRE_FALSE(nk::renderer_backend_name(window.renderer_backend()).empty());
+}
+
+TEST_CASE("Window repeatedly presents mixed text and image content on the active renderer backend",
+          "[app][render]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Mixed renderer", .width = 300, .height = 220});
+    auto widget = MixedGpuWidget::create(220.0F, 150.0F);
+    window.set_child(widget);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    window.request_frame();
+    REQUIRE(app.event_loop().poll());
+
+    REQUIRE_FALSE(nk::renderer_backend_name(window.renderer_backend()).empty());
 }
 
 TEST_CASE("Window close requests are notification-only and hide the window", "[app]") {
