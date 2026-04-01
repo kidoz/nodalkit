@@ -1,11 +1,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <unordered_map>
+#include <vector>
+
 #include <nk/render/image_node.h>
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
+#include <nk/text/shaped_text.h>
 #include <nk/text/text_shaper.h>
-#include <vector>
 
 namespace nk {
 
@@ -64,6 +70,12 @@ float signed_distance_to_rounded_rect(float px, float py, Rect rect, float corne
     const float inner_h = std::max(0.0F, half_h - radius);
     const float qx = local_x - inner_w;
     const float qy = local_y - inner_h;
+
+    // Fast-path: strictly inside the rectangular core
+    if (qx <= 0.0F && qy <= 0.0F) {
+        return std::max(qx, qy) - radius;
+    }
+
     const float outside_x = std::max(qx, 0.0F);
     const float outside_y = std::max(qy, 0.0F);
     const float outside = std::sqrt((outside_x * outside_x) + (outside_y * outside_y));
@@ -101,6 +113,16 @@ void blend_pixel(std::vector<uint8_t>& pixels,
     }
 
     const auto idx = static_cast<std::size_t>((y * pixel_width + x) * 4);
+
+    // Fast-path: opaque pixel overwrite
+    if (alpha >= 0.999F) {
+        pixels[idx + 0] = static_cast<uint8_t>(std::clamp(color.r * 255.0F, 0.0F, 255.0F));
+        pixels[idx + 1] = static_cast<uint8_t>(std::clamp(color.g * 255.0F, 0.0F, 255.0F));
+        pixels[idx + 2] = static_cast<uint8_t>(std::clamp(color.b * 255.0F, 0.0F, 255.0F));
+        pixels[idx + 3] = 255;
+        return;
+    }
+
     const float inv_a = 1.0F - alpha;
     pixels[idx + 0] = static_cast<uint8_t>(std::clamp(
         (color.r * 255.0F * alpha) + (static_cast<float>(pixels[idx + 0]) * inv_a), 0.0F, 255.0F));
@@ -110,6 +132,32 @@ void blend_pixel(std::vector<uint8_t>& pixels,
         (color.b * 255.0F * alpha) + (static_cast<float>(pixels[idx + 2]) * inv_a), 0.0F, 255.0F));
     pixels[idx + 3] = 255;
 }
+
+struct TextKey {
+    std::string text;
+    std::string family;
+    float size;
+    int weight;
+    int style;
+    float r, g, b, a;
+    float scale;
+
+    bool operator==(const TextKey& o) const {
+        return text == o.text && family == o.family && size == o.size && weight == o.weight &&
+               style == o.style && r == o.r && g == o.g && b == o.b && a == o.a && scale == o.scale;
+    }
+};
+
+struct TextKeyHash {
+    std::size_t operator()(const TextKey& k) const {
+        std::size_t h = std::hash<std::string>{}(k.text);
+        h ^= std::hash<std::string>{}(k.family) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(k.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(k.weight) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(k.scale) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
 
 } // namespace
 
@@ -125,6 +173,7 @@ struct SoftwareRenderer::Impl {
     int height = 0;
     std::vector<uint8_t> pixels; // RGBA8
     TextShaper* text_shaper = nullptr;
+    std::unordered_map<TextKey, std::shared_ptr<ShapedText>, TextKeyHash> shaped_text_cache;
 };
 
 SoftwareRenderer::SoftwareRenderer() : impl_(std::make_unique<Impl>()) {}
@@ -144,13 +193,23 @@ void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
 
 void SoftwareRenderer::render(const RenderNode& root) {
     auto render_node =
-        [&](auto&& self, const RenderNode& node, std::vector<ClipRegion>& clips) -> void {
+        [&](auto&& self, const RenderNode& node, std::vector<ClipRegion>& clips, int c_x0, int c_y0, int c_x1, int c_y1) -> void {
+        if (c_x1 <= c_x0 || c_y1 <= c_y0) {
+            return;
+        }
+
         if (node.kind() == RenderNodeKind::RoundedClip) {
             const auto& clip_node = static_cast<const RoundedClipNode&>(node);
-            clips.push_back({.bounds = scale_rect(clip_node.bounds(), impl_->scale_factor),
+            const auto scaled_bounds = scale_rect(clip_node.bounds(), impl_->scale_factor);
+            clips.push_back({.bounds = scaled_bounds,
                              .corner_radius = clip_node.corner_radius() * impl_->scale_factor});
+            int next_x0 = std::max(c_x0, static_cast<int>(std::floor(scaled_bounds.x)));
+            int next_y0 = std::max(c_y0, static_cast<int>(std::floor(scaled_bounds.y)));
+            int next_x1 = std::min(c_x1, static_cast<int>(std::ceil(scaled_bounds.right())));
+            int next_y1 = std::min(c_y1, static_cast<int>(std::ceil(scaled_bounds.bottom())));
+
             for (const auto& child : node.children()) {
-                self(self, *child, clips);
+                self(self, *child, clips, next_x0, next_y0, next_x1, next_y1);
             }
             clips.pop_back();
             return;
@@ -161,10 +220,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
             const auto b = scale_rect(color_node.bounds(), impl_->scale_factor);
             const auto c = color_node.color();
 
-            const int x0 = std::max(0, static_cast<int>(std::floor(b.x)));
-            const int y0 = std::max(0, static_cast<int>(std::floor(b.y)));
-            const int x1 = std::min(impl_->width, static_cast<int>(std::ceil(b.right())));
-            const int y1 = std::min(impl_->height, static_cast<int>(std::ceil(b.bottom())));
+            const int x0 = std::max(c_x0, static_cast<int>(std::floor(b.x)));
+            const int y0 = std::max(c_y0, static_cast<int>(std::floor(b.y)));
+            const int x1 = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
+            const int y1 = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
 
             for (int y = y0; y < y1; ++y) {
                 for (int x = x0; x < x1; ++x) {
@@ -182,10 +241,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
             const auto c = rounded_node.color();
             const float radius = rounded_node.corner_radius() * impl_->scale_factor;
 
-            const int x0 = std::max(0, static_cast<int>(std::floor(b.x)));
-            const int y0 = std::max(0, static_cast<int>(std::floor(b.y)));
-            const int x1 = std::min(impl_->width, static_cast<int>(std::ceil(b.right())));
-            const int y1 = std::min(impl_->height, static_cast<int>(std::ceil(b.bottom())));
+            const int x0 = std::max(c_x0, static_cast<int>(std::floor(b.x)));
+            const int y0 = std::max(c_y0, static_cast<int>(std::floor(b.y)));
+            const int x1 = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
+            const int y1 = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
 
             for (int y = y0; y < y1; ++y) {
                 for (int x = x0; x < x1; ++x) {
@@ -214,10 +273,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
                 };
                 const float inner_radius = std::max(0.0F, radius - thickness);
 
-                const int x0 = std::max(0, static_cast<int>(std::floor(b.x)));
-                const int y0 = std::max(0, static_cast<int>(std::floor(b.y)));
-                const int x1 = std::min(impl_->width, static_cast<int>(std::ceil(b.right())));
-                const int y1 = std::min(impl_->height, static_cast<int>(std::ceil(b.bottom())));
+                const int x0 = std::max(c_x0, static_cast<int>(std::floor(b.x)));
+                const int y0 = std::max(c_y0, static_cast<int>(std::floor(b.y)));
+                const int x1 = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
+                const int y1 = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
 
                 for (int y = y0; y < y1; ++y) {
                     for (int x = x0; x < x1; ++x) {
@@ -246,18 +305,43 @@ void SoftwareRenderer::render(const RenderNode& root) {
             if (impl_->text_shaper && !text_node.text().empty()) {
                 auto font = text_node.font();
                 font.size *= impl_->scale_factor;
-                auto shaped =
-                    impl_->text_shaper->shape(text_node.text(), font, text_node.text_color());
-                const auto* bmp = shaped.bitmap_data();
-                int bw = shaped.bitmap_width();
-                int bh = shaped.bitmap_height();
+                auto const color = text_node.text_color();
+                TextKey key{
+                    text_node.text(), font.family, font.size, static_cast<int>(font.weight),
+                    static_cast<int>(font.style), color.r, color.g, color.b, color.a, impl_->scale_factor
+                };
+
+                std::shared_ptr<ShapedText> shaped_ptr;
+                auto it = impl_->shaped_text_cache.find(key);
+                if (it != impl_->shaped_text_cache.end()) {
+                    shaped_ptr = it->second;
+                } else {
+                    if (impl_->shaped_text_cache.size() >= 1024) {
+                        impl_->shaped_text_cache.clear();
+                    }
+                    auto s = impl_->text_shaper->shape(text_node.text(), font, color);
+                    shaped_ptr = std::make_shared<ShapedText>(std::move(s));
+                    impl_->shaped_text_cache[key] = shaped_ptr;
+                }
+
+                const auto* bmp = shaped_ptr->bitmap_data();
+                int bw = shaped_ptr->bitmap_width();
+                int bh = shaped_ptr->bitmap_height();
                 if (bmp && bw > 0 && bh > 0) {
                     const auto origin =
                         scale_point(text_node.bounds().origin(), impl_->scale_factor);
-                    int dx0 = std::max(0, static_cast<int>(std::floor(origin.x)));
-                    int dy0 = std::max(0, static_cast<int>(std::floor(origin.y)));
-                    for (int sy = 0; sy < bh && (dy0 + sy) < impl_->height; ++sy) {
-                        for (int sx = 0; sx < bw && (dx0 + sx) < impl_->width; ++sx) {
+                    int dx0 = std::max(c_x0, static_cast<int>(std::floor(origin.x)));
+                    int dy0 = std::max(c_y0, static_cast<int>(std::floor(origin.y)));
+                    int start_sy = dy0 - static_cast<int>(std::floor(origin.y));
+                    int start_sx = dx0 - static_cast<int>(std::floor(origin.x));
+
+                    int dy1 = std::min(c_y1, static_cast<int>(std::floor(origin.y)) + bh);
+                    int dx1 = std::min(c_x1, static_cast<int>(std::floor(origin.x)) + bw);
+
+                    for (int dy = dy0; dy < dy1; ++dy) {
+                        int sy = start_sy + (dy - dy0);
+                        for (int dx = dx0; dx < dx1; ++dx) {
+                            int sx = start_sx + (dx - dx0);
                             auto src_idx = static_cast<std::size_t>((sy * bw + sx) * 4);
                             uint8_t sr = bmp[src_idx + 0];
                             uint8_t sg = bmp[src_idx + 1];
@@ -266,14 +350,14 @@ void SoftwareRenderer::render(const RenderNode& root) {
                             if (sa == 0) {
                                 continue;
                             }
-                            const float coverage = clip_coverage(dx0 + sx, dy0 + sy, clips);
+                            const float coverage = clip_coverage(dx, dy, clips);
                             if (coverage <= 0.0F) {
                                 continue;
                             }
                             blend_pixel(impl_->pixels,
                                         impl_->width,
-                                        dx0 + sx,
-                                        dy0 + sy,
+                                        dx,
+                                        dy,
                                         Color{
                                             sr / 255.0F,
                                             sg / 255.0F,
@@ -295,23 +379,25 @@ void SoftwareRenderer::render(const RenderNode& root) {
             const int src_h = image_node.src_height();
 
             if (src && src_w > 0 && src_h > 0) {
-                const int dest_x = std::max(0, static_cast<int>(std::floor(b.x)));
-                const int dest_y = std::max(0, static_cast<int>(std::floor(b.y)));
-                const int dest_r = std::min(impl_->width, static_cast<int>(std::ceil(b.right())));
-                const int dest_b = std::min(impl_->height, static_cast<int>(std::ceil(b.bottom())));
+                const int dest_x = std::max(c_x0, static_cast<int>(std::floor(b.x)));
+                const int dest_y = std::max(c_y0, static_cast<int>(std::floor(b.y)));
+                const int dest_r = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
+                const int dest_b = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
                 const int dest_w = dest_r - dest_x;
                 const int dest_h = dest_b - dest_y;
 
-                if (dest_w > 0 && dest_h > 0) {
+                if (dest_w > 0 && dest_h > 0 && b.width > 0.0F && b.height > 0.0F) {
+                    const float u_step = 1.0F / b.width;
+                    const float v_step = 1.0F / b.height;
                     for (int dy = dest_y; dy < dest_b; ++dy) {
+                        const float v = clamp01(((static_cast<float>(dy) + 0.5F) - b.y) * v_step);
+                        const int sy = std::min(src_h - 1, static_cast<int>(v * src_h));
+                        const int row_offset = sy * src_w;
+                        
                         for (int dx = dest_x; dx < dest_r; ++dx) {
-                            const float u =
-                                clamp01(((static_cast<float>(dx) + 0.5F) - b.x) / b.width);
-                            const float v =
-                                clamp01(((static_cast<float>(dy) + 0.5F) - b.y) / b.height);
+                            const float u = clamp01(((static_cast<float>(dx) + 0.5F) - b.x) * u_step);
                             const int sx = std::min(src_w - 1, static_cast<int>(u * src_w));
-                            const int sy = std::min(src_h - 1, static_cast<int>(v * src_h));
-                            const uint32_t pixel = src[sy * src_w + sx]; // ARGB8888
+                            const uint32_t pixel = src[row_offset + sx]; // ARGB8888
                             const float coverage = clip_coverage(dx, dy, clips);
                             if (coverage <= 0.0F) {
                                 continue;
@@ -334,12 +420,12 @@ void SoftwareRenderer::render(const RenderNode& root) {
         }
 
         for (const auto& child : node.children()) {
-            self(self, *child, clips);
+            self(self, *child, clips, c_x0, c_y0, c_x1, c_y1);
         }
     };
 
     std::vector<ClipRegion> clips;
-    render_node(render_node, root, clips);
+    render_node(render_node, root, clips, 0, 0, impl_->width, impl_->height);
 }
 
 void SoftwareRenderer::end_frame() {
