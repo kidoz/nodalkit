@@ -1,9 +1,12 @@
 /// @file basic_app_test.cpp
 /// @brief Smoke test: create Application, Window, widgets, and quit.
 
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <nk/controllers/event_controller.h>
+#include <nk/debug/diagnostics.h>
 #include <nk/layout/box_layout.h>
 #include <nk/layout/grid_layout.h>
 #include <nk/layout/stack_layout.h>
@@ -34,7 +37,7 @@ public:
     }
 
 protected:
-    void snapshot(nk::SnapshotContext& /*ctx*/) const override {}
+    void snapshot(nk::SnapshotContext& ctx) const override { nk::Widget::snapshot(ctx); }
 
 private:
     FixedWidget(float width, float height) : width_(width), height_(height) {}
@@ -52,7 +55,7 @@ public:
     void append(std::shared_ptr<nk::Widget> child) { append_child(std::move(child)); }
 
 protected:
-    void snapshot(nk::SnapshotContext& /*ctx*/) const override {}
+    void snapshot(nk::SnapshotContext& ctx) const override { nk::Widget::snapshot(ctx); }
 
 private:
     TestContainer() = default;
@@ -424,6 +427,237 @@ TEST_CASE("Window tracks current key state and cursor shape", "[app][input]") {
 
     window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Leave, .x = 0.0F, .y = 0.0F});
     REQUIRE(window.current_cursor_shape() == nk::CursorShape::Default);
+}
+
+TEST_CASE("Window captures frame diagnostics and widget debug dumps", "[app][debug]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Debug", .width = 240, .height = 120});
+
+    auto root = TestContainer::create();
+    root->set_debug_name("root");
+    root->add_style_class("root-surface");
+    auto child = FixedWidget::create(120.0F, 32.0F);
+    child->set_debug_name("leaf");
+    root->append(child);
+
+    window.set_child(root);
+    window.set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds |
+                                   nk::DebugOverlayFlags::DirtyWidgets |
+                                   nk::DebugOverlayFlags::FrameHud);
+    window.present();
+
+    REQUIRE(app.event_loop().poll());
+
+    const auto& diagnostics = window.last_frame_diagnostics();
+    REQUIRE(diagnostics.frame_id >= 1);
+    REQUIRE(diagnostics.widget_count >= 2);
+    REQUIRE(diagnostics.render_node_count >= 3);
+    REQUIRE(diagnostics.total_ms >= 0.0);
+
+    const auto tree = window.debug_tree();
+    REQUIRE(tree.type_name == "Window");
+    REQUIRE(tree.children.size() == 1);
+    REQUIRE(tree.children.front().debug_name == "root");
+    REQUIRE(tree.children.front().children.size() == 1);
+    REQUIRE(tree.children.front().children.front().debug_name == "leaf");
+
+    const auto dump = window.dump_widget_tree();
+    REQUIRE(dump.find("Window \"Debug\"") != std::string::npos);
+    REQUIRE(dump.find("root-surface") != std::string::npos);
+    REQUIRE(dump.find("\"leaf\"") != std::string::npos);
+}
+
+TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Trace", .width = 240, .height = 120});
+    app.event_loop().clear_debug_trace_events();
+
+    auto root = TestContainer::create();
+    root->set_debug_name("trace-root");
+    auto child = nk::Label::create("Trace");
+    child->set_debug_name("trace-label");
+    root->append(child);
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    child->queue_redraw();
+    REQUIRE(app.event_loop().poll());
+
+    child->queue_layout();
+    REQUIRE(app.event_loop().poll());
+
+    const auto history = window.debug_frame_history();
+    REQUIRE(history.size() >= 3);
+    REQUIRE(has_frame_request_reason(history.front(), nk::FrameRequestReason::Present));
+    REQUIRE(has_frame_request_reason(history[history.size() - 2],
+                                     nk::FrameRequestReason::WidgetRedraw));
+    REQUIRE(has_frame_request_reason(history.back(), nk::FrameRequestReason::WidgetLayout));
+    REQUIRE(history.back().started_at_ms >= history.front().requested_at_ms);
+    REQUIRE(history.back().render_snapshot_node_count >= 3);
+
+    const auto selected_snapshot = window.debug_selected_frame_render_snapshot();
+    REQUIRE(selected_snapshot.kind == "Container");
+    REQUIRE_FALSE(selected_snapshot.children.empty());
+
+    const auto snapshot_dump = window.dump_selected_frame_render_snapshot();
+    REQUIRE(snapshot_dump.find("Container") != std::string::npos);
+
+    const auto snapshot_json = window.dump_selected_frame_render_snapshot_json();
+    REQUIRE(snapshot_json.find("\"kind\":\"Container\"") != std::string::npos);
+    REQUIRE(snapshot_json.find("trace-label") != std::string::npos);
+
+    window.set_debug_selected_widget(child.get());
+    const auto widget_selected_render = window.debug_selected_render_node();
+    REQUIRE(widget_selected_render.kind == "Text");
+    REQUIRE(widget_selected_render.source_widget_label == "trace-label");
+    REQUIRE(widget_selected_render.detail.find("Trace") != std::string::npos);
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::I,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+                                       nk::DebugOverlayFlags::InspectorPanel));
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::PageDown,
+    });
+    const auto selected_render = window.debug_selected_render_node();
+    REQUIRE_FALSE(selected_render.kind.empty());
+    REQUIRE(selected_render.children.size() < selected_snapshot.children.size());
+
+    window.set_debug_selected_widget(nullptr);
+    bool found_provenance_selected_render = false;
+    for (int step = 0; step < 8; ++step) {
+        window.dispatch_key_event({
+            .type = nk::KeyEvent::Type::Press,
+            .key = nk::KeyCode::PageDown,
+        });
+        const auto render_node = window.debug_selected_render_node();
+        if (render_node.source_widget_label == "trace-label") {
+            found_provenance_selected_render = true;
+            break;
+        }
+    }
+    REQUIRE(found_provenance_selected_render);
+    REQUIRE(window.debug_selected_widget() == child.get());
+
+    bool posted_ran = false;
+    bool timeout_ran = false;
+    bool idle_ran = false;
+    app.event_loop().post([&] { posted_ran = true; });
+    (void)app.event_loop().set_timeout(std::chrono::milliseconds{0}, [&] { timeout_ran = true; });
+    (void)app.event_loop().add_idle([&] { idle_ran = true; });
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(posted_ran);
+    REQUIRE(timeout_ran);
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(idle_ran);
+
+    const auto runtime_trace = app.event_loop().debug_trace_events();
+    REQUIRE_FALSE(runtime_trace.empty());
+    REQUIRE(std::any_of(runtime_trace.begin(),
+                        runtime_trace.end(),
+                        [](const nk::TraceEvent& event) { return event.name == "posted-task"; }));
+    REQUIRE(std::any_of(runtime_trace.begin(),
+                        runtime_trace.end(),
+                        [](const nk::TraceEvent& event) { return event.name == "timeout"; }));
+    REQUIRE(std::any_of(runtime_trace.begin(),
+                        runtime_trace.end(),
+                        [](const nk::TraceEvent& event) { return event.name == "idle"; }));
+
+    const auto trace = window.dump_frame_trace_json();
+    REQUIRE(trace.find("\"traceEvents\"") != std::string::npos);
+    REQUIRE(trace.find("\"name\":\"widget-redraw\"") != std::string::npos);
+    REQUIRE(trace.find("\"name\":\"layout\"") != std::string::npos);
+    REQUIRE(trace.find("\"name\":\"frame\"") != std::string::npos);
+    REQUIRE(trace.find("\"name\":\"posted-task\"") != std::string::npos);
+}
+
+TEST_CASE("Window debug picker selects widgets and honors inspector shortcuts", "[app][debug]") {
+    nk::Window window({.title = "Inspector", .width = 240, .height = 120});
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal);
+    root->set_layout_manager(std::move(layout));
+
+    auto first = FocusProbeWidget::create(80.0F, 40.0F);
+    first->set_debug_name("first");
+    auto second = FocusProbeWidget::create(80.0F, 40.0F);
+    second->set_debug_name("second");
+    root->append(first);
+    root->append(second);
+    window.set_child(root);
+    root->allocate({0.0F, 0.0F, 200.0F, 60.0F});
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::I,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+                                       nk::DebugOverlayFlags::InspectorPanel));
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::P,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(window.debug_picker_enabled());
+
+    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 20.0F, .y = 20.0F});
+    REQUIRE(window.debug_selected_widget() == first.get());
+    REQUIRE(window.current_cursor_shape() == nk::CursorShape::Default);
+
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Press,
+        .x = 20.0F,
+        .y = 20.0F,
+        .button = 1,
+    });
+    REQUIRE_FALSE(window.debug_picker_enabled());
+    REQUIRE(window.debug_selected_widget() == first.get());
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Down,
+    });
+    REQUIRE(window.debug_selected_widget() == second.get());
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Home,
+    });
+    REQUIRE(window.debug_selected_widget() == first.get());
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::P,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(window.debug_picker_enabled());
+    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 120.0F, .y = 20.0F});
+    REQUIRE(window.debug_selected_widget() == second.get());
+
+    const auto selected = window.debug_selected_widget_info();
+    REQUIRE(selected.debug_name == "second");
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Escape,
+    });
+    REQUIRE_FALSE(window.debug_picker_enabled());
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::I,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE_FALSE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+                                             nk::DebugOverlayFlags::InspectorPanel));
 }
 
 TEST_CASE("TextField supports caret movement, selection, clipboard, and undo", "[app][text]") {
