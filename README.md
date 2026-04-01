@@ -11,12 +11,15 @@ NodalKit is an MIT-licensed alternative for C++ developers who might otherwise
 reach for Qt, offering a GTK4-inspired architecture with a productive,
 modern C++23 API. No meta-object compiler, no code generation, no build magic.
 
+![NodalKit showcase](docs/screenshots/showcase.png)
+
 ## Status
 
-**0.1.0** — Early scaffold. The module structure, public API headers, and a
-buildable skeleton are in place. Core systems (signals, properties, widget tree,
-layout, model/view) have stub implementations with passing tests. The software
-renderer and platform backends are minimal.
+**0.1.0** — Early, but real. NodalKit already ships a working widget tree,
+layout system, signals and properties, menus, dialogs, model/view primitives,
+text shaping, examples, tests, and a built-in diagnostics/inspector stack. The
+API and platform behavior are still unstable, and 0.x should be treated as a
+rapidly changing toolkit rather than a compatibility promise.
 
 The current 0.x support policy is:
 
@@ -56,6 +59,10 @@ Run the examples:
 ./buildDir/examples/showcase
 ```
 
+The `showcase` example is the current best overview of the toolkit surface:
+menus, layout, text entry, list/model behavior, image presentation, dialogs,
+and status surfaces in one window.
+
 ## Architecture at a Glance
 
 | Module | Responsibility |
@@ -63,7 +70,7 @@ Run the examples:
 | **foundation** | Types, Result, Signal/Slot, Property, Logging |
 | **runtime** | Event loop, timers, task posting |
 | **platform** | Application, Window, input events |
-| **render** | Render node tree, software renderer |
+| **render** | Render node tree, software renderer, experimental Metal-backed presentation on macOS |
 | **ui_core** | Widget base, tree, focus, state flags |
 | **controllers** | Pointer, Keyboard, Focus controllers |
 | **layout** | Measure/allocate pipeline, BoxLayout |
@@ -112,8 +119,9 @@ int main(int argc, char** argv) {
 - **GTK4-style layout** — measure/allocate with pluggable layout managers
 - **CSS-like theming** — selectors, style classes, pseudo-states, tokens
 - **Accessibility model** — WAI-ARIA roles and states (platform bridges planned)
-- **Async dialogs** — non-blocking present(), response via signals (WIP)
-- **Model/view** — AbstractListModel + SelectionModel + ItemFactory
+- **Async dialogs** — non-blocking `present()`, response via signals
+- **Model/view** — `AbstractListModel` + `SelectionModel` + `ItemFactory`
+- **Built-in diagnostics** — widget tree inspector, frame timeline, trace export, render snapshots
 
 ## Author
 
