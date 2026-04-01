@@ -72,26 +72,6 @@ private:
     Spacer() = default;
 };
 
-class FixedGap : public nk::Widget {
-public:
-    static std::shared_ptr<FixedGap> horizontal(float width) {
-        return std::shared_ptr<FixedGap>(new FixedGap(width, 0.0F));
-    }
-
-    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
-        return {width_, height_, width_, height_};
-    }
-
-protected:
-    void snapshot(nk::SnapshotContext& /*ctx*/) const override {}
-
-private:
-    FixedGap(float width, float height) : width_(width), height_(height) {}
-
-    float width_ = 0.0F;
-    float height_ = 0.0F;
-};
-
 class SectionTitle : public nk::Widget {
 public:
     static std::shared_ptr<SectionTitle> create(std::string text) {
@@ -1093,7 +1073,6 @@ int main(int argc, char** argv) {
     increment_btn->add_style_class("suggested");
     auto decrement_btn = nk::Button::create("Decrement");
     auto reset_btn = nk::Button::create("Reset");
-    reset_btn->add_style_class("flat");
 
     (void)increment_btn->on_clicked().connect([&] {
         ++counter;
@@ -1120,11 +1099,9 @@ int main(int argc, char** argv) {
     primary_counter_actions->append(increment_btn);
     primary_counter_actions->append(decrement_btn);
     primary_counter_actions->set_horizontal_size_policy(nk::SizePolicy::Preferred);
-    auto button_row = Box::horizontal(0.0F);
-    button_row->set_horizontal_size_policy(nk::SizePolicy::Preferred);
-    button_row->append(primary_counter_actions);
-    button_row->append(FixedGap::horizontal(24.0F));
-    button_row->append(reset_btn);
+    auto secondary_counter_actions = Box::horizontal(0.0F);
+    secondary_counter_actions->set_horizontal_size_policy(nk::SizePolicy::Preferred);
+    secondary_counter_actions->append(reset_btn);
 
     auto input_title = SectionTitle::create("Command Workspace");
     auto input_subtitle =
@@ -1169,7 +1146,8 @@ int main(int argc, char** argv) {
     auto counter_group = Box::vertical(12.0F);
     counter_group->append(counter_caption);
     counter_group->append(counter_label);
-    counter_group->append(button_row);
+    counter_group->append(primary_counter_actions);
+    counter_group->append(secondary_counter_actions);
 
     auto accent_group = Box::vertical(8.0F);
     accent_group->append(combo_label);
@@ -1180,7 +1158,7 @@ int main(int argc, char** argv) {
     controls_content->append(input_title);
     controls_content->append(input_subtitle);
     controls_content->append(InsetStage::create(command_group, 92.0F, 96.0F, 14.0F));
-    controls_content->append(InsetStage::create(counter_group, 112.0F, 116.0F, 14.0F));
+    controls_content->append(InsetStage::create(counter_group, 122.0F, 126.0F, 14.0F));
     controls_content->append(InsetStage::create(accent_group, 96.0F, 100.0F, 14.0F));
     auto controls_card = SurfacePanel::card(controls_content);
 
@@ -1243,7 +1221,7 @@ int main(int argc, char** argv) {
     scale_combo->set_horizontal_size_policy(nk::SizePolicy::Expanding);
     scale_combo->set_items({"Nearest Neighbor", "Bilinear"});
     scale_combo->set_selected_index(0);
-    auto scale_state = SecondaryText::create("Nearest-neighbor scaling active.");
+    auto scale_state = SecondaryText::create("Nearest-neighbor preview active.");
 
     constexpr int kImageWidth = 128;
     constexpr int kImageHeight = 96;
@@ -1253,8 +1231,8 @@ int main(int argc, char** argv) {
     (void)scale_combo->on_selection_changed().connect([&](int index) {
         preview_canvas->set_scale_mode(index == 0 ? nk::ScaleMode::NearestNeighbor
                                                   : nk::ScaleMode::Bilinear);
-        scale_state->set_text(index == 0 ? "Nearest-neighbor scaling active."
-                                         : "Bilinear scaling active.");
+        scale_state->set_text(index == 0 ? "Nearest-neighbor preview active."
+                                         : "Bilinear preview active.");
         hero_preview_pill->set_text(index == 0 ? "Nearest" : "Bilinear");
     });
 
@@ -1274,7 +1252,7 @@ int main(int argc, char** argv) {
     preview_info->append(preview_controls);
     preview_info->append(Spacer::create());
 
-    auto preview_display = SplitColumns::create(preview_stage, preview_info, 0.845F, 18.0F);
+    auto preview_display = SplitColumns::create(preview_stage, preview_info, 0.86F, 16.0F);
 
     auto preview_content = Box::vertical(16.0F);
     preview_content->append(preview_title);
@@ -1283,26 +1261,29 @@ int main(int argc, char** argv) {
     auto preview_card = SurfacePanel::card(preview_content);
 
     auto actions_title = SectionTitle::create("Runtime Actions");
-    auto actions_subtitle = SecondaryText::create("Property binding, modal flow, and status.");
+    auto actions_subtitle =
+        SecondaryText::create("Status-first runtime hooks for shared state and modal flow.");
     auto prop_label = FieldLabel::create("Property binding");
     nk::Property<int> source_prop{42};
     nk::Property<int> target_prop{0};
     [[maybe_unused]] auto binding = target_prop.bind_to(source_prop);
     auto prop_value_label =
         ValueText::create("Source: 42, Target: " + std::to_string(target_prop.get()));
-    auto prop_detail = SecondaryText::create("Shared state flows into the footer and HUD.");
+    auto prop_detail = SecondaryText::create("Shared state updates the footer and live status.");
     auto prop_btn = nk::Button::create("Set Source = 99");
     auto dialog_label = FieldLabel::create("Dialog flow");
-    auto dialog_detail = SecondaryText::create("Open a modal and capture the result.");
+    auto dialog_detail = SecondaryText::create("Open a modal and commit the response.");
     auto dialog_btn = nk::Button::create("Show Dialog");
     dialog_btn->add_style_class("suggested");
     auto runtime_status = ValueText::create("Waiting for an action.");
+    auto runtime_status_detail = SecondaryText::create("No runtime action has fired yet.");
 
     (void)prop_btn->on_clicked().connect([&] {
         source_prop.set(99);
         prop_value_label->set_text("Source: " + std::to_string(source_prop.get()) +
                                    ", Target: " + std::to_string(target_prop.get()));
         runtime_status->set_text("Property binding updated.");
+        runtime_status_detail->set_text("Source and target are now synchronized at 99.");
         status_bar->set_segment(0, "Property binding updated");
     });
 
@@ -1314,9 +1295,11 @@ int main(int argc, char** argv) {
             if (response == nk::DialogResponse::Accept) {
                 status_bar->set_segment(0, "Dialog: Accepted");
                 runtime_status->set_text("Dialog accepted.");
+                runtime_status_detail->set_text("The modal returned an accepted response.");
             } else {
                 status_bar->set_segment(0, "Dialog: Cancelled");
                 runtime_status->set_text("Dialog cancelled.");
+                runtime_status_detail->set_text("The modal was dismissed without acceptance.");
             }
         });
         dialog->present(window);
@@ -1335,19 +1318,20 @@ int main(int argc, char** argv) {
     dialog_group->append(dialog_btn);
     auto dialog_panel = InsetStage::create(dialog_group, 100.0F, 104.0F, 14.0F);
 
-    auto status_label = FieldLabel::create("Runtime status");
-    auto status_group = Box::vertical(6.0F);
+    auto status_label = FieldLabel::create("Latest result");
+    auto status_group = Box::vertical(8.0F);
     status_group->append(status_label);
     status_group->append(runtime_status);
-    auto status_panel = InsetStage::create(status_group, 64.0F, 68.0F, 14.0F);
+    status_group->append(runtime_status_detail);
+    auto status_panel = InsetStage::create(status_group, 94.0F, 100.0F, 14.0F);
 
-    auto actions_row = SplitColumns::create(property_panel, dialog_panel, 0.56F, 16.0F);
+    auto actions_row = SplitColumns::create(property_panel, dialog_panel, 0.58F, 18.0F);
 
     auto actions_content = Box::vertical(14.0F);
     actions_content->append(actions_title);
     actions_content->append(actions_subtitle);
-    actions_content->append(actions_row);
     actions_content->append(status_panel);
+    actions_content->append(actions_row);
     auto actions_card = SurfacePanel::card(actions_content);
 
     auto left_column = Box::vertical(16.0F);
@@ -1367,7 +1351,7 @@ int main(int argc, char** argv) {
     actions_card->set_vertical_size_policy(nk::SizePolicy::Expanding);
     actions_card->set_vertical_stretch(1);
 
-    auto content_row = SplitColumns::create(left_column, right_column, 0.45F, 24.0F);
+    auto content_row = SplitColumns::create(left_column, right_column, 0.44F, 24.0F);
     auto hero_banner = HeroBanner::create(
         "NodalKit Desktop Showcase",
         "A compact workspace for inputs, model/view state, and live raster output.",
@@ -1399,6 +1383,7 @@ int main(int argc, char** argv) {
 
         status_bar->set_segment(0, "Action: " + std::string(action));
         runtime_status->set_text("Menu action: " + std::string(action));
+        runtime_status_detail->set_text("The last runtime event came from the application menu.");
     });
 
     (void)app.event_loop().set_interval(std::chrono::milliseconds(33), [&] {
