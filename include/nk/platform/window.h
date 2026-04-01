@@ -4,10 +4,12 @@
 /// @brief Top-level window abstraction.
 
 #include <memory>
+#include <nk/debug/diagnostics.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
 #include <nk/platform/key_codes.h>
 #include <nk/ui_core/cursor_shape.h>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -91,6 +93,46 @@ public:
     /// Whether the given key is currently pressed according to window input state.
     [[nodiscard]] bool is_key_pressed(KeyCode key) const;
 
+    /// Configure built-in debug overlays for layout, dirtiness, and frame HUD output.
+    void set_debug_overlay_flags(DebugOverlayFlags flags);
+    [[nodiscard]] DebugOverlayFlags debug_overlay_flags() const;
+
+    /// Frame diagnostics captured for the most recently rendered frame.
+    [[nodiscard]] const FrameDiagnostics& last_frame_diagnostics() const;
+
+    /// Recent frame diagnostics retained for the in-process inspector timeline.
+    [[nodiscard]] std::span<const FrameDiagnostics> debug_frame_history() const;
+
+    /// Build a debug snapshot of the current widget tree and overlays.
+    [[nodiscard]] WidgetDebugNode debug_tree() const;
+
+    /// Format the current widget tree into a readable text dump.
+    [[nodiscard]] std::string dump_widget_tree() const;
+
+    /// Export recent frame history as Chrome Trace JSON.
+    [[nodiscard]] std::string dump_frame_trace_json() const;
+
+    /// Render-tree snapshot for the currently selected inspector frame.
+    [[nodiscard]] RenderSnapshotNode debug_selected_frame_render_snapshot() const;
+
+    /// Currently selected render node within the selected frame snapshot.
+    [[nodiscard]] RenderSnapshotNode debug_selected_render_node() const;
+
+    /// Format the selected frame's render snapshot as a readable tree dump.
+    [[nodiscard]] std::string dump_selected_frame_render_snapshot() const;
+
+    /// Format the selected frame's render snapshot as JSON.
+    [[nodiscard]] std::string dump_selected_frame_render_snapshot_json() const;
+
+    /// Enable a live widget picker that selects widgets under the pointer.
+    void set_debug_picker_enabled(bool enabled);
+    [[nodiscard]] bool debug_picker_enabled() const;
+
+    /// Currently selected widget in the live inspector, if any.
+    [[nodiscard]] Widget* debug_selected_widget() const;
+    void set_debug_selected_widget(Widget* widget);
+    [[nodiscard]] WidgetDebugNode debug_selected_widget_info() const;
+
     // --- Signals ---
 
     /// Emitted when the window receives a close request.
@@ -105,9 +147,15 @@ private:
     friend class Dialog;
 
     [[nodiscard]] TextShaper* text_shaper() const;
+    void request_frame(FrameRequestReason reason);
+    void sync_debug_selected_render_path();
+    [[nodiscard]] Widget* debug_selected_render_widget() const;
+    void sync_debug_selected_widget_from_render_selection();
     void focus_widget(Widget* widget);
     void handle_widget_state_change(Widget& widget);
     void handle_widget_detached(Widget& widget);
+    void note_widget_redraw_request(Widget& widget);
+    void note_widget_layout_request(Widget& widget);
     void show_overlay(std::shared_ptr<Widget> overlay, bool modal);
     void dismiss_overlay(Widget& overlay);
 
