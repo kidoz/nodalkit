@@ -38,7 +38,7 @@ struct Window::Impl {
     std::shared_ptr<Widget> child;
     std::vector<OverlayEntry> overlays;
     std::unique_ptr<NativeSurface> surface;
-    SoftwareRenderer renderer;
+    std::unique_ptr<Renderer> renderer;
     std::unique_ptr<TextShaper> text_shaper;
     Widget* hovered_widget = nullptr;
     Widget* focused_widget = nullptr;
@@ -100,6 +100,23 @@ struct InspectorPanelLayout {
 };
 
 constexpr std::size_t kDebugFrameHistoryLimit = 48;
+
+RendererBackend select_renderer_backend(const NativeSurface* surface) {
+    const auto support =
+        surface != nullptr ? surface->renderer_backend_support() : RendererBackendSupport{};
+    constexpr RendererBackend preferred_backends[] = {
+        RendererBackend::Metal,
+        RendererBackend::Vulkan,
+        RendererBackend::OpenGL,
+        RendererBackend::Software,
+    };
+    for (const auto backend : preferred_backends) {
+        if (renderer_backend_supported(support, backend) && renderer_backend_available(backend)) {
+            return backend;
+        }
+    }
+    return RendererBackend::Software;
+}
 
 Widget* hit_test_widget(Widget* widget, Point point) {
     if (widget == nullptr || !widget->is_visible() || !widget->hit_test(point)) {
@@ -747,9 +764,10 @@ void draw_widget_bounds_overlay(SnapshotContext& ctx,
 
 Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
     impl_->config = std::move(config);
+    impl_->renderer = create_renderer(RendererBackend::Software);
     impl_->text_shaper = TextShaper::create();
-    if (impl_->text_shaper) {
-        impl_->renderer.set_text_shaper(impl_->text_shaper.get());
+    if (impl_->renderer != nullptr && impl_->text_shaper) {
+        impl_->renderer->set_text_shaper(impl_->text_shaper.get());
     }
     NK_LOG_DEBUG("Window", "Window created");
 }
@@ -817,6 +835,24 @@ void Window::present() {
         if (app && app->has_platform_backend()) {
             impl_->surface = app->platform_backend().create_surface(impl_->config, *this);
         }
+    }
+
+    const auto preferred_backend = select_renderer_backend(impl_->surface.get());
+    if (impl_->renderer == nullptr || impl_->renderer->backend() != preferred_backend) {
+        auto renderer = create_renderer(preferred_backend);
+        if (renderer == nullptr) {
+            renderer = create_renderer(RendererBackend::Software);
+        }
+        if (renderer != nullptr) {
+            if (impl_->text_shaper) {
+                renderer->set_text_shaper(impl_->text_shaper.get());
+            }
+            if (impl_->surface == nullptr || renderer->attach_surface(*impl_->surface)) {
+                impl_->renderer = std::move(renderer);
+            }
+        }
+    } else if (impl_->renderer != nullptr && impl_->surface != nullptr) {
+        (void)impl_->renderer->attach_surface(*impl_->surface);
     }
 
     impl_->visible = true;
@@ -1265,19 +1301,27 @@ void Window::request_frame(FrameRequestReason reason) {
 
         // 3. Render pass.
         const auto render_start = Clock::now();
-        impl_->renderer.begin_frame(sz, scale_factor);
-        if (root_node) {
-            impl_->renderer.render(*root_node);
+        if (impl_->renderer == nullptr) {
+            impl_->renderer = create_renderer(RendererBackend::Software);
+            if (impl_->renderer != nullptr && impl_->text_shaper) {
+                impl_->renderer->set_text_shaper(impl_->text_shaper.get());
+            }
         }
-        impl_->renderer.end_frame();
+        if (impl_->renderer == nullptr) {
+            impl_->pending_frame_reasons.clear();
+            return;
+        }
+        impl_->renderer->begin_frame(sz, scale_factor);
+        if (root_node) {
+            impl_->renderer->render(*root_node);
+        }
+        impl_->renderer->end_frame();
         frame.render_ms = elapsed_ms(render_start, Clock::now());
 
         // 4. Present pass.
         const auto present_start = Clock::now();
-        if (impl_->surface) {
-            impl_->surface->present(impl_->renderer.pixel_data(),
-                                    impl_->renderer.pixel_width(),
-                                    impl_->renderer.pixel_height());
+        if (impl_->surface && impl_->renderer != nullptr) {
+            impl_->renderer->present(*impl_->surface);
         }
         frame.present_ms = elapsed_ms(present_start, Clock::now());
         frame.total_ms = elapsed_ms(frame_start, Clock::now());
@@ -2180,6 +2224,10 @@ void Window::dispatch_window_event(const WindowEvent& event) {
 
 NativeSurface* Window::native_surface() const {
     return impl_->surface.get();
+}
+
+RendererBackend Window::renderer_backend() const {
+    return impl_->renderer != nullptr ? impl_->renderer->backend() : RendererBackend::Software;
 }
 
 TextShaper* Window::text_shaper() const {

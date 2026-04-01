@@ -8,6 +8,7 @@
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
 #include <nk/platform/key_codes.h>
+#include <nk/render/renderer.h>
 #include <nk/ui_core/cursor_shape.h>
 #include <span>
 #include <string>
@@ -86,6 +87,9 @@ public:
 
     /// Access the native surface (nullptr until present() is called).
     [[nodiscard]] NativeSurface* native_surface() const;
+
+    /// Active renderer backend for this window.
+    [[nodiscard]] RendererBackend renderer_backend() const;
 
     /// Current cursor shape resolved from the hovered widget.
     [[nodiscard]] CursorShape current_cursor_shape() const;
