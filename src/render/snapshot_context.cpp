@@ -1,12 +1,16 @@
-#include <nk/render/snapshot_context.h>
-
 #include <cassert>
+#include <nk/render/snapshot_context.h>
 #include <stack>
 #include <utility>
 
 namespace nk {
 
 struct SnapshotContext::Impl {
+    struct DebugSourceScope {
+        std::string label;
+        std::vector<std::size_t> path;
+    };
+
     /// The root container node that collects all top-level children.
     std::unique_ptr<RenderNode> root;
     RenderNode* content_root = nullptr;
@@ -17,10 +21,10 @@ struct SnapshotContext::Impl {
     /// owning unique_ptr lives in the parent's children list (or in
     /// `root` for the bottom-most entry).
     std::stack<RenderNode*> container_stack;
+    std::vector<DebugSourceScope> debug_source_stack;
 };
 
-SnapshotContext::SnapshotContext()
-    : impl_(std::make_unique<Impl>()) {
+SnapshotContext::SnapshotContext() : impl_(std::make_unique<Impl>()) {
     // Create the implicit root container.
     impl_->root = std::make_unique<RenderNode>(RenderNodeKind::Container);
 
@@ -39,6 +43,10 @@ SnapshotContext::~SnapshotContext() = default;
 
 void SnapshotContext::add_node(std::unique_ptr<RenderNode> node) {
     assert(!impl_->container_stack.empty());
+    if (!impl_->debug_source_stack.empty()) {
+        const auto& source = impl_->debug_source_stack.back();
+        node->set_debug_source(source.label, source.path);
+    }
     impl_->container_stack.top()->append_child(std::move(node));
 }
 
@@ -46,33 +54,19 @@ void SnapshotContext::add_color_rect(Rect rect, Color color) {
     add_node(std::make_unique<ColorRectNode>(rect, color));
 }
 
-void SnapshotContext::add_rounded_rect(
-    Rect rect,
-    Color color,
-    float corner_radius) {
+void SnapshotContext::add_rounded_rect(Rect rect, Color color, float corner_radius) {
     add_node(std::make_unique<RoundedRectNode>(rect, color, corner_radius));
 }
 
-void SnapshotContext::add_border(
-    Rect rect,
-    Color color,
-    float thickness,
-    float corner_radius) {
-    add_node(std::make_unique<BorderNode>(
-        rect, color, thickness, corner_radius));
+void SnapshotContext::add_border(Rect rect, Color color, float thickness, float corner_radius) {
+    add_node(std::make_unique<BorderNode>(rect, color, thickness, corner_radius));
 }
 
-void SnapshotContext::add_text(
-    Point origin,
-    std::string text,
-    Color color,
-    FontDescriptor font) {
-    add_node(std::make_unique<TextNode>(
-        origin, std::move(text), color, std::move(font)));
+void SnapshotContext::add_text(Point origin, std::string text, Color color, FontDescriptor font) {
+    add_node(std::make_unique<TextNode>(origin, std::move(text), color, std::move(font)));
 }
 
-void SnapshotContext::add_image(Rect dest, uint32_t const* data, int w, int h,
-                                ScaleMode scale) {
+void SnapshotContext::add_image(Rect dest, const uint32_t* data, int w, int h, ScaleMode scale) {
     add_node(std::make_unique<ImageNode>(dest, data, w, h, scale));
 }
 
@@ -82,6 +76,16 @@ void SnapshotContext::push_container(Rect bounds) {
     auto* raw = container.get();
     add_node(std::move(container));
     impl_->container_stack.push(raw);
+}
+
+void SnapshotContext::push_debug_source(std::string label, std::span<const std::size_t> path) {
+    impl_->debug_source_stack.push_back(
+        {std::move(label), std::vector<std::size_t>(path.begin(), path.end())});
+}
+
+void SnapshotContext::pop_debug_source() {
+    assert(!impl_->debug_source_stack.empty() && "Cannot pop an empty debug source stack");
+    impl_->debug_source_stack.pop_back();
 }
 
 void SnapshotContext::push_rounded_clip(Rect bounds, float corner_radius) {
@@ -100,8 +104,7 @@ void SnapshotContext::push_overlay_container(Rect bounds) {
 }
 
 void SnapshotContext::pop_container() {
-    assert(impl_->container_stack.size() > 1 &&
-           "Cannot pop the root container");
+    assert(impl_->container_stack.size() > 1 && "Cannot pop the root container");
     impl_->container_stack.pop();
 }
 
