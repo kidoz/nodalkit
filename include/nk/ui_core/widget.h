@@ -82,6 +82,9 @@ public:
     void add_style_class(std::string_view name);
     void remove_style_class(std::string_view name);
     [[nodiscard]] bool has_style_class(std::string_view name) const;
+    [[nodiscard]] std::span<const std::string> style_classes() const;
+    void set_debug_name(std::string_view name);
+    [[nodiscard]] std::string_view debug_name() const;
 
     // --- Layout ---
 
@@ -191,6 +194,9 @@ protected:
 private:
     friend class Window;
 
+    [[nodiscard]] std::vector<std::size_t> debug_tree_path() const;
+    [[nodiscard]] std::string debug_snapshot_label() const;
+    void snapshot_subtree(SnapshotContext& ctx) const;
     void set_host_window(Window* window);
     void dispatch_pointer_controllers(const MouseEvent& event);
     void dispatch_keyboard_controllers(const KeyEvent& event);

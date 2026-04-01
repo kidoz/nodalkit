@@ -44,6 +44,7 @@ struct Widget::Impl {
     Rect allocation{};
     StateFlags state = StateFlags::None;
     std::vector<std::string> style_classes;
+    std::string debug_name;
 
     bool visible = true;
     bool sensitive = true;
@@ -160,6 +161,22 @@ bool Widget::has_style_class(std::string_view name) const {
     return std::find(classes.begin(), classes.end(), s) != classes.end();
 }
 
+std::span<const std::string> Widget::style_classes() const {
+    return impl_->style_classes;
+}
+
+void Widget::set_debug_name(std::string_view name) {
+    const auto value = std::string(name);
+    if (impl_->debug_name == value) {
+        return;
+    }
+    impl_->debug_name = value;
+}
+
+std::string_view Widget::debug_name() const {
+    return impl_->debug_name;
+}
+
 // --- Layout ---
 
 SizeRequest Widget::measure(const Constraints& constraints) const {
@@ -273,13 +290,13 @@ void Widget::grab_focus() {
 
 void Widget::queue_redraw() {
     if (impl_->host_window) {
-        impl_->host_window->request_frame();
+        impl_->host_window->note_widget_redraw_request(*this);
     }
 }
 
 void Widget::queue_layout() {
     if (impl_->host_window) {
-        impl_->host_window->invalidate_layout();
+        impl_->host_window->note_widget_layout_request(*this);
     }
 }
 
@@ -455,9 +472,38 @@ void Widget::snapshot(SnapshotContext& ctx) const {
     // Default: recursively snapshot visible children.
     for (const auto& child : impl_->children) {
         if (child && child->is_visible()) {
-            child->snapshot(ctx);
+            child->snapshot_subtree(ctx);
         }
     }
+}
+
+std::vector<std::size_t> Widget::debug_tree_path() const {
+    std::vector<std::size_t> path;
+    for (auto* current = this; current != nullptr && current->impl_->parent != nullptr;
+         current = current->impl_->parent) {
+        const auto& siblings = current->impl_->parent->impl_->children;
+        const auto it =
+            std::find_if(siblings.begin(), siblings.end(), [current](const auto& child) {
+                return child.get() == current;
+            });
+        if (it == siblings.end()) {
+            break;
+        }
+        path.push_back(static_cast<std::size_t>(it - siblings.begin()));
+    }
+    std::reverse(path.begin(), path.end());
+    return path;
+}
+
+std::string Widget::debug_snapshot_label() const {
+    return impl_->debug_name.empty() ? "widget" : impl_->debug_name;
+}
+
+void Widget::snapshot_subtree(SnapshotContext& ctx) const {
+    const auto path = debug_tree_path();
+    ctx.push_debug_source(debug_snapshot_label(), path);
+    snapshot(ctx);
+    ctx.pop_debug_source();
 }
 
 bool Widget::handle_mouse_event(const MouseEvent& /*event*/) {
