@@ -3,10 +3,10 @@
 /// @file render_node.h
 /// @brief Retained render node tree for the painting pipeline.
 
+#include <memory>
 #include <nk/foundation/types.h>
 #include <nk/text/font.h>
-
-#include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -30,19 +30,24 @@ public:
     explicit RenderNode(RenderNodeKind kind);
     virtual ~RenderNode();
 
-    RenderNode(RenderNode const&) = delete;
-    RenderNode& operator=(RenderNode const&) = delete;
+    RenderNode(const RenderNode&) = delete;
+    RenderNode& operator=(const RenderNode&) = delete;
 
     [[nodiscard]] RenderNodeKind kind() const;
-    [[nodiscard]] Rect const& bounds() const;
+    [[nodiscard]] const Rect& bounds() const;
     void set_bounds(Rect bounds);
+    void set_debug_source(std::string label, std::span<const std::size_t> path);
+    [[nodiscard]] std::string_view debug_source_label() const;
+    [[nodiscard]] std::span<const std::size_t> debug_source_path() const;
 
     void append_child(std::unique_ptr<RenderNode> child);
-    [[nodiscard]] std::vector<std::unique_ptr<RenderNode>> const& children() const;
+    [[nodiscard]] const std::vector<std::unique_ptr<RenderNode>>& children() const;
 
 private:
     RenderNodeKind kind_;
     Rect bounds_{};
+    std::string debug_source_label_;
+    std::vector<std::size_t> debug_source_path_;
     std::vector<std::unique_ptr<RenderNode>> children_;
 };
 
@@ -99,15 +104,11 @@ private:
 /// A text render node.
 class TextNode : public RenderNode {
 public:
-    TextNode(
-        Point origin,
-        std::string text,
-        Color color,
-        FontDescriptor font = {});
+    TextNode(Point origin, std::string text, Color color, FontDescriptor font = {});
 
-    [[nodiscard]] std::string const& text() const;
+    [[nodiscard]] const std::string& text() const;
     [[nodiscard]] Color text_color() const;
-    [[nodiscard]] FontDescriptor const& font() const;
+    [[nodiscard]] const FontDescriptor& font() const;
 
 private:
     std::string text_;
