@@ -14,7 +14,6 @@
 #include <nk/text/font.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/button.h>
-#include <optional>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/image_view.h>
@@ -23,6 +22,7 @@
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -70,6 +70,26 @@ protected:
 
 private:
     Spacer() = default;
+};
+
+class FixedGap : public nk::Widget {
+public:
+    static std::shared_ptr<FixedGap> horizontal(float width) {
+        return std::shared_ptr<FixedGap>(new FixedGap(width, 0.0F));
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, height_, width_, height_};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& /*ctx*/) const override {}
+
+private:
+    FixedGap(float width, float height) : width_(width), height_(height) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
 };
 
 class SectionTitle : public nk::Widget {
@@ -623,8 +643,12 @@ public:
     }
 
     [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& constraints) const override {
-        if (!cached_title_size_) cached_title_size_ = measure_text(title_, title_font());
-        if (!cached_subtitle_size_) cached_subtitle_size_ = measure_text(subtitle_, subtitle_font());
+        if (!cached_title_size_) {
+            cached_title_size_ = measure_text(title_, title_font());
+        }
+        if (!cached_subtitle_size_) {
+            cached_subtitle_size_ = measure_text(subtitle_, subtitle_font());
+        }
         const auto title_size = *cached_title_size_;
         const auto subtitle_size = *cached_subtitle_size_;
         const float left_width = std::max(title_size.width, subtitle_size.width);
@@ -749,8 +773,12 @@ protected:
             }
         }
 
-        if (!cached_title_size_) cached_title_size_ = measure_text(title_, title_font());
-        if (!cached_subtitle_size_) cached_subtitle_size_ = measure_text(subtitle_, subtitle_font());
+        if (!cached_title_size_) {
+            cached_title_size_ = measure_text(title_, title_font());
+        }
+        if (!cached_subtitle_size_) {
+            cached_subtitle_size_ = measure_text(subtitle_, subtitle_font());
+        }
         const auto title_size = *cached_title_size_;
         const auto subtitle_size = *cached_subtitle_size_;
         const float text_block_height = title_size.height + 10.0F + subtitle_size.height;
@@ -1065,6 +1093,7 @@ int main(int argc, char** argv) {
     increment_btn->add_style_class("suggested");
     auto decrement_btn = nk::Button::create("Decrement");
     auto reset_btn = nk::Button::create("Reset");
+    reset_btn->add_style_class("flat");
 
     (void)increment_btn->on_clicked().connect([&] {
         ++counter;
@@ -1087,14 +1116,14 @@ int main(int argc, char** argv) {
         hero_counter_pill->set_text("Counter 0");
     });
 
-    auto primary_counter_actions = Box::horizontal(8.0F);
+    auto primary_counter_actions = Box::horizontal(10.0F);
     primary_counter_actions->append(increment_btn);
     primary_counter_actions->append(decrement_btn);
     primary_counter_actions->set_horizontal_size_policy(nk::SizePolicy::Preferred);
-    auto button_row = Box::horizontal(16.0F);
-    button_row->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+    auto button_row = Box::horizontal(0.0F);
+    button_row->set_horizontal_size_policy(nk::SizePolicy::Preferred);
     button_row->append(primary_counter_actions);
-    button_row->append(Spacer::create());
+    button_row->append(FixedGap::horizontal(24.0F));
     button_row->append(reset_btn);
 
     auto input_title = SectionTitle::create("Command Workspace");
@@ -1132,27 +1161,27 @@ int main(int argc, char** argv) {
         }
     });
 
-    auto command_group = Box::vertical(10.0F);
+    auto command_group = Box::vertical(8.0F);
     command_group->append(command_label);
     command_group->append(text_field);
     command_group->append(echo_result);
 
-    auto counter_group = Box::vertical(10.0F);
+    auto counter_group = Box::vertical(12.0F);
     counter_group->append(counter_caption);
     counter_group->append(counter_label);
     counter_group->append(button_row);
 
-    auto accent_group = Box::vertical(10.0F);
+    auto accent_group = Box::vertical(8.0F);
     accent_group->append(combo_label);
     accent_group->append(combo);
     accent_group->append(combo_result);
 
-    auto controls_content = Box::vertical(18.0F);
+    auto controls_content = Box::vertical(16.0F);
     controls_content->append(input_title);
     controls_content->append(input_subtitle);
-    controls_content->append(InsetStage::create(command_group, 106.0F, 112.0F, 14.0F));
-    controls_content->append(InsetStage::create(counter_group, 124.0F, 132.0F, 14.0F));
-    controls_content->append(InsetStage::create(accent_group, 110.0F, 116.0F, 14.0F));
+    controls_content->append(InsetStage::create(command_group, 92.0F, 96.0F, 14.0F));
+    controls_content->append(InsetStage::create(counter_group, 112.0F, 116.0F, 14.0F));
+    controls_content->append(InsetStage::create(accent_group, 96.0F, 100.0F, 14.0F));
     auto controls_card = SurfacePanel::card(controls_content);
 
     auto list_title = SectionTitle::create("List & Selection");
@@ -1176,7 +1205,7 @@ int main(int argc, char** argv) {
     list_view->set_model(model);
     list_view->set_selection_model(selection);
     list_view->set_row_height(30.0F);
-    auto list_stage = InsetStage::create(list_view, 220.0F, 220.0F, 4.0F);
+    auto list_stage = InsetStage::create(list_view, 204.0F, 208.0F, 4.0F);
     auto list_status = StatusPill::create("10 items");
     auto add_item_btn = nk::Button::create("Add Item");
     add_item_btn->add_style_class("suggested");
@@ -1208,7 +1237,7 @@ int main(int argc, char** argv) {
     auto image_meta = ValueText::create("128 x 96 source");
     auto image_detail = SecondaryText::create("Animated sample with explicit display scaling.");
     auto preview_canvas = PreviewCanvas::create();
-    auto preview_stage = InsetStage::create(preview_canvas, 348.0F, 372.0F, 6.0F);
+    auto preview_stage = InsetStage::create(preview_canvas, 324.0F, 340.0F, 4.0F);
     auto scale_label = FieldLabel::create("Scale mode");
     auto scale_combo = nk::ComboBox::create();
     scale_combo->set_horizontal_size_policy(nk::SizePolicy::Expanding);
@@ -1229,16 +1258,23 @@ int main(int argc, char** argv) {
         hero_preview_pill->set_text(index == 0 ? "Nearest" : "Bilinear");
     });
 
-    auto preview_info = Box::vertical(10.0F);
-    preview_info->append(image_label);
-    preview_info->append(image_meta);
-    preview_info->append(image_detail);
-    preview_info->append(scale_label);
-    preview_info->append(scale_combo);
-    preview_info->append(scale_state);
+    auto preview_meta = Box::vertical(6.0F);
+    preview_meta->append(image_label);
+    preview_meta->append(image_meta);
+    preview_meta->append(image_detail);
+
+    auto preview_controls = Box::vertical(8.0F);
+    preview_controls->append(scale_label);
+    preview_controls->append(scale_combo);
+    preview_controls->append(scale_state);
+
+    auto preview_info = Box::vertical(20.0F);
+    preview_info->set_horizontal_size_policy(nk::SizePolicy::Preferred);
+    preview_info->append(preview_meta);
+    preview_info->append(preview_controls);
     preview_info->append(Spacer::create());
 
-    auto preview_display = SplitColumns::create(preview_stage, preview_info, 0.80F, 16.0F);
+    auto preview_display = SplitColumns::create(preview_stage, preview_info, 0.845F, 18.0F);
 
     auto preview_content = Box::vertical(16.0F);
     preview_content->append(preview_title);
@@ -1247,18 +1283,17 @@ int main(int argc, char** argv) {
     auto preview_card = SurfacePanel::card(preview_content);
 
     auto actions_title = SectionTitle::create("Runtime Actions");
-    auto actions_subtitle =
-        SecondaryText::create("Property binding, dialog flow, and command feedback.");
+    auto actions_subtitle = SecondaryText::create("Property binding, modal flow, and status.");
     auto prop_label = FieldLabel::create("Property binding");
     nk::Property<int> source_prop{42};
     nk::Property<int> target_prop{0};
     [[maybe_unused]] auto binding = target_prop.bind_to(source_prop);
     auto prop_value_label =
         ValueText::create("Source: 42, Target: " + std::to_string(target_prop.get()));
-    auto prop_detail = SecondaryText::create("Shared state mirrors into the status bar.");
+    auto prop_detail = SecondaryText::create("Shared state flows into the footer and HUD.");
     auto prop_btn = nk::Button::create("Set Source = 99");
     auto dialog_label = FieldLabel::create("Dialog flow");
-    auto dialog_detail = SecondaryText::create("Open a modal and report the result.");
+    auto dialog_detail = SecondaryText::create("Open a modal and capture the result.");
     auto dialog_btn = nk::Button::create("Show Dialog");
     dialog_btn->add_style_class("suggested");
     auto runtime_status = ValueText::create("Waiting for an action.");
@@ -1287,40 +1322,41 @@ int main(int argc, char** argv) {
         dialog->present(window);
     });
 
-    auto property_group = Box::vertical(10.0F);
+    auto property_group = Box::vertical(8.0F);
     property_group->append(prop_label);
     property_group->append(prop_value_label);
     property_group->append(prop_detail);
     property_group->append(prop_btn);
-    auto property_panel = InsetStage::create(property_group, 138.0F, 146.0F, 14.0F);
+    auto property_panel = InsetStage::create(property_group, 108.0F, 112.0F, 14.0F);
 
-    auto dialog_group = Box::vertical(10.0F);
+    auto dialog_group = Box::vertical(8.0F);
     dialog_group->append(dialog_label);
     dialog_group->append(dialog_detail);
     dialog_group->append(dialog_btn);
-    auto dialog_panel = InsetStage::create(dialog_group, 126.0F, 134.0F, 14.0F);
+    auto dialog_panel = InsetStage::create(dialog_group, 100.0F, 104.0F, 14.0F);
 
     auto status_label = FieldLabel::create("Runtime status");
-    auto status_group = Box::vertical(8.0F);
+    auto status_group = Box::vertical(6.0F);
     status_group->append(status_label);
     status_group->append(runtime_status);
-    auto status_panel = InsetStage::create(status_group, 80.0F, 88.0F, 14.0F);
+    auto status_panel = InsetStage::create(status_group, 64.0F, 68.0F, 14.0F);
 
-    auto actions_content = Box::vertical(16.0F);
+    auto actions_row = SplitColumns::create(property_panel, dialog_panel, 0.56F, 16.0F);
+
+    auto actions_content = Box::vertical(14.0F);
     actions_content->append(actions_title);
     actions_content->append(actions_subtitle);
-    actions_content->append(property_panel);
-    actions_content->append(dialog_panel);
+    actions_content->append(actions_row);
     actions_content->append(status_panel);
     auto actions_card = SurfacePanel::card(actions_content);
 
-    auto left_column = Box::vertical(18.0F);
+    auto left_column = Box::vertical(16.0F);
     left_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
     left_column->set_vertical_size_policy(nk::SizePolicy::Expanding);
     left_column->append(controls_card);
     left_column->append(list_card);
 
-    auto right_column = Box::vertical(18.0F);
+    auto right_column = Box::vertical(16.0F);
     right_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
     right_column->set_vertical_size_policy(nk::SizePolicy::Expanding);
     right_column->append(preview_card);
@@ -1337,7 +1373,7 @@ int main(int argc, char** argv) {
         "A compact workspace for inputs, model/view state, and live raster output.",
         {hero_counter_pill, hero_items_pill, hero_preview_pill});
 
-    auto body_content = Box::vertical(20.0F);
+    auto body_content = Box::vertical(18.0F);
     body_content->append(hero_banner);
     body_content->append(content_row);
 
