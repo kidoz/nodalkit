@@ -15,6 +15,7 @@ nk_sources = files(
     'src/platform/window.cpp',
     'src/platform/platform_backend.cpp',
     'src/platform/system_preferences.cpp',
+    'src/debug/diagnostics.cpp',
     'src/ui_core/widget.cpp',
     'src/layout/layout_manager.cpp',
     'src/layout/box_layout.cpp',
