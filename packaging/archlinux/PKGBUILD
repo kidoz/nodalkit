@@ -1,0 +1,42 @@
+# Maintainer: Aleksandr Pavlov <ckidoz@gmail.com>
+pkgname=nodalkit
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='C++-first GUI toolkit for modern desktop applications'
+arch=('x86_64' 'aarch64')
+url='https://github.com/kidoz/nodalkit'
+license=('MIT')
+depends=(
+    'wayland'
+    'libxkbcommon'
+    'freetype2'
+    'fontconfig'
+    'harfbuzz'
+    'glib2'
+)
+makedepends=(
+    'meson'
+    'wayland-protocols'
+)
+checkdepends=(
+    'catch2'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    arch-meson build
+    meson compile -C build
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    meson test -C build --no-rebuild
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    meson install -C build --destdir "$pkgdir"
+    install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
