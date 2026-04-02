@@ -49,6 +49,11 @@ int popup_index_at(const PopupGeometry& geometry, Point point) {
     return index;
 }
 
+void invalidate_popup_frame(Widget& widget) {
+    widget.queue_layout();
+    widget.queue_redraw();
+}
+
 } // namespace
 
 struct ComboBox::Impl {
@@ -151,7 +156,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
             impl_->highlighted_index = -1;
             impl_->armed_index = -1;
             impl_->armed = false;
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return consumed;
         }
 
@@ -164,7 +169,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
 
         impl_->popup_open = !impl_->popup_open;
         impl_->highlighted_index = impl_->popup_open ? std::max(0, impl_->selected_index) : -1;
-        queue_redraw();
+        invalidate_popup_frame(*this);
         return true;
     }
     case MouseEvent::Type::Move:
@@ -172,7 +177,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
             const int next_highlight = popup_index_at(popup, point);
             if (impl_->highlighted_index != next_highlight) {
                 impl_->highlighted_index = next_highlight;
-                queue_redraw();
+                invalidate_popup_frame(*this);
             }
         }
         return impl_->popup_open && popup.bounds.contains(point);
@@ -181,7 +186,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Leave:
         if (impl_->popup_open && impl_->highlighted_index != -1) {
             impl_->highlighted_index = -1;
-            queue_redraw();
+            invalidate_popup_frame(*this);
         }
         return false;
     case MouseEvent::Type::Scroll:
@@ -190,13 +195,13 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
         }
         if (event.scroll_dy > 0.0F && impl_->highlighted_index > 0) {
             --impl_->highlighted_index;
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return true;
         }
         if (event.scroll_dy < 0.0F &&
             impl_->highlighted_index + 1 < static_cast<int>(impl_->items.size())) {
             ++impl_->highlighted_index;
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return true;
         }
         return false;
@@ -215,7 +220,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
         impl_->popup_open = true;
         impl_->highlighted_index =
             std::clamp(highlight, 0, static_cast<int>(impl_->items.size()) - 1);
-        queue_redraw();
+        invalidate_popup_frame(*this);
     };
 
     if (impl_->popup_open) {
@@ -223,7 +228,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
         case KeyCode::Escape:
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return true;
         case KeyCode::Up:
             if (impl_->highlighted_index < 0) {
@@ -231,7 +236,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             } else if (impl_->highlighted_index > 0) {
                 --impl_->highlighted_index;
             }
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return true;
         case KeyCode::Down:
             if (impl_->highlighted_index < 0) {
@@ -239,7 +244,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             } else if (impl_->highlighted_index < last_index) {
                 ++impl_->highlighted_index;
             }
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return true;
         case KeyCode::Return:
         case KeyCode::Space:
@@ -248,7 +253,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             }
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return true;
         default:
             return false;
@@ -308,7 +313,7 @@ void ComboBox::on_focus_changed(bool focused) {
         impl_->armed = false;
         impl_->armed_index = -1;
         impl_->highlighted_index = -1;
-        queue_redraw();
+        invalidate_popup_frame(*this);
     }
 }
 

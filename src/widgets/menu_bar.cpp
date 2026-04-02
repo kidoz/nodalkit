@@ -35,6 +35,11 @@ struct PopupGeometry {
 
 using MenuPath = std::vector<int>;
 
+void invalidate_popup_frame(Widget& widget) {
+    widget.queue_layout();
+    widget.queue_redraw();
+}
+
 Rect popup_item_rect(const PopupGeometry& geometry, int index) {
     return {
         geometry.bounds.x + 1.0F,
@@ -339,7 +344,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
         impl_->open_path.clear();
         impl_->highlighted_path.clear();
         impl_->armed_path.clear();
-        queue_redraw();
+        invalidate_popup_frame(*this);
     };
 
     if (event.button != 1 && event.type != MouseEvent::Type::Move &&
@@ -371,7 +376,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                 impl_->open_path.clear();
                 impl_->highlighted_path.clear();
                 impl_->armed_menu = -1;
-                queue_redraw();
+                invalidate_popup_frame(*this);
             }
             return true;
         }
@@ -393,7 +398,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                     if (!item->children.empty()) {
                         impl_->open_path = *released_path;
                         impl_->highlighted_path = *released_path;
-                        queue_redraw();
+                        invalidate_popup_frame(*this);
                         return true;
                     }
                     if (!item->action_name.empty()) {
@@ -417,7 +422,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                 impl_->open_menu = hovered_menu;
                 impl_->open_path.clear();
                 impl_->highlighted_path.clear();
-                queue_redraw();
+                invalidate_popup_frame(*this);
                 return true;
             }
 
@@ -434,7 +439,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                     if (impl_->highlighted_path != *path || impl_->open_path != next_open_path) {
                         impl_->highlighted_path = *path;
                         impl_->open_path = next_open_path;
-                        queue_redraw();
+                        invalidate_popup_frame(*this);
                     }
                     return true;
                 }
@@ -461,7 +466,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         impl_->open_menu = -1;
         impl_->open_path.clear();
         impl_->highlighted_path.clear();
-        queue_redraw();
+        invalidate_popup_frame(*this);
     };
 
     auto select_next_menu = [this](int delta) {
@@ -476,7 +481,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         }
         impl_->open_path.clear();
         impl_->highlighted_path.clear();
-        queue_redraw();
+        invalidate_popup_frame(*this);
     };
 
     if (impl_->open_menu < 0) {
@@ -523,7 +528,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
                 }
                 impl_->highlighted_path = next_path;
                 impl_->open_path = submenu_chain_for_path(menu, next_path);
-                queue_redraw();
+                invalidate_popup_frame(*this);
                 break;
             }
             if (next_index == current_index) {
@@ -540,7 +545,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         if (!impl_->open_path.empty()) {
             impl_->open_path.pop_back();
             impl_->highlighted_path = impl_->open_path;
-            queue_redraw();
+            invalidate_popup_frame(*this);
             return true;
         }
         select_next_menu(-1);
@@ -550,7 +555,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
             if (auto* item = item_at_path(menu, impl_->highlighted_path);
                 item != nullptr && !item->children.empty()) {
                 impl_->open_path = impl_->highlighted_path;
-                queue_redraw();
+                invalidate_popup_frame(*this);
                 return true;
             }
         }
@@ -571,7 +576,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         if (auto* item = item_at_path(menu, impl_->highlighted_path)) {
             if (!item->children.empty()) {
                 impl_->open_path = impl_->highlighted_path;
-                queue_redraw();
+                invalidate_popup_frame(*this);
                 return true;
             }
             if (item->enabled && !item->separator && !item->action_name.empty()) {
@@ -617,7 +622,7 @@ void MenuBar::on_focus_changed(bool focused) {
     impl_->open_path.clear();
     impl_->highlighted_path.clear();
     impl_->armed_path.clear();
-    queue_redraw();
+    invalidate_popup_frame(*this);
 }
 
 void MenuBar::snapshot(SnapshotContext& ctx) const {

@@ -671,6 +671,56 @@ TEST_CASE("MenuBar opens popups and emits actions on click", "[app][menu]") {
     REQUIRE(action == "app.open");
 }
 
+TEST_CASE("Window menu popups trigger a full-frame repaint beyond the menu bar bounds",
+          "[app][menu][render]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Menu popup render", .width = 320, .height = 220});
+
+    auto root = TestContainer::create();
+    root->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical));
+
+    auto menu_bar = nk::MenuBar::create();
+    menu_bar->add_menu({
+        .title = "File",
+        .items = {
+            nk::MenuItem::action("Popup Action", "app.popup.action"),
+        },
+    });
+    root->append(menu_bar);
+    root->append(nk::Label::create("Body"));
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") == std::string::npos);
+
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Press,
+        .x = 20.0F,
+        .y = 16.0F,
+        .button = 1,
+    });
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Release,
+        .x = 20.0F,
+        .y = 16.0F,
+        .button = 1,
+    });
+
+    REQUIRE(app.event_loop().poll());
+
+    const auto history = window.debug_frame_history();
+    REQUIRE(history.size() >= 2);
+    const auto& frame = history.back();
+    REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetLayout));
+    REQUIRE(frame.had_layout);
+    REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") !=
+            std::string::npos);
+#if defined(__linux__)
+    REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
+#endif
+}
+
 TEST_CASE("Dialog present installs a modal overlay and routes Escape dismissal", "[app][dialog]") {
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Dialog test", .width = 320, .height = 240});
