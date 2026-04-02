@@ -1,8 +1,13 @@
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <nk/debug/diagnostics.h>
 #include <nk/render/image_node.h>
 #include <nk/render/render_node.h>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -129,6 +134,561 @@ void append_render_snapshot_json(std::ostringstream& out, const RenderSnapshotNo
     }
     out << "]}";
 }
+
+void append_render_snapshot_file_json(std::ostringstream& out, const RenderSnapshotNode& node) {
+    out << "{\"format\":\"nk-render-snapshot-v1\",\"root\":";
+    append_render_snapshot_json(out, node);
+    out << "}\n";
+}
+
+class RenderSnapshotJsonParser {
+public:
+    explicit RenderSnapshotJsonParser(std::string_view input) : input_(input) {}
+
+    Result<RenderSnapshotNode> parse_document() {
+        skip_ws();
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+
+        NodeBuilder builder;
+        bool has_node_fields = false;
+        std::string format;
+        std::optional<RenderSnapshotNode> wrapped_root;
+
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("render snapshot object is empty"));
+        }
+
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+
+            if (*key == "format") {
+                auto parsed_format = parse_string();
+                if (!parsed_format) {
+                    return Unexpected(parsed_format.error());
+                }
+                format = std::move(*parsed_format);
+            } else if (*key == "root") {
+                auto root = parse_node();
+                if (!root) {
+                    return Unexpected(root.error());
+                }
+                wrapped_root = std::move(*root);
+            } else {
+                has_node_fields = true;
+                auto field_result = parse_node_field(builder, *key);
+                if (!field_result) {
+                    return Unexpected(field_result.error());
+                }
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        skip_ws();
+        if (!eof()) {
+            return Unexpected(make_error("unexpected trailing data"));
+        }
+
+        if (wrapped_root.has_value()) {
+            if (!format.empty() && format != "nk-render-snapshot-v1") {
+                return Unexpected(
+                    make_error("unsupported render snapshot format \"" + format + "\""));
+            }
+            if (has_node_fields) {
+                return Unexpected(make_error("mixed render snapshot wrapper and root node fields"));
+            }
+            return std::move(*wrapped_root);
+        }
+
+        return finalize_node(std::move(builder));
+    }
+
+private:
+    struct NodeBuilder {
+        RenderSnapshotNode node;
+        bool has_kind = false;
+        bool has_bounds = false;
+    };
+
+    [[nodiscard]] bool eof() const noexcept { return index_ >= input_.size(); }
+
+    [[nodiscard]] std::string make_error(std::string_view message) const {
+        std::ostringstream out;
+        out << message << " at byte " << index_;
+        return out.str();
+    }
+
+    void skip_ws() {
+        while (!eof()) {
+            const char ch = input_[index_];
+            if (ch != ' ' && ch != '\n' && ch != '\r' && ch != '\t') {
+                break;
+            }
+            ++index_;
+        }
+    }
+
+    bool consume_if(char expected) {
+        skip_ws();
+        if (!eof() && input_[index_] == expected) {
+            ++index_;
+            return true;
+        }
+        return false;
+    }
+
+    Result<void> expect(char expected) {
+        skip_ws();
+        if (eof() || input_[index_] != expected) {
+            std::string message = "expected '";
+            message += expected;
+            message += "'";
+            return Unexpected(make_error(message));
+        }
+        ++index_;
+        return {};
+    }
+
+    Result<std::string> parse_string() {
+        skip_ws();
+        if (eof() || input_[index_] != '"') {
+            return Unexpected(make_error("expected string"));
+        }
+        ++index_;
+
+        std::string value;
+        while (!eof()) {
+            const char ch = input_[index_++];
+            if (ch == '"') {
+                return value;
+            }
+            if (ch == '\\') {
+                if (eof()) {
+                    return Unexpected(make_error("unterminated escape sequence"));
+                }
+                const char escaped = input_[index_++];
+                switch (escaped) {
+                case '"':
+                case '\\':
+                case '/':
+                    value += escaped;
+                    break;
+                case 'n':
+                    value += '\n';
+                    break;
+                case 'r':
+                    value += '\r';
+                    break;
+                case 't':
+                    value += '\t';
+                    break;
+                default:
+                    return Unexpected(make_error("unsupported escape sequence"));
+                }
+                continue;
+            }
+            value += ch;
+        }
+        return Unexpected(make_error("unterminated string"));
+    }
+
+    Result<double> parse_number() {
+        skip_ws();
+        const std::size_t start = index_;
+        while (!eof()) {
+            const char ch = input_[index_];
+            if ((ch >= '0' && ch <= '9') || ch == '-' || ch == '+' || ch == '.' || ch == 'e' ||
+                ch == 'E') {
+                ++index_;
+                continue;
+            }
+            break;
+        }
+
+        if (start == index_) {
+            return Unexpected(make_error("expected number"));
+        }
+
+        const std::string token(input_.substr(start, index_ - start));
+        char* end = nullptr;
+        errno = 0;
+        const double value = std::strtod(token.c_str(), &end);
+        if (end == nullptr || *end != '\0' || errno == ERANGE) {
+            return Unexpected(make_error("invalid number"));
+        }
+        return value;
+    }
+
+    Result<std::size_t> parse_size_t() {
+        auto parsed = parse_number();
+        if (!parsed) {
+            return Unexpected(parsed.error());
+        }
+        if (*parsed < 0.0 || std::floor(*parsed) != *parsed) {
+            return Unexpected(make_error("expected non-negative integer"));
+        }
+        return static_cast<std::size_t>(*parsed);
+    }
+
+    Result<void> consume_literal(std::string_view literal) {
+        skip_ws();
+        if (input_.substr(index_, literal.size()) != literal) {
+            return Unexpected(make_error("expected literal"));
+        }
+        index_ += literal.size();
+        return {};
+    }
+
+    Result<void> skip_value() {
+        skip_ws();
+        if (eof()) {
+            return Unexpected(make_error("unexpected end of input"));
+        }
+
+        const char ch = input_[index_];
+        if (ch == '"') {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            return {};
+        }
+        if (ch == '{') {
+            ++index_;
+            skip_ws();
+            if (consume_if('}')) {
+                return {};
+            }
+            while (true) {
+                auto key = parse_string();
+                if (!key) {
+                    return Unexpected(key.error());
+                }
+                auto colon = expect(':');
+                if (!colon) {
+                    return Unexpected(colon.error());
+                }
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if('}')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == '[') {
+            ++index_;
+            skip_ws();
+            if (consume_if(']')) {
+                return {};
+            }
+            while (true) {
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if(']')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == 't') {
+            return consume_literal("true");
+        }
+        if (ch == 'f') {
+            return consume_literal("false");
+        }
+        if (ch == 'n') {
+            return consume_literal("null");
+        }
+
+        auto number = parse_number();
+        if (!number) {
+            return Unexpected(number.error());
+        }
+        return {};
+    }
+
+    Result<Rect> parse_bounds() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+
+        Rect bounds{};
+        bool has_x = false;
+        bool has_y = false;
+        bool has_width = false;
+        bool has_height = false;
+
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("bounds object is empty"));
+        }
+
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+
+            if (*key == "x") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                bounds.x = static_cast<float>(*value);
+                has_x = true;
+            } else if (*key == "y") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                bounds.y = static_cast<float>(*value);
+                has_y = true;
+            } else if (*key == "width") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                bounds.width = static_cast<float>(*value);
+                has_width = true;
+            } else if (*key == "height") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                bounds.height = static_cast<float>(*value);
+                has_height = true;
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        if (!has_x || !has_y || !has_width || !has_height) {
+            return Unexpected(make_error("bounds object is missing required fields"));
+        }
+        return bounds;
+    }
+
+    Result<std::vector<std::size_t>> parse_size_t_array() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+
+        std::vector<std::size_t> values;
+        skip_ws();
+        if (consume_if(']')) {
+            return values;
+        }
+
+        while (true) {
+            auto value = parse_size_t();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            values.push_back(*value);
+
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return values;
+    }
+
+    Result<std::vector<RenderSnapshotNode>> parse_children() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+
+        std::vector<RenderSnapshotNode> children;
+        skip_ws();
+        if (consume_if(']')) {
+            return children;
+        }
+
+        while (true) {
+            auto child = parse_node();
+            if (!child) {
+                return Unexpected(child.error());
+            }
+            children.push_back(std::move(*child));
+
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return children;
+    }
+
+    Result<void> parse_node_field(NodeBuilder& builder, std::string_view key) {
+        if (key == "kind") {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            builder.node.kind = std::move(*value);
+            builder.has_kind = true;
+            return {};
+        }
+        if (key == "bounds") {
+            auto value = parse_bounds();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            builder.node.bounds = *value;
+            builder.has_bounds = true;
+            return {};
+        }
+        if (key == "detail") {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            builder.node.detail = std::move(*value);
+            return {};
+        }
+        if (key == "source_widget_label") {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            builder.node.source_widget_label = std::move(*value);
+            return {};
+        }
+        if (key == "source_widget_path") {
+            auto value = parse_size_t_array();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            builder.node.source_widget_path = std::move(*value);
+            return {};
+        }
+        if (key == "children") {
+            auto value = parse_children();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            builder.node.children = std::move(*value);
+            return {};
+        }
+
+        return skip_value();
+    }
+
+    Result<RenderSnapshotNode> finalize_node(NodeBuilder builder) {
+        if (!builder.has_kind) {
+            return Unexpected(make_error("render snapshot node is missing kind"));
+        }
+        if (!builder.has_bounds) {
+            return Unexpected(make_error("render snapshot node is missing bounds"));
+        }
+        return std::move(builder.node);
+    }
+
+    Result<RenderSnapshotNode> parse_node() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+
+        NodeBuilder builder;
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("render snapshot node is empty"));
+        }
+
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+
+            auto field_result = parse_node_field(builder, *key);
+            if (!field_result) {
+                return Unexpected(field_result.error());
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        return finalize_node(std::move(builder));
+    }
+
+    std::string_view input_;
+    std::size_t index_ = 0;
+};
 
 std::string render_node_kind_name(RenderNodeKind kind) {
     switch (kind) {
@@ -293,6 +853,43 @@ std::string format_render_snapshot_json(const RenderSnapshotNode& root) {
     std::ostringstream out;
     append_render_snapshot_json(out, root);
     return out.str();
+}
+
+Result<RenderSnapshotNode> parse_render_snapshot_json(std::string_view json) {
+    RenderSnapshotJsonParser parser(json);
+    return parser.parse_document();
+}
+
+Result<RenderSnapshotNode> load_render_snapshot_json_file(std::string_view path) {
+    const auto file_path = std::filesystem::path(std::string(path));
+    std::ifstream in(file_path, std::ios::binary);
+    if (!in.is_open()) {
+        return Unexpected("failed to open render snapshot file: " + file_path.string());
+    }
+
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    if (!in.good() && !in.eof()) {
+        return Unexpected("failed to read render snapshot file: " + file_path.string());
+    }
+
+    return parse_render_snapshot_json(buffer.str());
+}
+
+Result<void> save_render_snapshot_json_file(const RenderSnapshotNode& root, std::string_view path) {
+    const auto file_path = std::filesystem::path(std::string(path));
+    std::ofstream out(file_path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return Unexpected("failed to create render snapshot file: " + file_path.string());
+    }
+
+    std::ostringstream buffer;
+    append_render_snapshot_file_json(buffer, root);
+    out << buffer.str();
+    if (!out.good()) {
+        return Unexpected("failed to write render snapshot file: " + file_path.string());
+    }
+    return {};
 }
 
 std::string format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics> frames,

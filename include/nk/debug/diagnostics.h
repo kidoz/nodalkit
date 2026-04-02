@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <nk/foundation/result.h>
 #include <nk/foundation/types.h>
 #include <nk/ui_core/state_flags.h>
 #include <span>
@@ -59,6 +60,34 @@ enum class FrameRequestReason : uint8_t {
     PickerChanged,
 };
 
+struct RenderHotspotCounters {
+    std::size_t text_node_count = 0;
+    std::size_t text_shape_count = 0;
+    std::size_t text_shape_cache_hit_count = 0;
+    std::size_t text_bitmap_pixel_count = 0;
+    std::size_t text_texture_upload_count = 0;
+    std::size_t image_node_count = 0;
+    std::size_t image_source_pixel_count = 0;
+    std::size_t image_dest_pixel_count = 0;
+    std::size_t image_texture_upload_count = 0;
+
+    bool operator==(const RenderHotspotCounters&) const = default;
+};
+
+struct WidgetHotspotCounters {
+    std::size_t measure_count = 0;
+    std::size_t allocate_count = 0;
+    std::size_t snapshot_count = 0;
+    std::size_t text_measure_count = 0;
+    std::size_t image_snapshot_count = 0;
+    std::size_t model_sync_count = 0;
+    std::size_t model_row_materialize_count = 0;
+    std::size_t model_row_reuse_count = 0;
+    std::size_t model_row_dispose_count = 0;
+
+    bool operator==(const WidgetHotspotCounters&) const = default;
+};
+
 struct FrameDiagnostics {
     uint64_t frame_id = 0;
     Size logical_viewport{};
@@ -77,6 +106,8 @@ struct FrameDiagnostics {
     double render_ms = 0.0;
     double present_ms = 0.0;
     double total_ms = 0.0;
+    WidgetHotspotCounters widget_hotspot_totals;
+    RenderHotspotCounters render_hotspot_counters;
     std::vector<FrameRequestReason> request_reasons;
 
     struct RenderSnapshotNode {
@@ -86,6 +117,8 @@ struct FrameDiagnostics {
         std::string source_widget_label;
         std::vector<std::size_t> source_widget_path;
         std::vector<RenderSnapshotNode> children;
+
+        bool operator==(const RenderSnapshotNode&) const = default;
     } render_snapshot;
 
     std::size_t render_snapshot_node_count = 0;
@@ -109,6 +142,7 @@ struct WidgetDebugNode {
     bool visible = true;
     bool sensitive = true;
     bool focusable = false;
+    WidgetHotspotCounters hotspot_counters;
     std::vector<std::string> style_classes;
     std::vector<WidgetDebugNode> children;
 };
@@ -121,6 +155,10 @@ struct WidgetDebugNode {
 [[nodiscard]] std::string format_widget_debug_tree(const WidgetDebugNode& root);
 [[nodiscard]] std::string format_render_snapshot_tree(const RenderSnapshotNode& root);
 [[nodiscard]] std::string format_render_snapshot_json(const RenderSnapshotNode& root);
+[[nodiscard]] Result<RenderSnapshotNode> parse_render_snapshot_json(std::string_view json);
+[[nodiscard]] Result<RenderSnapshotNode> load_render_snapshot_json_file(std::string_view path);
+[[nodiscard]] Result<void> save_render_snapshot_json_file(const RenderSnapshotNode& root,
+                                                          std::string_view path);
 [[nodiscard]] std::string
 format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics> frames,
                                     std::span<const TraceEvent> extra_events = {});
