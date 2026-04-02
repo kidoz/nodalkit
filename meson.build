@@ -73,6 +73,8 @@ elif host_system == 'linux'
 
     wayland_client_dep = dependency('wayland-client')
     wayland_protocols_dep = dependency('wayland-protocols')
+    vulkan_dep = dependency('vulkan', required : false)
+    glslang_validator = find_program('glslangValidator', required : false)
     xkbcommon_dep = dependency('xkbcommon')
     freetype_dep = dependency('freetype2')
     fontconfig_dep = dependency('fontconfig')
@@ -104,6 +106,70 @@ elif host_system == 'linux'
     nk_sources += [xdg_shell_header, xdg_shell_code]
 
     nk_deps += [wayland_client_dep, xkbcommon_dep, freetype_dep, fontconfig_dep, harfbuzz_dep, gio_dep]
+
+    if vulkan_dep.found() and glslang_validator.found()
+        vulkan_primitive_vert_spv = custom_target('vulkan-primitive-vert-spv',
+            input : 'src/render/shaders/vulkan_primitive.vert',
+            output : 'vulkan_primitive_vert_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'vert',
+                '-x',
+                '--vn', 'nk_vulkan_primitive_vert_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        vulkan_primitive_frag_spv = custom_target('vulkan-primitive-frag-spv',
+            input : 'src/render/shaders/vulkan_primitive.frag',
+            output : 'vulkan_primitive_frag_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'frag',
+                '-x',
+                '--vn', 'nk_vulkan_primitive_frag_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        vulkan_image_vert_spv = custom_target('vulkan-image-vert-spv',
+            input : 'src/render/shaders/vulkan_image.vert',
+            output : 'vulkan_image_vert_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'vert',
+                '-x',
+                '--vn', 'nk_vulkan_image_vert_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        vulkan_image_frag_spv = custom_target('vulkan-image-frag-spv',
+            input : 'src/render/shaders/vulkan_image.frag',
+            output : 'vulkan_image_frag_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'frag',
+                '-x',
+                '--vn', 'nk_vulkan_image_frag_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        nk_sources += files('src/render/vulkan_renderer.cpp')
+        nk_sources += [
+            vulkan_primitive_vert_spv,
+            vulkan_primitive_frag_spv,
+            vulkan_image_vert_spv,
+            vulkan_image_frag_spv,
+        ]
+        nk_deps += vulkan_dep
+        nk_cpp_args += ['-DNK_HAVE_VULKAN']
+    endif
 endif
 
 # --- Build shared library ---
