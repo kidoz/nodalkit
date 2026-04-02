@@ -1012,6 +1012,36 @@ Result<void> save_text_file(std::string_view path, std::string_view text) {
     return {};
 }
 
+Result<void>
+save_ppm_file(std::string_view path, const uint8_t* rgba_pixels, int width, int height) {
+    if (rgba_pixels == nullptr || width <= 0 || height <= 0) {
+        return Unexpected(std::string("no readable frame buffer available for screenshot"));
+    }
+
+    std::ofstream out(std::string(path), std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return Unexpected(std::string("failed to open file for writing: ") + std::string(path));
+    }
+
+    out << "P6\n" << width << " " << height << "\n255\n";
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const auto index = static_cast<std::size_t>((y * width + x) * 4);
+            const char rgb[3] = {
+                static_cast<char>(rgba_pixels[index]),
+                static_cast<char>(rgba_pixels[index + 1]),
+                static_cast<char>(rgba_pixels[index + 2]),
+            };
+            out.write(rgb, 3);
+        }
+    }
+
+    if (!out.good()) {
+        return Unexpected(std::string("failed to write file: ") + std::string(path));
+    }
+    return {};
+}
+
 Result<void> copy_text_to_application_clipboard(std::string text) {
     if (auto* app = Application::instance(); app != nullptr) {
         app->set_clipboard_text(std::move(text));
@@ -1719,6 +1749,8 @@ void Window::request_frame(FrameRequestReason reason) {
         }
         frame.present_ms = elapsed_ms(present_start, Clock::now());
         frame.total_ms = elapsed_ms(frame_start, Clock::now());
+        frame.performance_marker = classify_frame_time(frame.total_ms);
+        frame.budget_overrun_ms = std::max(0.0, frame.total_ms - frame_budget_ms());
         impl_->last_frame_diagnostics = frame;
         const uint64_t previous_selected_frame_id = impl_->debug_selected_frame_id;
         const uint64_t previous_latest_frame_id =
@@ -1964,6 +1996,15 @@ std::string Window::dump_frame_trace_json() const {
     return format_frame_diagnostics_trace_json(impl_->frame_history);
 }
 
+Result<void> Window::save_frame_diagnostics_artifact_json_file(std::string_view path) const {
+    return nk::save_frame_diagnostics_artifact_json_file(
+        FrameDiagnosticsArtifact{.frames = impl_->frame_history}, path);
+}
+
+Result<void> Window::save_frame_trace_json_file(std::string_view path) const {
+    return save_text_file(path, dump_frame_trace_json());
+}
+
 std::vector<TraceEvent> Window::debug_selected_frame_runtime_events() const {
     const auto* frame =
         selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
@@ -2120,6 +2161,15 @@ Result<void> Window::copy_selected_widget_details_to_clipboard() const {
 
 Result<void> Window::save_selected_widget_details_file(std::string_view path) const {
     return save_text_file(path, dump_selected_widget_details());
+}
+
+Result<void> Window::save_debug_screenshot_ppm_file(std::string_view path) const {
+    const auto* renderer = dynamic_cast<const SoftwareRenderer*>(impl_->renderer.get());
+    if (renderer == nullptr) {
+        return Unexpected(std::string("debug screenshot capture requires the software renderer"));
+    }
+    return save_ppm_file(
+        path, renderer->pixel_data(), renderer->pixel_width(), renderer->pixel_height());
 }
 
 void Window::note_widget_redraw_request(Widget& widget) {

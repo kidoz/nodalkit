@@ -75,6 +75,13 @@ enum class GpuPresentTradeoff : uint8_t {
     DrawFavored,
 };
 
+enum class FramePerformanceMarker : uint8_t {
+    WithinBudget,
+    OverBudget,
+    Slow,
+    VerySlow,
+};
+
 struct RenderHotspotCounters {
     std::size_t text_node_count = 0;
     std::size_t text_shape_count = 0;
@@ -129,6 +136,8 @@ struct FrameDiagnostics {
     double render_ms = 0.0;
     double present_ms = 0.0;
     double total_ms = 0.0;
+    FramePerformanceMarker performance_marker = FramePerformanceMarker::WithinBudget;
+    double budget_overrun_ms = 0.0;
     WidgetHotspotCounters widget_hotspot_totals;
     RenderHotspotCounters render_hotspot_counters;
     std::vector<FrameRequestReason> request_reasons;
@@ -155,6 +164,9 @@ struct TraceEvent {
     double timestamp_ms = 0.0;
     double duration_ms = 0.0;
     std::string detail;
+    std::string source_label;
+
+    bool operator==(const TraceEvent&) const = default;
 };
 
 struct WidgetDebugNode {
@@ -168,6 +180,31 @@ struct WidgetDebugNode {
     WidgetHotspotCounters hotspot_counters;
     std::vector<std::string> style_classes;
     std::vector<WidgetDebugNode> children;
+};
+
+struct FrameDiagnosticsArtifact {
+    std::vector<FrameDiagnostics> frames;
+
+    bool operator==(const FrameDiagnosticsArtifact&) const = default;
+};
+
+struct TraceCapture {
+    std::vector<TraceEvent> events;
+
+    bool operator==(const TraceCapture&) const = default;
+};
+
+struct FrameTimeHistogram {
+    std::size_t within_budget_count = 0;
+    std::size_t over_budget_count = 0;
+    std::size_t slow_count = 0;
+    std::size_t very_slow_count = 0;
+
+    [[nodiscard]] constexpr std::size_t total_count() const noexcept {
+        return within_budget_count + over_budget_count + slow_count + very_slow_count;
+    }
+
+    bool operator==(const FrameTimeHistogram&) const = default;
 };
 
 [[nodiscard]] constexpr std::string_view render_snapshot_artifact_format() noexcept {
@@ -187,6 +224,14 @@ struct WidgetDebugNode {
 [[nodiscard]] std::string_view gpu_present_tradeoff_name(GpuPresentTradeoff tradeoff) noexcept;
 [[nodiscard]] bool has_frame_request_reason(const FrameDiagnostics& frame,
                                             FrameRequestReason reason) noexcept;
+
+[[nodiscard]] constexpr double frame_budget_ms() noexcept {
+    return 16.67;
+}
+
+[[nodiscard]] FramePerformanceMarker classify_frame_time(double total_ms) noexcept;
+[[nodiscard]] FrameTimeHistogram
+build_frame_time_histogram(std::span<const FrameDiagnostics> frames) noexcept;
 [[nodiscard]] std::size_t count_render_snapshot_nodes(const RenderSnapshotNode& root) noexcept;
 [[nodiscard]] RenderSnapshotNode build_render_snapshot(const RenderNode& root);
 [[nodiscard]] std::string format_widget_debug_tree(const WidgetDebugNode& root);
@@ -197,7 +242,20 @@ struct WidgetDebugNode {
 [[nodiscard]] Result<void> save_render_snapshot_json_file(const RenderSnapshotNode& root,
                                                           std::string_view path);
 [[nodiscard]] std::string
+format_frame_diagnostics_artifact_json(std::span<const FrameDiagnostics> frames);
+[[nodiscard]] Result<FrameDiagnosticsArtifact>
+parse_frame_diagnostics_artifact_json(std::string_view json);
+[[nodiscard]] Result<FrameDiagnosticsArtifact>
+load_frame_diagnostics_artifact_json_file(std::string_view path);
+[[nodiscard]] Result<void>
+save_frame_diagnostics_artifact_json_file(const FrameDiagnosticsArtifact& artifact,
+                                          std::string_view path);
+[[nodiscard]] std::string
 format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics> frames,
                                     std::span<const TraceEvent> extra_events = {});
+[[nodiscard]] Result<TraceCapture> parse_frame_diagnostics_trace_json(std::string_view json);
+[[nodiscard]] Result<TraceCapture> load_frame_diagnostics_trace_json_file(std::string_view path);
+[[nodiscard]] Result<void> save_frame_diagnostics_trace_json_file(const TraceCapture& capture,
+                                                                  std::string_view path);
 
 } // namespace nk

@@ -116,6 +116,13 @@ public:
     /// Export recent frame history as Chrome Trace JSON.
     [[nodiscard]] std::string dump_frame_trace_json() const;
 
+    /// Save recent frame history as a versioned diagnostics artifact JSON file.
+    [[nodiscard]] Result<void>
+    save_frame_diagnostics_artifact_json_file(std::string_view path) const;
+
+    /// Save recent frame history and runtime events as a trace JSON file.
+    [[nodiscard]] Result<void> save_frame_trace_json_file(std::string_view path) const;
+
     /// Runtime trace events correlated to the currently selected inspector frame.
     [[nodiscard]] std::vector<TraceEvent> debug_selected_frame_runtime_events() const;
 
@@ -166,6 +173,9 @@ public:
 
     /// Save the selected widget summary to a text file.
     [[nodiscard]] Result<void> save_selected_widget_details_file(std::string_view path) const;
+
+    /// Save the currently rendered debug surface to a PPM file when readback is available.
+    [[nodiscard]] Result<void> save_debug_screenshot_ppm_file(std::string_view path) const;
 
     // --- Signals ---
 

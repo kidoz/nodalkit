@@ -12,6 +12,7 @@ struct EventLoop::Impl {
     struct PostedTask {
         std::chrono::steady_clock::time_point queued_at;
         std::function<void()> callback;
+        std::string source_label;
     };
 
     bool running = false;
@@ -27,6 +28,7 @@ struct EventLoop::Impl {
         std::chrono::steady_clock::time_point fire_at;
         std::chrono::milliseconds interval; // 0 for one-shot
         std::function<void()> callback;
+        std::string source_label;
         bool cancelled = false;
     };
 
@@ -36,6 +38,7 @@ struct EventLoop::Impl {
         CallbackHandle handle;
         std::chrono::steady_clock::time_point queued_at;
         std::function<void()> callback;
+        std::string source_label;
         bool cancelled = false;
     };
 
@@ -60,13 +63,15 @@ void append_trace_event(std::vector<TraceEvent>& trace_events,
                         std::string category,
                         std::chrono::steady_clock::time_point start,
                         std::chrono::steady_clock::time_point end,
-                        std::string detail = {}) {
+                        std::string detail = {},
+                        std::string source_label = {}) {
     trace_events.push_back({
         .name = std::move(name),
         .category = std::move(category),
         .timestamp_ms = elapsed_ms(diagnostics_origin, start),
         .duration_ms = elapsed_ms(start, end),
         .detail = std::move(detail),
+        .source_label = std::move(source_label),
     });
     if (trace_events.size() > kTraceEventHistoryLimit) {
         trace_events.erase(
@@ -104,12 +109,13 @@ void EventLoop::quit(int exit_code) {
     impl_->running = false;
 }
 
-void EventLoop::post(std::function<void()> task) {
+void EventLoop::post(std::function<void()> task, std::string_view source_label) {
     {
         std::lock_guard lock(impl_->task_mutex);
         impl_->posted_tasks.push_back({
             .queued_at = std::chrono::steady_clock::now(),
             .callback = std::move(task),
+            .source_label = std::string(source_label),
         });
     }
     wake();
@@ -130,26 +136,30 @@ int EventLoop::exit_code() const {
 }
 
 CallbackHandle EventLoop::set_timeout(std::chrono::milliseconds delay,
-                                      std::function<void()> callback) {
+                                      std::function<void()> callback,
+                                      std::string_view source_label) {
     auto h = impl_->next_handle();
     impl_->timers.push_back({
         h,
         std::chrono::steady_clock::now() + delay,
         std::chrono::milliseconds{0},
         std::move(callback),
+        std::string(source_label),
         false,
     });
     return h;
 }
 
 CallbackHandle EventLoop::set_interval(std::chrono::milliseconds interval,
-                                       std::function<void()> callback) {
+                                       std::function<void()> callback,
+                                       std::string_view source_label) {
     auto h = impl_->next_handle();
     impl_->timers.push_back({
         h,
         std::chrono::steady_clock::now() + interval,
         interval,
         std::move(callback),
+        std::string(source_label),
         false,
     });
     return h;
@@ -168,12 +178,13 @@ void EventLoop::cancel(CallbackHandle handle) {
     }
 }
 
-CallbackHandle EventLoop::add_idle(std::function<void()> callback) {
+CallbackHandle EventLoop::add_idle(std::function<void()> callback, std::string_view source_label) {
     auto h = impl_->next_handle();
     impl_->idle_callbacks.push_back({
         h,
         std::chrono::steady_clock::now(),
         std::move(callback),
+        std::string(source_label),
         false,
     });
     return h;
@@ -199,7 +210,8 @@ bool EventLoop::poll() {
                            "event-loop-task",
                            started_at,
                            finished_at,
-                           "queued_ms=" + std::to_string(elapsed_ms(task.queued_at, started_at)));
+                           "queued_ms=" + std::to_string(elapsed_ms(task.queued_at, started_at)),
+                           task.source_label);
         did_work = true;
     }
 
@@ -218,7 +230,8 @@ bool EventLoop::poll() {
                                "event-loop-timer",
                                started_at,
                                finished_at,
-                               "lateness_ms=" + std::to_string(elapsed_ms(t.fire_at, started_at)));
+                               "lateness_ms=" + std::to_string(elapsed_ms(t.fire_at, started_at)),
+                               t.source_label);
             did_work = true;
             if (t.interval.count() > 0) {
                 t.fire_at = now + t.interval;
@@ -249,7 +262,8 @@ bool EventLoop::poll() {
                                started_at,
                                finished_at,
                                "queued_ms=" +
-                                   std::to_string(elapsed_ms(idle.queued_at, started_at)));
+                                   std::to_string(elapsed_ms(idle.queued_at, started_at)),
+                               idle.source_label);
             did_work = true;
         }
     }

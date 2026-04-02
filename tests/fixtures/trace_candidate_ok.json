@@ -1,0 +1,10 @@
+{
+  "format": "chrome-trace-event-array-v1",
+  "traceEvents": [
+    {"name": "posted-task", "cat": "event-loop-task", "ph": "X", "ts": 1000, "dur": 220, "pid": 1, "tid": 2, "args": {"detail": "queued_ms=0.10", "source_label": "baseline.task"}},
+    {"name": "timeout", "cat": "event-loop-timer", "ph": "X", "ts": 2000, "dur": 120, "pid": 1, "tid": 2, "args": {"detail": "lateness_ms=0.06", "source_label": "baseline.timeout"}},
+    {"name": "idle", "cat": "event-loop-idle", "ph": "X", "ts": 2500, "dur": 120, "pid": 1, "tid": 2, "args": {"detail": "queued_ms=0.00", "source_label": "baseline.idle"}},
+    {"name": "frame", "cat": "frame", "ph": "X", "ts": 3000, "dur": 15500, "pid": 1, "tid": 1},
+    {"name": "frame", "cat": "frame", "ph": "X", "ts": 20000, "dur": 17500, "pid": 1, "tid": 1}
+  ]
+}

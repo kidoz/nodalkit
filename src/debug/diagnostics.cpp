@@ -43,6 +43,145 @@ std::string escape_json_string(std::string_view value) {
     return escaped;
 }
 
+std::string_view frame_performance_marker_name(FramePerformanceMarker marker) {
+    switch (marker) {
+    case FramePerformanceMarker::WithinBudget:
+        return "within-budget";
+    case FramePerformanceMarker::OverBudget:
+        return "over-budget";
+    case FramePerformanceMarker::Slow:
+        return "slow";
+    case FramePerformanceMarker::VerySlow:
+        return "very-slow";
+    }
+    return "within-budget";
+}
+
+std::optional<FramePerformanceMarker> parse_frame_performance_marker_name(std::string_view value) {
+    if (value == "within-budget") {
+        return FramePerformanceMarker::WithinBudget;
+    }
+    if (value == "over-budget") {
+        return FramePerformanceMarker::OverBudget;
+    }
+    if (value == "slow") {
+        return FramePerformanceMarker::Slow;
+    }
+    if (value == "very-slow") {
+        return FramePerformanceMarker::VerySlow;
+    }
+    return std::nullopt;
+}
+
+std::optional<FrameRequestReason> parse_frame_request_reason_name(std::string_view value) {
+    if (value == "manual") {
+        return FrameRequestReason::Manual;
+    }
+    if (value == "present") {
+        return FrameRequestReason::Present;
+    }
+    if (value == "resize") {
+        return FrameRequestReason::Resize;
+    }
+    if (value == "expose") {
+        return FrameRequestReason::Expose;
+    }
+    if (value == "child-changed") {
+        return FrameRequestReason::ChildChanged;
+    }
+    if (value == "overlay-changed") {
+        return FrameRequestReason::OverlayChanged;
+    }
+    if (value == "layout-invalidation") {
+        return FrameRequestReason::LayoutInvalidation;
+    }
+    if (value == "widget-redraw") {
+        return FrameRequestReason::WidgetRedraw;
+    }
+    if (value == "widget-layout") {
+        return FrameRequestReason::WidgetLayout;
+    }
+    if (value == "debug-overlay") {
+        return FrameRequestReason::DebugOverlayChanged;
+    }
+    if (value == "debug-selection") {
+        return FrameRequestReason::DebugSelectionChanged;
+    }
+    if (value == "debug-picker") {
+        return FrameRequestReason::PickerChanged;
+    }
+    return std::nullopt;
+}
+
+std::optional<GpuPresentPath> parse_gpu_present_path_name(std::string_view value) {
+    if (value == "none") {
+        return GpuPresentPath::None;
+    }
+    if (value == "software-direct") {
+        return GpuPresentPath::SoftwareDirect;
+    }
+    if (value == "software-upload") {
+        return GpuPresentPath::SoftwareUpload;
+    }
+    if (value == "full-redraw-direct") {
+        return GpuPresentPath::FullRedrawDirect;
+    }
+    if (value == "full-redraw-copy-back") {
+        return GpuPresentPath::FullRedrawCopyBack;
+    }
+    if (value == "partial-redraw-copy") {
+        return GpuPresentPath::PartialRedrawCopy;
+    }
+    return std::nullopt;
+}
+
+std::optional<GpuPresentTradeoff> parse_gpu_present_tradeoff_name(std::string_view value) {
+    if (value == "none") {
+        return GpuPresentTradeoff::None;
+    }
+    if (value == "bandwidth-favored") {
+        return GpuPresentTradeoff::BandwidthFavored;
+    }
+    if (value == "draw-favored") {
+        return GpuPresentTradeoff::DrawFavored;
+    }
+    return std::nullopt;
+}
+
+double frame_budget_overrun_ms(double total_ms) {
+    return std::max(0.0, total_ms - frame_budget_ms());
+}
+
+Result<std::string> load_text_file(std::string_view path, std::string_view label) {
+    const auto file_path = std::filesystem::path(std::string(path));
+    std::ifstream in(file_path, std::ios::binary);
+    if (!in.is_open()) {
+        return Unexpected("failed to open " + std::string(label) + ": " + file_path.string());
+    }
+
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    if (!in.good() && !in.eof()) {
+        return Unexpected("failed to read " + std::string(label) + ": " + file_path.string());
+    }
+    return buffer.str();
+}
+
+Result<void>
+save_text_file(std::string_view path, std::string_view contents, std::string_view label) {
+    const auto file_path = std::filesystem::path(std::string(path));
+    std::ofstream out(file_path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return Unexpected("failed to create " + std::string(label) + ": " + file_path.string());
+    }
+
+    out << contents;
+    if (!out.good()) {
+        return Unexpected("failed to write " + std::string(label) + ": " + file_path.string());
+    }
+    return {};
+}
+
 void append_trace_event_header(std::ostringstream& out, bool& first_event) {
     if (!first_event) {
         out << ",\n";
@@ -139,6 +278,96 @@ void append_render_snapshot_file_json(std::ostringstream& out, const RenderSnaps
     out << "{\"format\":\"" << render_snapshot_artifact_format() << "\",\"root\":";
     append_render_snapshot_json(out, node);
     out << "}\n";
+}
+
+void append_size_json(std::ostringstream& out, Size size) {
+    out << "{\"width\":" << size.width << ",\"height\":" << size.height << "}";
+}
+
+void append_widget_hotspot_counters_json(std::ostringstream& out,
+                                         const WidgetHotspotCounters& counters) {
+    out << "{\"measure_count\":" << counters.measure_count
+        << ",\"allocate_count\":" << counters.allocate_count
+        << ",\"snapshot_count\":" << counters.snapshot_count
+        << ",\"text_measure_count\":" << counters.text_measure_count
+        << ",\"image_snapshot_count\":" << counters.image_snapshot_count
+        << ",\"model_sync_count\":" << counters.model_sync_count
+        << ",\"model_row_materialize_count\":" << counters.model_row_materialize_count
+        << ",\"model_row_reuse_count\":" << counters.model_row_reuse_count
+        << ",\"model_row_dispose_count\":" << counters.model_row_dispose_count << "}";
+}
+
+void append_render_hotspot_counters_json(std::ostringstream& out,
+                                         const RenderHotspotCounters& counters) {
+    out << "{\"text_node_count\":" << counters.text_node_count
+        << ",\"text_shape_count\":" << counters.text_shape_count
+        << ",\"text_shape_cache_hit_count\":" << counters.text_shape_cache_hit_count
+        << ",\"text_bitmap_pixel_count\":" << counters.text_bitmap_pixel_count
+        << ",\"text_texture_upload_count\":" << counters.text_texture_upload_count
+        << ",\"image_node_count\":" << counters.image_node_count
+        << ",\"image_source_pixel_count\":" << counters.image_source_pixel_count
+        << ",\"image_dest_pixel_count\":" << counters.image_dest_pixel_count
+        << ",\"image_texture_upload_count\":" << counters.image_texture_upload_count
+        << ",\"damage_region_count\":" << counters.damage_region_count
+        << ",\"gpu_draw_call_count\":" << counters.gpu_draw_call_count
+        << ",\"gpu_present_region_count\":" << counters.gpu_present_region_count
+        << ",\"gpu_swapchain_copy_count\":" << counters.gpu_swapchain_copy_count
+        << ",\"gpu_viewport_pixel_count\":" << counters.gpu_viewport_pixel_count
+        << ",\"gpu_estimated_draw_pixel_count\":" << counters.gpu_estimated_draw_pixel_count
+        << ",\"gpu_present_path\":\""
+        << escape_json_string(gpu_present_path_name(counters.gpu_present_path))
+        << "\",\"gpu_present_tradeoff\":\""
+        << escape_json_string(gpu_present_tradeoff_name(counters.gpu_present_tradeoff)) << "\"}";
+}
+
+void append_frame_request_reasons_json(std::ostringstream& out,
+                                       std::span<const FrameRequestReason> reasons) {
+    out << "[";
+    for (std::size_t index = 0; index < reasons.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << "\"" << escape_json_string(frame_request_reason_name(reasons[index])) << "\"";
+    }
+    out << "]";
+}
+
+void append_frame_diagnostics_json(std::ostringstream& out, const FrameDiagnostics& frame) {
+    out << "{\"frame_id\":" << frame.frame_id << ",\"logical_viewport\":";
+    append_size_json(out, frame.logical_viewport);
+    out << ",\"scale_factor\":" << frame.scale_factor
+        << ",\"had_layout\":" << (frame.had_layout ? "true" : "false")
+        << ",\"requested_at_ms\":" << frame.requested_at_ms
+        << ",\"started_at_ms\":" << frame.started_at_ms
+        << ",\"queue_delay_ms\":" << frame.queue_delay_ms
+        << ",\"widget_count\":" << frame.widget_count
+        << ",\"render_node_count\":" << frame.render_node_count
+        << ",\"dirty_widget_count\":" << frame.dirty_widget_count
+        << ",\"redraw_request_count\":" << frame.redraw_request_count
+        << ",\"layout_request_count\":" << frame.layout_request_count
+        << ",\"layout_ms\":" << frame.layout_ms << ",\"snapshot_ms\":" << frame.snapshot_ms
+        << ",\"render_ms\":" << frame.render_ms << ",\"present_ms\":" << frame.present_ms
+        << ",\"total_ms\":" << frame.total_ms << ",\"performance_marker\":\""
+        << escape_json_string(frame_performance_marker_name(frame.performance_marker))
+        << "\",\"budget_overrun_ms\":" << frame.budget_overrun_ms << ",\"widget_hotspot_totals\":";
+    append_widget_hotspot_counters_json(out, frame.widget_hotspot_totals);
+    out << ",\"render_hotspot_counters\":";
+    append_render_hotspot_counters_json(out, frame.render_hotspot_counters);
+    out << ",\"request_reasons\":";
+    append_frame_request_reasons_json(out, frame.request_reasons);
+    out << ",\"render_snapshot_node_count\":" << frame.render_snapshot_node_count << "}";
+}
+
+void append_frame_diagnostics_artifact_json(std::ostringstream& out,
+                                            std::span<const FrameDiagnostics> frames) {
+    out << "{\"format\":\"" << frame_diagnostics_artifact_format() << "\",\"frames\":[";
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        append_frame_diagnostics_json(out, frames[index]);
+    }
+    out << "]}\n";
 }
 
 class RenderSnapshotJsonParser {
@@ -690,6 +919,1162 @@ private:
     std::size_t index_ = 0;
 };
 
+class FrameDiagnosticsArtifactJsonParser {
+public:
+    explicit FrameDiagnosticsArtifactJsonParser(std::string_view input) : input_(input) {}
+
+    Result<FrameDiagnosticsArtifact> parse_document() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+
+        FrameDiagnosticsArtifact artifact;
+        std::string format;
+
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("frame diagnostics artifact is empty"));
+        }
+
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+
+            if (*key == "format") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                format = std::move(*value);
+            } else if (*key == "frames") {
+                auto frames = parse_frames();
+                if (!frames) {
+                    return Unexpected(frames.error());
+                }
+                artifact.frames = std::move(*frames);
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        skip_ws();
+        if (!eof()) {
+            return Unexpected(make_error("unexpected trailing data"));
+        }
+        if (!format.empty() && format != frame_diagnostics_artifact_format()) {
+            return Unexpected(
+                make_error("unsupported frame diagnostics artifact format \"" + format + "\""));
+        }
+        return artifact;
+    }
+
+private:
+    [[nodiscard]] bool eof() const noexcept { return index_ >= input_.size(); }
+
+    [[nodiscard]] std::string make_error(std::string_view message) const {
+        std::ostringstream out;
+        out << message << " at byte " << index_;
+        return out.str();
+    }
+
+    void skip_ws() {
+        while (!eof()) {
+            const char ch = input_[index_];
+            if (ch != ' ' && ch != '\n' && ch != '\r' && ch != '\t') {
+                break;
+            }
+            ++index_;
+        }
+    }
+
+    bool consume_if(char expected) {
+        skip_ws();
+        if (!eof() && input_[index_] == expected) {
+            ++index_;
+            return true;
+        }
+        return false;
+    }
+
+    Result<void> expect(char expected) {
+        skip_ws();
+        if (eof() || input_[index_] != expected) {
+            std::string message = "expected '";
+            message += expected;
+            message += "'";
+            return Unexpected(make_error(message));
+        }
+        ++index_;
+        return {};
+    }
+
+    Result<std::string> parse_string() {
+        skip_ws();
+        if (eof() || input_[index_] != '"') {
+            return Unexpected(make_error("expected string"));
+        }
+        ++index_;
+
+        std::string value;
+        while (!eof()) {
+            const char ch = input_[index_++];
+            if (ch == '"') {
+                return value;
+            }
+            if (ch == '\\') {
+                if (eof()) {
+                    return Unexpected(make_error("unterminated escape sequence"));
+                }
+                const char escaped = input_[index_++];
+                switch (escaped) {
+                case '"':
+                case '\\':
+                case '/':
+                    value += escaped;
+                    break;
+                case 'n':
+                    value += '\n';
+                    break;
+                case 'r':
+                    value += '\r';
+                    break;
+                case 't':
+                    value += '\t';
+                    break;
+                default:
+                    return Unexpected(make_error("unsupported escape sequence"));
+                }
+                continue;
+            }
+            value += ch;
+        }
+        return Unexpected(make_error("unterminated string"));
+    }
+
+    Result<double> parse_number() {
+        skip_ws();
+        const std::size_t start = index_;
+        while (!eof()) {
+            const char ch = input_[index_];
+            if ((ch >= '0' && ch <= '9') || ch == '-' || ch == '+' || ch == '.' || ch == 'e' ||
+                ch == 'E') {
+                ++index_;
+                continue;
+            }
+            break;
+        }
+
+        if (start == index_) {
+            return Unexpected(make_error("expected number"));
+        }
+
+        const std::string token(input_.substr(start, index_ - start));
+        char* end = nullptr;
+        errno = 0;
+        const double value = std::strtod(token.c_str(), &end);
+        if (end == nullptr || *end != '\0' || errno == ERANGE) {
+            return Unexpected(make_error("invalid number"));
+        }
+        return value;
+    }
+
+    Result<std::size_t> parse_size_t() {
+        auto value = parse_number();
+        if (!value) {
+            return Unexpected(value.error());
+        }
+        if (*value < 0.0 || std::floor(*value) != *value) {
+            return Unexpected(make_error("expected non-negative integer"));
+        }
+        return static_cast<std::size_t>(*value);
+    }
+
+    Result<bool> parse_bool() {
+        skip_ws();
+        if (input_.substr(index_, 4) == "true") {
+            index_ += 4;
+            return true;
+        }
+        if (input_.substr(index_, 5) == "false") {
+            index_ += 5;
+            return false;
+        }
+        return Unexpected(make_error("expected boolean"));
+    }
+
+    Result<void> consume_literal(std::string_view literal) {
+        skip_ws();
+        if (input_.substr(index_, literal.size()) != literal) {
+            return Unexpected(make_error("expected literal"));
+        }
+        index_ += literal.size();
+        return {};
+    }
+
+    Result<void> skip_value() {
+        skip_ws();
+        if (eof()) {
+            return Unexpected(make_error("unexpected end of input"));
+        }
+
+        const char ch = input_[index_];
+        if (ch == '"') {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            return {};
+        }
+        if (ch == '{') {
+            ++index_;
+            skip_ws();
+            if (consume_if('}')) {
+                return {};
+            }
+            while (true) {
+                auto key = parse_string();
+                if (!key) {
+                    return Unexpected(key.error());
+                }
+                auto colon = expect(':');
+                if (!colon) {
+                    return Unexpected(colon.error());
+                }
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if('}')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == '[') {
+            ++index_;
+            skip_ws();
+            if (consume_if(']')) {
+                return {};
+            }
+            while (true) {
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if(']')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == 't') {
+            return consume_literal("true");
+        }
+        if (ch == 'f') {
+            return consume_literal("false");
+        }
+        if (ch == 'n') {
+            return consume_literal("null");
+        }
+        auto number = parse_number();
+        if (!number) {
+            return Unexpected(number.error());
+        }
+        return {};
+    }
+
+    Result<Size> parse_size() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        Size size{};
+        bool has_width = false;
+        bool has_height = false;
+
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("size object is empty"));
+        }
+
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            if (*key == "width") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                size.width = static_cast<float>(*value);
+                has_width = true;
+            } else if (*key == "height") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                size.height = static_cast<float>(*value);
+                has_height = true;
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        if (!has_width || !has_height) {
+            return Unexpected(make_error("size object is missing required fields"));
+        }
+        return size;
+    }
+
+    Result<std::vector<FrameRequestReason>> parse_request_reasons() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        std::vector<FrameRequestReason> reasons;
+        skip_ws();
+        if (consume_if(']')) {
+            return reasons;
+        }
+        while (true) {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            if (const auto parsed = parse_frame_request_reason_name(*value); parsed.has_value()) {
+                reasons.push_back(*parsed);
+            }
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return reasons;
+    }
+
+    Result<WidgetHotspotCounters> parse_widget_hotspot_counters() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        WidgetHotspotCounters counters;
+        skip_ws();
+        if (consume_if('}')) {
+            return counters;
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            auto value = parse_size_t();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            if (*key == "measure_count") {
+                counters.measure_count = *value;
+            } else if (*key == "allocate_count") {
+                counters.allocate_count = *value;
+            } else if (*key == "snapshot_count") {
+                counters.snapshot_count = *value;
+            } else if (*key == "text_measure_count") {
+                counters.text_measure_count = *value;
+            } else if (*key == "image_snapshot_count") {
+                counters.image_snapshot_count = *value;
+            } else if (*key == "model_sync_count") {
+                counters.model_sync_count = *value;
+            } else if (*key == "model_row_materialize_count") {
+                counters.model_row_materialize_count = *value;
+            } else if (*key == "model_row_reuse_count") {
+                counters.model_row_reuse_count = *value;
+            } else if (*key == "model_row_dispose_count") {
+                counters.model_row_dispose_count = *value;
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return counters;
+    }
+
+    Result<RenderHotspotCounters> parse_render_hotspot_counters() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        RenderHotspotCounters counters;
+        skip_ws();
+        if (consume_if('}')) {
+            return counters;
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            if (*key == "gpu_present_path") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                if (const auto parsed = parse_gpu_present_path_name(*value); parsed.has_value()) {
+                    counters.gpu_present_path = *parsed;
+                }
+            } else if (*key == "gpu_present_tradeoff") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                if (const auto parsed = parse_gpu_present_tradeoff_name(*value);
+                    parsed.has_value()) {
+                    counters.gpu_present_tradeoff = *parsed;
+                }
+            } else {
+                auto value = parse_size_t();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                if (*key == "text_node_count") {
+                    counters.text_node_count = *value;
+                } else if (*key == "text_shape_count") {
+                    counters.text_shape_count = *value;
+                } else if (*key == "text_shape_cache_hit_count") {
+                    counters.text_shape_cache_hit_count = *value;
+                } else if (*key == "text_bitmap_pixel_count") {
+                    counters.text_bitmap_pixel_count = *value;
+                } else if (*key == "text_texture_upload_count") {
+                    counters.text_texture_upload_count = *value;
+                } else if (*key == "image_node_count") {
+                    counters.image_node_count = *value;
+                } else if (*key == "image_source_pixel_count") {
+                    counters.image_source_pixel_count = *value;
+                } else if (*key == "image_dest_pixel_count") {
+                    counters.image_dest_pixel_count = *value;
+                } else if (*key == "image_texture_upload_count") {
+                    counters.image_texture_upload_count = *value;
+                } else if (*key == "damage_region_count") {
+                    counters.damage_region_count = *value;
+                } else if (*key == "gpu_draw_call_count") {
+                    counters.gpu_draw_call_count = *value;
+                } else if (*key == "gpu_present_region_count") {
+                    counters.gpu_present_region_count = *value;
+                } else if (*key == "gpu_swapchain_copy_count") {
+                    counters.gpu_swapchain_copy_count = *value;
+                } else if (*key == "gpu_viewport_pixel_count") {
+                    counters.gpu_viewport_pixel_count = *value;
+                } else if (*key == "gpu_estimated_draw_pixel_count") {
+                    counters.gpu_estimated_draw_pixel_count = *value;
+                }
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return counters;
+    }
+
+    Result<FrameDiagnostics> parse_frame() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        FrameDiagnostics frame;
+        skip_ws();
+        if (consume_if('}')) {
+            return frame;
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            if (*key == "frame_id") {
+                auto value = parse_size_t();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.frame_id = static_cast<uint64_t>(*value);
+            } else if (*key == "logical_viewport") {
+                auto value = parse_size();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.logical_viewport = *value;
+            } else if (*key == "scale_factor") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.scale_factor = static_cast<float>(*value);
+            } else if (*key == "had_layout") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.had_layout = *value;
+            } else if (*key == "requested_at_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.requested_at_ms = *value;
+            } else if (*key == "started_at_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.started_at_ms = *value;
+            } else if (*key == "queue_delay_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.queue_delay_ms = *value;
+            } else if (*key == "layout_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.layout_ms = *value;
+            } else if (*key == "snapshot_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.snapshot_ms = *value;
+            } else if (*key == "render_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.render_ms = *value;
+            } else if (*key == "present_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.present_ms = *value;
+            } else if (*key == "total_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.total_ms = *value;
+            } else if (*key == "performance_marker") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                if (const auto parsed = parse_frame_performance_marker_name(*value);
+                    parsed.has_value()) {
+                    frame.performance_marker = *parsed;
+                }
+            } else if (*key == "budget_overrun_ms") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.budget_overrun_ms = *value;
+            } else if (*key == "widget_hotspot_totals") {
+                auto value = parse_widget_hotspot_counters();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.widget_hotspot_totals = *value;
+            } else if (*key == "render_hotspot_counters") {
+                auto value = parse_render_hotspot_counters();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.render_hotspot_counters = *value;
+            } else if (*key == "request_reasons") {
+                auto value = parse_request_reasons();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                frame.request_reasons = std::move(*value);
+            } else {
+                auto integer_target = [&](std::size_t& target) -> Result<void> {
+                    auto value = parse_size_t();
+                    if (!value) {
+                        return Unexpected(value.error());
+                    }
+                    target = *value;
+                    return {};
+                };
+                if (*key == "widget_count") {
+                    auto result = integer_target(frame.widget_count);
+                    if (!result) {
+                        return Unexpected(result.error());
+                    }
+                } else if (*key == "render_node_count") {
+                    auto result = integer_target(frame.render_node_count);
+                    if (!result) {
+                        return Unexpected(result.error());
+                    }
+                } else if (*key == "dirty_widget_count") {
+                    auto result = integer_target(frame.dirty_widget_count);
+                    if (!result) {
+                        return Unexpected(result.error());
+                    }
+                } else if (*key == "redraw_request_count") {
+                    auto result = integer_target(frame.redraw_request_count);
+                    if (!result) {
+                        return Unexpected(result.error());
+                    }
+                } else if (*key == "layout_request_count") {
+                    auto result = integer_target(frame.layout_request_count);
+                    if (!result) {
+                        return Unexpected(result.error());
+                    }
+                } else if (*key == "render_snapshot_node_count") {
+                    auto result = integer_target(frame.render_snapshot_node_count);
+                    if (!result) {
+                        return Unexpected(result.error());
+                    }
+                } else {
+                    auto skipped = skip_value();
+                    if (!skipped) {
+                        return Unexpected(skipped.error());
+                    }
+                }
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        if (frame.performance_marker == FramePerformanceMarker::WithinBudget &&
+            frame.total_ms > frame_budget_ms()) {
+            frame.performance_marker = classify_frame_time(frame.total_ms);
+        }
+        if (frame.budget_overrun_ms <= 0.0) {
+            frame.budget_overrun_ms = frame_budget_overrun_ms(frame.total_ms);
+        }
+        return frame;
+    }
+
+    Result<std::vector<FrameDiagnostics>> parse_frames() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        std::vector<FrameDiagnostics> frames;
+        skip_ws();
+        if (consume_if(']')) {
+            return frames;
+        }
+        while (true) {
+            auto frame = parse_frame();
+            if (!frame) {
+                return Unexpected(frame.error());
+            }
+            frames.push_back(std::move(*frame));
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return frames;
+    }
+
+    std::string_view input_;
+    std::size_t index_ = 0;
+};
+
+class TraceCaptureJsonParser {
+public:
+    explicit TraceCaptureJsonParser(std::string_view input) : input_(input) {}
+
+    Result<TraceCapture> parse_document() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        TraceCapture capture;
+        std::string format;
+
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("trace capture is empty"));
+        }
+
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            if (*key == "format") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                format = std::move(*value);
+            } else if (*key == "traceEvents") {
+                auto events = parse_trace_events();
+                if (!events) {
+                    return Unexpected(events.error());
+                }
+                capture.events = std::move(*events);
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        skip_ws();
+        if (!eof()) {
+            return Unexpected(make_error("unexpected trailing data"));
+        }
+        if (!format.empty() && format != frame_diagnostics_trace_export_format()) {
+            return Unexpected(make_error("unsupported trace capture format \"" + format + "\""));
+        }
+        return capture;
+    }
+
+private:
+    [[nodiscard]] bool eof() const noexcept { return index_ >= input_.size(); }
+
+    [[nodiscard]] std::string make_error(std::string_view message) const {
+        std::ostringstream out;
+        out << message << " at byte " << index_;
+        return out.str();
+    }
+
+    void skip_ws() {
+        while (!eof()) {
+            const char ch = input_[index_];
+            if (ch != ' ' && ch != '\n' && ch != '\r' && ch != '\t') {
+                break;
+            }
+            ++index_;
+        }
+    }
+
+    bool consume_if(char expected) {
+        skip_ws();
+        if (!eof() && input_[index_] == expected) {
+            ++index_;
+            return true;
+        }
+        return false;
+    }
+
+    Result<void> expect(char expected) {
+        skip_ws();
+        if (eof() || input_[index_] != expected) {
+            std::string message = "expected '";
+            message += expected;
+            message += "'";
+            return Unexpected(make_error(message));
+        }
+        ++index_;
+        return {};
+    }
+
+    Result<std::string> parse_string() {
+        skip_ws();
+        if (eof() || input_[index_] != '"') {
+            return Unexpected(make_error("expected string"));
+        }
+        ++index_;
+        std::string value;
+        while (!eof()) {
+            const char ch = input_[index_++];
+            if (ch == '"') {
+                return value;
+            }
+            if (ch == '\\') {
+                if (eof()) {
+                    return Unexpected(make_error("unterminated escape sequence"));
+                }
+                const char escaped = input_[index_++];
+                switch (escaped) {
+                case '"':
+                case '\\':
+                case '/':
+                    value += escaped;
+                    break;
+                case 'n':
+                    value += '\n';
+                    break;
+                case 'r':
+                    value += '\r';
+                    break;
+                case 't':
+                    value += '\t';
+                    break;
+                default:
+                    return Unexpected(make_error("unsupported escape sequence"));
+                }
+                continue;
+            }
+            value += ch;
+        }
+        return Unexpected(make_error("unterminated string"));
+    }
+
+    Result<double> parse_number() {
+        skip_ws();
+        const std::size_t start = index_;
+        while (!eof()) {
+            const char ch = input_[index_];
+            if ((ch >= '0' && ch <= '9') || ch == '-' || ch == '+' || ch == '.' || ch == 'e' ||
+                ch == 'E') {
+                ++index_;
+                continue;
+            }
+            break;
+        }
+        if (start == index_) {
+            return Unexpected(make_error("expected number"));
+        }
+        const std::string token(input_.substr(start, index_ - start));
+        char* end = nullptr;
+        errno = 0;
+        const double value = std::strtod(token.c_str(), &end);
+        if (end == nullptr || *end != '\0' || errno == ERANGE) {
+            return Unexpected(make_error("invalid number"));
+        }
+        return value;
+    }
+
+    Result<void> consume_literal(std::string_view literal) {
+        skip_ws();
+        if (input_.substr(index_, literal.size()) != literal) {
+            return Unexpected(make_error("expected literal"));
+        }
+        index_ += literal.size();
+        return {};
+    }
+
+    Result<void> skip_value() {
+        skip_ws();
+        if (eof()) {
+            return Unexpected(make_error("unexpected end of input"));
+        }
+        const char ch = input_[index_];
+        if (ch == '"') {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            return {};
+        }
+        if (ch == '{') {
+            ++index_;
+            skip_ws();
+            if (consume_if('}')) {
+                return {};
+            }
+            while (true) {
+                auto key = parse_string();
+                if (!key) {
+                    return Unexpected(key.error());
+                }
+                auto colon = expect(':');
+                if (!colon) {
+                    return Unexpected(colon.error());
+                }
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if('}')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == '[') {
+            ++index_;
+            skip_ws();
+            if (consume_if(']')) {
+                return {};
+            }
+            while (true) {
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if(']')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == 't') {
+            return consume_literal("true");
+        }
+        if (ch == 'f') {
+            return consume_literal("false");
+        }
+        if (ch == 'n') {
+            return consume_literal("null");
+        }
+        auto number = parse_number();
+        if (!number) {
+            return Unexpected(number.error());
+        }
+        return {};
+    }
+
+    Result<TraceEvent> parse_trace_event() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        TraceEvent event;
+        skip_ws();
+        if (consume_if('}')) {
+            return event;
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            if (*key == "name") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                event.name = std::move(*value);
+            } else if (*key == "cat") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                event.category = std::move(*value);
+            } else if (*key == "ts") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                event.timestamp_ms = *value / 1000.0;
+            } else if (*key == "dur") {
+                auto value = parse_number();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                event.duration_ms = *value / 1000.0;
+            } else if (*key == "args") {
+                auto value = parse_trace_args();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                if (!value->first.empty()) {
+                    event.detail = std::move(value->first);
+                }
+                if (!value->second.empty()) {
+                    event.source_label = std::move(value->second);
+                }
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return event;
+    }
+
+    Result<std::pair<std::string, std::string>> parse_trace_args() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        std::pair<std::string, std::string> result;
+        skip_ws();
+        if (consume_if('}')) {
+            return result;
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            if (*key == "detail") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                result.first = std::move(*value);
+            } else if (*key == "source_label") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                result.second = std::move(*value);
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return result;
+    }
+
+    Result<std::vector<TraceEvent>> parse_trace_events() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        std::vector<TraceEvent> events;
+        skip_ws();
+        if (consume_if(']')) {
+            return events;
+        }
+        while (true) {
+            auto event = parse_trace_event();
+            if (!event) {
+                return Unexpected(event.error());
+            }
+            events.push_back(std::move(*event));
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return events;
+    }
+
+    std::string_view input_;
+    std::size_t index_ = 0;
+};
+
 std::string render_node_kind_name(RenderNodeKind kind) {
     switch (kind) {
     case RenderNodeKind::Container:
@@ -859,6 +2244,40 @@ bool has_frame_request_reason(const FrameDiagnostics& frame, FrameRequestReason 
            frame.request_reasons.end();
 }
 
+FramePerformanceMarker classify_frame_time(double total_ms) noexcept {
+    if (total_ms <= frame_budget_ms()) {
+        return FramePerformanceMarker::WithinBudget;
+    }
+    if (total_ms <= 33.34) {
+        return FramePerformanceMarker::OverBudget;
+    }
+    if (total_ms <= 66.68) {
+        return FramePerformanceMarker::Slow;
+    }
+    return FramePerformanceMarker::VerySlow;
+}
+
+FrameTimeHistogram build_frame_time_histogram(std::span<const FrameDiagnostics> frames) noexcept {
+    FrameTimeHistogram histogram;
+    for (const auto& frame : frames) {
+        switch (classify_frame_time(frame.total_ms)) {
+        case FramePerformanceMarker::WithinBudget:
+            ++histogram.within_budget_count;
+            break;
+        case FramePerformanceMarker::OverBudget:
+            ++histogram.over_budget_count;
+            break;
+        case FramePerformanceMarker::Slow:
+            ++histogram.slow_count;
+            break;
+        case FramePerformanceMarker::VerySlow:
+            ++histogram.very_slow_count;
+            break;
+        }
+    }
+    return histogram;
+}
+
 std::size_t count_render_snapshot_nodes(const RenderSnapshotNode& root) noexcept {
     std::size_t count = 1;
     for (const auto& child : root.children) {
@@ -907,25 +2326,42 @@ Result<RenderSnapshotNode> load_render_snapshot_json_file(std::string_view path)
 }
 
 Result<void> save_render_snapshot_json_file(const RenderSnapshotNode& root, std::string_view path) {
-    const auto file_path = std::filesystem::path(std::string(path));
-    std::ofstream out(file_path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) {
-        return Unexpected("failed to create render snapshot file: " + file_path.string());
-    }
-
     std::ostringstream buffer;
     append_render_snapshot_file_json(buffer, root);
-    out << buffer.str();
-    if (!out.good()) {
-        return Unexpected("failed to write render snapshot file: " + file_path.string());
+    return save_text_file(path, buffer.str(), "render snapshot file");
+}
+
+std::string format_frame_diagnostics_artifact_json(std::span<const FrameDiagnostics> frames) {
+    std::ostringstream out;
+    append_frame_diagnostics_artifact_json(out, frames);
+    return out.str();
+}
+
+Result<FrameDiagnosticsArtifact> parse_frame_diagnostics_artifact_json(std::string_view json) {
+    FrameDiagnosticsArtifactJsonParser parser(json);
+    return parser.parse_document();
+}
+
+Result<FrameDiagnosticsArtifact> load_frame_diagnostics_artifact_json_file(std::string_view path) {
+    auto contents = load_text_file(path, "frame diagnostics artifact");
+    if (!contents) {
+        return Unexpected(contents.error());
     }
-    return {};
+    return parse_frame_diagnostics_artifact_json(*contents);
+}
+
+Result<void> save_frame_diagnostics_artifact_json_file(const FrameDiagnosticsArtifact& artifact,
+                                                       std::string_view path) {
+    return save_text_file(path,
+                          format_frame_diagnostics_artifact_json(artifact.frames),
+                          "frame diagnostics artifact");
 }
 
 std::string format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics> frames,
                                                 std::span<const TraceEvent> extra_events) {
     std::ostringstream out;
-    out << "{\n  \"traceEvents\": [\n";
+    out << "{\n  \"format\": \"" << frame_diagnostics_trace_export_format()
+        << "\",\n  \"traceEvents\": [\n";
     bool first_event = true;
 
     for (const auto& event : extra_events) {
@@ -935,8 +2371,20 @@ std::string format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics
             << static_cast<long long>(std::llround(event.timestamp_ms * 1000.0))
             << ",\"dur\":" << static_cast<long long>(std::llround(event.duration_ms * 1000.0))
             << ",\"pid\":1,\"tid\":2";
-        if (!event.detail.empty()) {
-            out << ",\"args\":{\"detail\":\"" << escape_json_string(event.detail) << "\"}";
+        if (!event.detail.empty() || !event.source_label.empty()) {
+            out << ",\"args\":{";
+            bool first_arg = true;
+            if (!event.detail.empty()) {
+                out << "\"detail\":\"" << escape_json_string(event.detail) << "\"";
+                first_arg = false;
+            }
+            if (!event.source_label.empty()) {
+                if (!first_arg) {
+                    out << ",";
+                }
+                out << "\"source_label\":\"" << escape_json_string(event.source_label) << "\"";
+            }
+            out << "}";
         }
         out << "}";
     }
@@ -998,6 +2446,53 @@ std::string format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics
 
     out << "\n  ]\n}\n";
     return out.str();
+}
+
+Result<TraceCapture> parse_frame_diagnostics_trace_json(std::string_view json) {
+    TraceCaptureJsonParser parser(json);
+    return parser.parse_document();
+}
+
+Result<TraceCapture> load_frame_diagnostics_trace_json_file(std::string_view path) {
+    auto contents = load_text_file(path, "frame diagnostics trace");
+    if (!contents) {
+        return Unexpected(contents.error());
+    }
+    return parse_frame_diagnostics_trace_json(*contents);
+}
+
+Result<void> save_frame_diagnostics_trace_json_file(const TraceCapture& capture,
+                                                    std::string_view path) {
+    std::ostringstream out;
+    out << "{\n  \"format\": \"" << frame_diagnostics_trace_export_format()
+        << "\",\n  \"traceEvents\": [\n";
+    bool first_event = true;
+    for (const auto& event : capture.events) {
+        append_trace_event_header(out, first_event);
+        out << "    {\"name\":\"" << escape_json_string(event.name) << "\",\"cat\":\""
+            << escape_json_string(event.category) << "\",\"ph\":\"X\",\"ts\":"
+            << static_cast<long long>(std::llround(event.timestamp_ms * 1000.0))
+            << ",\"dur\":" << static_cast<long long>(std::llround(event.duration_ms * 1000.0))
+            << ",\"pid\":1,\"tid\":2";
+        if (!event.detail.empty() || !event.source_label.empty()) {
+            out << ",\"args\":{";
+            bool first_arg = true;
+            if (!event.detail.empty()) {
+                out << "\"detail\":\"" << escape_json_string(event.detail) << "\"";
+                first_arg = false;
+            }
+            if (!event.source_label.empty()) {
+                if (!first_arg) {
+                    out << ",";
+                }
+                out << "\"source_label\":\"" << escape_json_string(event.source_label) << "\"";
+            }
+            out << "}";
+        }
+        out << "}";
+    }
+    out << "\n  ]\n}\n";
+    return save_text_file(path, out.str(), "frame diagnostics trace");
 }
 
 RenderSnapshotNode build_render_snapshot(const RenderNode& root) {

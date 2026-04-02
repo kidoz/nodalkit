@@ -9,6 +9,7 @@
 #include <memory>
 #include <nk/debug/diagnostics.h>
 #include <span>
+#include <string_view>
 
 namespace nk {
 
@@ -36,21 +37,24 @@ public:
     void quit(int exit_code = 0);
 
     /// Post a task to be executed on the next iteration of the loop.
-    void post(std::function<void()> task);
+    void post(std::function<void()> task, std::string_view source_label = {});
 
     /// Schedule a one-shot timer.
     [[nodiscard]] CallbackHandle set_timeout(std::chrono::milliseconds delay,
-                                             std::function<void()> callback);
+                                             std::function<void()> callback,
+                                             std::string_view source_label = {});
 
     /// Schedule a repeating timer.
     [[nodiscard]] CallbackHandle set_interval(std::chrono::milliseconds interval,
-                                              std::function<void()> callback);
+                                              std::function<void()> callback,
+                                              std::string_view source_label = {});
 
     /// Cancel a previously scheduled timer or idle callback.
     void cancel(CallbackHandle handle);
 
     /// Schedule a callback to run when the loop is idle.
-    [[nodiscard]] CallbackHandle add_idle(std::function<void()> callback);
+    [[nodiscard]] CallbackHandle add_idle(std::function<void()> callback,
+                                          std::string_view source_label = {});
 
     /// Process pending events without blocking. Returns true if events
     /// were processed.
