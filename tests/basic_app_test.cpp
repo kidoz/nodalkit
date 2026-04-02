@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <nk/controllers/event_controller.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/layout/box_layout.h>
@@ -27,6 +28,7 @@
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/text_field.h>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -286,9 +288,9 @@ TEST_CASE("Window exposes the active renderer backend", "[app][render]") {
     window.present();
     REQUIRE(app.event_loop().poll());
 
-    const auto support =
-        window.native_surface() != nullptr ? window.native_surface()->renderer_backend_support()
-                                           : nk::RendererBackendSupport{};
+    const auto support = window.native_surface() != nullptr
+                             ? window.native_surface()->renderer_backend_support()
+                             : nk::RendererBackendSupport{};
     const auto expected_backend =
         nk::renderer_backend_supported(support, nk::RendererBackend::Metal) &&
                 nk::renderer_backend_available(nk::RendererBackend::Metal)
@@ -453,8 +455,7 @@ TEST_CASE("Linux Vulkan mixed-content frames upload image and text textures", "[
 #endif
 }
 
-TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
-          "[app][render]") {
+TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage", "[app][render]") {
 #if defined(__linux__)
     const char* previous = std::getenv("NK_RENDERER_BACKEND");
     std::string previous_value = previous != nullptr ? previous : "";
@@ -689,9 +690,10 @@ TEST_CASE("Window menu popups trigger a full-frame repaint beyond the menu bar b
     auto menu_bar = nk::MenuBar::create();
     menu_bar->add_menu({
         .title = "File",
-        .items = {
-            nk::MenuItem::action("Popup Action", "app.popup.action"),
-        },
+        .items =
+            {
+                nk::MenuItem::action("Popup Action", "app.popup.action"),
+            },
     });
     root->append(menu_bar);
     root->append(nk::Label::create("Body"));
@@ -721,8 +723,7 @@ TEST_CASE("Window menu popups trigger a full-frame repaint beyond the menu bar b
     const auto& frame = history.back();
     REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetLayout));
     REQUIRE(frame.had_layout);
-    REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") !=
-            std::string::npos);
+    REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") != std::string::npos);
 #if defined(__linux__)
     REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
 #endif
@@ -1015,6 +1016,78 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE_FALSE(selected_render.kind.empty());
     REQUIRE(selected_render.children.size() < selected_snapshot.children.size());
 
+    const auto selected_frame_summary = window.dump_selected_frame_summary();
+    REQUIRE(selected_frame_summary.find("Frame ") != std::string::npos);
+    REQUIRE(selected_frame_summary.find("render nodes:") != std::string::npos);
+
+    const auto selected_render_details = window.dump_selected_render_node_details();
+    REQUIRE(selected_render_details.find("render node:") != std::string::npos);
+    REQUIRE(selected_render_details.find(selected_render.kind) != std::string::npos);
+
+    const auto selected_widget_details = window.dump_selected_widget_details();
+    REQUIRE(selected_widget_details.find("trace-label") != std::string::npos);
+    REQUIRE(selected_widget_details.find("measure ") != std::string::npos);
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::W,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(app.clipboard_text().find("trace-label") != std::string::npos);
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::R,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(app.clipboard_text().find("render node:") != std::string::npos);
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::F,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(app.clipboard_text().find("Frame ") != std::string::npos);
+
+    const auto widget_details_path =
+        std::filesystem::temp_directory_path() / "nodalkit_widget_details.txt";
+    REQUIRE(window.save_selected_widget_details_file(widget_details_path.string()));
+    {
+        std::ifstream widget_in(widget_details_path);
+        REQUIRE(widget_in.is_open());
+        std::stringstream widget_buffer;
+        widget_buffer << widget_in.rdbuf();
+        REQUIRE(widget_buffer.str().find("trace-label") != std::string::npos);
+    }
+    std::error_code remove_widget_details_error;
+    std::filesystem::remove(widget_details_path, remove_widget_details_error);
+
+    const auto render_details_path =
+        std::filesystem::temp_directory_path() / "nodalkit_render_details.txt";
+    REQUIRE(window.save_selected_render_node_details_file(render_details_path.string()));
+    {
+        std::ifstream render_in(render_details_path);
+        REQUIRE(render_in.is_open());
+        std::stringstream render_buffer;
+        render_buffer << render_in.rdbuf();
+        REQUIRE(render_buffer.str().find("render node:") != std::string::npos);
+    }
+    std::error_code remove_render_details_error;
+    std::filesystem::remove(render_details_path, remove_render_details_error);
+
+    const auto frame_summary_path =
+        std::filesystem::temp_directory_path() / "nodalkit_frame_summary.txt";
+    REQUIRE(window.save_selected_frame_summary_file(frame_summary_path.string()));
+    {
+        std::ifstream frame_in(frame_summary_path);
+        REQUIRE(frame_in.is_open());
+        std::stringstream frame_buffer;
+        frame_buffer << frame_in.rdbuf();
+        REQUIRE(frame_buffer.str().find("Frame ") != std::string::npos);
+    }
+    std::error_code remove_frame_summary_error;
+    std::filesystem::remove(frame_summary_path, remove_frame_summary_error);
+
     window.set_debug_selected_widget(nullptr);
     bool found_provenance_selected_render = false;
     for (int step = 0; step < 8; ++step) {
@@ -1076,7 +1149,20 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
         });
     }
 
-    const auto selected_runtime_events = window.debug_selected_frame_runtime_events();
+    auto selected_runtime_events = window.debug_selected_frame_runtime_events();
+    for (int step = 0;
+         selected_runtime_events.empty() ||
+         !std::any_of(selected_runtime_events.begin(),
+                      selected_runtime_events.end(),
+                      [](const nk::TraceEvent& event) { return event.name == "posted-task"; });
+         ++step) {
+        REQUIRE(step < 8);
+        window.dispatch_key_event({
+            .type = nk::KeyEvent::Type::Press,
+            .key = nk::KeyCode::Left,
+        });
+        selected_runtime_events = window.debug_selected_frame_runtime_events();
+    }
     REQUIRE_FALSE(selected_runtime_events.empty());
     REQUIRE(std::any_of(selected_runtime_events.begin(),
                         selected_runtime_events.end(),
