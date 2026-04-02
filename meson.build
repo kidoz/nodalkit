@@ -201,3 +201,4 @@ pkgconfig.generate(
 
 subdir('examples')
 subdir('tests')
+subdir('tools')
