@@ -52,7 +52,7 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
-    void clear_visible_items();
+    [[nodiscard]] std::size_t clear_visible_items();
     void sync_visible_items();
 
     struct Impl;

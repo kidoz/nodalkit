@@ -123,7 +123,7 @@ ListView::ListView() : impl_(std::make_unique<Impl>()) {
 ListView::~ListView() = default;
 
 void ListView::set_model(std::shared_ptr<AbstractListModel> model) {
-    clear_visible_items();
+    (void)clear_visible_items();
     impl_->model = std::move(model);
     impl_->rows_inserted.disconnect();
     impl_->rows_removed.disconnect();
@@ -131,7 +131,7 @@ void ListView::set_model(std::shared_ptr<AbstractListModel> model) {
     impl_->model_reset.disconnect();
     if (impl_->model) {
         auto refresh = [this] {
-            clear_visible_items();
+            (void)clear_visible_items();
             queue_layout();
             queue_redraw();
         };
@@ -173,7 +173,7 @@ SelectionModel* ListView::selection_model() const {
 
 void ListView::set_item_factory(ItemFactory factory) {
     impl_->factory = std::move(factory);
-    clear_visible_items();
+    (void)clear_visible_items();
     queue_layout();
     queue_redraw();
 }
@@ -414,26 +414,29 @@ void ListView::snapshot(SnapshotContext& ctx) const {
     }
 }
 
-void ListView::clear_visible_items() {
+std::size_t ListView::clear_visible_items() {
+    std::size_t disposed = 0;
     for (auto& [row, widget] : impl_->visible_items) {
         (void)row;
         if (widget) {
             remove_child(*widget);
+            ++disposed;
         }
     }
     impl_->visible_items.clear();
+    return disposed;
 }
 
 void ListView::sync_visible_items() {
     if (!impl_->factory || !impl_->model) {
-        clear_visible_items();
+        note_model_view_sync_for_diagnostics(0, 0, clear_visible_items());
         return;
     }
 
     const auto inner = list_inner_rect(*this);
     if (inner.width <= 0.0F || inner.height <= 0.0F || impl_->row_height <= 0.0F ||
         impl_->model->row_count() == 0) {
-        clear_visible_items();
+        note_model_view_sync_for_diagnostics(0, 0, clear_visible_items());
         return;
     }
 
@@ -455,6 +458,9 @@ void ListView::sync_visible_items() {
 
     std::vector<std::pair<std::size_t, std::shared_ptr<Widget>>> next_visible_items;
     next_visible_items.reserve(last_row - first_row + 1);
+    std::size_t materialized_rows = 0;
+    std::size_t reused_rows = 0;
+    std::size_t disposed_rows = 0;
 
     for (std::size_t row = first_row; row <= last_row; ++row) {
         std::shared_ptr<Widget> row_widget;
@@ -463,10 +469,14 @@ void ListView::sync_visible_items() {
                                      [row](const auto& entry) { return entry.first == row; });
         if (existing != impl_->visible_items.end()) {
             row_widget = existing->second;
+            if (row_widget) {
+                ++reused_rows;
+            }
         } else {
             row_widget = impl_->factory(row);
             if (row_widget) {
                 append_child(row_widget);
+                ++materialized_rows;
             }
         }
 
@@ -489,10 +499,12 @@ void ListView::sync_visible_items() {
                                           [row](const auto& entry) { return entry.first == row; });
         if (still_visible == next_visible_items.end() && widget) {
             remove_child(*widget);
+            ++disposed_rows;
         }
     }
 
     impl_->visible_items = std::move(next_visible_items);
+    note_model_view_sync_for_diagnostics(materialized_rows, reused_rows, disposed_rows);
 }
 
 } // namespace nk
