@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <filesystem>
 #include <nk/controllers/event_controller.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/layout/box_layout.h>
@@ -19,6 +20,7 @@
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/dialog.h>
+#include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
@@ -27,6 +29,10 @@
 #include <string>
 
 namespace {
+
+std::filesystem::path test_fixture_path(std::string_view relative) {
+    return std::filesystem::path(__FILE__).parent_path() / "fixtures" / relative;
+}
 
 class FixedWidget : public nk::Widget {
 public:
@@ -663,6 +669,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 
     auto root = TestContainer::create();
     root->set_debug_name("trace-root");
+    root->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical));
     auto child = nk::Label::create("Trace");
     child->set_debug_name("trace-label");
     root->append(child);
@@ -698,6 +705,10 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(snapshot_json.find("trace-label") != std::string::npos);
 
     window.set_debug_selected_widget(child.get());
+    const auto selected_widget_info = window.debug_selected_widget_info();
+    REQUIRE(selected_widget_info.hotspot_counters.measure_count >= 1);
+    REQUIRE(selected_widget_info.hotspot_counters.allocate_count >= 1);
+    REQUIRE(selected_widget_info.hotspot_counters.snapshot_count >= 1);
     const auto widget_selected_render = window.debug_selected_render_node();
     REQUIRE(widget_selected_render.kind == "Text");
     REQUIRE(widget_selected_render.source_widget_label == "trace-label");
@@ -735,14 +746,19 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(found_provenance_selected_render);
     REQUIRE(window.debug_selected_widget() == child.get());
 
-    bool posted_ran = false;
+    bool frame_requested_from_post = false;
+    app.event_loop().post([&] {
+        frame_requested_from_post = true;
+        child->queue_redraw();
+    });
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(frame_requested_from_post);
+
     bool timeout_ran = false;
     bool idle_ran = false;
-    app.event_loop().post([&] { posted_ran = true; });
     (void)app.event_loop().set_timeout(std::chrono::milliseconds{0}, [&] { timeout_ran = true; });
     (void)app.event_loop().add_idle([&] { idle_ran = true; });
     REQUIRE(app.event_loop().poll());
-    REQUIRE(posted_ran);
     REQUIRE(timeout_ran);
     REQUIRE(app.event_loop().poll());
     REQUIRE(idle_ran);
@@ -759,12 +775,165 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
                         runtime_trace.end(),
                         [](const nk::TraceEvent& event) { return event.name == "idle"; }));
 
+    const auto updated_history = window.debug_frame_history();
+    const auto redraw_frame_it = std::find_if(
+        updated_history.rbegin(), updated_history.rend(), [](const nk::FrameDiagnostics& frame) {
+            return nk::has_frame_request_reason(frame, nk::FrameRequestReason::WidgetRedraw);
+        });
+    REQUIRE(redraw_frame_it != updated_history.rend());
+    const auto redraw_index =
+        static_cast<std::size_t>(std::distance(redraw_frame_it, updated_history.rend()) - 1);
+    const auto latest_index = updated_history.size() - 1;
+    for (std::size_t step = latest_index; step > redraw_index; --step) {
+        window.dispatch_key_event({
+            .type = nk::KeyEvent::Type::Press,
+            .key = nk::KeyCode::Left,
+        });
+    }
+
+    const auto selected_runtime_events = window.debug_selected_frame_runtime_events();
+    REQUIRE_FALSE(selected_runtime_events.empty());
+    REQUIRE(std::any_of(selected_runtime_events.begin(),
+                        selected_runtime_events.end(),
+                        [](const nk::TraceEvent& event) { return event.name == "posted-task"; }));
+    REQUIRE(std::any_of(selected_runtime_events.begin(),
+                        selected_runtime_events.end(),
+                        [](const nk::TraceEvent& event) { return event.name == "idle"; }));
+
     const auto trace = window.dump_frame_trace_json();
     REQUIRE(trace.find("\"traceEvents\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"widget-redraw\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"layout\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"frame\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"posted-task\"") != std::string::npos);
+}
+
+TEST_CASE("Render snapshots support fixture import and file round-trip", "[app][debug]") {
+    const auto fixture_path = test_fixture_path("render_snapshot_fixture.json");
+    const auto fixture_snapshot = nk::load_render_snapshot_json_file(fixture_path.string());
+    REQUIRE(fixture_snapshot);
+    REQUIRE(fixture_snapshot->kind == "Container");
+    REQUIRE(fixture_snapshot->source_widget_label == "fixture-window");
+    REQUIRE(fixture_snapshot->children.size() == 1);
+    REQUIRE(fixture_snapshot->children.front().kind == "Text");
+    REQUIRE(fixture_snapshot->children.front().source_widget_path ==
+            std::vector<std::size_t>{0, 0});
+
+    const auto fixture_dump = nk::format_render_snapshot_tree(*fixture_snapshot);
+    REQUIRE(fixture_dump.find("fixture-label") != std::string::npos);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Snapshot", .width = 240, .height = 120});
+
+    auto root = TestContainer::create();
+    root->set_debug_name("snapshot-root");
+    auto label = nk::Label::create("Snapshot");
+    label->set_debug_name("snapshot-label");
+    root->append(label);
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    const auto selected_snapshot = window.debug_selected_frame_render_snapshot();
+    REQUIRE(selected_snapshot.kind == "Container");
+    REQUIRE(selected_snapshot != *fixture_snapshot);
+
+    const auto parsed_dump =
+        nk::parse_render_snapshot_json(window.dump_selected_frame_render_snapshot_json());
+    REQUIRE(parsed_dump);
+    REQUIRE(*parsed_dump == selected_snapshot);
+
+    const auto temp_path =
+        std::filesystem::temp_directory_path() / "nodalkit_render_snapshot_roundtrip.json";
+    const auto save_result =
+        nk::save_render_snapshot_json_file(selected_snapshot, temp_path.string());
+    REQUIRE(save_result);
+
+    const auto loaded_roundtrip = nk::load_render_snapshot_json_file(temp_path.string());
+    REQUIRE(loaded_roundtrip);
+    REQUIRE(*loaded_roundtrip == selected_snapshot);
+    REQUIRE(nk::count_render_snapshot_nodes(*loaded_roundtrip) ==
+            nk::count_render_snapshot_nodes(selected_snapshot));
+
+    std::error_code remove_error;
+    std::filesystem::remove(temp_path, remove_error);
+}
+
+TEST_CASE("Frame diagnostics capture text, image, and model-view hotspot counters",
+          "[app][debug][perf]") {
+    static constexpr std::array<uint32_t, 16> kPixels = {
+        0xFF0C6B68,
+        0xFF149E98,
+        0xFF2AB7AF,
+        0xFF77D3CC,
+        0xFF1E3D7B,
+        0xFF3359AA,
+        0xFF567BD1,
+        0xFF8BAAF0,
+        0xFF6A167C,
+        0xFF8F229F,
+        0xFFB34DC1,
+        0xFFD08ADF,
+        0xFF2A3947,
+        0xFF526579,
+        0xFF7E93A9,
+        0xFFB8C5D3,
+    };
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Hotspots", .width = 360, .height = 320});
+
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    layout->set_spacing(8.0F);
+    root->set_layout_manager(std::move(layout));
+
+    auto label = nk::Label::create("Hotspot text");
+    label->set_debug_name("hotspot-label");
+
+    auto image = nk::ImageView::create();
+    image->set_debug_name("hotspot-image");
+    image->update_pixel_buffer(kPixels.data(), 4, 4);
+
+    auto model = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"});
+    auto list_view = nk::ListView::create();
+    list_view->set_debug_name("hotspot-list");
+    list_view->set_model(model);
+    list_view->set_item_factory(
+        [model](std::size_t row) { return nk::Label::create(model->display_text(row)); });
+
+    root->append(label);
+    root->append(image);
+    root->append(list_view);
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    const auto first_frame = window.last_frame_diagnostics();
+    REQUIRE(first_frame.widget_hotspot_totals.text_measure_count >= 1);
+    REQUIRE(first_frame.widget_hotspot_totals.image_snapshot_count >= 1);
+    REQUIRE(first_frame.widget_hotspot_totals.model_sync_count >= 1);
+    REQUIRE(first_frame.widget_hotspot_totals.model_row_materialize_count >= 1);
+    REQUIRE(first_frame.render_hotspot_counters.text_node_count >= 1);
+    REQUIRE(first_frame.render_hotspot_counters.text_shape_count >= 1);
+    REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
+    REQUIRE(first_frame.render_hotspot_counters.image_source_pixel_count >= 16);
+
+    window.set_debug_selected_widget(list_view.get());
+    const auto selected_list = window.debug_selected_widget_info();
+    REQUIRE(selected_list.hotspot_counters.model_sync_count >= 1);
+    REQUIRE(selected_list.hotspot_counters.model_row_materialize_count >= 1);
+
+    window.request_frame();
+    REQUIRE(app.event_loop().poll());
+
+    const auto second_frame = window.last_frame_diagnostics();
+    REQUIRE(second_frame.render_hotspot_counters.text_node_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.text_shape_cache_hit_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.image_node_count >= 1);
 }
 
 TEST_CASE("Window debug picker selects widgets and honors inspector shortcuts", "[app][debug]") {
