@@ -18,6 +18,10 @@ namespace nk {
 std::unique_ptr<Renderer> create_metal_renderer();
 #endif
 
+#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+std::unique_ptr<Renderer> create_vulkan_renderer();
+#endif
+
 namespace {
 
 struct ClipRegion {
@@ -219,7 +223,11 @@ bool renderer_backend_available(RendererBackend backend) noexcept {
         return false;
 #endif
     case RendererBackend::OpenGL:
+        return false;
     case RendererBackend::Vulkan:
+        // Keep Vulkan out of automatic selection until swapchain presentation
+        // is finished. The experimental backend is available via
+        // NK_RENDERER_BACKEND=vulkan.
         return false;
     }
     return false;
@@ -232,6 +240,10 @@ bool Renderer::attach_surface(NativeSurface& surface) {
 
 void Renderer::set_text_shaper(TextShaper* shaper) {
     (void)shaper;
+}
+
+void Renderer::set_damage_regions(std::span<const Rect> regions) {
+    (void)regions;
 }
 
 RenderHotspotCounters Renderer::last_hotspot_counters() const {
@@ -574,8 +586,13 @@ std::unique_ptr<Renderer> create_renderer(RendererBackend backend) {
         return nullptr;
 #endif
     case RendererBackend::OpenGL:
-    case RendererBackend::Vulkan:
         return nullptr;
+    case RendererBackend::Vulkan:
+#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+        return create_vulkan_renderer();
+#else
+        return nullptr;
+#endif
     }
     return nullptr;
 }

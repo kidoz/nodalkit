@@ -7,6 +7,7 @@
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/types.h>
 #include <string_view>
+#include <span>
 
 namespace nk {
 
@@ -51,6 +52,10 @@ public:
 
     /// Set the text shaper used for text rendering.
     virtual void set_text_shaper(TextShaper* shaper);
+
+    /// Provide optional damage regions for the current frame. Backends may
+    /// ignore this and redraw the full scene.
+    virtual void set_damage_regions(std::span<const Rect> regions);
 
     /// Begin a frame for the given logical viewport and device scale.
     virtual void begin_frame(Size viewport, float scale_factor) = 0;
