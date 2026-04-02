@@ -16,6 +16,7 @@
 #include <nk/model/selection_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
+#include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/button.h>
@@ -295,6 +296,73 @@ TEST_CASE("Window exposes the active renderer backend", "[app][render]") {
             (window.renderer_backend() != nk::RendererBackend::Software));
 }
 
+TEST_CASE("Window honors a renderer backend override from the environment", "[app][render]") {
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "software", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Renderer override", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Renderer override"));
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Software);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+}
+
+TEST_CASE("Linux Wayland surfaces expose Vulkan interop handles", "[app][render]") {
+#if defined(__linux__)
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Wayland Vulkan interop", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Wayland Vulkan interop"));
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    auto* surface = window.native_surface();
+    REQUIRE(surface != nullptr);
+    const auto support = surface->renderer_backend_support();
+    REQUIRE(support.software);
+    REQUIRE(support.vulkan);
+    REQUIRE(surface->native_handle() != nullptr);
+    REQUIRE(surface->native_display_handle() != nullptr);
+#else
+    SUCCEED("Wayland Vulkan interop handles are Linux-specific");
+#endif
+}
+
+TEST_CASE("Linux can opt into the Vulkan renderer backend experimentally", "[app][render]") {
+#if defined(__linux__)
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "vulkan", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan renderer override", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Vulkan renderer override"));
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+#else
+    SUCCEED("Experimental Vulkan override is Linux-specific");
+#endif
+}
+
 TEST_CASE("Window presents clipped primitive content on the active renderer backend",
           "[app][render]") {
     nk::Application app(0, nullptr);
@@ -334,6 +402,153 @@ TEST_CASE("Window repeatedly presents mixed text and image content on the active
     REQUIRE(app.event_loop().poll());
 
     REQUIRE_FALSE(nk::renderer_backend_name(window.renderer_backend()).empty());
+}
+
+TEST_CASE("Linux Vulkan mixed-content frames upload image and text textures", "[app][render]") {
+#if defined(__linux__)
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "vulkan", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan mixed renderer", .width = 300, .height = 220});
+    auto widget = MixedGpuWidget::create(220.0F, 150.0F);
+    window.set_child(widget);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
+
+    const auto first_frame = window.last_frame_diagnostics();
+    REQUIRE(first_frame.render_hotspot_counters.text_node_count >= 1);
+    REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
+    REQUIRE(first_frame.render_hotspot_counters.text_texture_upload_count >= 1);
+    REQUIRE(first_frame.render_hotspot_counters.image_texture_upload_count >= 1);
+
+    window.request_frame();
+    REQUIRE(app.event_loop().poll());
+
+    const auto second_frame = window.last_frame_diagnostics();
+    REQUIRE(second_frame.render_hotspot_counters.text_node_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.image_node_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.text_shape_cache_hit_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.text_texture_upload_count == 0);
+    REQUIRE(second_frame.render_hotspot_counters.image_texture_upload_count == 0);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+#else
+    SUCCEED("Vulkan mixed-content path is Linux-specific");
+#endif
+}
+
+TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
+          "[app][render]") {
+#if defined(__linux__)
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "vulkan", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan partial redraw", .width = 420, .height = 220});
+
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal);
+    layout->set_spacing(24.0F);
+    root->set_layout_manager(std::move(layout));
+
+    auto left = PrimitiveClipWidget::create(160.0F, 120.0F);
+    auto right = PrimitiveClipWidget::create(160.0F, 120.0F);
+    root->append(left);
+    root->append(right);
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
+
+    const auto first_frame = window.last_frame_diagnostics();
+    REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 6);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_swapchain_copy_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::FullRedrawDirect);
+
+    left->queue_redraw();
+    REQUIRE(app.event_loop().poll());
+
+    const auto second_frame = window.last_frame_diagnostics();
+    REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count <
+            first_frame.render_hotspot_counters.gpu_draw_call_count);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count <=
+            second_frame.render_hotspot_counters.damage_region_count);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_swapchain_copy_count <= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::PartialRedrawCopy);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+#else
+    SUCCEED("Vulkan partial redraw is Linux-specific");
+#endif
+}
+
+TEST_CASE("Linux Vulkan adapts large full redraws to copy-back scene preservation",
+          "[app][render]") {
+#if defined(__linux__)
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "vulkan", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan full redraw strategy", .width = 520, .height = 180});
+
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal);
+    layout->set_spacing(12.0F);
+    root->set_layout_manager(std::move(layout));
+
+    root->append(PrimitiveClipWidget::create(120.0F, 120.0F));
+    root->append(PrimitiveClipWidget::create(120.0F, 120.0F));
+    root->append(PrimitiveClipWidget::create(120.0F, 120.0F));
+    root->append(PrimitiveClipWidget::create(120.0F, 120.0F));
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
+
+    const auto frame = window.last_frame_diagnostics();
+    REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
+    REQUIRE(frame.render_hotspot_counters.gpu_draw_call_count >= 12);
+    REQUIRE(frame.render_hotspot_counters.gpu_draw_call_count < 24);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::FullRedrawCopyBack);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+#else
+    SUCCEED("Adaptive Vulkan full redraw strategy is Linux-specific");
+#endif
 }
 
 TEST_CASE("Window close requests are notification-only and hide the window", "[app]") {
@@ -806,6 +1021,8 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(trace.find("\"name\":\"layout\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"frame\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"posted-task\"") != std::string::npos);
+    REQUIRE(trace.find("\"present_path\":\"") != std::string::npos);
+    REQUIRE(trace.find("\"gpu_draw_pixels\":") != std::string::npos);
 }
 
 TEST_CASE("Render snapshots support fixture import and file round-trip", "[app][debug]") {
