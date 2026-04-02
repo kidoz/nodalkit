@@ -24,7 +24,7 @@ void main() {
     vec2 pixel = pc.rect.xy + (pc.rect.zw * unit);
     vec2 ndc;
     ndc.x = (pixel.x / pc.viewport.x) * 2.0 - 1.0;
-    ndc.y = 1.0 - ((pixel.y / pc.viewport.y) * 2.0);
+    ndc.y = (pixel.y / pc.viewport.y) * 2.0 - 1.0;
 
     gl_Position = vec4(ndc, 0.0, 1.0);
     v_tex_coord = unit;
