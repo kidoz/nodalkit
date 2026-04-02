@@ -1,0 +1,19 @@
+# Build directories
+builddir/
+build/
+
+# Meson subprojects (downloaded dependencies)
+subprojects/Catch2-*/
+subprojects/packagecache/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Images (screenshots, etc.)
+*.png
