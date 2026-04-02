@@ -225,10 +225,11 @@ bool renderer_backend_available(RendererBackend backend) noexcept {
     case RendererBackend::OpenGL:
         return false;
     case RendererBackend::Vulkan:
-        // Keep Vulkan out of automatic selection until swapchain presentation
-        // is finished. The experimental backend is available via
-        // NK_RENDERER_BACKEND=vulkan.
+#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+        return true;
+#else
         return false;
+#endif
     }
     return false;
 }

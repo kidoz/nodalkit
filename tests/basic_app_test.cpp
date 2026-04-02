@@ -286,10 +286,17 @@ TEST_CASE("Window exposes the active renderer backend", "[app][render]") {
     window.present();
     REQUIRE(app.event_loop().poll());
 
-    const auto expected_backend = (window.native_surface() != nullptr &&
-                                   nk::renderer_backend_available(nk::RendererBackend::Metal))
-                                      ? nk::RendererBackend::Metal
-                                      : nk::RendererBackend::Software;
+    const auto support =
+        window.native_surface() != nullptr ? window.native_surface()->renderer_backend_support()
+                                           : nk::RendererBackendSupport{};
+    const auto expected_backend =
+        nk::renderer_backend_supported(support, nk::RendererBackend::Metal) &&
+                nk::renderer_backend_available(nk::RendererBackend::Metal)
+            ? nk::RendererBackend::Metal
+        : nk::renderer_backend_supported(support, nk::RendererBackend::Vulkan) &&
+                nk::renderer_backend_available(nk::RendererBackend::Vulkan)
+            ? nk::RendererBackend::Vulkan
+            : nk::RendererBackend::Software;
     REQUIRE(window.renderer_backend() == expected_backend);
     REQUIRE_FALSE(nk::renderer_backend_name(window.renderer_backend()).empty());
     REQUIRE(nk::renderer_backend_is_gpu(window.renderer_backend()) ==
