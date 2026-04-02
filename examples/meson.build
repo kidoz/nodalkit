@@ -9,6 +9,11 @@ executable('counter',
 )
 
 executable('showcase',
-    'showcase.cpp',
+    [
+        'showcase/main.cpp',
+        'showcase/showcase_app.cpp',
+        'showcase/showcase_pattern.cpp',
+        'showcase/showcase_profile.cpp',
+    ],
     dependencies : nk_dep,
 )
