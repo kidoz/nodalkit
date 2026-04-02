@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <nk/controllers/event_controller.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/logging.h>
@@ -71,6 +72,39 @@ struct Window::Impl {
 
 namespace {
 
+std::optional<RendererBackend> parse_renderer_backend_override(std::string_view value) {
+    if (value == "software") {
+        return RendererBackend::Software;
+    }
+    if (value == "metal") {
+        return RendererBackend::Metal;
+    }
+    if (value == "opengl" || value == "open_gl" || value == "gl") {
+        return RendererBackend::OpenGL;
+    }
+    if (value == "vulkan" || value == "vk") {
+        return RendererBackend::Vulkan;
+    }
+    return std::nullopt;
+}
+
+std::optional<RendererBackend> renderer_backend_override_from_environment() {
+    const char* env = std::getenv("NK_RENDERER_BACKEND");
+    if (env == nullptr || *env == '\0') {
+        return std::nullopt;
+    }
+
+    const auto requested = parse_renderer_backend_override(env);
+    if (!requested.has_value()) {
+        NK_LOG_WARN("Window",
+                    "Ignoring unknown NK_RENDERER_BACKEND override; expected software, metal, "
+                    "opengl, or vulkan");
+        return std::nullopt;
+    }
+
+    return requested;
+}
+
 struct InspectorEntry {
     Widget* widget = nullptr;
     std::size_t depth = 0;
@@ -83,6 +117,85 @@ struct RenderInspectorEntry {
     std::vector<std::size_t> path;
     std::string label;
 };
+
+[[nodiscard]] bool rect_is_empty(Rect rect) {
+    return rect.width <= 0.0F || rect.height <= 0.0F;
+}
+
+[[nodiscard]] Rect intersect_rect(Rect lhs, Rect rhs) {
+    const float x0 = std::max(lhs.x, rhs.x);
+    const float y0 = std::max(lhs.y, rhs.y);
+    const float x1 = std::min(lhs.right(), rhs.right());
+    const float y1 = std::min(lhs.bottom(), rhs.bottom());
+    return {
+        x0,
+        y0,
+        std::max(0.0F, x1 - x0),
+        std::max(0.0F, y1 - y0),
+    };
+}
+
+[[nodiscard]] bool rects_overlap_or_touch(Rect lhs, Rect rhs) {
+    return lhs.x <= rhs.right() && lhs.right() >= rhs.x && lhs.y <= rhs.bottom() &&
+           lhs.bottom() >= rhs.y;
+}
+
+[[nodiscard]] Rect union_rect(Rect lhs, Rect rhs) {
+    const float x0 = std::min(lhs.x, rhs.x);
+    const float y0 = std::min(lhs.y, rhs.y);
+    const float x1 = std::max(lhs.right(), rhs.right());
+    const float y1 = std::max(lhs.bottom(), rhs.bottom());
+    return {
+        x0,
+        y0,
+        std::max(0.0F, x1 - x0),
+        std::max(0.0F, y1 - y0),
+    };
+}
+
+[[nodiscard]] std::vector<Rect> collect_damage_regions(std::span<Widget* const> widgets,
+                                                       Size viewport) {
+    const Rect viewport_rect{0.0F, 0.0F, viewport.width, viewport.height};
+    std::vector<Rect> merged;
+    merged.reserve(widgets.size());
+
+    for (auto* widget : widgets) {
+        if (widget == nullptr || !widget->is_visible()) {
+            continue;
+        }
+
+        Rect damage = intersect_rect(widget->allocation(), viewport_rect);
+        if (rect_is_empty(damage)) {
+            continue;
+        }
+
+        bool merged_existing = false;
+        for (auto& existing : merged) {
+            if (rects_overlap_or_touch(existing, damage)) {
+                existing = union_rect(existing, damage);
+                merged_existing = true;
+                break;
+            }
+        }
+
+        if (!merged_existing) {
+            merged.push_back(damage);
+        }
+    }
+
+    for (std::size_t outer = 0; outer < merged.size(); ++outer) {
+        for (std::size_t inner = outer + 1; inner < merged.size();) {
+            if (rects_overlap_or_touch(merged[outer], merged[inner])) {
+                merged[outer] = union_rect(merged[outer], merged[inner]);
+                merged.erase(merged.begin() + static_cast<std::ptrdiff_t>(inner));
+            } else {
+                ++inner;
+            }
+        }
+    }
+
+    return merged;
+}
 
 struct InspectorPanelLayout {
     Rect panel{};
@@ -104,6 +217,23 @@ constexpr std::size_t kDebugFrameHistoryLimit = 48;
 RendererBackend select_renderer_backend(const NativeSurface* surface) {
     const auto support =
         surface != nullptr ? surface->renderer_backend_support() : RendererBackendSupport{};
+    if (const auto override_backend = renderer_backend_override_from_environment();
+        override_backend.has_value()) {
+        const auto backend = *override_backend;
+        if (!renderer_backend_supported(support, backend)) {
+            NK_LOG_WARN("Window",
+                        "Requested renderer backend is not supported by the active surface; "
+                        "falling back to automatic selection");
+        } else {
+            if (!renderer_backend_available(backend)) {
+                NK_LOG_WARN("Window",
+                            "Requested renderer backend bypasses normal availability checks; "
+                            "treating it as an experimental override");
+            }
+            return backend;
+        }
+    }
+
     constexpr RendererBackend preferred_backends[] = {
         RendererBackend::Metal,
         RendererBackend::Vulkan,
@@ -664,6 +794,14 @@ void append_frame_hud_lines(std::vector<std::string>& lines, const FrameDiagnost
                  << frame.layout_request_count << "  layout pass "
                  << (frame.had_layout ? "yes" : "no");
     lines.push_back(invalidation.str());
+
+    if (frame.render_hotspot_counters.gpu_present_path != GpuPresentPath::None) {
+        std::ostringstream gpu_line;
+        gpu_line << "gpu " << gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path)
+                 << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count
+                 << "  px " << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count;
+        lines.push_back(gpu_line.str());
+    }
 }
 
 void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagnostics& frame) {
@@ -712,6 +850,18 @@ void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagn
                    << frame.widget_hotspot_totals.model_row_reuse_count << "  drop "
                    << frame.widget_hotspot_totals.model_row_dispose_count;
         lines.push_back(model_line.str());
+    }
+
+    if (frame.render_hotspot_counters.gpu_present_path != GpuPresentPath::None) {
+        std::ostringstream gpu_line;
+        gpu_line << "gpu present: "
+                 << gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path)
+                 << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count
+                 << "  regions " << frame.render_hotspot_counters.gpu_present_region_count
+                 << "  copies " << frame.render_hotspot_counters.gpu_swapchain_copy_count
+                 << "  draw px "
+                 << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count;
+        lines.push_back(gpu_line.str());
     }
 }
 
@@ -1177,7 +1327,7 @@ void Window::request_frame(FrameRequestReason reason) {
                                                         ? impl_->last_frame_diagnostics
                                                         : impl_->frame_history.back();
                 append_frame_hud_lines(lines, hud_frame);
-                const Rect hud_rect{12.0F, 12.0F, 316.0F, 92.0F};
+                const Rect hud_rect{12.0F, 12.0F, 316.0F, 110.0F};
                 snap_ctx.add_rounded_rect(hud_rect, Color{0.10F, 0.12F, 0.15F, 0.80F}, 10.0F);
                 snap_ctx.add_border(hud_rect, Color{0.82F, 0.85F, 0.90F, 0.40F}, 1.0F, 10.0F);
                 FontDescriptor font{
@@ -1443,6 +1593,11 @@ void Window::request_frame(FrameRequestReason reason) {
             frame.render_snapshot_node_count = count_render_snapshot_nodes(frame.render_snapshot);
         }
 
+        const auto damage_regions =
+            (!frame.had_layout && !impl_->dirty_widgets.empty())
+                ? collect_damage_regions(impl_->dirty_widgets, sz)
+                : std::vector<Rect>{};
+
         // 3. Render pass.
         const auto render_start = Clock::now();
         if (impl_->renderer == nullptr) {
@@ -1456,6 +1611,7 @@ void Window::request_frame(FrameRequestReason reason) {
             return;
         }
         impl_->renderer->begin_frame(sz, scale_factor);
+        impl_->renderer->set_damage_regions(damage_regions);
         if (root_node) {
             impl_->renderer->render(*root_node);
         }
@@ -1467,6 +1623,7 @@ void Window::request_frame(FrameRequestReason reason) {
         const auto present_start = Clock::now();
         if (impl_->surface && impl_->renderer != nullptr) {
             impl_->renderer->present(*impl_->surface);
+            frame.render_hotspot_counters = impl_->renderer->last_hotspot_counters();
         }
         frame.present_ms = elapsed_ms(present_start, Clock::now());
         frame.total_ms = elapsed_ms(frame_start, Clock::now());
