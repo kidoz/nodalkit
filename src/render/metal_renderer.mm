@@ -203,6 +203,17 @@ float normalize_scale_factor(float scale_factor) {
     return std::isfinite(scale_factor) && scale_factor > 0.0F ? scale_factor : 1.0F;
 }
 
+std::size_t scaled_pixel_area(Rect rect, float scale_factor) {
+    if (rect.width <= 0.0F || rect.height <= 0.0F) {
+        return 0;
+    }
+    const auto width = std::max(
+        1, static_cast<int>(std::lround(rect.width * normalize_scale_factor(scale_factor))));
+    const auto height = std::max(
+        1, static_cast<int>(std::lround(rect.height * normalize_scale_factor(scale_factor))));
+    return static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+}
+
 Rect scale_rect(Rect rect, float scale_factor) {
     return {
         rect.x * scale_factor,
@@ -600,9 +611,11 @@ public:
         trim_texture_cache(image_texture_cache_, kImageTextureCacheMaxEntries);
         trim_texture_cache(text_texture_cache_, kTextTextureCacheMaxEntries);
         needs_software_fallback_ = false;
+        last_hotspot_counters_ = {};
     }
 
     void render(const RenderNode& root) override {
+        last_hotspot_counters_ = {};
         draw_commands_.clear();
         primitive_commands_.clear();
         image_commands_.clear();
@@ -612,6 +625,7 @@ public:
             needs_software_fallback_ = true;
             software_->begin_frame(logical_viewport_, scale_factor_);
             software_->render(root);
+            last_hotspot_counters_ = software_->last_hotspot_counters();
         }
     }
 
@@ -795,6 +809,10 @@ public:
         [command_buffer commit];
     }
 
+    [[nodiscard]] RenderHotspotCounters last_hotspot_counters() const override {
+        return last_hotspot_counters_;
+    }
+
 private:
     template <typename Map> void trim_texture_cache(Map& cache, std::size_t max_entries) {
         for (auto it = cache.begin(); it != cache.end();) {
@@ -868,6 +886,7 @@ private:
                    mipmapLevel:0
                      withBytes:image_upload_buffer_.data()
                    bytesPerRow:static_cast<NSUInteger>(command.src_width * 4)];
+        ++last_hotspot_counters_.image_texture_upload_count;
         image_texture_cache_[cache_key] = {.texture = texture, .last_used_frame = frame_serial_};
         return texture;
     }
@@ -914,6 +933,7 @@ private:
                    mipmapLevel:0
                      withBytes:command.shaped_text->bitmap_data()
                    bytesPerRow:static_cast<NSUInteger>(command.shaped_text->bitmap_width() * 4)];
+        ++last_hotspot_counters_.text_texture_upload_count;
         text_texture_cache_[cache_key] = {.texture = texture, .last_used_frame = frame_serial_};
         return texture;
     }
@@ -940,6 +960,7 @@ private:
         };
 
         if (auto it = shaped_text_cache_.find(key); it != shaped_text_cache_.end()) {
+            ++last_hotspot_counters_.text_shape_cache_hit_count;
             return it->second;
         }
 
@@ -950,6 +971,7 @@ private:
         auto shaped =
             std::make_shared<ShapedText>(text_shaper_->shape(text_node.text(), font, color));
         shaped_text_cache_[key] = shaped;
+        ++last_hotspot_counters_.text_shape_count;
         return shaped;
     }
 
@@ -1037,6 +1059,13 @@ private:
                 return true;
             }
 
+            ++last_hotspot_counters_.image_node_count;
+            last_hotspot_counters_.image_source_pixel_count +=
+                static_cast<std::size_t>(image_node.src_width()) *
+                static_cast<std::size_t>(image_node.src_height());
+            last_hotspot_counters_.image_dest_pixel_count +=
+                scaled_pixel_area(image_node.bounds(), scale_factor_);
+
             ImageCommand command{
                 .rect = image_node.bounds(),
                 .pixel_data = image_node.pixel_data(),
@@ -1053,11 +1082,16 @@ private:
         }
         case RenderNodeKind::Text: {
             const auto& text_node = static_cast<const TextNode&>(node);
+            ++last_hotspot_counters_.text_node_count;
             auto shaped_text = shape_text_node(text_node);
             if (shaped_text == nullptr || shaped_text->bitmap_data() == nullptr ||
                 shaped_text->bitmap_width() <= 0 || shaped_text->bitmap_height() <= 0) {
                 return true;
             }
+
+            last_hotspot_counters_.text_bitmap_pixel_count +=
+                static_cast<std::size_t>(shaped_text->bitmap_width()) *
+                static_cast<std::size_t>(shaped_text->bitmap_height());
 
             TextCommand command{
                 .rect = {text_node.bounds().x,
@@ -1106,6 +1140,7 @@ private:
     float scale_factor_ = 1.0F;
     uint64_t frame_serial_ = 0;
     bool needs_software_fallback_ = false;
+    RenderHotspotCounters last_hotspot_counters_{};
 };
 
 std::unique_ptr<Renderer> create_metal_renderer() {

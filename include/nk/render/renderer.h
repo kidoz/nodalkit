@@ -4,6 +4,7 @@
 /// @brief Abstract renderer backend.
 
 #include <memory>
+#include <nk/debug/diagnostics.h>
 #include <nk/foundation/types.h>
 #include <string_view>
 
@@ -63,6 +64,9 @@ public:
     /// Present the frame through the attached platform surface.
     virtual void present(NativeSurface& surface) = 0;
 
+    /// Renderer-side hotspot counters captured for the most recently rendered frame.
+    [[nodiscard]] virtual RenderHotspotCounters last_hotspot_counters() const;
+
 protected:
     Renderer();
 };
@@ -80,6 +84,7 @@ public:
     void render(const RenderNode& root) override;
     void end_frame() override;
     void present(NativeSurface& surface) override;
+    [[nodiscard]] RenderHotspotCounters last_hotspot_counters() const override;
 
     /// Set the text shaper used for rendering TextNode.
     void set_text_shaper(TextShaper* shaper) override;

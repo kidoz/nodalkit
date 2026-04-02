@@ -53,6 +53,15 @@ int scaled_extent(float logical_extent, float scale_factor) {
     return std::max(1, static_cast<int>(std::lround(logical_extent * scale_factor)));
 }
 
+std::size_t scaled_pixel_area(Rect rect, float scale_factor) {
+    const auto width = scaled_extent(rect.width, scale_factor);
+    const auto height = scaled_extent(rect.height, scale_factor);
+    if (width <= 0 || height <= 0) {
+        return 0;
+    }
+    return static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+}
+
 float clamp01(float value) {
     return std::clamp(value, 0.0F, 1.0F);
 }
@@ -225,6 +234,10 @@ void Renderer::set_text_shaper(TextShaper* shaper) {
     (void)shaper;
 }
 
+RenderHotspotCounters Renderer::last_hotspot_counters() const {
+    return {};
+}
+
 // --- SoftwareRenderer ---
 
 struct SoftwareRenderer::Impl {
@@ -235,6 +248,7 @@ struct SoftwareRenderer::Impl {
     std::vector<uint8_t> pixels; // RGBA8
     TextShaper* text_shaper = nullptr;
     std::unordered_map<TextKey, std::shared_ptr<ShapedText>, TextKeyHash> shaped_text_cache;
+    RenderHotspotCounters last_hotspot_counters;
 };
 
 SoftwareRenderer::SoftwareRenderer() : impl_(std::make_unique<Impl>()) {}
@@ -255,6 +269,7 @@ void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
     impl_->scale_factor = normalize_scale_factor(scale_factor);
     impl_->width = scaled_extent(viewport.width, impl_->scale_factor);
     impl_->height = scaled_extent(viewport.height, impl_->scale_factor);
+    impl_->last_hotspot_counters = {};
     const auto size = static_cast<std::size_t>(impl_->width * impl_->height * 4);
     impl_->pixels.resize(size);
     // Clear to white.
@@ -376,6 +391,7 @@ void SoftwareRenderer::render(const RenderNode& root) {
         }
 
         if (node.kind() == RenderNodeKind::Text) {
+            ++impl_->last_hotspot_counters.text_node_count;
             const auto& text_node = static_cast<const TextNode&>(node);
             if (impl_->text_shaper && !text_node.text().empty()) {
                 auto font = text_node.font();
@@ -396,6 +412,7 @@ void SoftwareRenderer::render(const RenderNode& root) {
                 auto it = impl_->shaped_text_cache.find(key);
                 if (it != impl_->shaped_text_cache.end()) {
                     shaped_ptr = it->second;
+                    ++impl_->last_hotspot_counters.text_shape_cache_hit_count;
                 } else {
                     if (impl_->shaped_text_cache.size() >= 1024) {
                         impl_->shaped_text_cache.clear();
@@ -403,12 +420,15 @@ void SoftwareRenderer::render(const RenderNode& root) {
                     auto s = impl_->text_shaper->shape(text_node.text(), font, color);
                     shaped_ptr = std::make_shared<ShapedText>(std::move(s));
                     impl_->shaped_text_cache[key] = shaped_ptr;
+                    ++impl_->last_hotspot_counters.text_shape_count;
                 }
 
                 const auto* bmp = shaped_ptr->bitmap_data();
                 int bw = shaped_ptr->bitmap_width();
                 int bh = shaped_ptr->bitmap_height();
                 if (bmp && bw > 0 && bh > 0) {
+                    impl_->last_hotspot_counters.text_bitmap_pixel_count +=
+                        static_cast<std::size_t>(bw) * static_cast<std::size_t>(bh);
                     const auto origin =
                         scale_point(text_node.bounds().origin(), impl_->scale_factor);
                     int dx0 = std::max(c_x0, static_cast<int>(std::floor(origin.x)));
@@ -460,6 +480,11 @@ void SoftwareRenderer::render(const RenderNode& root) {
             const int src_h = image_node.src_height();
 
             if (src && src_w > 0 && src_h > 0) {
+                ++impl_->last_hotspot_counters.image_node_count;
+                impl_->last_hotspot_counters.image_source_pixel_count +=
+                    static_cast<std::size_t>(src_w) * static_cast<std::size_t>(src_h);
+                impl_->last_hotspot_counters.image_dest_pixel_count +=
+                    scaled_pixel_area(image_node.bounds(), impl_->scale_factor);
                 const int dest_x = std::max(c_x0, static_cast<int>(std::floor(b.x)));
                 const int dest_y = std::max(c_y0, static_cast<int>(std::floor(b.y)));
                 const int dest_r = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
@@ -516,6 +541,10 @@ void SoftwareRenderer::end_frame() {
 
 void SoftwareRenderer::present(NativeSurface& surface) {
     surface.present(pixel_data(), pixel_width(), pixel_height());
+}
+
+RenderHotspotCounters SoftwareRenderer::last_hotspot_counters() const {
+    return impl_->last_hotspot_counters;
 }
 
 void SoftwareRenderer::set_text_shaper(TextShaper* shaper) {
