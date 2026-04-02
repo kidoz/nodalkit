@@ -170,6 +170,18 @@ struct WidgetDebugNode {
     std::vector<WidgetDebugNode> children;
 };
 
+[[nodiscard]] constexpr std::string_view render_snapshot_artifact_format() noexcept {
+    return "nk-render-snapshot-v1";
+}
+
+[[nodiscard]] constexpr std::string_view frame_diagnostics_artifact_format() noexcept {
+    return "nk-frame-diagnostics-v1";
+}
+
+[[nodiscard]] constexpr std::string_view frame_diagnostics_trace_export_format() noexcept {
+    return "chrome-trace-event-array-v1";
+}
+
 [[nodiscard]] std::string_view frame_request_reason_name(FrameRequestReason reason) noexcept;
 [[nodiscard]] std::string_view gpu_present_path_name(GpuPresentPath path) noexcept;
 [[nodiscard]] std::string_view gpu_present_tradeoff_name(GpuPresentTradeoff tradeoff) noexcept;

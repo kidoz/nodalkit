@@ -136,7 +136,7 @@ void append_render_snapshot_json(std::ostringstream& out, const RenderSnapshotNo
 }
 
 void append_render_snapshot_file_json(std::ostringstream& out, const RenderSnapshotNode& node) {
-    out << "{\"format\":\"nk-render-snapshot-v1\",\"root\":";
+    out << "{\"format\":\"" << render_snapshot_artifact_format() << "\",\"root\":";
     append_render_snapshot_json(out, node);
     out << "}\n";
 }
@@ -209,7 +209,7 @@ public:
         }
 
         if (wrapped_root.has_value()) {
-            if (!format.empty() && format != "nk-render-snapshot-v1") {
+            if (!format.empty() && format != render_snapshot_artifact_format()) {
                 return Unexpected(
                     make_error("unsupported render snapshot format \"" + format + "\""));
             }
@@ -959,21 +959,17 @@ std::string format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics
         out << "    {\"name\":\"frame\",\"cat\":\"frame\",\"ph\":\"X\",\"ts\":" << started_ts_us
             << ",\"dur\":" << static_cast<long long>(std::llround(frame.total_ms * 1000.0))
             << ",\"pid\":1,\"tid\":1,\"args\":{\"frame\":" << frame.frame_id
-            << ",\"queue_delay_ms\":" << frame.queue_delay_ms
-            << ",\"present_path\":\""
-            << escape_json_string(gpu_present_path_name(
-                   frame.render_hotspot_counters.gpu_present_path))
+            << ",\"queue_delay_ms\":" << frame.queue_delay_ms << ",\"present_path\":\""
+            << escape_json_string(
+                   gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path))
             << "\",\"present_tradeoff\":\""
-            << escape_json_string(gpu_present_tradeoff_name(
-                   frame.render_hotspot_counters.gpu_present_tradeoff))
-            << "\",\"gpu_draw_calls\":"
-            << frame.render_hotspot_counters.gpu_draw_call_count
-            << ",\"gpu_viewport_pixels\":"
-            << frame.render_hotspot_counters.gpu_viewport_pixel_count
+            << escape_json_string(
+                   gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff))
+            << "\",\"gpu_draw_calls\":" << frame.render_hotspot_counters.gpu_draw_call_count
+            << ",\"gpu_viewport_pixels\":" << frame.render_hotspot_counters.gpu_viewport_pixel_count
             << ",\"gpu_draw_pixels\":"
             << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count
-            << ",\"gpu_present_regions\":"
-            << frame.render_hotspot_counters.gpu_present_region_count
+            << ",\"gpu_present_regions\":" << frame.render_hotspot_counters.gpu_present_region_count
             << ",\"gpu_swapchain_copies\":"
             << frame.render_hotspot_counters.gpu_swapchain_copy_count << "}}";
 
