@@ -82,7 +82,7 @@ float max_h_offset(const Widget* content, Rect viewport) {
     if (content == nullptr) {
         return 0.0F;
     }
-    const auto req = content->measure(Constraints::unbounded());
+    const auto req = content->measure_for_diagnostics(Constraints::unbounded());
     return std::max(0.0F, req.natural_width - viewport.width);
 }
 
@@ -90,7 +90,7 @@ float max_v_offset(const Widget* content, Rect viewport) {
     if (content == nullptr) {
         return 0.0F;
     }
-    const auto req = content->measure(Constraints::unbounded());
+    const auto req = content->measure_for_diagnostics(Constraints::unbounded());
     return std::max(0.0F, req.natural_height - viewport.height);
 }
 
@@ -112,7 +112,7 @@ Rect scrollbar_track(Rect viewport, bool vertical) {
 
 SizeRequest ScrollArea::measure(const Constraints& constraints) const {
     if (impl_->content) {
-        return impl_->content->measure(constraints);
+        return impl_->content->measure_for_diagnostics(constraints);
     }
     return {};
 }
@@ -125,7 +125,7 @@ void ScrollArea::allocate(const Rect& allocation) {
         std::clamp(impl_->v_offset, 0.0F, max_v_offset(impl_->content.get(), allocation));
     if (impl_->content) {
         // Content can be larger than the viewport.
-        const auto req = impl_->content->measure(Constraints::unbounded());
+        const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
         const float cw = std::max(allocation.width, req.natural_width);
         const float ch = std::max(allocation.height, req.natural_height);
         impl_->content->allocate({-impl_->h_offset, -impl_->v_offset, cw, ch});
@@ -167,7 +167,7 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
         return;
     }
 
-    const auto req = impl_->content->measure(Constraints::unbounded());
+    const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
     const bool show_v_scrollbar =
         impl_->v_policy == ScrollPolicy::Always ||
         (impl_->v_policy == ScrollPolicy::Automatic && req.natural_height > viewport.height);

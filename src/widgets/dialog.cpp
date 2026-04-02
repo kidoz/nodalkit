@@ -140,7 +140,7 @@ SizeRequest Dialog::measure(const Constraints& /*constraints*/) const {
 
     SizeRequest content_req{};
     if (impl_->content) {
-        content_req = impl_->content->measure(Constraints::unbounded());
+        content_req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
     }
 
     const float natural_width = std::max({min_width,

@@ -148,7 +148,7 @@ SizeRequest GridLayout::measure(const Widget& widget, const Constraints& constra
         }
 
         const auto placement = placement_for(*child, fallback_index++);
-        const auto request = child->measure(constraints);
+        const auto request = child->measure_for_diagnostics(constraints);
         row_count = std::max(row_count, placement.row + placement.row_span);
         column_count = std::max(column_count, placement.column + placement.column_span);
         children.push_back({child, placement, request});
@@ -209,7 +209,7 @@ void GridLayout::allocate(Widget& widget, const Rect& allocation) {
         }
 
         const auto placement = placement_for(*child, fallback_index++);
-        const auto request = child->measure(Constraints{
+        const auto request = child->measure_for_diagnostics(Constraints{
             0.0F, 0.0F, std::max(0.0F, allocation.width), std::max(0.0F, allocation.height)});
         row_count = std::max(row_count, placement.row + placement.row_span);
         column_count = std::max(column_count, placement.column + placement.column_span);

@@ -52,7 +52,7 @@ collect_box_children(const Widget& widget, const Constraints& constraints, bool 
             continue;
         }
 
-        const auto request = child->measure(measure_constraints);
+        const auto request = child->measure_for_diagnostics(measure_constraints);
         children.push_back({
             .widget = child,
             .request = request,

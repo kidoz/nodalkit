@@ -15,7 +15,7 @@ SizeRequest StackLayout::measure(const Widget& widget, const Constraints& constr
             continue;
         }
 
-        const auto request = child->measure(constraints);
+        const auto request = child->measure_for_diagnostics(constraints);
         result.minimum_width = std::max(result.minimum_width, request.minimum_width);
         result.minimum_height = std::max(result.minimum_height, request.minimum_height);
         result.natural_width = std::max(result.natural_width, request.natural_width);
