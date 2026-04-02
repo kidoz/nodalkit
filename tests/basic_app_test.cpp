@@ -1184,6 +1184,10 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 }
 
 TEST_CASE("Render snapshots support fixture import and file round-trip", "[app][debug]") {
+    REQUIRE(nk::render_snapshot_artifact_format() == "nk-render-snapshot-v1");
+    REQUIRE(nk::frame_diagnostics_artifact_format() == "nk-frame-diagnostics-v1");
+    REQUIRE(nk::frame_diagnostics_trace_export_format() == "chrome-trace-event-array-v1");
+
     const auto fixture_path = test_fixture_path("render_snapshot_fixture.json");
     const auto fixture_snapshot = nk::load_render_snapshot_json_file(fixture_path.string());
     REQUIRE(fixture_snapshot);
@@ -1218,6 +1222,12 @@ TEST_CASE("Render snapshots support fixture import and file round-trip", "[app][
         nk::parse_render_snapshot_json(window.dump_selected_frame_render_snapshot_json());
     REQUIRE(parsed_dump);
     REQUIRE(*parsed_dump == selected_snapshot);
+
+    const auto unsupported_format = nk::parse_render_snapshot_json(
+        R"({"format":"nk-render-snapshot-v999","root":{"kind":"Container","bounds":{"x":0,"y":0,"width":1,"height":1},"children":[]}})");
+    REQUIRE_FALSE(unsupported_format);
+    REQUIRE(unsupported_format.error().find("unsupported render snapshot format") !=
+            std::string::npos);
 
     const auto temp_path =
         std::filesystem::temp_directory_path() / "nodalkit_render_snapshot_roundtrip.json";
