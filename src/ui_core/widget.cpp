@@ -55,6 +55,7 @@ struct Widget::Impl {
     uint8_t horizontal_stretch = 0;
     uint8_t vertical_stretch = 0;
     Window* host_window = nullptr;
+    WidgetHotspotCounters debug_hotspot_counters;
 
     Signal<> on_map;
     Signal<> on_unmap;
@@ -186,7 +187,13 @@ SizeRequest Widget::measure(const Constraints& constraints) const {
     return {};
 }
 
+SizeRequest Widget::measure_for_diagnostics(const Constraints& constraints) const {
+    ++impl_->debug_hotspot_counters.measure_count;
+    return measure(constraints);
+}
+
 void Widget::allocate(const Rect& allocation) {
+    ++impl_->debug_hotspot_counters.allocate_count;
     impl_->allocation = allocation;
     if (impl_->layout_manager) {
         impl_->layout_manager->allocate(*const_cast<Widget*>(this), allocation);
@@ -284,6 +291,10 @@ void Widget::grab_focus() {
     set_state_flag(StateFlags::Focused, true);
     dispatch_focus_controllers(true);
     on_focus_changed(true);
+}
+
+WidgetHotspotCounters Widget::debug_hotspot_counters() const {
+    return impl_->debug_hotspot_counters;
 }
 
 // --- Invalidation ---
@@ -500,10 +511,20 @@ std::string Widget::debug_snapshot_label() const {
 }
 
 void Widget::snapshot_subtree(SnapshotContext& ctx) const {
+    ++impl_->debug_hotspot_counters.snapshot_count;
     const auto path = debug_tree_path();
     ctx.push_debug_source(debug_snapshot_label(), path);
     snapshot(ctx);
     ctx.pop_debug_source();
+}
+
+void Widget::reset_debug_hotspot_counters_recursive() {
+    impl_->debug_hotspot_counters = {};
+    for (const auto& child : impl_->children) {
+        if (child != nullptr) {
+            child->reset_debug_hotspot_counters_recursive();
+        }
+    }
 }
 
 bool Widget::handle_mouse_event(const MouseEvent& /*event*/) {
@@ -529,12 +550,31 @@ Size Widget::measure_text(std::string_view text, const FontDescriptor& font) con
         return {};
     }
 
+    note_text_measure_for_diagnostics();
+
     if (impl_->host_window != nullptr && impl_->host_window->text_shaper() != nullptr) {
         return impl_->host_window->text_shaper()->measure(text, font);
     }
 
     const auto length = static_cast<float>(text.size());
     return {length * font.size * 0.55F, font.size * 1.35F};
+}
+
+void Widget::note_text_measure_for_diagnostics() const {
+    ++impl_->debug_hotspot_counters.text_measure_count;
+}
+
+void Widget::note_image_snapshot_for_diagnostics() const {
+    ++impl_->debug_hotspot_counters.image_snapshot_count;
+}
+
+void Widget::note_model_view_sync_for_diagnostics(std::size_t materialized_rows,
+                                                  std::size_t reused_rows,
+                                                  std::size_t disposed_rows) const {
+    ++impl_->debug_hotspot_counters.model_sync_count;
+    impl_->debug_hotspot_counters.model_row_materialize_count += materialized_rows;
+    impl_->debug_hotspot_counters.model_row_reuse_count += reused_rows;
+    impl_->debug_hotspot_counters.model_row_dispose_count += disposed_rows;
 }
 
 } // namespace nk

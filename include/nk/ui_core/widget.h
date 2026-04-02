@@ -3,6 +3,7 @@
 /// @file widget.h
 /// @brief Base class for all visual elements in the widget tree.
 
+#include <nk/debug/diagnostics.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
 #include <nk/layout/constraints.h>
@@ -91,6 +92,10 @@ public:
     /// Measure this widget under the given constraints.
     [[nodiscard]] virtual SizeRequest measure(const Constraints& constraints) const;
 
+    /// Measure this widget and record the call in per-frame debug hotspot
+    /// counters when diagnostics are active.
+    [[nodiscard]] SizeRequest measure_for_diagnostics(const Constraints& constraints) const;
+
     /// Allocate a position and size for this widget.
     virtual void allocate(const Rect& allocation);
 
@@ -126,6 +131,9 @@ public:
     [[nodiscard]] bool is_focusable() const;
     void set_focusable(bool focusable);
     void grab_focus();
+
+    /// Per-widget debug counters for measure/allocate/snapshot activity.
+    [[nodiscard]] WidgetHotspotCounters debug_hotspot_counters() const;
 
     // --- Invalidation ---
 
@@ -182,6 +190,17 @@ protected:
     /// available. Falls back to a simple estimate otherwise.
     [[nodiscard]] Size measure_text(std::string_view text, const FontDescriptor& font) const;
 
+    /// Record a text-measure hotspot on this widget for the current frame.
+    void note_text_measure_for_diagnostics() const;
+
+    /// Record that this widget emitted image content during snapshot.
+    void note_image_snapshot_for_diagnostics() const;
+
+    /// Record model/view churn owned by this widget for the current frame.
+    void note_model_view_sync_for_diagnostics(std::size_t materialized_rows,
+                                              std::size_t reused_rows,
+                                              std::size_t disposed_rows) const;
+
     /// Container widgets call these to manage children.
     void append_child(std::shared_ptr<Widget> child);
     void insert_child(std::size_t index, std::shared_ptr<Widget> child);
@@ -196,6 +215,7 @@ private:
 
     [[nodiscard]] std::vector<std::size_t> debug_tree_path() const;
     [[nodiscard]] std::string debug_snapshot_label() const;
+    void reset_debug_hotspot_counters_recursive();
     void snapshot_subtree(SnapshotContext& ctx) const;
     void set_host_window(Window* window);
     void dispatch_pointer_controllers(const MouseEvent& event);
