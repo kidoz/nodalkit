@@ -60,6 +60,15 @@ enum class FrameRequestReason : uint8_t {
     PickerChanged,
 };
 
+enum class GpuPresentPath : uint8_t {
+    None,
+    SoftwareDirect,
+    SoftwareUpload,
+    FullRedrawDirect,
+    FullRedrawCopyBack,
+    PartialRedrawCopy,
+};
+
 struct RenderHotspotCounters {
     std::size_t text_node_count = 0;
     std::size_t text_shape_count = 0;
@@ -70,6 +79,12 @@ struct RenderHotspotCounters {
     std::size_t image_source_pixel_count = 0;
     std::size_t image_dest_pixel_count = 0;
     std::size_t image_texture_upload_count = 0;
+    std::size_t damage_region_count = 0;
+    std::size_t gpu_draw_call_count = 0;
+    std::size_t gpu_present_region_count = 0;
+    std::size_t gpu_swapchain_copy_count = 0;
+    std::size_t gpu_estimated_draw_pixel_count = 0;
+    GpuPresentPath gpu_present_path = GpuPresentPath::None;
 
     bool operator==(const RenderHotspotCounters&) const = default;
 };
@@ -148,6 +163,7 @@ struct WidgetDebugNode {
 };
 
 [[nodiscard]] std::string_view frame_request_reason_name(FrameRequestReason reason) noexcept;
+[[nodiscard]] std::string_view gpu_present_path_name(GpuPresentPath path) noexcept;
 [[nodiscard]] bool has_frame_request_reason(const FrameDiagnostics& frame,
                                             FrameRequestReason reason) noexcept;
 [[nodiscard]] std::size_t count_render_snapshot_nodes(const RenderSnapshotNode& root) noexcept;

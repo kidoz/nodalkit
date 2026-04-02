@@ -824,6 +824,24 @@ std::string_view frame_request_reason_name(FrameRequestReason reason) noexcept {
     return "unknown";
 }
 
+std::string_view gpu_present_path_name(GpuPresentPath path) noexcept {
+    switch (path) {
+    case GpuPresentPath::None:
+        return "none";
+    case GpuPresentPath::SoftwareDirect:
+        return "software-direct";
+    case GpuPresentPath::SoftwareUpload:
+        return "software-upload";
+    case GpuPresentPath::FullRedrawDirect:
+        return "full-redraw-direct";
+    case GpuPresentPath::FullRedrawCopyBack:
+        return "full-redraw-copy-back";
+    case GpuPresentPath::PartialRedrawCopy:
+        return "partial-redraw-copy";
+    }
+    return "unknown";
+}
+
 bool has_frame_request_reason(const FrameDiagnostics& frame, FrameRequestReason reason) noexcept {
     return std::find(frame.request_reasons.begin(), frame.request_reasons.end(), reason) !=
            frame.request_reasons.end();
@@ -929,7 +947,18 @@ std::string format_frame_diagnostics_trace_json(std::span<const FrameDiagnostics
         out << "    {\"name\":\"frame\",\"cat\":\"frame\",\"ph\":\"X\",\"ts\":" << started_ts_us
             << ",\"dur\":" << static_cast<long long>(std::llround(frame.total_ms * 1000.0))
             << ",\"pid\":1,\"tid\":1,\"args\":{\"frame\":" << frame.frame_id
-            << ",\"queue_delay_ms\":" << frame.queue_delay_ms << "}}";
+            << ",\"queue_delay_ms\":" << frame.queue_delay_ms
+            << ",\"present_path\":\""
+            << escape_json_string(gpu_present_path_name(
+                   frame.render_hotspot_counters.gpu_present_path))
+            << "\",\"gpu_draw_calls\":"
+            << frame.render_hotspot_counters.gpu_draw_call_count
+            << ",\"gpu_draw_pixels\":"
+            << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count
+            << ",\"gpu_present_regions\":"
+            << frame.render_hotspot_counters.gpu_present_region_count
+            << ",\"gpu_swapchain_copies\":"
+            << frame.render_hotspot_counters.gpu_swapchain_copy_count << "}}";
 
         double phase_start_ms = frame.started_at_ms;
 
