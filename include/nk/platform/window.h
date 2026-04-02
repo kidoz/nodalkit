@@ -119,6 +119,15 @@ public:
     /// Runtime trace events correlated to the currently selected inspector frame.
     [[nodiscard]] std::vector<TraceEvent> debug_selected_frame_runtime_events() const;
 
+    /// Format the currently selected inspector frame as a readable summary.
+    [[nodiscard]] std::string dump_selected_frame_summary() const;
+
+    /// Copy the selected-frame summary to the clipboard.
+    [[nodiscard]] Result<void> copy_selected_frame_summary_to_clipboard() const;
+
+    /// Save the selected-frame summary to a text file.
+    [[nodiscard]] Result<void> save_selected_frame_summary_file(std::string_view path) const;
+
     /// Render-tree snapshot for the currently selected inspector frame.
     [[nodiscard]] RenderSnapshotNode debug_selected_frame_render_snapshot() const;
 
@@ -131,6 +140,15 @@ public:
     /// Format the selected frame's render snapshot as JSON.
     [[nodiscard]] std::string dump_selected_frame_render_snapshot_json() const;
 
+    /// Format the selected render node as a readable summary.
+    [[nodiscard]] std::string dump_selected_render_node_details() const;
+
+    /// Copy the selected render-node summary to the clipboard.
+    [[nodiscard]] Result<void> copy_selected_render_node_details_to_clipboard() const;
+
+    /// Save the selected render-node summary to a text file.
+    [[nodiscard]] Result<void> save_selected_render_node_details_file(std::string_view path) const;
+
     /// Enable a live widget picker that selects widgets under the pointer.
     void set_debug_picker_enabled(bool enabled);
     [[nodiscard]] bool debug_picker_enabled() const;
@@ -139,6 +157,15 @@ public:
     [[nodiscard]] Widget* debug_selected_widget() const;
     void set_debug_selected_widget(Widget* widget);
     [[nodiscard]] WidgetDebugNode debug_selected_widget_info() const;
+
+    /// Format the selected widget as a readable summary.
+    [[nodiscard]] std::string dump_selected_widget_details() const;
+
+    /// Copy the selected widget summary to the clipboard.
+    [[nodiscard]] Result<void> copy_selected_widget_details_to_clipboard() const;
+
+    /// Save the selected widget summary to a text file.
+    [[nodiscard]] Result<void> save_selected_widget_details_file(std::string_view path) const;
 
     // --- Signals ---
 

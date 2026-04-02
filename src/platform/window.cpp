@@ -2,9 +2,9 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <memory>
-#include <optional>
 #include <nk/controllers/event_controller.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/logging.h>
@@ -17,6 +17,7 @@
 #include <nk/render/snapshot_context.h>
 #include <nk/text/text_shaper.h>
 #include <nk/ui_core/widget.h>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <typeinfo>
@@ -798,9 +799,10 @@ void append_frame_hud_lines(std::vector<std::string>& lines, const FrameDiagnost
     if (frame.render_hotspot_counters.gpu_present_path != GpuPresentPath::None) {
         std::ostringstream gpu_line;
         gpu_line << "gpu " << gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path)
-                 << "  " << gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff)
-                 << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count
-                 << "  px " << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count << "/"
+                 << "  "
+                 << gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff)
+                 << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count << "  px "
+                 << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count << "/"
                  << frame.render_hotspot_counters.gpu_viewport_pixel_count;
         lines.push_back(gpu_line.str());
     }
@@ -857,13 +859,13 @@ void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagn
     if (frame.render_hotspot_counters.gpu_present_path != GpuPresentPath::None) {
         std::ostringstream gpu_line;
         gpu_line << "gpu present: "
-                 << gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path)
-                 << "  " << gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff)
-                 << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count
-                 << "  regions " << frame.render_hotspot_counters.gpu_present_region_count
-                 << "  copies " << frame.render_hotspot_counters.gpu_swapchain_copy_count
-                 << "  draw px " << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count
-                 << "  viewport px " << frame.render_hotspot_counters.gpu_viewport_pixel_count;
+                 << gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path) << "  "
+                 << gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff)
+                 << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count << "  regions "
+                 << frame.render_hotspot_counters.gpu_present_region_count << "  copies "
+                 << frame.render_hotspot_counters.gpu_swapchain_copy_count << "  draw px "
+                 << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count << "  viewport px "
+                 << frame.render_hotspot_counters.gpu_viewport_pixel_count;
         lines.push_back(gpu_line.str());
     }
 }
@@ -985,6 +987,93 @@ void append_widget_panel_lines(std::vector<std::string>& lines, const Widget* wi
         }
     }
     lines.push_back(truncate_for_overlay(classes, 40));
+}
+
+std::string join_detail_lines(std::span<const std::string> lines) {
+    std::ostringstream out;
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        if (index > 0) {
+            out << "\n";
+        }
+        out << lines[index];
+    }
+    return out.str();
+}
+
+Result<void> save_text_file(std::string_view path, std::string_view text) {
+    std::ofstream out(std::string(path), std::ios::binary);
+    if (!out.is_open()) {
+        return Unexpected(std::string("failed to open file for writing: ") + std::string(path));
+    }
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!out.good()) {
+        return Unexpected(std::string("failed to write file: ") + std::string(path));
+    }
+    return {};
+}
+
+Result<void> copy_text_to_application_clipboard(std::string text) {
+    if (auto* app = Application::instance(); app != nullptr) {
+        app->set_clipboard_text(std::move(text));
+        return {};
+    }
+    return Unexpected(std::string("no running Application for clipboard copy"));
+}
+
+std::string format_widget_panel_text(const Widget* widget) {
+    std::vector<std::string> lines;
+    append_widget_panel_lines(lines, widget);
+    return join_detail_lines(lines);
+}
+
+void append_selected_render_node_lines(std::vector<std::string>& lines,
+                                       const RenderSnapshotNode* selected_render_node) {
+    if (selected_render_node == nullptr) {
+        lines.push_back("No render node selected");
+        return;
+    }
+
+    lines.push_back("render node:");
+    lines.push_back(selected_render_node->kind);
+    if (!selected_render_node->detail.empty()) {
+        lines.push_back(selected_render_node->detail);
+    }
+
+    {
+        std::ostringstream bounds;
+        bounds << "rect: " << static_cast<int>(selected_render_node->bounds.x) << ", "
+               << static_cast<int>(selected_render_node->bounds.y) << "  "
+               << static_cast<int>(selected_render_node->bounds.width) << "x"
+               << static_cast<int>(selected_render_node->bounds.height);
+        lines.push_back(bounds.str());
+    }
+    if (!selected_render_node->source_widget_label.empty()) {
+        lines.push_back("widget: " + selected_render_node->source_widget_label);
+    }
+    {
+        std::ostringstream children;
+        children << "children: " << selected_render_node->children.size();
+        lines.push_back(children.str());
+    }
+}
+
+std::string format_selected_render_node_text(const RenderSnapshotNode* selected_render_node) {
+    std::vector<std::string> lines;
+    append_selected_render_node_lines(lines, selected_render_node);
+    return join_detail_lines(lines);
+}
+
+std::string format_selected_frame_summary_text(const FrameDiagnostics& frame,
+                                               std::span<const TraceEvent> events) {
+    std::vector<std::string> lines;
+    append_frame_detail_lines(lines, frame);
+    append_frame_runtime_event_lines(lines, frame, events);
+    {
+        std::ostringstream render_summary;
+        render_summary << "render nodes: " << frame.render_snapshot_node_count;
+        lines.push_back(render_summary.str());
+    }
+    return join_detail_lines(lines);
 }
 
 void draw_widget_bounds_overlay(SnapshotContext& ctx,
@@ -1454,6 +1543,7 @@ void Window::request_frame(FrameRequestReason reason) {
                     lines.push_back("Picker: off");
                     lines.push_back("Ctrl+Shift+P picker  Up/Down widgets  Left/Right frames");
                     lines.push_back("PageUp/PageDown render tree");
+                    lines.push_back("Ctrl+Shift+W/R/F copy widget/render/frame");
                 }
                 append_widget_panel_lines(lines, impl_->debug_selected_widget);
 
@@ -1596,10 +1686,9 @@ void Window::request_frame(FrameRequestReason reason) {
             frame.render_snapshot_node_count = count_render_snapshot_nodes(frame.render_snapshot);
         }
 
-        const auto damage_regions =
-            (!frame.had_layout && !impl_->dirty_widgets.empty())
-                ? collect_damage_regions(impl_->dirty_widgets, sz)
-                : std::vector<Rect>{};
+        const auto damage_regions = (!frame.had_layout && !impl_->dirty_widgets.empty())
+                                        ? collect_damage_regions(impl_->dirty_widgets, sz)
+                                        : std::vector<Rect>{};
 
         // 3. Render pass.
         const auto render_start = Clock::now();
@@ -1887,6 +1976,26 @@ std::vector<TraceEvent> Window::debug_selected_frame_runtime_events() const {
     return {};
 }
 
+std::string Window::dump_selected_frame_summary() const {
+    const auto* frame =
+        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+    if (frame == nullptr) {
+        return "No frame selected";
+    }
+    if (auto* app = Application::instance()) {
+        return format_selected_frame_summary_text(*frame, app->event_loop().debug_trace_events());
+    }
+    return format_selected_frame_summary_text(*frame, {});
+}
+
+Result<void> Window::copy_selected_frame_summary_to_clipboard() const {
+    return copy_text_to_application_clipboard(dump_selected_frame_summary());
+}
+
+Result<void> Window::save_selected_frame_summary_file(std::string_view path) const {
+    return save_text_file(path, dump_selected_frame_summary());
+}
+
 RenderSnapshotNode Window::debug_selected_frame_render_snapshot() const {
     if (const auto* frame =
             selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
@@ -1925,6 +2034,24 @@ std::string Window::dump_selected_frame_render_snapshot_json() const {
         return format_render_snapshot_json(frame->render_snapshot);
     }
     return {};
+}
+
+std::string Window::dump_selected_render_node_details() const {
+    const auto* frame =
+        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+    if (frame == nullptr) {
+        return "No frame selected";
+    }
+    return format_selected_render_node_text(
+        selected_render_node_from_frame(frame, impl_->debug_selected_render_path));
+}
+
+Result<void> Window::copy_selected_render_node_details_to_clipboard() const {
+    return copy_text_to_application_clipboard(dump_selected_render_node_details());
+}
+
+Result<void> Window::save_selected_render_node_details_file(std::string_view path) const {
+    return save_text_file(path, dump_selected_render_node_details());
 }
 
 void Window::set_debug_picker_enabled(bool enabled) {
@@ -1981,6 +2108,18 @@ WidgetDebugNode Window::debug_selected_widget_info() const {
     return impl_->debug_selected_widget != nullptr
                ? build_widget_debug_node(*impl_->debug_selected_widget)
                : WidgetDebugNode{};
+}
+
+std::string Window::dump_selected_widget_details() const {
+    return format_widget_panel_text(impl_->debug_selected_widget);
+}
+
+Result<void> Window::copy_selected_widget_details_to_clipboard() const {
+    return copy_text_to_application_clipboard(dump_selected_widget_details());
+}
+
+Result<void> Window::save_selected_widget_details_file(std::string_view path) const {
+    return save_text_file(path, dump_selected_widget_details());
 }
 
 void Window::note_widget_redraw_request(Widget& widget) {
@@ -2372,6 +2511,24 @@ void Window::dispatch_key_event(const KeyEvent& event) {
                 impl_->debug_overlay_flags |= DebugOverlayFlags::InspectorPanel;
             }
             set_debug_picker_enabled(!impl_->debug_picker_enabled);
+            return;
+        }
+        if (event.modifiers == ctrl_shift && event.key == KeyCode::W &&
+            has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
+            !impl_->debug_picker_enabled) {
+            (void)copy_selected_widget_details_to_clipboard();
+            return;
+        }
+        if (event.modifiers == ctrl_shift && event.key == KeyCode::R &&
+            has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
+            !impl_->debug_picker_enabled) {
+            (void)copy_selected_render_node_details_to_clipboard();
+            return;
+        }
+        if (event.modifiers == ctrl_shift && event.key == KeyCode::F &&
+            has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
+            !impl_->debug_picker_enabled) {
+            (void)copy_selected_frame_summary_to_clipboard();
             return;
         }
         if (impl_->debug_picker_enabled && event.key == KeyCode::Escape) {
