@@ -246,6 +246,8 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Scroll:
         return false;
     }
+
+    return false;
 }
 
 bool TextField::handle_key_event(const KeyEvent& event) {
