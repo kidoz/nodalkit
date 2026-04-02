@@ -359,6 +359,14 @@ VkExtent2D choose_swapchain_extent(const VkSurfaceCapabilitiesKHR& capabilities,
     };
 }
 
+VkSurfaceTransformFlagBitsKHR choose_surface_transform(
+    const VkSurfaceCapabilitiesKHR& capabilities) {
+    if ((capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0) {
+        return VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    }
+    return capabilities.currentTransform;
+}
+
 [[nodiscard]] bool has_extension(std::span<const VkExtensionProperties> extensions,
                                  const char* name) {
     return std::any_of(extensions.begin(), extensions.end(), [&](const auto& extension) {
@@ -1949,6 +1957,7 @@ private:
             chosen_present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
         }
         const auto chosen_extent = choose_swapchain_extent(capabilities, desired_width, desired_height);
+        const auto chosen_transform = choose_surface_transform(capabilities);
 
         uint32_t image_count = capabilities.minImageCount + 1;
         if (capabilities.maxImageCount > 0) {
@@ -1972,7 +1981,7 @@ private:
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
             .queueFamilyIndexCount = 0,
             .pQueueFamilyIndices = nullptr,
-            .preTransform = capabilities.currentTransform,
+            .preTransform = chosen_transform,
             .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
             .presentMode = chosen_present_mode,
             .clipped = VK_TRUE,
