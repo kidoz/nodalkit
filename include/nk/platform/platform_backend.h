@@ -73,6 +73,10 @@ public:
     /// Get the platform-native handle (NSWindow*, wl_surface*, etc.).
     [[nodiscard]] virtual NativeWindowHandle native_handle() const = 0;
 
+    /// Get the platform-native display/connection handle when the renderer
+    /// needs both the surface and the parent display server connection.
+    [[nodiscard]] virtual NativeWindowHandle native_display_handle() const { return nullptr; }
+
     /// Apply a platform cursor shape for the current pointer location.
     virtual void set_cursor_shape(CursorShape shape) = 0;
 };

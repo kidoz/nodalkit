@@ -227,6 +227,15 @@ float WaylandSurface::scale_factor() const {
     return 1.0F;
 }
 
+RendererBackendSupport WaylandSurface::renderer_backend_support() const {
+    return {
+        .software = true,
+        .metal = false,
+        .open_gl = false,
+        .vulkan = true,
+    };
+}
+
 void WaylandSurface::present(const uint8_t* rgba, int w, int h) {
     if (!configured_) {
         return;
@@ -285,6 +294,10 @@ bool WaylandSurface::is_fullscreen() const {
 
 NativeWindowHandle WaylandSurface::native_handle() const {
     return static_cast<NativeWindowHandle>(surface_);
+}
+
+NativeWindowHandle WaylandSurface::native_display_handle() const {
+    return static_cast<NativeWindowHandle>(backend_.display());
 }
 
 void WaylandSurface::set_cursor_shape(CursorShape /*shape*/) {

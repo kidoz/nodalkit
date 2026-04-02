@@ -28,10 +28,12 @@ public:
     void resize(int width, int height) override;
     [[nodiscard]] Size size() const override;
     [[nodiscard]] float scale_factor() const override;
+    [[nodiscard]] RendererBackendSupport renderer_backend_support() const override;
     void present(const uint8_t* rgba, int w, int h) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
+    [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
 
     /// Access the owning Window for event delivery.

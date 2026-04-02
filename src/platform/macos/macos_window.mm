@@ -790,6 +790,10 @@ NativeWindowHandle MacosSurface::native_handle() const {
     return (__bridge NativeWindowHandle)window_;
 }
 
+NativeWindowHandle MacosSurface::native_display_handle() const {
+    return nullptr;
+}
+
 void MacosSurface::set_cursor_shape(CursorShape shape) {
     @autoreleasepool {
         switch (shape) {

@@ -38,6 +38,7 @@ public:
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
+    [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
 
     /// Access the owning Window for event delivery from Objective-C code.

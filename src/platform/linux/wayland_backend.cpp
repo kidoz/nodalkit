@@ -155,6 +155,8 @@ static constexpr struct xdg_wm_base_listener wm_base_listener = {
     .ping = wm_base_ping,
 };
 
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Registry listener — bind required Wayland globals
 // ---------------------------------------------------------------------------
