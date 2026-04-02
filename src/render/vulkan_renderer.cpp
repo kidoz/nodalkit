@@ -645,6 +645,9 @@ public:
 
         if (collect_draw_commands(root)) {
             use_gpu_path_ = true;
+            last_hotspot_counters_.gpu_viewport_pixel_count =
+                static_cast<std::size_t>(desired_pixel_width()) *
+                static_cast<std::size_t>(desired_pixel_height());
             last_hotspot_counters_.gpu_estimated_draw_pixel_count =
                 estimate_full_redraw_draw_pixel_count();
             if (ready_ && !ensure_draw_textures_ready()) {
@@ -659,9 +662,11 @@ public:
                 counters.gpu_draw_call_count = preserved.gpu_draw_call_count;
                 counters.gpu_present_region_count = preserved.gpu_present_region_count;
                 counters.gpu_swapchain_copy_count = preserved.gpu_swapchain_copy_count;
+                counters.gpu_viewport_pixel_count = preserved.gpu_viewport_pixel_count;
                 counters.gpu_estimated_draw_pixel_count =
                     preserved.gpu_estimated_draw_pixel_count;
                 counters.gpu_present_path = preserved.gpu_present_path;
+                counters.gpu_present_tradeoff = preserved.gpu_present_tradeoff;
                 last_hotspot_counters_ = counters;
             } else {
                 last_hotspot_counters_.gpu_draw_call_count = estimate_gpu_draw_call_count();
@@ -773,6 +778,7 @@ public:
             }
             wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::SoftwareUpload;
+            last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::None;
         }
 
         present_regions_.clear();
@@ -2839,6 +2845,7 @@ private:
         if (full_redraw && !copy_back_full_redraw) {
             last_hotspot_counters_.gpu_swapchain_copy_count = 0;
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::FullRedrawDirect;
+            last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::BandwidthFavored;
             if (scene_layout_ == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
                 transition_scene_image(command_buffer_,
                                        scene_layout_,
@@ -2981,6 +2988,7 @@ private:
         } else if (full_redraw) {
             last_hotspot_counters_.gpu_swapchain_copy_count = 1;
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::FullRedrawCopyBack;
+            last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::DrawFavored;
 
             const VkImageMemoryBarrier swapchain_to_transfer = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -3166,6 +3174,7 @@ private:
         } else {
             last_hotspot_counters_.gpu_swapchain_copy_count = 1;
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::PartialRedrawCopy;
+            last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::DrawFavored;
             if (scene_layout_ == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
                 transition_scene_image(command_buffer_,
                                        scene_layout_,
@@ -3308,8 +3317,10 @@ private:
             counters.gpu_draw_call_count = preserved.gpu_draw_call_count;
             counters.gpu_present_region_count = preserved.gpu_present_region_count;
             counters.gpu_swapchain_copy_count = preserved.gpu_swapchain_copy_count;
+            counters.gpu_viewport_pixel_count = preserved.gpu_viewport_pixel_count;
             counters.gpu_estimated_draw_pixel_count = preserved.gpu_estimated_draw_pixel_count;
             counters.gpu_present_path = preserved.gpu_present_path;
+            counters.gpu_present_tradeoff = preserved.gpu_present_tradeoff;
             last_hotspot_counters_ = counters;
         }
 
@@ -3326,6 +3337,7 @@ private:
             return;
         }
         last_hotspot_counters_.gpu_present_path = GpuPresentPath::SoftwareDirect;
+        last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::None;
         software_->present(surface);
     }
 

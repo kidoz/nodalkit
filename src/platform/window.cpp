@@ -798,8 +798,10 @@ void append_frame_hud_lines(std::vector<std::string>& lines, const FrameDiagnost
     if (frame.render_hotspot_counters.gpu_present_path != GpuPresentPath::None) {
         std::ostringstream gpu_line;
         gpu_line << "gpu " << gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path)
+                 << "  " << gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff)
                  << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count
-                 << "  px " << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count;
+                 << "  px " << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count << "/"
+                 << frame.render_hotspot_counters.gpu_viewport_pixel_count;
         lines.push_back(gpu_line.str());
     }
 }
@@ -856,11 +858,12 @@ void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagn
         std::ostringstream gpu_line;
         gpu_line << "gpu present: "
                  << gpu_present_path_name(frame.render_hotspot_counters.gpu_present_path)
+                 << "  " << gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff)
                  << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count
                  << "  regions " << frame.render_hotspot_counters.gpu_present_region_count
                  << "  copies " << frame.render_hotspot_counters.gpu_swapchain_copy_count
-                 << "  draw px "
-                 << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count;
+                 << "  draw px " << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count
+                 << "  viewport px " << frame.render_hotspot_counters.gpu_viewport_pixel_count;
         lines.push_back(gpu_line.str());
     }
 }

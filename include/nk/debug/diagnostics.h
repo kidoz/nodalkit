@@ -69,6 +69,12 @@ enum class GpuPresentPath : uint8_t {
     PartialRedrawCopy,
 };
 
+enum class GpuPresentTradeoff : uint8_t {
+    None,
+    BandwidthFavored,
+    DrawFavored,
+};
+
 struct RenderHotspotCounters {
     std::size_t text_node_count = 0;
     std::size_t text_shape_count = 0;
@@ -83,8 +89,10 @@ struct RenderHotspotCounters {
     std::size_t gpu_draw_call_count = 0;
     std::size_t gpu_present_region_count = 0;
     std::size_t gpu_swapchain_copy_count = 0;
+    std::size_t gpu_viewport_pixel_count = 0;
     std::size_t gpu_estimated_draw_pixel_count = 0;
     GpuPresentPath gpu_present_path = GpuPresentPath::None;
+    GpuPresentTradeoff gpu_present_tradeoff = GpuPresentTradeoff::None;
 
     bool operator==(const RenderHotspotCounters&) const = default;
 };
@@ -164,6 +172,7 @@ struct WidgetDebugNode {
 
 [[nodiscard]] std::string_view frame_request_reason_name(FrameRequestReason reason) noexcept;
 [[nodiscard]] std::string_view gpu_present_path_name(GpuPresentPath path) noexcept;
+[[nodiscard]] std::string_view gpu_present_tradeoff_name(GpuPresentTradeoff tradeoff) noexcept;
 [[nodiscard]] bool has_frame_request_reason(const FrameDiagnostics& frame,
                                             FrameRequestReason reason) noexcept;
 [[nodiscard]] std::size_t count_render_snapshot_nodes(const RenderSnapshotNode& root) noexcept;

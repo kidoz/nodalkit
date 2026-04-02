@@ -477,9 +477,14 @@ TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 6);
     REQUIRE(first_frame.render_hotspot_counters.gpu_present_region_count == 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_swapchain_copy_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_viewport_pixel_count > 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <=
+            first_frame.render_hotspot_counters.gpu_viewport_pixel_count);
     REQUIRE(first_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::FullRedrawDirect);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::BandwidthFavored);
 
     left->queue_redraw();
     REQUIRE(app.event_loop().poll());
@@ -492,9 +497,12 @@ TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count <=
             second_frame.render_hotspot_counters.damage_region_count);
     REQUIRE(second_frame.render_hotspot_counters.gpu_swapchain_copy_count <= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_viewport_pixel_count > 0);
     REQUIRE(second_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::PartialRedrawCopy);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::DrawFavored);
 
     if (previous != nullptr) {
         REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
@@ -537,9 +545,14 @@ TEST_CASE("Linux Vulkan adapts large full redraws to copy-back scene preservatio
     REQUIRE(frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
     REQUIRE(frame.render_hotspot_counters.gpu_draw_call_count >= 12);
     REQUIRE(frame.render_hotspot_counters.gpu_draw_call_count < 24);
+    REQUIRE(frame.render_hotspot_counters.gpu_viewport_pixel_count > 0);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count >=
+            frame.render_hotspot_counters.gpu_viewport_pixel_count);
     REQUIRE(frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::FullRedrawCopyBack);
+    REQUIRE(frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::DrawFavored);
 
     if (previous != nullptr) {
         REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
@@ -1022,6 +1035,8 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(trace.find("\"name\":\"frame\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"posted-task\"") != std::string::npos);
     REQUIRE(trace.find("\"present_path\":\"") != std::string::npos);
+    REQUIRE(trace.find("\"present_tradeoff\":\"") != std::string::npos);
+    REQUIRE(trace.find("\"gpu_viewport_pixels\":") != std::string::npos);
     REQUIRE(trace.find("\"gpu_draw_pixels\":") != std::string::npos);
 }
 
