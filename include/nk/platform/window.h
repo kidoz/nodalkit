@@ -116,6 +116,9 @@ public:
     /// Export recent frame history as Chrome Trace JSON.
     [[nodiscard]] std::string dump_frame_trace_json() const;
 
+    /// Runtime trace events correlated to the currently selected inspector frame.
+    [[nodiscard]] std::vector<TraceEvent> debug_selected_frame_runtime_events() const;
+
     /// Render-tree snapshot for the currently selected inspector frame.
     [[nodiscard]] RenderSnapshotNode debug_selected_frame_render_snapshot() const;
 

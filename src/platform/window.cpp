@@ -210,6 +210,34 @@ void append_unique_reason(std::vector<FrameRequestReason>& reasons, FrameRequest
     }
 }
 
+void accumulate_widget_hotspot_counters(WidgetHotspotCounters& total,
+                                        const WidgetHotspotCounters& value) {
+    total.measure_count += value.measure_count;
+    total.allocate_count += value.allocate_count;
+    total.snapshot_count += value.snapshot_count;
+    total.text_measure_count += value.text_measure_count;
+    total.image_snapshot_count += value.image_snapshot_count;
+    total.model_sync_count += value.model_sync_count;
+    total.model_row_materialize_count += value.model_row_materialize_count;
+    total.model_row_reuse_count += value.model_row_reuse_count;
+    total.model_row_dispose_count += value.model_row_dispose_count;
+}
+
+WidgetHotspotCounters collect_widget_hotspot_totals(const Widget* widget) {
+    WidgetHotspotCounters total;
+    if (widget == nullptr) {
+        return total;
+    }
+
+    accumulate_widget_hotspot_counters(total, widget->debug_hotspot_counters());
+    for (const auto& child : widget->children()) {
+        if (child != nullptr) {
+            accumulate_widget_hotspot_counters(total, collect_widget_hotspot_totals(child.get()));
+        }
+    }
+    return total;
+}
+
 std::size_t count_widgets_recursive(const Widget* widget) {
     if (widget == nullptr) {
         return 0;
@@ -259,6 +287,7 @@ WidgetDebugNode build_widget_debug_node(const Widget& widget) {
     node.visible = widget.is_visible();
     node.sensitive = widget.is_sensitive();
     node.focusable = widget.is_focusable();
+    node.hotspot_counters = widget.debug_hotspot_counters();
     const auto classes = widget.style_classes();
     node.style_classes.assign(classes.begin(), classes.end());
     node.children.reserve(widget.children().size());
@@ -648,18 +677,88 @@ void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagn
     queue << "queued " << frame.queue_delay_ms << " ms  start " << frame.started_at_ms;
     lines.push_back(queue.str());
 
-    std::string reasons = "reasons: ";
     if (frame.request_reasons.empty()) {
-        reasons += "(none)";
+        lines.push_back("request reasons: (none)");
     } else {
-        for (std::size_t index = 0; index < frame.request_reasons.size(); ++index) {
-            if (index > 0) {
-                reasons += ", ";
-            }
-            reasons += std::string(frame_request_reason_name(frame.request_reasons[index]));
+        lines.push_back("request reasons:");
+        for (const auto reason : frame.request_reasons) {
+            lines.push_back("  - " + std::string(frame_request_reason_name(reason)));
         }
     }
-    lines.push_back(truncate_for_overlay(reasons, 40));
+
+    if (frame.widget_hotspot_totals.text_measure_count > 0 ||
+        frame.render_hotspot_counters.text_node_count > 0) {
+        std::ostringstream text_line;
+        text_line << "text: measure " << frame.widget_hotspot_totals.text_measure_count
+                  << "  nodes " << frame.render_hotspot_counters.text_node_count << "  shape "
+                  << frame.render_hotspot_counters.text_shape_count << "  cache hit "
+                  << frame.render_hotspot_counters.text_shape_cache_hit_count;
+        lines.push_back(text_line.str());
+    }
+
+    if (frame.widget_hotspot_totals.image_snapshot_count > 0 ||
+        frame.render_hotspot_counters.image_node_count > 0) {
+        std::ostringstream image_line;
+        image_line << "image: snapshot " << frame.widget_hotspot_totals.image_snapshot_count
+                   << "  nodes " << frame.render_hotspot_counters.image_node_count << "  src px "
+                   << frame.render_hotspot_counters.image_source_pixel_count;
+        lines.push_back(image_line.str());
+    }
+
+    if (frame.widget_hotspot_totals.model_sync_count > 0) {
+        std::ostringstream model_line;
+        model_line << "model: sync " << frame.widget_hotspot_totals.model_sync_count << "  make "
+                   << frame.widget_hotspot_totals.model_row_materialize_count << "  reuse "
+                   << frame.widget_hotspot_totals.model_row_reuse_count << "  drop "
+                   << frame.widget_hotspot_totals.model_row_dispose_count;
+        lines.push_back(model_line.str());
+    }
+}
+
+double trace_event_end_ms(const TraceEvent& event) {
+    return event.timestamp_ms + event.duration_ms;
+}
+
+bool trace_event_overlaps_frame(const TraceEvent& event, const FrameDiagnostics& frame) {
+    const double frame_start_ms = frame.requested_at_ms;
+    const double frame_end_ms = frame.started_at_ms + frame.total_ms;
+    return trace_event_end_ms(event) >= frame_start_ms && event.timestamp_ms <= frame_end_ms;
+}
+
+std::vector<TraceEvent> collect_frame_runtime_events(const FrameDiagnostics& frame,
+                                                     std::span<const TraceEvent> events) {
+    std::vector<TraceEvent> matched;
+    matched.reserve(events.size());
+    for (const auto& event : events) {
+        if (trace_event_overlaps_frame(event, frame)) {
+            matched.push_back(event);
+        }
+    }
+    return matched;
+}
+
+void append_frame_runtime_event_lines(std::vector<std::string>& lines,
+                                      const FrameDiagnostics& frame,
+                                      std::span<const TraceEvent> events) {
+    const auto matched = collect_frame_runtime_events(frame, events);
+    if (matched.empty()) {
+        lines.push_back("runtime events: (none)");
+        return;
+    }
+
+    lines.push_back("runtime events:");
+    for (const auto& event : matched) {
+        std::ostringstream summary;
+        summary << "  - " << event.name;
+        if (!event.category.empty()) {
+            summary << " [" << event.category << "]";
+        }
+        summary << " " << std::fixed << std::setprecision(2) << event.duration_ms << " ms";
+        lines.push_back(truncate_for_overlay(summary.str(), 48));
+        if (!event.detail.empty()) {
+            lines.push_back("    " + truncate_for_overlay(event.detail, 44));
+        }
+    }
 }
 
 void append_widget_panel_lines(std::vector<std::string>& lines, const Widget* widget) {
@@ -687,6 +786,30 @@ void append_widget_panel_lines(std::vector<std::string>& lines, const Widget* wi
         flags << "visible " << (widget->is_visible() ? "yes" : "no") << "  focusable "
               << (widget->is_focusable() ? "yes" : "no");
         lines.push_back(flags.str());
+    }
+
+    {
+        const auto counters = widget->debug_hotspot_counters();
+        std::ostringstream hotspot;
+        hotspot << "measure " << counters.measure_count << "  allocate " << counters.allocate_count
+                << "  snapshot " << counters.snapshot_count;
+        lines.push_back(hotspot.str());
+
+        if (counters.text_measure_count > 0 || counters.image_snapshot_count > 0) {
+            std::ostringstream content_hotspot;
+            content_hotspot << "text measure " << counters.text_measure_count << "  image snap "
+                            << counters.image_snapshot_count;
+            lines.push_back(content_hotspot.str());
+        }
+
+        if (counters.model_sync_count > 0) {
+            std::ostringstream model_hotspot;
+            model_hotspot << "model sync " << counters.model_sync_count << "  make "
+                          << counters.model_row_materialize_count << "  reuse "
+                          << counters.model_row_reuse_count << "  drop "
+                          << counters.model_row_dispose_count;
+            lines.push_back(model_hotspot.str());
+        }
     }
 
     {
@@ -957,11 +1080,18 @@ void Window::request_frame(FrameRequestReason reason) {
             }
         }
 
+        impl_->child->reset_debug_hotspot_counters_recursive();
+        for (auto& overlay : impl_->overlays) {
+            if (overlay.widget != nullptr) {
+                overlay.widget->reset_debug_hotspot_counters_recursive();
+            }
+        }
+
         // 1. Layout pass.
         if (impl_->needs_layout) {
             const auto layout_start = Clock::now();
             const auto constraints = Constraints::tight(sz);
-            (void)impl_->child->measure(constraints);
+            (void)impl_->child->measure_for_diagnostics(constraints);
             impl_->child->allocate({0, 0, sz.width, sz.height});
             for (auto& overlay : impl_->overlays) {
                 if (overlay.widget != nullptr && overlay.widget->is_visible()) {
@@ -1133,6 +1263,12 @@ void Window::request_frame(FrameRequestReason reason) {
                 std::vector<std::string> lines;
                 if (selected_frame != nullptr) {
                     append_frame_detail_lines(lines, *selected_frame);
+                    if (auto* app = Application::instance()) {
+                        append_frame_runtime_event_lines(
+                            lines, *selected_frame, app->event_loop().debug_trace_events());
+                    } else {
+                        lines.push_back("runtime events: unavailable");
+                    }
                     {
                         std::ostringstream render_summary;
                         render_summary << "render nodes: "
@@ -1293,6 +1429,14 @@ void Window::request_frame(FrameRequestReason reason) {
 
         auto root_node = snap_ctx.take_root();
         frame.snapshot_ms = elapsed_ms(snapshot_start, Clock::now());
+        frame.widget_hotspot_totals = collect_widget_hotspot_totals(impl_->child.get());
+        for (const auto& overlay : impl_->overlays) {
+            if (overlay.widget != nullptr) {
+                accumulate_widget_hotspot_counters(
+                    frame.widget_hotspot_totals,
+                    collect_widget_hotspot_totals(overlay.widget.get()));
+            }
+        }
         frame.render_node_count = count_render_nodes_recursive(root_node.get());
         if (root_node) {
             frame.render_snapshot = build_render_snapshot(*root_node);
@@ -1316,6 +1460,7 @@ void Window::request_frame(FrameRequestReason reason) {
             impl_->renderer->render(*root_node);
         }
         impl_->renderer->end_frame();
+        frame.render_hotspot_counters = impl_->renderer->last_hotspot_counters();
         frame.render_ms = elapsed_ms(render_start, Clock::now());
 
         // 4. Present pass.
@@ -1568,6 +1713,18 @@ std::string Window::dump_frame_trace_json() const {
                                                    app->event_loop().debug_trace_events());
     }
     return format_frame_diagnostics_trace_json(impl_->frame_history);
+}
+
+std::vector<TraceEvent> Window::debug_selected_frame_runtime_events() const {
+    const auto* frame =
+        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+    if (frame == nullptr) {
+        return {};
+    }
+    if (auto* app = Application::instance()) {
+        return collect_frame_runtime_events(*frame, app->event_loop().debug_trace_events());
+    }
+    return {};
 }
 
 RenderSnapshotNode Window::debug_selected_frame_render_snapshot() const {
