@@ -445,13 +445,89 @@ std::string format_debug_scalar(float value) {
     return out.str();
 }
 
+std::string truncate_for_overlay(std::string value, std::size_t max_chars) {
+    if (value.size() <= max_chars) {
+        return value;
+    }
+    if (max_chars <= 3) {
+        return value.substr(0, max_chars);
+    }
+    return value.substr(0, max_chars - 3) + "...";
+}
+
+std::string_view accessible_role_name(AccessibleRole role) {
+    switch (role) {
+    case AccessibleRole::None:
+        return "none";
+    case AccessibleRole::Button:
+        return "button";
+    case AccessibleRole::CheckBox:
+        return "checkbox";
+    case AccessibleRole::Dialog:
+        return "dialog";
+    case AccessibleRole::Grid:
+        return "grid";
+    case AccessibleRole::GridCell:
+        return "gridcell";
+    case AccessibleRole::Image:
+        return "image";
+    case AccessibleRole::Label:
+        return "label";
+    case AccessibleRole::Link:
+        return "link";
+    case AccessibleRole::List:
+        return "list";
+    case AccessibleRole::ListItem:
+        return "listitem";
+    case AccessibleRole::Menu:
+        return "menu";
+    case AccessibleRole::MenuBar:
+        return "menubar";
+    case AccessibleRole::MenuItem:
+        return "menuitem";
+    case AccessibleRole::ProgressBar:
+        return "progressbar";
+    case AccessibleRole::RadioButton:
+        return "radiobutton";
+    case AccessibleRole::ScrollBar:
+        return "scrollbar";
+    case AccessibleRole::Separator:
+        return "separator";
+    case AccessibleRole::Slider:
+        return "slider";
+    case AccessibleRole::SpinButton:
+        return "spinbutton";
+    case AccessibleRole::Tab:
+        return "tab";
+    case AccessibleRole::TabList:
+        return "tablist";
+    case AccessibleRole::TabPanel:
+        return "tabpanel";
+    case AccessibleRole::TextInput:
+        return "textinput";
+    case AccessibleRole::ToggleButton:
+        return "togglebutton";
+    case AccessibleRole::Toolbar:
+        return "toolbar";
+    case AccessibleRole::Tree:
+        return "tree";
+    case AccessibleRole::TreeItem:
+        return "treeitem";
+    case AccessibleRole::Window:
+        return "window";
+    }
+    return "none";
+}
+
 WidgetDebugNode build_widget_debug_node(const Widget& widget,
+                                        std::vector<std::size_t> tree_path,
                                         const Widget* focused_widget,
                                         const Widget* hovered_widget,
                                         const Widget* pressed_widget) {
     WidgetDebugNode node;
     node.type_name = debug_type_name(widget);
     node.debug_name = std::string(widget.debug_name());
+    node.tree_path = tree_path;
     node.allocation = widget.allocation();
     node.state_flags = widget.state_flags();
     node.visible = widget.is_visible();
@@ -481,26 +557,36 @@ WidgetDebugNode build_widget_debug_node(const Widget& widget,
     node.horizontal_stretch = widget.horizontal_stretch();
     node.vertical_stretch = widget.vertical_stretch();
     node.hotspot_counters = widget.debug_hotspot_counters();
+    if (const auto* accessible = widget.accessible(); accessible != nullptr) {
+        node.accessible_role = std::string(accessible_role_name(accessible->role()));
+        node.accessible_name = std::string(accessible->name());
+        node.accessible_description = std::string(accessible->description());
+        node.accessible_value = std::string(accessible->value());
+        node.accessible_hidden = accessible->is_hidden();
+        node.accessible_state = accessible->state();
+        for (const auto action : accessible->actions()) {
+            node.accessible_actions.emplace_back(accessible_action_name(action));
+        }
+        for (const auto& relation : accessible->relations()) {
+            std::string formatted(accessible_relation_kind_name(relation.kind));
+            formatted += ":";
+            formatted += relation.target_debug_name;
+            node.accessible_relations.push_back(std::move(formatted));
+        }
+    }
     const auto classes = widget.style_classes();
     node.style_classes.assign(classes.begin(), classes.end());
     node.children.reserve(widget.children().size());
-    for (const auto& child : widget.children()) {
+    for (std::size_t child_index = 0; child_index < widget.children().size(); ++child_index) {
+        const auto& child = widget.children()[child_index];
         if (child != nullptr) {
-            node.children.push_back(
-                build_widget_debug_node(*child, focused_widget, hovered_widget, pressed_widget));
+            auto child_path = tree_path;
+            child_path.push_back(child_index);
+            node.children.push_back(build_widget_debug_node(
+                *child, std::move(child_path), focused_widget, hovered_widget, pressed_widget));
         }
     }
     return node;
-}
-
-std::string truncate_for_overlay(std::string value, std::size_t max_chars) {
-    if (value.size() <= max_chars) {
-        return value;
-    }
-    if (max_chars <= 3) {
-        return value.substr(0, max_chars);
-    }
-    return value.substr(0, max_chars - 3) + "...";
 }
 
 std::string widget_label_for_inspector(const Widget& widget) {
@@ -1176,6 +1262,43 @@ void append_widget_panel_lines(std::vector<std::string>& lines,
             invalidation << "  retain hidden yes";
         }
         lines.push_back(invalidation.str());
+    }
+
+    if (const auto* accessible = widget->accessible(); accessible != nullptr) {
+        std::ostringstream accessibility;
+        accessibility << "a11y role " << accessible_role_name(accessible->role());
+        if (!accessible->name().empty()) {
+            accessibility << "  name " << truncate_for_overlay(std::string(accessible->name()), 18);
+        }
+        if (accessible->is_hidden()) {
+            accessibility << "  hidden yes";
+        }
+        lines.push_back(accessibility.str());
+        if (!accessible->value().empty()) {
+            lines.push_back("a11y value: " +
+                            truncate_for_overlay(std::string(accessible->value()), 26));
+        }
+        if (!accessible->description().empty()) {
+            lines.push_back("a11y desc: " +
+                            truncate_for_overlay(std::string(accessible->description()), 27));
+        }
+        if (!accessible->actions().empty()) {
+            std::ostringstream actions;
+            actions << "a11y actions:";
+            for (const auto action : accessible->actions()) {
+                actions << " " << accessible_action_name(action);
+            }
+            lines.push_back(actions.str());
+        }
+        if (!accessible->relations().empty()) {
+            for (const auto& relation : accessible->relations()) {
+                lines.push_back(
+                    "a11y rel: " +
+                    truncate_for_overlay(std::string(accessible_relation_kind_name(relation.kind)) +
+                                             " " + relation.target_debug_name,
+                                         28));
+            }
+        }
     }
 
     if (widget->debug_has_last_measure()) {
@@ -2310,12 +2433,17 @@ WidgetDebugNode Window::debug_tree() const {
     root.sensitive = true;
     root.focusable = false;
     if (impl_->child != nullptr) {
-        root.children.push_back(build_widget_debug_node(
-            *impl_->child, impl_->focused_widget, impl_->hovered_widget, impl_->pressed_widget));
+        root.children.push_back(build_widget_debug_node(*impl_->child,
+                                                        {0},
+                                                        impl_->focused_widget,
+                                                        impl_->hovered_widget,
+                                                        impl_->pressed_widget));
     }
-    for (const auto& overlay : impl_->overlays) {
+    for (std::size_t overlay_index = 0; overlay_index < impl_->overlays.size(); ++overlay_index) {
+        const auto& overlay = impl_->overlays[overlay_index];
         if (overlay.widget != nullptr) {
             root.children.push_back(build_widget_debug_node(*overlay.widget,
+                                                            {overlay_index + 1},
                                                             impl_->focused_widget,
                                                             impl_->hovered_widget,
                                                             impl_->pressed_widget));
@@ -2593,6 +2721,7 @@ std::string_view Window::debug_widget_filter() const {
 WidgetDebugNode Window::debug_selected_widget_info() const {
     return impl_->debug_selected_widget != nullptr
                ? build_widget_debug_node(*impl_->debug_selected_widget,
+                                         impl_->debug_selected_widget->debug_tree_path(),
                                          impl_->focused_widget,
                                          impl_->hovered_widget,
                                          impl_->pressed_widget)
