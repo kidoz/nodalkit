@@ -23,6 +23,12 @@ enum class DialogResponse {
     Custom, ///< Application-defined response.
 };
 
+/// Visual presentation policy for dialogs.
+enum class DialogPresentationStyle {
+    Default,
+    Sheet,
+};
+
 /// Async dialog. Dialogs are shown with present() and emit
 /// on_response() when the user acts. No blocking show() call.
 ///
@@ -46,6 +52,12 @@ public:
 
     /// Set the content widget (replaces the message label).
     void set_content(std::shared_ptr<Widget> content);
+
+    /// Set the visual presentation style used when the dialog is shown.
+    void set_presentation_style(DialogPresentationStyle style);
+
+    /// Set the minimum panel width used during measure and allocation.
+    void set_minimum_panel_width(float width);
 
     /// Present the dialog modally relative to the given window.
     void present(Window& parent);

@@ -42,6 +42,8 @@ struct Dialog::Impl {
     Window* parent_window = nullptr;
     bool presented = false;
     int armed_button = -1;
+    DialogPresentationStyle presentation_style = DialogPresentationStyle::Default;
+    float minimum_panel_width = 280.0F;
     Rect panel_bounds{};
     std::vector<Rect> button_bounds;
 
@@ -89,6 +91,25 @@ void Dialog::set_content(std::shared_ptr<Widget> content) {
     queue_redraw();
 }
 
+void Dialog::set_presentation_style(DialogPresentationStyle style) {
+    if (impl_->presentation_style == style) {
+        return;
+    }
+    impl_->presentation_style = style;
+    queue_layout();
+    queue_redraw();
+}
+
+void Dialog::set_minimum_panel_width(float width) {
+    width = std::max(120.0F, width);
+    if (impl_->minimum_panel_width == width) {
+        return;
+    }
+    impl_->minimum_panel_width = width;
+    queue_layout();
+    queue_redraw();
+}
+
 void Dialog::present(Window& parent) {
     if (impl_->presented && impl_->parent_window == &parent) {
         return;
@@ -125,8 +146,8 @@ Signal<DialogResponse>& Dialog::on_response() {
 SizeRequest Dialog::measure(const Constraints& /*constraints*/) const {
     constexpr float padding = 20.0F;
     constexpr float spacing = 12.0F;
-    constexpr float min_width = 280.0F;
     constexpr float min_height = 140.0F;
+    const float min_width = impl_->minimum_panel_width;
 
     const auto title_size = measure_text(impl_->title, dialog_title_font());
     const auto message_size =
@@ -181,12 +202,13 @@ void Dialog::allocate(const Rect& allocation) {
                                     std::min(preferred.minimum_height, allocation.height),
                                     std::max(0.0F, allocation.height - (margin * 2.0F)));
 
-    impl_->panel_bounds = {
-        allocation.x + std::max(0.0F, (allocation.width - panel_width) * 0.5F),
-        allocation.y + std::max(0.0F, (allocation.height - panel_height) * 0.5F),
-        panel_width,
-        panel_height,
-    };
+    const float panel_x = allocation.x + std::max(0.0F, (allocation.width - panel_width) * 0.5F);
+    float panel_y = allocation.y + std::max(0.0F, (allocation.height - panel_height) * 0.5F);
+    if (impl_->presentation_style == DialogPresentationStyle::Sheet) {
+        panel_y = allocation.y + margin;
+    }
+
+    impl_->panel_bounds = {panel_x, panel_y, panel_width, panel_height};
 
     impl_->button_bounds.clear();
     float inner_x = impl_->panel_bounds.x + padding;
