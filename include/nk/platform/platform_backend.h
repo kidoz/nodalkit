@@ -12,6 +12,7 @@
 #include <nk/foundation/types.h>
 #include <nk/platform/events.h>
 #include <nk/platform/file_dialog.h>
+#include <nk/platform/native_menu.h>
 #include <nk/platform/system_preferences.h>
 #include <nk/render/renderer.h>
 #include <nk/ui_core/cursor_shape.h>
@@ -34,6 +35,9 @@ using EventCallback = std::function<void(Window&)>;
 
 /// Callback for backend-driven system preference changes.
 using SystemPreferencesObserver = std::function<void(const SystemPreferences&)>;
+
+/// Callback for native app-menu activation.
+using NativeMenuActionHandler = std::function<void(std::string_view)>;
 
 /// Abstract native surface for a single window.
 class NativeSurface {
@@ -139,6 +143,16 @@ public:
 
     /// Stop native system-preference observation.
     virtual void stop_system_preferences_observation() {}
+
+    /// Whether the backend supports a native application menu.
+    [[nodiscard]] virtual bool supports_native_app_menu() const { return false; }
+
+    /// Install a native application menu model.
+    virtual void set_native_app_menu(std::span<const NativeMenu> menus,
+                                     NativeMenuActionHandler action_handler) {
+        (void)menus;
+        (void)action_handler;
+    }
 
     /// Create the platform-appropriate backend for the current OS.
     [[nodiscard]] static std::unique_ptr<PlatformBackend> create();

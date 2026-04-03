@@ -32,6 +32,9 @@ public:
     [[nodiscard]] bool supports_clipboard_text() const override;
     [[nodiscard]] std::string clipboard_text() const override;
     void set_clipboard_text(std::string_view text) override;
+    [[nodiscard]] bool supports_native_app_menu() const override;
+    void set_native_app_menu(std::span<const NativeMenu> menus,
+                             NativeMenuActionHandler action_handler) override;
 
     [[nodiscard]] SystemPreferences system_preferences() const override;
     [[nodiscard]] bool supports_system_preferences_observation() const override;
