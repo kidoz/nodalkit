@@ -47,9 +47,15 @@ int run_showcase(int argc, char** argv) {
     int counter = 0;
     int frame_number = 0;
 
+    auto menus = build_showcase_menus(profile);
     auto menu_bar = nk::MenuBar::create();
-    for (auto menu : build_showcase_menus(profile)) {
+    for (auto menu : menus) {
         menu_bar->add_menu(std::move(menu));
+    }
+    std::shared_ptr<nk::Widget> menu_surface = menu_bar;
+    if (app.supports_native_app_menu()) {
+        app.set_native_app_menu(menus);
+        menu_surface.reset();
     }
 
     auto status_bar = nk::StatusBar::create();
@@ -270,9 +276,10 @@ int run_showcase(int argc, char** argv) {
         ValueText::create("Source: 42, Target: " + std::to_string(target_prop.get()));
     auto prop_detail = SecondaryText::create("Shared state updates the footer and live status.");
     auto prop_btn = nk::Button::create("Set Source = 99");
-    auto dialog_label = FieldLabel::create("Dialog flow");
-    auto dialog_detail = SecondaryText::create("Open a modal and commit the response.");
-    auto dialog_btn = nk::Button::create("Show Dialog");
+    auto dialog_label = FieldLabel::create("Sheet dialog");
+    auto dialog_detail =
+        SecondaryText::create("Open a window-attached sheet with explicit minimum width.");
+    auto dialog_btn = nk::Button::create("Show Preferences Sheet");
     dialog_btn->add_style_class("suggested");
     auto runtime_status = ValueText::create("Waiting for an action.");
     auto runtime_status_detail = SecondaryText::create("No runtime action has fired yet.");
@@ -314,23 +321,31 @@ int run_showcase(int argc, char** argv) {
         status_bar->set_segment(0, "Property binding updated");
     });
 
-    (void)dialog_btn->on_clicked().connect([&] {
-        auto dialog = nk::Dialog::create("Confirmation", "Do you want to continue?");
-        dialog->add_button("Cancel", nk::DialogResponse::Cancel);
-        dialog->add_button("OK", nk::DialogResponse::Accept);
+    auto present_preferences_sheet = [&] {
+        auto dialog = nk::Dialog::create(
+            "Preferences",
+            "Review the current showcase shell configuration before applying the change.");
+        dialog->set_presentation_style(nk::DialogPresentationStyle::Sheet);
+        dialog->set_minimum_panel_width(460.0F);
+        dialog->add_button("Later", nk::DialogResponse::Cancel);
+        dialog->add_button("Apply", nk::DialogResponse::Accept);
         (void)dialog->on_response().connect([&](nk::DialogResponse response) {
             if (response == nk::DialogResponse::Accept) {
-                status_bar->set_segment(0, "Dialog: Accepted");
-                runtime_status->set_text("Dialog accepted.");
-                runtime_status_detail->set_text("The modal returned an accepted response.");
+                status_bar->set_segment(0, "Sheet: Applied");
+                runtime_status->set_text("Preferences sheet applied.");
+                runtime_status_detail->set_text(
+                    "The top-attached sheet closed after an accepted response.");
             } else {
-                status_bar->set_segment(0, "Dialog: Cancelled");
-                runtime_status->set_text("Dialog cancelled.");
-                runtime_status_detail->set_text("The modal was dismissed without acceptance.");
+                status_bar->set_segment(0, "Sheet: Deferred");
+                runtime_status->set_text("Preferences sheet deferred.");
+                runtime_status_detail->set_text(
+                    "The sheet was dismissed without applying any changes.");
             }
         });
         dialog->present(window);
-    });
+    };
+
+    (void)dialog_btn->on_clicked().connect(present_preferences_sheet);
 
     auto property_group = Box::vertical(8.0F);
     property_group->append(prop_label);
@@ -390,12 +405,12 @@ int run_showcase(int argc, char** argv) {
     body_content->append(content_row);
 
     auto body_page = SurfacePanel::page(body_content);
-    auto root = ShowcaseShell::create(menu_bar, body_page, status_bar);
+    auto root = ShowcaseShell::create(menu_surface, body_page, status_bar);
     window.set_child(root);
 
     list_view->grab_focus();
 
-    (void)menu_bar->on_action().connect([&](std::string_view action) {
+    auto handle_menu_action = [&](std::string_view action) {
         if (action == "file.quit") {
             app.quit(0);
             return;
@@ -414,10 +429,18 @@ int run_showcase(int argc, char** argv) {
             return;
         }
 
+        if (action == "app.preferences") {
+            present_preferences_sheet();
+            return;
+        }
+
         status_bar->set_segment(0, "Action: " + std::string(action));
         runtime_status->set_text("Menu action: " + std::string(action));
         runtime_status_detail->set_text("The last runtime event came from the application menu.");
-    });
+    };
+
+    (void)menu_bar->on_action().connect(handle_menu_action);
+    (void)app.on_native_app_menu_action().connect(handle_menu_action);
 
     (void)app.event_loop().set_interval(std::chrono::milliseconds(33), [&] {
         ++frame_number;
