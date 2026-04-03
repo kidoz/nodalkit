@@ -70,6 +70,31 @@ float clamp01(float value) {
     return std::clamp(value, 0.0F, 1.0F);
 }
 
+bool rect_is_empty(Rect rect) {
+    return rect.width <= 0.0F || rect.height <= 0.0F;
+}
+
+bool rects_overlap_or_touch(Rect lhs, Rect rhs) {
+    return lhs.x <= rhs.right() && rhs.x <= lhs.right() && lhs.y <= rhs.bottom() &&
+           rhs.y <= lhs.bottom();
+}
+
+Rect union_rect(Rect lhs, Rect rhs) {
+    const float x0 = std::min(lhs.x, rhs.x);
+    const float y0 = std::min(lhs.y, rhs.y);
+    const float x1 = std::max(lhs.right(), rhs.right());
+    const float y1 = std::max(lhs.bottom(), rhs.bottom());
+    return {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+}
+
+Rect clip_rect_to_viewport(Rect rect, int width, int height) {
+    const float x0 = std::clamp(rect.x, 0.0F, static_cast<float>(width));
+    const float y0 = std::clamp(rect.y, 0.0F, static_cast<float>(height));
+    const float x1 = std::clamp(rect.right(), 0.0F, static_cast<float>(width));
+    const float y1 = std::clamp(rect.bottom(), 0.0F, static_cast<float>(height));
+    return {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+}
+
 float effective_corner_radius(Rect rect, float requested_radius) {
     return std::clamp(requested_radius, 0.0F, std::min(rect.width, rect.height) * 0.5F);
 }
@@ -259,9 +284,12 @@ struct SoftwareRenderer::Impl {
     int width = 0;
     int height = 0;
     std::vector<uint8_t> pixels; // RGBA8
+    std::vector<Rect> damage_regions;
     TextShaper* text_shaper = nullptr;
     std::unordered_map<TextKey, std::shared_ptr<ShapedText>, TextKeyHash> shaped_text_cache;
     RenderHotspotCounters last_hotspot_counters;
+    bool full_redraw = true;
+    bool force_full_redraw = true;
 };
 
 SoftwareRenderer::SoftwareRenderer() : impl_(std::make_unique<Impl>()) {}
@@ -280,16 +308,110 @@ bool SoftwareRenderer::attach_surface(NativeSurface& surface) {
 void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
     impl_->logical_viewport = viewport;
     impl_->scale_factor = normalize_scale_factor(scale_factor);
-    impl_->width = scaled_extent(viewport.width, impl_->scale_factor);
-    impl_->height = scaled_extent(viewport.height, impl_->scale_factor);
+    const int next_width = scaled_extent(viewport.width, impl_->scale_factor);
+    const int next_height = scaled_extent(viewport.height, impl_->scale_factor);
+    const bool size_changed = next_width != impl_->width || next_height != impl_->height;
+    impl_->width = next_width;
+    impl_->height = next_height;
     impl_->last_hotspot_counters = {};
-    const auto size = static_cast<std::size_t>(impl_->width * impl_->height * 4);
-    impl_->pixels.resize(size);
-    // Clear to white.
-    std::memset(impl_->pixels.data(), 0xFF, impl_->pixels.size());
+    impl_->damage_regions.clear();
+    impl_->full_redraw = true;
+    impl_->force_full_redraw = size_changed || impl_->pixels.empty();
+    impl_->last_hotspot_counters.gpu_viewport_pixel_count =
+        static_cast<std::size_t>(std::max(0, impl_->width)) *
+        static_cast<std::size_t>(std::max(0, impl_->height));
+
+    const auto size =
+        static_cast<std::size_t>(std::max(0, impl_->width) * std::max(0, impl_->height) * 4);
+    if (size_changed || impl_->pixels.size() != size) {
+        impl_->pixels.resize(size);
+        if (!impl_->pixels.empty()) {
+            std::memset(impl_->pixels.data(), 0xFF, impl_->pixels.size());
+        }
+    }
+}
+
+void SoftwareRenderer::set_damage_regions(std::span<const Rect> regions) {
+    impl_->damage_regions.clear();
+    if (impl_->width <= 0 || impl_->height <= 0 || regions.empty()) {
+        impl_->last_hotspot_counters.damage_region_count = 0;
+        impl_->full_redraw = true;
+        return;
+    }
+
+    impl_->damage_regions.reserve(regions.size());
+    for (const auto& region : regions) {
+        const auto scaled = clip_rect_to_viewport(
+            scale_rect(region, impl_->scale_factor), impl_->width, impl_->height);
+        if (rect_is_empty(scaled)) {
+            continue;
+        }
+
+        bool merged_existing = false;
+        for (auto& existing : impl_->damage_regions) {
+            if (rects_overlap_or_touch(existing, scaled)) {
+                existing = union_rect(existing, scaled);
+                merged_existing = true;
+                break;
+            }
+        }
+
+        if (!merged_existing) {
+            impl_->damage_regions.push_back(scaled);
+        }
+    }
+
+    for (std::size_t outer = 0; outer < impl_->damage_regions.size(); ++outer) {
+        for (std::size_t inner = outer + 1; inner < impl_->damage_regions.size();) {
+            if (rects_overlap_or_touch(impl_->damage_regions[outer],
+                                       impl_->damage_regions[inner])) {
+                impl_->damage_regions[outer] =
+                    union_rect(impl_->damage_regions[outer], impl_->damage_regions[inner]);
+                impl_->damage_regions.erase(impl_->damage_regions.begin() +
+                                            static_cast<std::ptrdiff_t>(inner));
+            } else {
+                ++inner;
+            }
+        }
+    }
+
+    impl_->last_hotspot_counters.damage_region_count = impl_->damage_regions.size();
+    impl_->full_redraw = impl_->force_full_redraw || impl_->damage_regions.empty();
 }
 
 void SoftwareRenderer::render(const RenderNode& root) {
+    auto clear_rect = [&](Rect rect) {
+        const int x0 = std::max(0, static_cast<int>(std::floor(rect.x)));
+        const int y0 = std::max(0, static_cast<int>(std::floor(rect.y)));
+        const int x1 = std::min(impl_->width, static_cast<int>(std::ceil(rect.right())));
+        const int y1 = std::min(impl_->height, static_cast<int>(std::ceil(rect.bottom())));
+        if (x1 <= x0 || y1 <= y0) {
+            return;
+        }
+
+        for (int y = y0; y < y1; ++y) {
+            auto* row =
+                impl_->pixels.data() + static_cast<std::size_t>((y * impl_->width + x0) * 4);
+            std::memset(row, 0xFF, static_cast<std::size_t>(x1 - x0) * 4);
+        }
+    };
+
+    if (impl_->full_redraw || impl_->damage_regions.empty()) {
+        if (!impl_->pixels.empty()) {
+            std::memset(impl_->pixels.data(), 0xFF, impl_->pixels.size());
+        }
+        impl_->last_hotspot_counters.damage_region_count = 0;
+        impl_->last_hotspot_counters.gpu_estimated_draw_pixel_count =
+            impl_->last_hotspot_counters.gpu_viewport_pixel_count;
+    } else {
+        std::size_t total_damage_pixels = 0;
+        for (const auto& damage : impl_->damage_regions) {
+            clear_rect(damage);
+            total_damage_pixels += scaled_pixel_area(damage, 1.0F);
+        }
+        impl_->last_hotspot_counters.gpu_estimated_draw_pixel_count = total_damage_pixels;
+    }
+
     auto render_node = [&](auto&& self,
                            const RenderNode& node,
                            std::vector<ClipRegion>& clips,
@@ -299,6 +421,23 @@ void SoftwareRenderer::render(const RenderNode& root) {
                            int c_y1) -> void {
         if (c_x1 <= c_x0 || c_y1 <= c_y0) {
             return;
+        }
+
+        if (node.kind() != RenderNodeKind::Text) {
+            const auto scaled_bounds = scale_rect(node.bounds(), impl_->scale_factor);
+            if (!rect_is_empty(scaled_bounds)) {
+                const int node_x0 = static_cast<int>(std::floor(scaled_bounds.x));
+                const int node_y0 = static_cast<int>(std::floor(scaled_bounds.y));
+                const int node_x1 = static_cast<int>(std::ceil(scaled_bounds.right()));
+                const int node_y1 = static_cast<int>(std::ceil(scaled_bounds.bottom()));
+                c_x0 = std::max(c_x0, node_x0);
+                c_y0 = std::max(c_y0, node_y0);
+                c_x1 = std::min(c_x1, node_x1);
+                c_y1 = std::min(c_y1, node_y1);
+                if (c_x1 <= c_x0 || c_y1 <= c_y0) {
+                    return;
+                }
+            }
         }
 
         if (node.kind() == RenderNodeKind::RoundedClip) {
@@ -545,7 +684,19 @@ void SoftwareRenderer::render(const RenderNode& root) {
     };
 
     std::vector<ClipRegion> clips;
-    render_node(render_node, root, clips, 0, 0, impl_->width, impl_->height);
+    if (impl_->full_redraw || impl_->damage_regions.empty()) {
+        render_node(render_node, root, clips, 0, 0, impl_->width, impl_->height);
+    } else {
+        for (const auto& damage : impl_->damage_regions) {
+            render_node(render_node,
+                        root,
+                        clips,
+                        static_cast<int>(std::floor(damage.x)),
+                        static_cast<int>(std::floor(damage.y)),
+                        static_cast<int>(std::ceil(damage.right())),
+                        static_cast<int>(std::ceil(damage.bottom())));
+        }
+    }
 }
 
 void SoftwareRenderer::end_frame() {
@@ -553,7 +704,13 @@ void SoftwareRenderer::end_frame() {
 }
 
 void SoftwareRenderer::present(NativeSurface& surface) {
-    surface.present(pixel_data(), pixel_width(), pixel_height());
+    impl_->last_hotspot_counters.gpu_present_path = GpuPresentPath::SoftwareUpload;
+    const auto damage = present_damage_regions();
+    impl_->last_hotspot_counters.gpu_present_region_count = damage.has_value() ? damage->size() : 0;
+    impl_->last_hotspot_counters.gpu_present_tradeoff =
+        damage.has_value() ? GpuPresentTradeoff::BandwidthFavored : GpuPresentTradeoff::None;
+    surface.present(
+        pixel_data(), pixel_width(), pixel_height(), damage.value_or(std::span<const Rect>{}));
 }
 
 RenderHotspotCounters SoftwareRenderer::last_hotspot_counters() const {
@@ -574,6 +731,13 @@ int SoftwareRenderer::pixel_width() const {
 
 int SoftwareRenderer::pixel_height() const {
     return impl_->height;
+}
+
+std::optional<std::span<const Rect>> SoftwareRenderer::present_damage_regions() const {
+    if (impl_->full_redraw || impl_->damage_regions.empty()) {
+        return std::nullopt;
+    }
+    return std::span<const Rect>(impl_->damage_regions);
 }
 
 std::unique_ptr<Renderer> create_renderer(RendererBackend backend) {

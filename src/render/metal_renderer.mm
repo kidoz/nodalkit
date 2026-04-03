@@ -227,6 +227,24 @@ float effective_corner_radius(Rect rect, float requested_radius) {
     return std::clamp(requested_radius, 0.0F, std::min(rect.width, rect.height) * 0.5F);
 }
 
+bool rects_overlap_or_touch(Rect lhs, Rect rhs) {
+    return lhs.x <= rhs.right() && rhs.x <= lhs.right() && lhs.y <= rhs.bottom() &&
+           rhs.y <= lhs.bottom();
+}
+
+bool rects_intersect(Rect lhs, Rect rhs) {
+    return lhs.x < rhs.right() && rhs.x < lhs.right() && lhs.y < rhs.bottom() &&
+           rhs.y < lhs.bottom();
+}
+
+Rect union_rect(Rect lhs, Rect rhs) {
+    const float x0 = std::min(lhs.x, rhs.x);
+    const float y0 = std::min(lhs.y, rhs.y);
+    const float x1 = std::max(lhs.right(), rhs.right());
+    const float y1 = std::max(lhs.bottom(), rhs.bottom());
+    return {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+}
+
 constexpr uint64_t kTextureCacheMaxAgeFrames = 120;
 constexpr std::size_t kImageTextureCacheMaxEntries = 128;
 constexpr std::size_t kTextTextureCacheMaxEntries = 256;
@@ -599,6 +617,62 @@ public:
         software_->set_text_shaper(shaper);
     }
 
+    void set_damage_regions(std::span<const Rect> regions) override {
+        damage_regions_.clear();
+        if (logical_viewport_.width <= 0.0F || logical_viewport_.height <= 0.0F ||
+            regions.empty()) {
+            last_hotspot_counters_.damage_region_count = 0;
+            full_redraw_ = true;
+            return;
+        }
+
+        damage_regions_.reserve(regions.size());
+        const Rect viewport = {0.0F,
+                               0.0F,
+                               logical_viewport_.width * scale_factor_,
+                               logical_viewport_.height * scale_factor_};
+        for (const auto& region : regions) {
+            Rect scaled = scale_rect(region, scale_factor_);
+            const float x0 = std::max(viewport.x, scaled.x);
+            const float y0 = std::max(viewport.y, scaled.y);
+            const float x1 = std::min(viewport.right(), scaled.right());
+            const float y1 = std::min(viewport.bottom(), scaled.bottom());
+            scaled = {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+            if (scaled.width <= 0.0F || scaled.height <= 0.0F) {
+                continue;
+            }
+
+            bool merged_existing = false;
+            for (auto& existing : damage_regions_) {
+                if (rects_overlap_or_touch(existing, scaled)) {
+                    existing = union_rect(existing, scaled);
+                    merged_existing = true;
+                    break;
+                }
+            }
+
+            if (!merged_existing) {
+                damage_regions_.push_back(scaled);
+            }
+        }
+
+        for (std::size_t outer = 0; outer < damage_regions_.size(); ++outer) {
+            for (std::size_t inner = outer + 1; inner < damage_regions_.size();) {
+                if (rects_overlap_or_touch(damage_regions_[outer], damage_regions_[inner])) {
+                    damage_regions_[outer] =
+                        union_rect(damage_regions_[outer], damage_regions_[inner]);
+                    damage_regions_.erase(damage_regions_.begin() +
+                                          static_cast<std::ptrdiff_t>(inner));
+                } else {
+                    ++inner;
+                }
+            }
+        }
+
+        last_hotspot_counters_.damage_region_count = damage_regions_.size();
+        full_redraw_ = damage_regions_.empty();
+    }
+
     void begin_frame(Size viewport, float scale_factor) override {
         logical_viewport_ = viewport;
         scale_factor_ = normalize_scale_factor(scale_factor);
@@ -611,11 +685,15 @@ public:
         trim_texture_cache(image_texture_cache_, kImageTextureCacheMaxEntries);
         trim_texture_cache(text_texture_cache_, kTextTextureCacheMaxEntries);
         needs_software_fallback_ = false;
+        damage_regions_.clear();
+        full_redraw_ = true;
         last_hotspot_counters_ = {};
     }
 
     void render(const RenderNode& root) override {
+        const auto preserved_damage_region_count = last_hotspot_counters_.damage_region_count;
         last_hotspot_counters_ = {};
+        last_hotspot_counters_.damage_region_count = preserved_damage_region_count;
         draw_commands_.clear();
         primitive_commands_.clear();
         image_commands_.clear();
@@ -655,17 +733,25 @@ public:
             return;
         }
 
-        MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
-        pass.colorAttachments[0].texture = drawable.texture;
-        pass.colorAttachments[0].loadAction = MTLLoadActionClear;
-        pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-        pass.colorAttachments[0].clearColor = MTLClearColorMake(1.0, 1.0, 1.0, 1.0);
-
         id<MTLCommandBuffer> command_buffer = [command_queue_ commandBuffer];
-        id<MTLRenderCommandEncoder> encoder =
-            [command_buffer renderCommandEncoderWithDescriptor:pass];
+        if (command_buffer == nil) {
+            software_->present(surface);
+            return;
+        }
 
         if (needs_software_fallback_) {
+            MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+            pass.colorAttachments[0].texture = drawable.texture;
+            pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+            pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+            pass.colorAttachments[0].clearColor = MTLClearColorMake(1.0, 1.0, 1.0, 1.0);
+            id<MTLRenderCommandEncoder> encoder =
+                [command_buffer renderCommandEncoderWithDescriptor:pass];
+            if (encoder == nil) {
+                software_->present(surface);
+                return;
+            }
+
             if (staging_texture_ == nil || static_cast<int>(staging_texture_.width) != width ||
                 static_cast<int>(staging_texture_.height) != height) {
                 MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
@@ -698,113 +784,98 @@ public:
                 [encoder setFragmentSamplerState:sampler_state_ atIndex:0];
             }
             [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
-        } else {
-            id<MTLRenderPipelineState> active_pipeline = nil;
-            for (const auto& draw_command : draw_commands_) {
-                switch (draw_command.kind) {
-                case DrawCommandKind::Primitive: {
-                    const auto& command = primitive_commands_[draw_command.command_index];
-                    if (active_pipeline != primitive_pipeline_) {
-                        [encoder setRenderPipelineState:primitive_pipeline_];
-                        [encoder setVertexBuffer:primitive_vertex_buffer_ offset:0 atIndex:0];
-                        active_pipeline = primitive_pipeline_;
-                    }
+            ++last_hotspot_counters_.gpu_draw_call_count;
+            last_hotspot_counters_.gpu_present_path = GpuPresentPath::SoftwareUpload;
+            last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::None;
+            last_hotspot_counters_.gpu_present_region_count = 0;
+            [encoder endEncoding];
+            [command_buffer presentDrawable:drawable];
+            [command_buffer commit];
+            return;
+        }
 
-                    PrimitiveUniforms uniforms{};
-                    const Rect scaled_rect = scale_rect(command.rect, scale_factor_);
-                    uniforms.rect[0] = scaled_rect.x;
-                    uniforms.rect[1] = scaled_rect.y;
-                    uniforms.rect[2] = scaled_rect.width;
-                    uniforms.rect[3] = scaled_rect.height;
-                    uniforms.color[0] = command.color.r;
-                    uniforms.color[1] = command.color.g;
-                    uniforms.color[2] = command.color.b;
-                    uniforms.color[3] = command.color.a;
-                    uniforms.radius = command.radius * scale_factor_;
-                    uniforms.thickness = command.thickness * scale_factor_;
-                    uniforms.kind = command.kind;
-                    populate_clip_uniforms(
-                        uniforms, command.clips, command.clip_count, scale_factor_);
-                    uniforms.viewport_size[0] = static_cast<float>(width);
-                    uniforms.viewport_size[1] = static_cast<float>(height);
-                    [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
-                    [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:1];
-                    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
-                                vertexStart:0
-                                vertexCount:4];
-                    break;
+        if (!ensure_scene_texture(width, height)) {
+            software_->present(surface);
+            return;
+        }
+
+        const bool partial_redraw = scene_initialized_ && !full_redraw_ && !damage_regions_.empty();
+        MTLRenderPassDescriptor* scene_pass = [MTLRenderPassDescriptor renderPassDescriptor];
+        scene_pass.colorAttachments[0].texture = scene_texture_;
+        scene_pass.colorAttachments[0].loadAction =
+            partial_redraw ? MTLLoadActionLoad : MTLLoadActionClear;
+        scene_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+        scene_pass.colorAttachments[0].clearColor = MTLClearColorMake(1.0, 1.0, 1.0, 1.0);
+
+        id<MTLRenderCommandEncoder> scene_encoder =
+            [command_buffer renderCommandEncoderWithDescriptor:scene_pass];
+        if (scene_encoder == nil) {
+            software_->present(surface);
+            return;
+        }
+
+        id<MTLRenderPipelineState> active_pipeline = nil;
+        if (partial_redraw) {
+            std::size_t damage_pixel_count = 0;
+            for (const auto& damage_region : damage_regions_) {
+                const auto scissor = scissor_rect(damage_region, width, height);
+                if (scissor.width == 0 || scissor.height == 0) {
+                    continue;
                 }
-                case DrawCommandKind::Image: {
-                    const auto& command = image_commands_[draw_command.command_index];
-                    id<MTLTexture> image_texture = upload_image_texture(command);
-                    if (image_texture == nil) {
-                        break;
+                damage_pixel_count += scissor.width * scissor.height;
+                [scene_encoder setScissorRect:scissor];
+                encode_clear_rect(scene_encoder, active_pipeline, damage_region, width, height);
+                for (const auto& draw_command : draw_commands_) {
+                    if (!draw_command_intersects_damage(draw_command, damage_region)) {
+                        continue;
                     }
-
-                    if (active_pipeline != image_pipeline_) {
-                        [encoder setRenderPipelineState:image_pipeline_];
-                        [encoder setVertexBuffer:primitive_vertex_buffer_ offset:0 atIndex:0];
-                        active_pipeline = image_pipeline_;
-                    }
-
-                    ImageUniforms uniforms{};
-                    const Rect scaled_rect = scale_rect(command.rect, scale_factor_);
-                    uniforms.rect[0] = scaled_rect.x;
-                    uniforms.rect[1] = scaled_rect.y;
-                    uniforms.rect[2] = scaled_rect.width;
-                    uniforms.rect[3] = scaled_rect.height;
-                    populate_clip_uniforms(
-                        uniforms, command.clips, command.clip_count, scale_factor_);
-                    uniforms.viewport_size[0] = static_cast<float>(width);
-                    uniforms.viewport_size[1] = static_cast<float>(height);
-                    [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
-                    [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:1];
-                    [encoder setFragmentTexture:image_texture atIndex:0];
-                    [encoder setFragmentSamplerState:(command.scale_mode == ScaleMode::Bilinear
-                                                          ? linear_sampler_state_
-                                                          : sampler_state_)
-                                             atIndex:0];
-                    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
-                                vertexStart:0
-                                vertexCount:4];
-                    break;
-                }
-                case DrawCommandKind::Text: {
-                    const auto& command = text_commands_[draw_command.command_index];
-                    id<MTLTexture> text_texture = upload_text_texture(command);
-                    if (text_texture == nil) {
-                        break;
-                    }
-
-                    if (active_pipeline != image_pipeline_) {
-                        [encoder setRenderPipelineState:image_pipeline_];
-                        [encoder setVertexBuffer:primitive_vertex_buffer_ offset:0 atIndex:0];
-                        active_pipeline = image_pipeline_;
-                    }
-
-                    ImageUniforms uniforms{};
-                    const Rect scaled_rect = scale_rect(command.rect, scale_factor_);
-                    uniforms.rect[0] = scaled_rect.x;
-                    uniforms.rect[1] = scaled_rect.y;
-                    uniforms.rect[2] = scaled_rect.width;
-                    uniforms.rect[3] = scaled_rect.height;
-                    populate_clip_uniforms(
-                        uniforms, command.clips, command.clip_count, scale_factor_);
-                    uniforms.viewport_size[0] = static_cast<float>(width);
-                    uniforms.viewport_size[1] = static_cast<float>(height);
-                    [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
-                    [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:1];
-                    [encoder setFragmentTexture:text_texture atIndex:0];
-                    [encoder setFragmentSamplerState:sampler_state_ atIndex:0];
-                    [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
-                                vertexStart:0
-                                vertexCount:4];
-                    break;
-                }
+                    encode_draw_command(
+                        scene_encoder, active_pipeline, draw_command, width, height);
                 }
             }
+            last_hotspot_counters_.gpu_present_region_count = damage_regions_.size();
+            last_hotspot_counters_.gpu_present_path = GpuPresentPath::PartialRedrawCopy;
+            last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::DrawFavored;
+            last_hotspot_counters_.gpu_estimated_draw_pixel_count =
+                static_cast<std::size_t>(width) * static_cast<std::size_t>(height) +
+                damage_pixel_count;
+        } else {
+            for (const auto& draw_command : draw_commands_) {
+                encode_draw_command(scene_encoder, active_pipeline, draw_command, width, height);
+            }
+            last_hotspot_counters_.gpu_present_region_count = 0;
+            last_hotspot_counters_.gpu_present_path = GpuPresentPath::FullRedrawCopyBack;
+            last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::None;
+            last_hotspot_counters_.gpu_estimated_draw_pixel_count =
+                static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 2;
         }
+        [scene_encoder endEncoding];
+
+        MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+        pass.colorAttachments[0].texture = drawable.texture;
+        pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+        pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+        pass.colorAttachments[0].clearColor = MTLClearColorMake(1.0, 1.0, 1.0, 1.0);
+        id<MTLRenderCommandEncoder> encoder =
+            [command_buffer renderCommandEncoderWithDescriptor:pass];
+        if (encoder == nil) {
+            software_->present(surface);
+            return;
+        }
+        [encoder setRenderPipelineState:texture_pipeline_];
+        [encoder setVertexBuffer:vertex_buffer_ offset:0 atIndex:0];
+        [encoder setFragmentTexture:scene_texture_ atIndex:0];
+        if (sampler_state_ != nil) {
+            [encoder setFragmentSamplerState:sampler_state_ atIndex:0];
+        }
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        ++last_hotspot_counters_.gpu_draw_call_count;
         [encoder endEncoding];
+
+        scene_initialized_ = true;
+        last_hotspot_counters_.gpu_viewport_pixel_count =
+            static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+
         [command_buffer presentDrawable:drawable];
         [command_buffer commit];
     }
@@ -814,6 +885,196 @@ public:
     }
 
 private:
+    [[nodiscard]] bool ensure_scene_texture(int width, int height) {
+        if (device_ == nil || width <= 0 || height <= 0) {
+            return false;
+        }
+
+        if (scene_texture_ != nil && static_cast<int>(scene_texture_.width) == width &&
+            static_cast<int>(scene_texture_.height) == height) {
+            return true;
+        }
+
+        MTLTextureDescriptor* descriptor =
+            [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                               width:static_cast<NSUInteger>(width)
+                                                              height:static_cast<NSUInteger>(height)
+                                                           mipmapped:NO];
+        descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+        descriptor.storageMode = MTLStorageModePrivate;
+        scene_texture_ = [device_ newTextureWithDescriptor:descriptor];
+        scene_initialized_ = false;
+        return scene_texture_ != nil;
+    }
+
+    [[nodiscard]] Rect scaled_command_bounds(const DrawCommand& draw_command) const {
+        switch (draw_command.kind) {
+        case DrawCommandKind::Primitive:
+            return scale_rect(primitive_commands_[draw_command.command_index].rect, scale_factor_);
+        case DrawCommandKind::Image:
+            return scale_rect(image_commands_[draw_command.command_index].rect, scale_factor_);
+        case DrawCommandKind::Text:
+            return scale_rect(text_commands_[draw_command.command_index].rect, scale_factor_);
+        }
+        return {};
+    }
+
+    [[nodiscard]] bool draw_command_intersects_damage(const DrawCommand& draw_command,
+                                                      Rect damage_rect) const {
+        return rects_intersect(scaled_command_bounds(draw_command), damage_rect);
+    }
+
+    [[nodiscard]] MTLScissorRect scissor_rect(Rect rect, int width, int height) const {
+        const NSUInteger x = static_cast<NSUInteger>(
+            std::clamp(static_cast<int>(std::floor(rect.x)), 0, std::max(0, width)));
+        const NSUInteger y = static_cast<NSUInteger>(
+            std::clamp(static_cast<int>(std::floor(rect.y)), 0, std::max(0, height)));
+        const NSUInteger right = static_cast<NSUInteger>(
+            std::clamp(static_cast<int>(std::ceil(rect.right())), 0, std::max(0, width)));
+        const NSUInteger bottom = static_cast<NSUInteger>(
+            std::clamp(static_cast<int>(std::ceil(rect.bottom())), 0, std::max(0, height)));
+        return MTLScissorRect{
+            x,
+            y,
+            right > x ? right - x : 0,
+            bottom > y ? bottom - y : 0,
+        };
+    }
+
+    void encode_clear_rect(id<MTLRenderCommandEncoder> encoder,
+                           id<MTLRenderPipelineState>& active_pipeline,
+                           Rect rect,
+                           int width,
+                           int height) {
+        if (encoder == nil || rect.width <= 0.0F || rect.height <= 0.0F) {
+            return;
+        }
+
+        if (active_pipeline != primitive_pipeline_) {
+            [encoder setRenderPipelineState:primitive_pipeline_];
+            [encoder setVertexBuffer:primitive_vertex_buffer_ offset:0 atIndex:0];
+            active_pipeline = primitive_pipeline_;
+        }
+
+        PrimitiveUniforms uniforms{};
+        uniforms.rect[0] = rect.x;
+        uniforms.rect[1] = rect.y;
+        uniforms.rect[2] = rect.width;
+        uniforms.rect[3] = rect.height;
+        uniforms.color[0] = 1.0F;
+        uniforms.color[1] = 1.0F;
+        uniforms.color[2] = 1.0F;
+        uniforms.color[3] = 1.0F;
+        uniforms.viewport_size[0] = static_cast<float>(width);
+        uniforms.viewport_size[1] = static_cast<float>(height);
+        [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+        [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        ++last_hotspot_counters_.gpu_draw_call_count;
+    }
+
+    void encode_draw_command(id<MTLRenderCommandEncoder> encoder,
+                             id<MTLRenderPipelineState>& active_pipeline,
+                             const DrawCommand& draw_command,
+                             int width,
+                             int height) {
+        switch (draw_command.kind) {
+        case DrawCommandKind::Primitive: {
+            const auto& command = primitive_commands_[draw_command.command_index];
+            if (active_pipeline != primitive_pipeline_) {
+                [encoder setRenderPipelineState:primitive_pipeline_];
+                [encoder setVertexBuffer:primitive_vertex_buffer_ offset:0 atIndex:0];
+                active_pipeline = primitive_pipeline_;
+            }
+
+            PrimitiveUniforms uniforms{};
+            const Rect scaled_rect = scale_rect(command.rect, scale_factor_);
+            uniforms.rect[0] = scaled_rect.x;
+            uniforms.rect[1] = scaled_rect.y;
+            uniforms.rect[2] = scaled_rect.width;
+            uniforms.rect[3] = scaled_rect.height;
+            uniforms.color[0] = command.color.r;
+            uniforms.color[1] = command.color.g;
+            uniforms.color[2] = command.color.b;
+            uniforms.color[3] = command.color.a;
+            uniforms.radius = command.radius * scale_factor_;
+            uniforms.thickness = command.thickness * scale_factor_;
+            uniforms.kind = command.kind;
+            populate_clip_uniforms(uniforms, command.clips, command.clip_count, scale_factor_);
+            uniforms.viewport_size[0] = static_cast<float>(width);
+            uniforms.viewport_size[1] = static_cast<float>(height);
+            [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+            [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+            ++last_hotspot_counters_.gpu_draw_call_count;
+            break;
+        }
+        case DrawCommandKind::Image: {
+            const auto& command = image_commands_[draw_command.command_index];
+            id<MTLTexture> image_texture = upload_image_texture(command);
+            if (image_texture == nil) {
+                break;
+            }
+
+            if (active_pipeline != image_pipeline_) {
+                [encoder setRenderPipelineState:image_pipeline_];
+                [encoder setVertexBuffer:primitive_vertex_buffer_ offset:0 atIndex:0];
+                active_pipeline = image_pipeline_;
+            }
+
+            ImageUniforms uniforms{};
+            const Rect scaled_rect = scale_rect(command.rect, scale_factor_);
+            uniforms.rect[0] = scaled_rect.x;
+            uniforms.rect[1] = scaled_rect.y;
+            uniforms.rect[2] = scaled_rect.width;
+            uniforms.rect[3] = scaled_rect.height;
+            populate_clip_uniforms(uniforms, command.clips, command.clip_count, scale_factor_);
+            uniforms.viewport_size[0] = static_cast<float>(width);
+            uniforms.viewport_size[1] = static_cast<float>(height);
+            [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+            [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+            [encoder setFragmentTexture:image_texture atIndex:0];
+            [encoder setFragmentSamplerState:(command.scale_mode == ScaleMode::Bilinear
+                                                  ? linear_sampler_state_
+                                                  : sampler_state_)
+                                     atIndex:0];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+            ++last_hotspot_counters_.gpu_draw_call_count;
+            break;
+        }
+        case DrawCommandKind::Text: {
+            const auto& command = text_commands_[draw_command.command_index];
+            id<MTLTexture> text_texture = upload_text_texture(command);
+            if (text_texture == nil) {
+                break;
+            }
+
+            if (active_pipeline != image_pipeline_) {
+                [encoder setRenderPipelineState:image_pipeline_];
+                [encoder setVertexBuffer:primitive_vertex_buffer_ offset:0 atIndex:0];
+                active_pipeline = image_pipeline_;
+            }
+
+            ImageUniforms uniforms{};
+            const Rect scaled_rect = scale_rect(command.rect, scale_factor_);
+            uniforms.rect[0] = scaled_rect.x;
+            uniforms.rect[1] = scaled_rect.y;
+            uniforms.rect[2] = scaled_rect.width;
+            uniforms.rect[3] = scaled_rect.height;
+            populate_clip_uniforms(uniforms, command.clips, command.clip_count, scale_factor_);
+            uniforms.viewport_size[0] = static_cast<float>(width);
+            uniforms.viewport_size[1] = static_cast<float>(height);
+            [encoder setVertexBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+            [encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:1];
+            [encoder setFragmentTexture:text_texture atIndex:0];
+            [encoder setFragmentSamplerState:sampler_state_ atIndex:0];
+            [encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+            ++last_hotspot_counters_.gpu_draw_call_count;
+            break;
+        }
+        }
+    }
+
     template <typename Map> void trim_texture_cache(Map& cache, std::size_t max_entries) {
         for (auto it = cache.begin(); it != cache.end();) {
             if ((frame_serial_ - it->second.last_used_frame) > kTextureCacheMaxAgeFrames) {
@@ -1122,6 +1383,7 @@ private:
     id<MTLSamplerState> sampler_state_ = nil;
     id<MTLSamplerState> linear_sampler_state_ = nil;
     id<MTLTexture> staging_texture_ = nil;
+    id<MTLTexture> scene_texture_ = nil;
     CAMetalLayer* layer_ = nil;
     std::unique_ptr<SoftwareRenderer> software_;
     TextShaper* text_shaper_ = nullptr;
@@ -1136,9 +1398,12 @@ private:
     std::vector<ImageCommand> image_commands_;
     std::vector<TextCommand> text_commands_;
     std::vector<uint8_t> image_upload_buffer_;
+    std::vector<Rect> damage_regions_;
     Size logical_viewport_{};
     float scale_factor_ = 1.0F;
     uint64_t frame_serial_ = 0;
+    bool full_redraw_ = true;
+    bool scene_initialized_ = false;
     bool needs_software_fallback_ = false;
     RenderHotspotCounters last_hotspot_counters_{};
 };

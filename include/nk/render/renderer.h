@@ -6,8 +6,9 @@
 #include <memory>
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/types.h>
-#include <string_view>
+#include <optional>
 #include <span>
+#include <string_view>
 
 namespace nk {
 
@@ -85,6 +86,7 @@ public:
 
     [[nodiscard]] RendererBackend backend() const override;
     bool attach_surface(NativeSurface& surface) override;
+    void set_damage_regions(std::span<const Rect> regions) override;
     void begin_frame(Size viewport, float scale_factor) override;
     void render(const RenderNode& root) override;
     void end_frame() override;
@@ -101,6 +103,8 @@ public:
     [[nodiscard]] int pixel_height() const;
 
 private:
+    [[nodiscard]] std::optional<std::span<const Rect>> present_damage_regions() const;
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
