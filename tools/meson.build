@@ -3,6 +3,11 @@ frame_diag_diff = executable('nk_frame_diag_diff',
     dependencies : nk_dep,
 )
 
+debug_bundle_view = executable('nk_debug_bundle_view',
+    'debug_bundle_view.cpp',
+    dependencies : nk_dep,
+)
+
 frame_diag_view = executable('nk_frame_diag_view',
     'frame_diag_view.cpp',
     dependencies : nk_dep,
@@ -10,6 +15,11 @@ frame_diag_view = executable('nk_frame_diag_view',
 
 render_snapshot_view = executable('nk_render_snapshot_view',
     'render_snapshot_view.cpp',
+    dependencies : nk_dep,
+)
+
+atspi_snapshot_view = executable('nk_atspi_snapshot_view',
+    'atspi_snapshot_view.cpp',
     dependencies : nk_dep,
 )
 
@@ -66,6 +76,7 @@ overlay_screenshot_inspector = meson.project_build_root() / 'overlay_inspector.p
 overlay_screenshot_docked = meson.project_build_root() / 'overlay_inspector_docked.ppm'
 overlay_screenshot_filter = meson.project_build_root() / 'overlay_widget_filter.ppm'
 overlay_screenshot_render_focus = meson.project_build_root() / 'overlay_render_focus.ppm'
+sanitizers_enabled = get_option('b_sanitize') != 'none'
 
 frame_diag_diff_args = [
     '--max-total-ms-regression=0.5',
@@ -105,14 +116,48 @@ test('frame_diag_diff_regression',
     should_fail : true,
 )
 
+test('debug_bundle_view',
+    debug_bundle_view,
+    args : [meson.project_source_root() / 'tests' / 'fixtures' / 'debug_bundle_fixture', '--summary-only'],
+)
+
 test('frame_diag_view',
     frame_diag_view,
     args : [frame_diag_baseline, '--summary-only'],
 )
 
+test('frame_diag_view_filter',
+    frame_diag_view,
+    args : [frame_diag_baseline, '--reason=widget-redraw'],
+)
+
 test('render_snapshot_view',
     render_snapshot_view,
     args : [meson.project_source_root() / 'tests' / 'fixtures' / 'render_snapshot_fixture.json'],
+)
+
+test('render_snapshot_view_filter',
+    render_snapshot_view,
+    args : [
+        meson.project_source_root() / 'tests' / 'fixtures' / 'render_snapshot_fixture.json',
+        '--kind=text',
+        '--source-widget=fixture-label',
+    ],
+)
+
+test('atspi_snapshot_view',
+    atspi_snapshot_view,
+    args : [meson.project_source_root() / 'tests' / 'fixtures' / 'atspi_widget_debug_fixture.json', '--summary-only'],
+)
+
+test('atspi_snapshot_view_filter',
+    atspi_snapshot_view,
+    args : [
+        meson.project_source_root() / 'tests' / 'fixtures' / 'atspi_widget_debug_fixture.json',
+        '--role=push button',
+        '--action=activate',
+        '--find=search',
+    ],
 )
 
 test('widget_debug_view',
@@ -125,6 +170,14 @@ test('widget_debug_view_filter',
     args : [
         meson.project_source_root() / 'tests' / 'fixtures' / 'widget_debug_fixture.json',
         '--find=accent',
+    ],
+)
+
+test('widget_debug_view_state_filter',
+    widget_debug_view,
+    args : [
+        meson.project_source_root() / 'tests' / 'fixtures' / 'widget_debug_fixture.json',
+        '--state=focused',
     ],
 )
 
@@ -144,15 +197,21 @@ test('trace_view',
     args : [trace_baseline, '--summary-only'],
 )
 
+test('trace_view_filter',
+    trace_view,
+    args : [trace_baseline, '--reason=idle', '--label=baseline.idle'],
+)
+
 test('trace_capture_harness',
     trace_capture_harness,
     args : [
         'mixed',
         trace_capture_harness_mixed_artifact,
         trace_capture_harness_mixed_trace,
+    ] + (sanitizers_enabled ? [] : [
         '--baseline-artifact=' + stable_mixed_artifact,
         '--baseline-trace=' + stable_mixed_trace,
-    ],
+    ]),
 )
 
 test('trace_capture_harness_text_heavy',
@@ -161,9 +220,10 @@ test('trace_capture_harness_text_heavy',
         'text-heavy',
         trace_capture_harness_text_artifact,
         trace_capture_harness_text_trace,
+    ] + (sanitizers_enabled ? [] : [
         '--baseline-artifact=' + stable_text_artifact,
         '--baseline-trace=' + stable_text_trace,
-    ],
+    ]),
 )
 
 test('trace_capture_harness_list_heavy',
@@ -172,9 +232,10 @@ test('trace_capture_harness_list_heavy',
         'list-heavy',
         trace_capture_harness_list_artifact,
         trace_capture_harness_list_trace,
+    ] + (sanitizers_enabled ? [] : [
         '--baseline-artifact=' + stable_list_artifact,
         '--baseline-trace=' + stable_list_trace,
-    ],
+    ]),
 )
 
 test('trace_capture_harness_animation_heavy',
@@ -183,9 +244,10 @@ test('trace_capture_harness_animation_heavy',
         'animation-heavy',
         trace_capture_harness_animation_artifact,
         trace_capture_harness_animation_trace,
+    ] + (sanitizers_enabled ? [] : [
         '--baseline-artifact=' + stable_animation_artifact,
         '--baseline-trace=' + stable_animation_trace,
-    ],
+    ]),
 )
 
 test('overlay_screenshot_harness',
