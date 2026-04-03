@@ -39,6 +39,10 @@ bool has_primary_shortcut(Modifiers modifiers) {
            (modifiers & Modifiers::Ctrl) == Modifiers::Ctrl;
 }
 
+std::string default_text_field_accessible_name(std::string_view placeholder) {
+    return placeholder.empty() ? "Text field" : std::string(placeholder);
+}
+
 std::optional<char> key_to_ascii(const KeyEvent& event) {
     const bool shift = has_shift(event.modifiers);
     auto key = static_cast<uint16_t>(event.key);
@@ -130,6 +134,10 @@ TextField::TextField(std::string text) : impl_(std::make_unique<Impl>()) {
     impl_->selection_anchor = impl_->cursor;
     set_focusable(true);
     add_style_class("text-field");
+    auto& accessible = ensure_accessible();
+    accessible.set_role(AccessibleRole::TextInput);
+    accessible.set_name(default_text_field_accessible_name(impl_->placeholder));
+    accessible.set_value(impl_->text);
     reset_history();
 }
 
@@ -142,6 +150,7 @@ std::string_view TextField::text() const {
 void TextField::set_text(std::string text) {
     if (impl_->text != text) {
         impl_->text = std::move(text);
+        ensure_accessible().set_value(impl_->text);
         impl_->cursor = impl_->text.size();
         impl_->selection_anchor = impl_->cursor;
         impl_->scroll_x = 0.0F;
@@ -157,6 +166,8 @@ std::string_view TextField::placeholder() const {
 
 void TextField::set_placeholder(std::string placeholder) {
     impl_->placeholder = std::move(placeholder);
+    ensure_accessible().set_description(impl_->placeholder);
+    ensure_accessible().set_name(default_text_field_accessible_name(impl_->placeholder));
     queue_redraw();
 }
 

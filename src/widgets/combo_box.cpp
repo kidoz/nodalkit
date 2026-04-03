@@ -73,6 +73,8 @@ std::shared_ptr<ComboBox> ComboBox::create() {
 ComboBox::ComboBox() : impl_(std::make_unique<Impl>()) {
     set_focusable(true);
     add_style_class("combo-box");
+    auto& accessible = ensure_accessible();
+    accessible.set_role(AccessibleRole::List);
 }
 
 ComboBox::~ComboBox() = default;
@@ -80,6 +82,7 @@ ComboBox::~ComboBox() = default;
 void ComboBox::set_items(std::vector<std::string> items) {
     impl_->items = std::move(items);
     impl_->selected_index = -1;
+    ensure_accessible().set_name({});
     queue_layout();
     queue_redraw();
 }
@@ -105,6 +108,7 @@ void ComboBox::set_selected_index(int index) {
     }
     if (impl_->selected_index != index) {
         impl_->selected_index = index;
+        ensure_accessible().set_name(std::string(selected_text()));
         queue_redraw();
         impl_->selection_changed.emit(index);
     }

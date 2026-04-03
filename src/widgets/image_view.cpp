@@ -41,6 +41,7 @@ std::shared_ptr<ImageView> ImageView::create() {
 
 ImageView::ImageView() : impl_(std::make_unique<Impl>()) {
     add_style_class("image-view");
+    ensure_accessible().set_role(AccessibleRole::Image);
 }
 
 ImageView::~ImageView() = default;

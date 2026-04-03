@@ -63,6 +63,10 @@ Dialog::Dialog(std::string title, std::string message) : impl_(std::make_unique<
     impl_->title = std::move(title);
     impl_->message = std::move(message);
     add_style_class("dialog");
+    auto& accessible = ensure_accessible();
+    accessible.set_role(AccessibleRole::Dialog);
+    accessible.set_name(impl_->title);
+    accessible.set_description(impl_->message);
 }
 
 Dialog::~Dialog() = default;

@@ -33,6 +33,13 @@ Button::Button(std::string label) : impl_(std::make_unique<Impl>()) {
     impl_->label = std::move(label);
     set_focusable(true);
     add_style_class("button");
+    auto& accessible = ensure_accessible();
+    accessible.set_role(AccessibleRole::Button);
+    accessible.set_name(impl_->label);
+    accessible.add_action(AccessibleAction::Activate, [this]() {
+        impl_->clicked.emit();
+        return true;
+    });
 }
 
 Button::~Button() = default;
@@ -44,6 +51,7 @@ std::string_view Button::label() const {
 void Button::set_label(std::string label) {
     if (impl_->label != label) {
         impl_->label = std::move(label);
+        ensure_accessible().set_name(impl_->label);
         queue_layout();
         queue_redraw();
     }

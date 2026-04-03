@@ -92,6 +92,7 @@ std::shared_ptr<MenuBar> MenuBar::create() {
 MenuBar::MenuBar() : impl_(std::make_unique<Impl>()) {
     set_focusable(true);
     add_style_class("menu-bar");
+    ensure_accessible().set_role(AccessibleRole::MenuBar);
 }
 
 MenuBar::~MenuBar() = default;
