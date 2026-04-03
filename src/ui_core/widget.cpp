@@ -56,6 +56,11 @@ struct Widget::Impl {
     uint8_t vertical_stretch = 0;
     Window* host_window = nullptr;
     WidgetHotspotCounters debug_hotspot_counters;
+    bool debug_pending_redraw = false;
+    bool debug_pending_layout = false;
+    bool debug_has_last_measure = false;
+    Constraints debug_last_measure_constraints{};
+    SizeRequest debug_last_size_request{};
 
     Signal<> on_map;
     Signal<> on_unmap;
@@ -189,12 +194,17 @@ SizeRequest Widget::measure(const Constraints& constraints) const {
 
 SizeRequest Widget::measure_for_diagnostics(const Constraints& constraints) const {
     ++impl_->debug_hotspot_counters.measure_count;
-    return measure(constraints);
+    const auto request = measure(constraints);
+    impl_->debug_has_last_measure = true;
+    impl_->debug_last_measure_constraints = constraints;
+    impl_->debug_last_size_request = request;
+    return request;
 }
 
 void Widget::allocate(const Rect& allocation) {
     ++impl_->debug_hotspot_counters.allocate_count;
     impl_->allocation = allocation;
+    impl_->debug_pending_layout = false;
     if (impl_->layout_manager) {
         impl_->layout_manager->allocate(*const_cast<Widget*>(this), allocation);
     }
@@ -297,15 +307,37 @@ WidgetHotspotCounters Widget::debug_hotspot_counters() const {
     return impl_->debug_hotspot_counters;
 }
 
+bool Widget::debug_pending_redraw() const {
+    return impl_->debug_pending_redraw;
+}
+
+bool Widget::debug_pending_layout() const {
+    return impl_->debug_pending_layout;
+}
+
+bool Widget::debug_has_last_measure() const {
+    return impl_->debug_has_last_measure;
+}
+
+Constraints Widget::debug_last_measure_constraints() const {
+    return impl_->debug_last_measure_constraints;
+}
+
+SizeRequest Widget::debug_last_size_request() const {
+    return impl_->debug_last_size_request;
+}
+
 // --- Invalidation ---
 
 void Widget::queue_redraw() {
+    impl_->debug_pending_redraw = true;
     if (impl_->host_window) {
         impl_->host_window->note_widget_redraw_request(*this);
     }
 }
 
 void Widget::queue_layout() {
+    impl_->debug_pending_layout = true;
     if (impl_->host_window) {
         impl_->host_window->note_widget_layout_request(*this);
     }
@@ -516,6 +548,7 @@ void Widget::snapshot_subtree(SnapshotContext& ctx) const {
     ctx.push_debug_source(debug_snapshot_label(), path);
     snapshot(ctx);
     ctx.pop_debug_source();
+    impl_->debug_pending_redraw = false;
 }
 
 void Widget::reset_debug_hotspot_counters_recursive() {

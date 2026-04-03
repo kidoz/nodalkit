@@ -134,6 +134,11 @@ public:
 
     /// Per-widget debug counters for measure/allocate/snapshot activity.
     [[nodiscard]] WidgetHotspotCounters debug_hotspot_counters() const;
+    [[nodiscard]] bool debug_pending_redraw() const;
+    [[nodiscard]] bool debug_pending_layout() const;
+    [[nodiscard]] bool debug_has_last_measure() const;
+    [[nodiscard]] Constraints debug_last_measure_constraints() const;
+    [[nodiscard]] SizeRequest debug_last_size_request() const;
 
     // --- Invalidation ---
 
