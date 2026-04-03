@@ -1,0 +1,15 @@
+{
+  "format": "nk-debug-bundle-v1",
+  "title": "Fixture Window",
+  "renderer_backend": "software",
+  "files": {
+    "widget_tree": "widget_tree.txt",
+    "widget_tree_json": "widget_tree.json",
+    "frame_trace": "frame_trace.json",
+    "frame_diagnostics": "frame_diagnostics.json",
+    "render_snapshot": "render_snapshot.json",
+    "frame_summary": "selected_frame_summary.txt",
+    "selected_widget": "selected_widget.json",
+    "screenshot": "screenshot.ppm"
+  }
+}

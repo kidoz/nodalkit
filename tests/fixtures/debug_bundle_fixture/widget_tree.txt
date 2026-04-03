@@ -1,0 +1,4 @@
+Window(root-window)
+  Box(main-column)
+    Label(hero-title)
+    ListView(items)

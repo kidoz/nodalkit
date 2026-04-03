@@ -1,0 +1,30 @@
+{
+  "format": "nk-render-snapshot-v1",
+  "root": {
+    "kind": "Container",
+    "bounds": {
+      "x": 0,
+      "y": 0,
+      "width": 120,
+      "height": 40
+    },
+    "detail": "fixture-root",
+    "source_widget_label": "fixture-window",
+    "source_widget_path": [0],
+    "children": [
+      {
+        "kind": "Text",
+        "bounds": {
+          "x": 8,
+          "y": 8,
+          "width": 48,
+          "height": 16
+        },
+        "detail": "\"Fixture\" rgba(1,1,1,1) size=14",
+        "source_widget_label": "fixture-label",
+        "source_widget_path": [0, 0],
+        "children": []
+      }
+    ]
+  }
+}

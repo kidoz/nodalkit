@@ -1,0 +1,230 @@
+{
+  "format": "nk-widget-debug-v1",
+  "root": {
+    "type_name": "Window",
+    "debug_name": "a11y-fixture-window",
+    "tree_path": [],
+    "allocation": {
+      "x": 0,
+      "y": 0,
+      "width": 400,
+      "height": 240
+    },
+    "state_flags": 0,
+    "visible": true,
+    "sensitive": true,
+    "focusable": false,
+    "focused": false,
+    "hovered": false,
+    "pressed": false,
+    "retain_size_when_hidden": false,
+    "pending_redraw": false,
+    "pending_layout": false,
+    "has_last_measure": false,
+    "last_measure_constraints": {
+      "min_width": 0,
+      "min_height": 0,
+      "max_width": null,
+      "max_height": null
+    },
+    "last_size_request": {
+      "minimum_width": 400,
+      "minimum_height": 240,
+      "natural_width": 400,
+      "natural_height": 240
+    },
+    "horizontal_size_policy": "Preferred",
+    "vertical_size_policy": "Preferred",
+    "horizontal_stretch": 0,
+    "vertical_stretch": 0,
+    "hotspot_counters": {
+      "measure_count": 0,
+      "allocate_count": 0,
+      "snapshot_count": 0,
+      "text_measure_count": 0,
+      "image_snapshot_count": 0,
+      "model_sync_count": 0,
+      "model_row_materialize_count": 0,
+      "model_row_reuse_count": 0,
+      "model_row_dispose_count": 0
+    },
+    "style_classes": [],
+    "children": [
+      {
+        "type_name": "Label",
+        "debug_name": "search-label",
+        "tree_path": [0],
+        "accessible_role": "label",
+        "accessible_name": "Search",
+        "accessible_description": "Search label",
+        "accessible_actions": [],
+        "accessible_relations": [],
+        "accessible_hidden": false,
+        "accessible_state": 0,
+        "allocation": {
+          "x": 12,
+          "y": 12,
+          "width": 120,
+          "height": 24
+        },
+        "state_flags": 0,
+        "visible": true,
+        "sensitive": true,
+        "focusable": false,
+        "focused": false,
+        "hovered": false,
+        "pressed": false,
+        "retain_size_when_hidden": false,
+        "pending_redraw": false,
+        "pending_layout": false,
+        "has_last_measure": false,
+        "last_measure_constraints": {
+          "min_width": 0,
+          "min_height": 0,
+          "max_width": null,
+          "max_height": null
+        },
+        "last_size_request": {
+          "minimum_width": 80,
+          "minimum_height": 20,
+          "natural_width": 120,
+          "natural_height": 24
+        },
+        "horizontal_size_policy": "Preferred",
+        "vertical_size_policy": "Preferred",
+        "horizontal_stretch": 0,
+        "vertical_stretch": 0,
+        "hotspot_counters": {
+          "measure_count": 0,
+          "allocate_count": 0,
+          "snapshot_count": 0,
+          "text_measure_count": 0,
+          "image_snapshot_count": 0,
+          "model_sync_count": 0,
+          "model_row_materialize_count": 0,
+          "model_row_reuse_count": 0,
+          "model_row_dispose_count": 0
+        },
+        "style_classes": [],
+        "children": []
+      },
+      {
+        "type_name": "TextField",
+        "debug_name": "search-input",
+        "tree_path": [1],
+        "accessible_role": "textinput",
+        "accessible_name": "Search Field",
+        "accessible_description": "Enter search text",
+        "accessible_value": "Battle City",
+        "accessible_actions": ["focus"],
+        "accessible_relations": ["labelled-by:search-label"],
+        "accessible_hidden": false,
+        "accessible_state": 0,
+        "allocation": {
+          "x": 12,
+          "y": 44,
+          "width": 180,
+          "height": 28
+        },
+        "state_flags": 0,
+        "visible": true,
+        "sensitive": true,
+        "focusable": true,
+        "focused": true,
+        "hovered": false,
+        "pressed": false,
+        "retain_size_when_hidden": false,
+        "pending_redraw": false,
+        "pending_layout": false,
+        "has_last_measure": false,
+        "last_measure_constraints": {
+          "min_width": 0,
+          "min_height": 0,
+          "max_width": null,
+          "max_height": null
+        },
+        "last_size_request": {
+          "minimum_width": 120,
+          "minimum_height": 28,
+          "natural_width": 180,
+          "natural_height": 28
+        },
+        "horizontal_size_policy": "Expanding",
+        "vertical_size_policy": "Preferred",
+        "horizontal_stretch": 1,
+        "vertical_stretch": 0,
+        "hotspot_counters": {
+          "measure_count": 0,
+          "allocate_count": 0,
+          "snapshot_count": 0,
+          "text_measure_count": 0,
+          "image_snapshot_count": 0,
+          "model_sync_count": 0,
+          "model_row_materialize_count": 0,
+          "model_row_reuse_count": 0,
+          "model_row_dispose_count": 0
+        },
+        "style_classes": [],
+        "children": []
+      },
+      {
+        "type_name": "Button",
+        "debug_name": "search-button",
+        "tree_path": [2],
+        "accessible_role": "button",
+        "accessible_name": "Open Search",
+        "accessible_description": "Run search action",
+        "accessible_actions": ["activate", "focus"],
+        "accessible_relations": ["described-by:search-label"],
+        "accessible_hidden": false,
+        "accessible_state": 0,
+        "allocation": {
+          "x": 204,
+          "y": 44,
+          "width": 96,
+          "height": 28
+        },
+        "state_flags": 0,
+        "visible": true,
+        "sensitive": true,
+        "focusable": true,
+        "focused": false,
+        "hovered": false,
+        "pressed": false,
+        "retain_size_when_hidden": false,
+        "pending_redraw": false,
+        "pending_layout": false,
+        "has_last_measure": false,
+        "last_measure_constraints": {
+          "min_width": 0,
+          "min_height": 0,
+          "max_width": null,
+          "max_height": null
+        },
+        "last_size_request": {
+          "minimum_width": 72,
+          "minimum_height": 28,
+          "natural_width": 96,
+          "natural_height": 28
+        },
+        "horizontal_size_policy": "Preferred",
+        "vertical_size_policy": "Preferred",
+        "horizontal_stretch": 0,
+        "vertical_stretch": 0,
+        "hotspot_counters": {
+          "measure_count": 0,
+          "allocate_count": 0,
+          "snapshot_count": 0,
+          "text_measure_count": 0,
+          "image_snapshot_count": 0,
+          "model_sync_count": 0,
+          "model_row_materialize_count": 0,
+          "model_row_reuse_count": 0,
+          "model_row_dispose_count": 0
+        },
+        "style_classes": [],
+        "children": []
+      }
+    ]
+  }
+}

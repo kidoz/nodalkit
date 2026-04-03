@@ -1,0 +1,7 @@
+{
+  "format": "chrome-trace-event-array-v1",
+  "traceEvents": [
+    {"name": "posted-task", "cat": "event-loop-task", "ph": "X", "ts": 1000, "dur": 200, "pid": 1, "tid": 2, "args": {"detail": "queued_ms=0.10", "source_label": "baseline.task"}},
+    {"name": "frame", "cat": "frame", "ph": "X", "ts": 3000, "dur": 15000, "pid": 1, "tid": 1}
+  ]
+}

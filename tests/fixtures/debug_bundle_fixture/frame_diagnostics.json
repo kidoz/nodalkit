@@ -1,0 +1,58 @@
+{
+  "format": "nk-frame-diagnostics-v1",
+  "frames": [
+    {
+      "frame_id": 1,
+      "logical_viewport": {"width": 800, "height": 600},
+      "scale_factor": 1.0,
+      "had_layout": true,
+      "requested_at_ms": 0.0,
+      "started_at_ms": 0.2,
+      "queue_delay_ms": 0.2,
+      "widget_count": 8,
+      "render_node_count": 18,
+      "dirty_widget_count": 2,
+      "redraw_request_count": 1,
+      "layout_request_count": 1,
+      "layout_ms": 2.0,
+      "snapshot_ms": 3.0,
+      "render_ms": 4.0,
+      "present_ms": 1.0,
+      "total_ms": 12.0,
+      "performance_marker": "within-budget",
+      "budget_overrun_ms": 0.0,
+      "widget_hotspot_totals": {
+        "measure_count": 8,
+        "allocate_count": 8,
+        "snapshot_count": 8,
+        "text_measure_count": 2,
+        "image_snapshot_count": 1,
+        "model_sync_count": 1,
+        "model_row_materialize_count": 2,
+        "model_row_reuse_count": 0,
+        "model_row_dispose_count": 0
+      },
+      "render_hotspot_counters": {
+        "text_node_count": 2,
+        "text_shape_count": 2,
+        "text_shape_cache_hit_count": 1,
+        "text_bitmap_pixel_count": 512,
+        "text_texture_upload_count": 1,
+        "image_node_count": 1,
+        "image_source_pixel_count": 4096,
+        "image_dest_pixel_count": 4096,
+        "image_texture_upload_count": 0,
+        "damage_region_count": 1,
+        "gpu_draw_call_count": 0,
+        "gpu_present_region_count": 0,
+        "gpu_swapchain_copy_count": 0,
+        "gpu_viewport_pixel_count": 0,
+        "gpu_estimated_draw_pixel_count": 0,
+        "gpu_present_path": "none",
+        "gpu_present_tradeoff": "none"
+      },
+      "request_reasons": ["manual"],
+      "render_snapshot_node_count": 2
+    }
+  ]
+}
