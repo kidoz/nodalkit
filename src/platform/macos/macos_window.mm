@@ -1102,15 +1102,53 @@ RendererBackendSupport MacosSurface::renderer_backend_support() const {
     };
 }
 
-void MacosSurface::present(const uint8_t* rgba, int w, int h) {
-    size_t byte_count = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+void MacosSurface::present(const uint8_t* rgba,
+                           int w,
+                           int h,
+                           std::span<const Rect> damage_regions) {
+    const size_t byte_count = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    const bool size_changed =
+        pixel_width_ != w || pixel_height_ != h || pixel_buffer_.size() != byte_count;
     pixel_buffer_.resize(byte_count);
-    std::memcpy(pixel_buffer_.data(), rgba, byte_count);
+
+    auto copy_region = [&](Rect rect) {
+        const int x0 = std::max(0, static_cast<int>(std::floor(rect.x)));
+        const int y0 = std::max(0, static_cast<int>(std::floor(rect.y)));
+        const int x1 = std::min(w, static_cast<int>(std::ceil(rect.right())));
+        const int y1 = std::min(h, static_cast<int>(std::ceil(rect.bottom())));
+        if (x1 <= x0 || y1 <= y0) {
+            return;
+        }
+
+        for (int y = y0; y < y1; ++y) {
+            const auto row_offset = static_cast<size_t>((y * w + x0) * 4);
+            const auto row_bytes = static_cast<size_t>(x1 - x0) * 4;
+            std::memcpy(pixel_buffer_.data() + row_offset, rgba + row_offset, row_bytes);
+        }
+    };
+
+    if (size_changed || damage_regions.empty()) {
+        std::memcpy(pixel_buffer_.data(), rgba, byte_count);
+    } else {
+        for (const auto& rect : damage_regions) {
+            copy_region(rect);
+        }
+    }
     pixel_width_ = w;
     pixel_height_ = h;
 
     @autoreleasepool {
-        [view_ setNeedsDisplay:YES];
+        if (size_changed || damage_regions.empty()) {
+            [view_ setNeedsDisplay:YES];
+            return;
+        }
+
+        const float scale = std::max(0.0001F, scale_factor());
+        for (const auto& rect : damage_regions) {
+            const NSRect dirty =
+                NSMakeRect(rect.x / scale, rect.y / scale, rect.width / scale, rect.height / scale);
+            [view_ setNeedsDisplayInRect:dirty];
+        }
     }
 }
 

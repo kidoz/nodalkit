@@ -29,7 +29,7 @@ public:
     [[nodiscard]] Size size() const override;
     [[nodiscard]] float scale_factor() const override;
     [[nodiscard]] RendererBackendSupport renderer_backend_support() const override;
-    void present(const uint8_t* rgba, int w, int h) override;
+    void present(const uint8_t* rgba, int w, int h, std::span<const Rect> damage_regions) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
@@ -53,6 +53,7 @@ private:
         int fd = -1;
         size_t pool_size = 0;
         bool busy = false;
+        bool initialized = false;
     };
 
     void destroy_buffer(ShmBuffer& buf);
@@ -67,6 +68,7 @@ private:
 
     ShmBuffer buffers_[2];
     int current_buffer_ = 0;
+    int last_presented_buffer_ = -1;
 
     int width_;
     int height_;

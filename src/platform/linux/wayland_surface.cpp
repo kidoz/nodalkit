@@ -159,6 +159,7 @@ void WaylandSurface::destroy_buffer(ShmBuffer& buf) {
     }
     buf.pool_size = 0;
     buf.busy = false;
+    buf.initialized = false;
 }
 
 void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
@@ -236,7 +237,10 @@ RendererBackendSupport WaylandSurface::renderer_backend_support() const {
     };
 }
 
-void WaylandSurface::present(const uint8_t* rgba, int w, int h) {
+void WaylandSurface::present(const uint8_t* rgba,
+                             int w,
+                             int h,
+                             std::span<const Rect> damage_regions) {
     if (!configured_) {
         return;
     }
@@ -255,22 +259,62 @@ void WaylandSurface::present(const uint8_t* rgba, int w, int h) {
         return;
     }
 
-    // Convert RGBA8 (R,G,B,A) → WL_SHM_FORMAT_ARGB8888 (B,G,R,A on LE).
-    uint8_t* dst = buffers_[idx].data;
-    const int pixel_count = w * h;
-    for (int i = 0; i < pixel_count; ++i) {
-        const int off = i * 4;
-        dst[off + 0] = rgba[off + 2]; // B
-        dst[off + 1] = rgba[off + 1]; // G
-        dst[off + 2] = rgba[off + 0]; // R
-        dst[off + 3] = rgba[off + 3]; // A
+    auto convert_region = [&](Rect rect) {
+        const int x0 = std::max(0, static_cast<int>(std::floor(rect.x)));
+        const int y0 = std::max(0, static_cast<int>(std::floor(rect.y)));
+        const int x1 = std::min(w, static_cast<int>(std::ceil(rect.right())));
+        const int y1 = std::min(h, static_cast<int>(std::ceil(rect.bottom())));
+        if (x1 <= x0 || y1 <= y0) {
+            return;
+        }
+
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
+                const int off = (y * w + x) * 4;
+                buffers_[idx].data[off + 0] = rgba[off + 2]; // B
+                buffers_[idx].data[off + 1] = rgba[off + 1]; // G
+                buffers_[idx].data[off + 2] = rgba[off + 0]; // R
+                buffers_[idx].data[off + 3] = rgba[off + 3]; // A
+            }
+        }
+    };
+
+    const bool size_changed = buffers_[idx].pool_size != static_cast<size_t>(w * h * 4);
+    const bool full_upload = damage_regions.empty() || !buffers_[idx].initialized || size_changed;
+    if (!full_upload && last_presented_buffer_ >= 0 && last_presented_buffer_ != idx &&
+        buffers_[last_presented_buffer_].data != nullptr &&
+        buffers_[last_presented_buffer_].pool_size == buffers_[idx].pool_size) {
+        std::memcpy(
+            buffers_[idx].data, buffers_[last_presented_buffer_].data, buffers_[idx].pool_size);
     }
+
+    if (full_upload) {
+        convert_region({0.0F, 0.0F, static_cast<float>(w), static_cast<float>(h)});
+    } else {
+        for (const auto& rect : damage_regions) {
+            convert_region(rect);
+        }
+    }
+    buffers_[idx].initialized = true;
 
     buffers_[idx].busy = true;
     current_buffer_ = 1 - idx;
+    last_presented_buffer_ = idx;
 
     wl_surface_attach(surface_, buffers_[idx].buffer, 0, 0);
-    wl_surface_damage_buffer(surface_, 0, 0, w, h);
+    if (full_upload) {
+        wl_surface_damage_buffer(surface_, 0, 0, w, h);
+    } else {
+        for (const auto& rect : damage_regions) {
+            const int x0 = std::max(0, static_cast<int>(std::floor(rect.x)));
+            const int y0 = std::max(0, static_cast<int>(std::floor(rect.y)));
+            const int x1 = std::min(w, static_cast<int>(std::ceil(rect.right())));
+            const int y1 = std::min(h, static_cast<int>(std::ceil(rect.bottom())));
+            if (x1 > x0 && y1 > y0) {
+                wl_surface_damage_buffer(surface_, x0, y0, x1 - x0, y1 - y0);
+            }
+        }
+    }
     wl_surface_commit(surface_);
 }
 

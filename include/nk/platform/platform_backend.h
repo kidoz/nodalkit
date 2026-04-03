@@ -15,6 +15,7 @@
 #include <nk/platform/system_preferences.h>
 #include <nk/render/renderer.h>
 #include <nk/ui_core/cursor_shape.h>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -64,7 +65,9 @@ public:
     /// @param rgba  Pixel data in RGBA8 format, row-major.
     /// @param w     Pixel width.
     /// @param h     Pixel height.
-    virtual void present(const uint8_t* rgba, int w, int h) = 0;
+    /// @param damage_regions Optional changed regions in pixel-buffer coordinates.
+    virtual void
+    present(const uint8_t* rgba, int w, int h, std::span<const Rect> damage_regions = {}) = 0;
 
     /// Toggle fullscreen mode.
     virtual void set_fullscreen(bool fullscreen) = 0;
