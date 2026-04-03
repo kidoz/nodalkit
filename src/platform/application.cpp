@@ -19,8 +19,10 @@ struct Application::Impl {
     ThemeSelection theme_selection;
     ResolvedThemeSelection resolved_theme_selection;
     std::string clipboard_text;
+    std::vector<NativeMenu> native_app_menus;
     Signal<const SystemPreferences&> system_preferences_changed;
     Signal<const ThemeSelection&> theme_selection_changed;
+    Signal<std::string_view> native_app_menu_action;
     CallbackHandle system_preferences_observer;
     std::chrono::milliseconds system_preferences_poll_interval{std::chrono::seconds(1)};
     bool system_preferences_observation_enabled = true;
@@ -263,12 +265,31 @@ void Application::set_clipboard_text(std::string text) {
     }
 }
 
+bool Application::supports_native_app_menu() const {
+    return impl_->backend != nullptr && impl_->backend->supports_native_app_menu();
+}
+
+void Application::set_native_app_menu(std::vector<NativeMenu> menus) {
+    impl_->native_app_menus = std::move(menus);
+    if (impl_->backend == nullptr || !impl_->backend->supports_native_app_menu()) {
+        return;
+    }
+
+    impl_->backend->set_native_app_menu(
+        impl_->native_app_menus,
+        [this](std::string_view action_name) { impl_->native_app_menu_action.emit(action_name); });
+}
+
 Signal<const SystemPreferences&>& Application::on_system_preferences_changed() {
     return impl_->system_preferences_changed;
 }
 
 Signal<const ThemeSelection&>& Application::on_theme_selection_changed() {
     return impl_->theme_selection_changed;
+}
+
+Signal<std::string_view>& Application::on_native_app_menu_action() {
+    return impl_->native_app_menu_action;
 }
 
 } // namespace nk

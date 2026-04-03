@@ -7,6 +7,7 @@
 #include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/platform/file_dialog.h>
+#include <nk/platform/native_menu.h>
 #include <nk/platform/system_preferences.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/style/theme_selection.h>
@@ -121,11 +122,20 @@ public:
     /// native clipboard is available.
     void set_clipboard_text(std::string text);
 
+    /// Whether the active backend supports a native application menu.
+    [[nodiscard]] bool supports_native_app_menu() const;
+
+    /// Install a native application menu model on supported backends.
+    void set_native_app_menu(std::vector<NativeMenu> menus);
+
     /// Emitted when system preferences are refreshed.
     [[nodiscard]] Signal<const SystemPreferences&>& on_system_preferences_changed();
 
     /// Emitted when theme selection policy changes.
     [[nodiscard]] Signal<const ThemeSelection&>& on_theme_selection_changed();
+
+    /// Emitted when a native app-menu action is activated.
+    [[nodiscard]] Signal<std::string_view>& on_native_app_menu_action();
 
 private:
     struct Impl;
