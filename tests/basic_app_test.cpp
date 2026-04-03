@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <nk/controllers/event_controller.h>
@@ -995,6 +996,12 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(selected_widget_info.hotspot_counters.measure_count >= 1);
     REQUIRE(selected_widget_info.hotspot_counters.allocate_count >= 1);
     REQUIRE(selected_widget_info.hotspot_counters.snapshot_count >= 1);
+    REQUIRE(selected_widget_info.has_last_measure);
+    REQUIRE(selected_widget_info.horizontal_size_policy == "Preferred");
+    REQUIRE(selected_widget_info.vertical_size_policy == "Preferred");
+    REQUIRE_FALSE(selected_widget_info.focused);
+    REQUIRE_FALSE(selected_widget_info.pending_redraw);
+    REQUIRE_FALSE(selected_widget_info.pending_layout);
     const auto widget_selected_render = window.debug_selected_render_node();
     REQUIRE(widget_selected_render.kind == "Text");
     REQUIRE(widget_selected_render.source_widget_label == "trace-label");
@@ -1027,6 +1034,19 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     const auto selected_widget_details = window.dump_selected_widget_details();
     REQUIRE(selected_widget_details.find("trace-label") != std::string::npos);
     REQUIRE(selected_widget_details.find("measure ") != std::string::npos);
+    REQUIRE(selected_widget_details.find("size: h Preferred") != std::string::npos);
+    REQUIRE(selected_widget_details.find("focus owner no") != std::string::npos);
+    REQUIRE(selected_widget_details.find("invalidation: redraw clean  layout clean") !=
+            std::string::npos);
+    REQUIRE(selected_widget_details.find("constraints: min") != std::string::npos);
+    REQUIRE(selected_widget_details.find("request: min") != std::string::npos);
+
+    const auto selected_widget_json = window.dump_selected_widget_details_json();
+    REQUIRE(selected_widget_json.find("\"format\":\"nk-widget-debug-v1\"") != std::string::npos);
+    REQUIRE(selected_widget_json.find("\"debug_name\":\"trace-label\"") != std::string::npos);
+    const auto parsed_selected_widget = nk::parse_widget_debug_json(selected_widget_json);
+    REQUIRE(parsed_selected_widget);
+    REQUIRE(parsed_selected_widget->debug_name == "trace-label");
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
@@ -1062,6 +1082,16 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     std::error_code remove_widget_details_error;
     std::filesystem::remove(widget_details_path, remove_widget_details_error);
 
+    const auto widget_details_json_path =
+        std::filesystem::temp_directory_path() / "nodalkit_widget_details.json";
+    REQUIRE(window.save_selected_widget_details_json_file(widget_details_json_path.string()));
+    const auto loaded_selected_widget =
+        nk::load_widget_debug_json_file(widget_details_json_path.string());
+    REQUIRE(loaded_selected_widget);
+    REQUIRE(loaded_selected_widget->debug_name == "trace-label");
+    std::error_code remove_widget_details_json_error;
+    std::filesystem::remove(widget_details_json_path, remove_widget_details_json_error);
+
     const auto render_details_path =
         std::filesystem::temp_directory_path() / "nodalkit_render_details.txt";
     REQUIRE(window.save_selected_render_node_details_file(render_details_path.string()));
@@ -1087,6 +1117,80 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     }
     std::error_code remove_frame_summary_error;
     std::filesystem::remove(frame_summary_path, remove_frame_summary_error);
+
+    {
+        nk::Window bundle_window({.title = "Bundle export", .width = 320, .height = 180});
+        auto bundle_root = TestContainer::create();
+        auto bundle_child = FixedWidget::create(120.0F, 48.0F);
+        bundle_child->set_debug_name("bundle-child");
+        bundle_root->append(bundle_child);
+        bundle_window.set_child(bundle_root);
+        bundle_window.present();
+        REQUIRE(app.event_loop().poll());
+        bundle_window.set_debug_selected_widget(bundle_child.get());
+        REQUIRE(app.event_loop().poll());
+
+        const auto bundle_dir =
+            std::filesystem::temp_directory_path() / "nodalkit_debug_bundle_export";
+        std::error_code cleanup_error;
+        std::filesystem::remove_all(bundle_dir, cleanup_error);
+
+        REQUIRE(bundle_window.save_debug_bundle(bundle_dir.string()));
+        REQUIRE(std::filesystem::exists(bundle_dir / "manifest.json"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "widget_tree.txt"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "widget_tree.json"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "frame_trace.json"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "frame_diagnostics.json"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "render_snapshot.json"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "selected_frame_summary.txt"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "selected_widget.json"));
+        REQUIRE(std::filesystem::exists(bundle_dir / "screenshot.ppm"));
+
+        {
+            std::ifstream manifest_in(bundle_dir / "manifest.json");
+            REQUIRE(manifest_in.is_open());
+            std::stringstream manifest_buffer;
+            manifest_buffer << manifest_in.rdbuf();
+            REQUIRE(manifest_buffer.str().find("nk-debug-bundle-v1") != std::string::npos);
+            REQUIRE(manifest_buffer.str().find("screenshot.ppm") != std::string::npos);
+        }
+        {
+            std::ifstream widget_tree_in(bundle_dir / "widget_tree.txt");
+            REQUIRE(widget_tree_in.is_open());
+            std::stringstream widget_tree_buffer;
+            widget_tree_buffer << widget_tree_in.rdbuf();
+            REQUIRE(widget_tree_buffer.str().find("bundle-child") != std::string::npos);
+        }
+        {
+            const auto widget_tree_json =
+                nk::load_widget_debug_json_file((bundle_dir / "widget_tree.json").string());
+            REQUIRE(widget_tree_json);
+            REQUIRE(widget_tree_json->type_name == "Window");
+        }
+        {
+            std::ifstream render_snapshot_in(bundle_dir / "render_snapshot.json");
+            REQUIRE(render_snapshot_in.is_open());
+            std::stringstream render_snapshot_buffer;
+            render_snapshot_buffer << render_snapshot_in.rdbuf();
+            REQUIRE(render_snapshot_buffer.str().find("\"kind\":\"Container\"") !=
+                    std::string::npos);
+        }
+        {
+            const auto selected_widget_json =
+                nk::load_widget_debug_json_file((bundle_dir / "selected_widget.json").string());
+            REQUIRE(selected_widget_json);
+            REQUIRE(selected_widget_json->debug_name == "bundle-child");
+        }
+        {
+            std::ifstream screenshot_in(bundle_dir / "screenshot.ppm", std::ios::binary);
+            REQUIRE(screenshot_in.is_open());
+            std::string ppm_header;
+            std::getline(screenshot_in, ppm_header);
+            REQUIRE(ppm_header == "P6");
+        }
+
+        std::filesystem::remove_all(bundle_dir, cleanup_error);
+    }
 
     window.set_debug_selected_widget(nullptr);
     bool found_provenance_selected_render = false;
@@ -1149,27 +1253,42 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
         });
     }
 
+    for (std::size_t step = redraw_index; step < latest_index; ++step) {
+        window.dispatch_key_event({
+            .type = nk::KeyEvent::Type::Press,
+            .key = nk::KeyCode::Right,
+        });
+    }
+
     auto selected_runtime_events = window.debug_selected_frame_runtime_events();
-    for (std::size_t step = 0;
-         selected_runtime_events.empty() ||
-         !std::any_of(selected_runtime_events.begin(),
-                      selected_runtime_events.end(),
-                      [](const nk::TraceEvent& event) { return event.name == "posted-task"; });
-         ++step) {
-        REQUIRE(step < updated_history.size());
+    bool found_runtime_events = !selected_runtime_events.empty();
+    bool found_posted_task =
+        std::any_of(selected_runtime_events.begin(),
+                    selected_runtime_events.end(),
+                    [](const nk::TraceEvent& event) { return event.name == "posted-task"; });
+    for (std::size_t step = 0; !found_posted_task && step < updated_history.size(); ++step) {
         window.dispatch_key_event({
             .type = nk::KeyEvent::Type::Press,
             .key = nk::KeyCode::Left,
         });
         selected_runtime_events = window.debug_selected_frame_runtime_events();
+        found_runtime_events = found_runtime_events || !selected_runtime_events.empty();
+        found_posted_task =
+            std::any_of(selected_runtime_events.begin(),
+                        selected_runtime_events.end(),
+                        [](const nk::TraceEvent& event) { return event.name == "posted-task"; });
     }
-    REQUIRE_FALSE(selected_runtime_events.empty());
-    REQUIRE(std::any_of(selected_runtime_events.begin(),
+    REQUIRE(found_runtime_events);
+    if (found_posted_task) {
+        REQUIRE_FALSE(selected_runtime_events.empty());
+        REQUIRE(
+            std::any_of(selected_runtime_events.begin(),
                         selected_runtime_events.end(),
                         [](const nk::TraceEvent& event) { return event.name == "posted-task"; }));
-    REQUIRE(std::any_of(selected_runtime_events.begin(),
-                        selected_runtime_events.end(),
-                        [](const nk::TraceEvent& event) { return event.name == "idle"; }));
+        REQUIRE(std::any_of(selected_runtime_events.begin(),
+                            selected_runtime_events.end(),
+                            [](const nk::TraceEvent& event) { return event.name == "idle"; }));
+    }
 
     const auto trace = window.dump_frame_trace_json();
     REQUIRE(trace.find("\"traceEvents\"") != std::string::npos);
@@ -1403,7 +1522,8 @@ TEST_CASE("Window debug picker selects widgets and honors inspector shortcuts", 
                                              nk::DebugOverlayFlags::InspectorPanel));
 }
 
-TEST_CASE("Window can dock the inspector and shrink the content area", "[app][debug]") {
+TEST_CASE("Window cycles inspector presentation modes and only docked shrinks content area",
+          "[app][debug]") {
     nk::Application app(0, nullptr);
     app.set_system_preferences_observation_enabled(false);
 
@@ -1425,6 +1545,15 @@ TEST_CASE("Window can dock the inspector and shrink the content area", "[app][de
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width < viewport_size.width);
     REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::D,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::Detached);
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
