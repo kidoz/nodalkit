@@ -150,6 +150,10 @@ public:
     [[nodiscard]] bool debug_has_last_measure() const;
     [[nodiscard]] Constraints debug_last_measure_constraints() const;
     [[nodiscard]] SizeRequest debug_last_size_request() const;
+    [[nodiscard]] std::vector<Rect> debug_damage_regions() const;
+    [[nodiscard]] std::span<const Rect> debug_preserved_damage_regions() const;
+    [[nodiscard]] bool debug_has_previous_allocation() const;
+    [[nodiscard]] Rect debug_previous_allocation() const;
 
     // --- Invalidation ---
 
@@ -184,6 +188,10 @@ public:
     /// interactive region beyond their base allocation.
     [[nodiscard]] virtual bool hit_test(Point point) const;
 
+    /// Widgets with transient popup or overlay content may override this to
+    /// describe redraw regions that extend beyond the base allocation.
+    [[nodiscard]] virtual std::vector<Rect> damage_regions() const;
+
     /// Cursor shape hint to use while the pointer is over this widget.
     [[nodiscard]] virtual CursorShape cursor_shape() const;
 
@@ -217,6 +225,11 @@ protected:
                                               std::size_t reused_rows,
                                               std::size_t disposed_rows) const;
 
+    /// Preserve the widget's current damage regions for the next redraw. This
+    /// is used by widgets whose transient visual footprint changes without a
+    /// layout pass, such as popup menus and combo drop-downs.
+    void preserve_damage_regions_for_next_redraw();
+
     /// Container widgets call these to manage children.
     void append_child(std::shared_ptr<Widget> child);
     void insert_child(std::size_t index, std::shared_ptr<Widget> child);
@@ -237,6 +250,7 @@ private:
     void dispatch_pointer_controllers(const MouseEvent& event);
     void dispatch_keyboard_controllers(const KeyEvent& event);
     void dispatch_focus_controllers(bool focused);
+    void clear_preserved_damage_regions();
     void sync_accessible_state();
 
     struct Impl;

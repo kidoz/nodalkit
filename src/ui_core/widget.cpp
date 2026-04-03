@@ -42,6 +42,7 @@ struct Widget::Impl {
     std::unique_ptr<LayoutManager> layout_manager;
 
     Rect allocation{};
+    Rect previous_allocation{};
     StateFlags state = StateFlags::None;
     std::vector<std::string> style_classes;
     std::string debug_name;
@@ -49,6 +50,8 @@ struct Widget::Impl {
     bool visible = true;
     bool sensitive = true;
     bool focusable = false;
+    bool has_allocation = false;
+    bool has_previous_allocation = false;
     bool retain_size_when_hidden = false;
     SizePolicy horizontal_size_policy = SizePolicy::Preferred;
     SizePolicy vertical_size_policy = SizePolicy::Preferred;
@@ -62,6 +65,7 @@ struct Widget::Impl {
     bool debug_has_last_measure = false;
     Constraints debug_last_measure_constraints{};
     SizeRequest debug_last_size_request{};
+    std::vector<Rect> preserved_damage_regions;
 
     Signal<> on_map;
     Signal<> on_unmap;
@@ -207,7 +211,13 @@ SizeRequest Widget::measure_for_diagnostics(const Constraints& constraints) cons
 
 void Widget::allocate(const Rect& allocation) {
     ++impl_->debug_hotspot_counters.allocate_count;
+    if (impl_->has_allocation) {
+        preserve_damage_regions_for_next_redraw();
+        impl_->previous_allocation = impl_->allocation;
+        impl_->has_previous_allocation = true;
+    }
     impl_->allocation = allocation;
+    impl_->has_allocation = true;
     impl_->debug_pending_layout = false;
     if (impl_->layout_manager) {
         impl_->layout_manager->allocate(*const_cast<Widget*>(this), allocation);
@@ -364,6 +374,22 @@ Constraints Widget::debug_last_measure_constraints() const {
 
 SizeRequest Widget::debug_last_size_request() const {
     return impl_->debug_last_size_request;
+}
+
+std::vector<Rect> Widget::debug_damage_regions() const {
+    return damage_regions();
+}
+
+std::span<const Rect> Widget::debug_preserved_damage_regions() const {
+    return impl_->preserved_damage_regions;
+}
+
+bool Widget::debug_has_previous_allocation() const {
+    return impl_->has_previous_allocation;
+}
+
+Rect Widget::debug_previous_allocation() const {
+    return impl_->previous_allocation;
 }
 
 // --- Invalidation ---
@@ -607,6 +633,10 @@ void Widget::reset_debug_hotspot_counters_recursive() {
     }
 }
 
+void Widget::clear_preserved_damage_regions() {
+    impl_->preserved_damage_regions.clear();
+}
+
 bool Widget::handle_mouse_event(const MouseEvent& /*event*/) {
     return false;
 }
@@ -617,6 +647,10 @@ bool Widget::handle_key_event(const KeyEvent& /*event*/) {
 
 bool Widget::hit_test(Point point) const {
     return allocation().contains(point);
+}
+
+std::vector<Rect> Widget::damage_regions() const {
+    return {allocation()};
 }
 
 CursorShape Widget::cursor_shape() const {
@@ -655,6 +689,10 @@ void Widget::note_model_view_sync_for_diagnostics(std::size_t materialized_rows,
     impl_->debug_hotspot_counters.model_row_materialize_count += materialized_rows;
     impl_->debug_hotspot_counters.model_row_reuse_count += reused_rows;
     impl_->debug_hotspot_counters.model_row_dispose_count += disposed_rows;
+}
+
+void Widget::preserve_damage_regions_for_next_redraw() {
+    impl_->preserved_damage_regions = damage_regions();
 }
 
 } // namespace nk
