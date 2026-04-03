@@ -1,0 +1,23 @@
+{
+  "format": "chrome-trace-event-array-v1",
+  "traceEvents": [
+    {"name":"posted-task","cat":"event-loop-task","ph":"X","ts":132191,"dur":11,"pid":1,"tid":2,"args":{"detail":"queued_ms=2.286083","source_label":"harness.localized-redraw.post"}},
+    {"name":"timeout","cat":"event-loop-timer","ph":"X","ts":132207,"dur":73,"pid":1,"tid":2,"args":{"detail":"lateness_ms=2.290125","source_label":"harness.localized-redraw.timeout"}},
+    {"name":"idle","cat":"event-loop-idle","ph":"X","ts":134555,"dur":7,"pid":1,"tid":2,"args":{"detail":"queued_ms=4.636708","source_label":"harness.localized-redraw.idle"}},
+    {"name":"idle","cat":"event-loop-idle","ph":"X","ts":134568,"dur":3320,"pid":1,"tid":2,"args":{"detail":"queued_ms=4.648375"}},
+    {"name":"present","cat":"frame-request","ph":"i","s":"t","ts":50027,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"frame","cat":"frame","ph":"X","ts":50051,"dur":4779,"pid":1,"tid":1,"args":{"frame":1,"queue_delay_ms":0.024458,"present_path":"full-redraw-copy-back","present_tradeoff":"none","gpu_draw_calls":13,"gpu_viewport_pixels":1702400,"gpu_draw_pixels":3404800,"gpu_present_regions":0,"gpu_swapchain_copies":0}},
+    {"name":"layout","cat":"frame-phase","ph":"X","ts":50051,"dur":1657,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"snapshot","cat":"frame-phase","ph":"X","ts":51709,"dur":124,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"render","cat":"frame-phase","ph":"X","ts":51833,"dur":1099,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"present","cat":"frame-phase","ph":"X","ts":52932,"dur":1828,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"manual","cat":"frame-request","ph":"i","s":"t","ts":54906,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"widget-layout","cat":"frame-request","ph":"i","s":"t","ts":54906,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"widget-redraw","cat":"frame-request","ph":"i","s":"t","ts":54906,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"frame","cat":"frame","ph":"X","ts":59560,"dur":3284,"pid":1,"tid":1,"args":{"frame":2,"queue_delay_ms":4.65371,"present_path":"partial-redraw-copy","present_tradeoff":"draw-favored","gpu_draw_calls":12,"gpu_viewport_pixels":1702400,"gpu_draw_pixels":1870160,"gpu_present_regions":3,"gpu_swapchain_copies":0}},
+    {"name":"layout","cat":"frame-phase","ph":"X","ts":59560,"dur":454,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"snapshot","cat":"frame-phase","ph":"X","ts":60014,"dur":162,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"render","cat":"frame-phase","ph":"X","ts":60176,"dur":975,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"present","cat":"frame-phase","ph":"X","ts":61152,"dur":1635,"pid":1,"tid":1,"args":{"frame":2}}
+  ]
+}

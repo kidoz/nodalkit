@@ -62,6 +62,10 @@ stable_list_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'sta
 stable_list_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_list_heavy_trace.json'
 stable_animation_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_animation_heavy_frame_diagnostics.json'
 stable_animation_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_animation_heavy_trace.json'
+stable_localized_redraw_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_localized_redraw_frame_diagnostics.json'
+stable_localized_redraw_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_localized_redraw_trace.json'
+stable_metal_localized_redraw_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_metal_localized_redraw_frame_diagnostics.json'
+stable_metal_localized_redraw_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_metal_localized_redraw_trace.json'
 trace_capture_harness_mixed_artifact = meson.project_build_root() / 'trace_capture_harness_mixed_artifact.json'
 trace_capture_harness_mixed_trace = meson.project_build_root() / 'trace_capture_harness_mixed_trace.json'
 trace_capture_harness_text_artifact = meson.project_build_root() / 'trace_capture_harness_text_artifact.json'
@@ -70,6 +74,10 @@ trace_capture_harness_list_artifact = meson.project_build_root() / 'trace_captur
 trace_capture_harness_list_trace = meson.project_build_root() / 'trace_capture_harness_list_trace.json'
 trace_capture_harness_animation_artifact = meson.project_build_root() / 'trace_capture_harness_animation_artifact.json'
 trace_capture_harness_animation_trace = meson.project_build_root() / 'trace_capture_harness_animation_trace.json'
+trace_capture_harness_localized_redraw_artifact = meson.project_build_root() / 'trace_capture_harness_localized_redraw_artifact.json'
+trace_capture_harness_localized_redraw_trace = meson.project_build_root() / 'trace_capture_harness_localized_redraw_trace.json'
+trace_capture_harness_metal_localized_redraw_artifact = meson.project_build_root() / 'trace_capture_harness_metal_localized_redraw_artifact.json'
+trace_capture_harness_metal_localized_redraw_trace = meson.project_build_root() / 'trace_capture_harness_metal_localized_redraw_trace.json'
 overlay_screenshot_layout = meson.project_build_root() / 'overlay_layout_bounds.ppm'
 overlay_screenshot_dirty = meson.project_build_root() / 'overlay_dirty_widgets.ppm'
 overlay_screenshot_inspector = meson.project_build_root() / 'overlay_inspector.ppm'
@@ -249,6 +257,33 @@ test('trace_capture_harness_animation_heavy',
         '--baseline-trace=' + stable_animation_trace,
     ]),
 )
+
+test('trace_capture_harness_localized_redraw',
+    trace_capture_harness,
+    args : [
+        'localized-redraw',
+        trace_capture_harness_localized_redraw_artifact,
+        trace_capture_harness_localized_redraw_trace,
+    ] + (sanitizers_enabled ? [] : [
+        '--baseline-artifact=' + stable_localized_redraw_artifact,
+        '--baseline-trace=' + stable_localized_redraw_trace,
+    ]),
+)
+
+if host_machine.system() == 'darwin'
+    test('trace_capture_harness_metal_localized_redraw',
+        trace_capture_harness,
+        args : [
+            'localized-redraw',
+            trace_capture_harness_metal_localized_redraw_artifact,
+            trace_capture_harness_metal_localized_redraw_trace,
+            '--backend=metal',
+        ] + (sanitizers_enabled ? [] : [
+            '--baseline-artifact=' + stable_metal_localized_redraw_artifact,
+            '--baseline-trace=' + stable_metal_localized_redraw_trace,
+        ]),
+    )
+endif
 
 test('overlay_screenshot_harness',
     overlay_screenshot_harness,
