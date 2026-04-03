@@ -40,6 +40,32 @@ std::filesystem::path test_fixture_path(std::string_view relative) {
     return std::filesystem::path(__FILE__).parent_path() / "fixtures" / relative;
 }
 
+const nk::RenderSnapshotNode* find_render_snapshot_node(const nk::RenderSnapshotNode& node,
+                                                        std::string_view kind,
+                                                        std::string_view detail_substring) {
+    if (node.kind == kind &&
+        (detail_substring.empty() || node.detail.find(detail_substring) != std::string::npos)) {
+        return &node;
+    }
+    for (const auto& child : node.children) {
+        if (const auto* match = find_render_snapshot_node(child, kind, detail_substring);
+            match != nullptr) {
+            return match;
+        }
+    }
+    return nullptr;
+}
+
+float widest_render_snapshot_kind_containing(const nk::RenderSnapshotNode& node,
+                                             nk::Point point,
+                                             std::string_view kind) {
+    float widest = (node.kind == kind && node.bounds.contains(point)) ? node.bounds.width : 0.0F;
+    for (const auto& child : node.children) {
+        widest = std::max(widest, widest_render_snapshot_kind_containing(child, point, kind));
+    }
+    return widest;
+}
+
 class FixedWidget : public nk::Widget {
 public:
     static std::shared_ptr<FixedWidget> create(float width, float height) {
@@ -783,6 +809,29 @@ TEST_CASE("Application reports file-dialog capability explicitly", "[app]") {
                                                           : nk::FileDialogError::Unavailable));
 }
 
+TEST_CASE("Application reports native app-menu capability explicitly", "[app][menu]") {
+    nk::Application app(0, nullptr);
+
+    const bool expected_support =
+        app.has_platform_backend() ? app.platform_backend().supports_native_app_menu() : false;
+    REQUIRE(app.supports_native_app_menu() == expected_support);
+
+    app.set_native_app_menu({
+        {
+            .title = "File",
+            .items =
+                {
+                    nk::NativeMenuItem::action("Quit",
+                                               "file.quit",
+                                               nk::NativeMenuShortcut{
+                                                   .key = nk::KeyCode::Q,
+                                                   .modifiers = nk::NativeMenuModifier::Super,
+                                               }),
+                },
+        },
+    });
+}
+
 TEST_CASE("ScrollArea clamps offsets and consumes bubbled scroll input", "[app][scroll]") {
     nk::Window window({.title = "Scroll test", .width = 120, .height = 80});
     auto scroll_area = nk::ScrollArea::create();
@@ -997,6 +1046,70 @@ TEST_CASE("Dialog present installs a modal overlay and routes Escape dismissal",
 
     REQUIRE(response == nk::DialogResponse::Cancel);
     REQUIRE_FALSE(dialog->is_presented());
+}
+
+TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geometry",
+          "[app][dialog][render]") {
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "software", 1) == 0);
+
+    auto restore_backend = [&] {
+        if (previous != nullptr) {
+            REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+        } else {
+            REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+        }
+    };
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Dialog layout", .width = 480, .height = 320});
+    auto root = TestContainer::create();
+    root->append(nk::Label::create("Body"));
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    auto centered = nk::Dialog::create("Centered Dialog", "Proceed?");
+    centered->set_minimum_panel_width(420.0F);
+    centered->present(window);
+    REQUIRE(app.event_loop().poll());
+
+    const auto centered_snapshot_result =
+        nk::parse_render_snapshot_json(window.dump_selected_frame_render_snapshot_json());
+    REQUIRE(centered_snapshot_result);
+    const auto* centered_title =
+        find_render_snapshot_node(centered_snapshot_result.value(), "Text", "Centered Dialog");
+    REQUIRE(centered_title != nullptr);
+    const float centered_panel_width = widest_render_snapshot_kind_containing(
+        centered_snapshot_result.value(),
+        {centered_title->bounds.x + 1.0F, centered_title->bounds.y + 1.0F},
+        "RoundedRect");
+    REQUIRE(centered_panel_width >= 420.0F);
+
+    centered->close();
+    REQUIRE(app.event_loop().poll());
+
+    auto sheet = nk::Dialog::create("Sheet Dialog", "Proceed?");
+    sheet->set_minimum_panel_width(420.0F);
+    sheet->set_presentation_style(nk::DialogPresentationStyle::Sheet);
+    sheet->present(window);
+    REQUIRE(app.event_loop().poll());
+
+    const auto sheet_snapshot_result =
+        nk::parse_render_snapshot_json(window.dump_selected_frame_render_snapshot_json());
+    REQUIRE(sheet_snapshot_result);
+    const auto* sheet_title =
+        find_render_snapshot_node(sheet_snapshot_result.value(), "Text", "Sheet Dialog");
+    REQUIRE(sheet_title != nullptr);
+    const float sheet_panel_width = widest_render_snapshot_kind_containing(
+        sheet_snapshot_result.value(),
+        {sheet_title->bounds.x + 1.0F, sheet_title->bounds.y + 1.0F},
+        "RoundedRect");
+    REQUIRE(sheet_panel_width >= 420.0F);
+    REQUIRE(sheet_title->bounds.y + 40.0F < centered_title->bounds.y);
+
+    restore_backend();
 }
 
 TEST_CASE("Dialog overlay changes contribute damage regions on show and dismiss",
