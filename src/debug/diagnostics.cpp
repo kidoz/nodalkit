@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <nk/debug/diagnostics.h>
 #include <nk/render/image_node.h>
 #include <nk/render/render_node.h>
@@ -41,6 +42,14 @@ std::string escape_json_string(std::string_view value) {
         }
     }
     return escaped;
+}
+
+void append_json_number_or_null(std::ostringstream& out, float value) {
+    if (std::isfinite(value)) {
+        out << value;
+    } else {
+        out << "null";
+    }
 }
 
 std::string_view frame_performance_marker_name(FramePerformanceMarker marker) {
@@ -223,6 +232,65 @@ void append_widget_debug_node(std::ostringstream& out,
     }
 }
 
+void append_widget_hotspot_counters_json(std::ostringstream& out,
+                                         const WidgetHotspotCounters& counters);
+
+void append_widget_debug_json(std::ostringstream& out, const WidgetDebugNode& node) {
+    out << "{\"type_name\":\"" << escape_json_string(node.type_name) << "\"";
+    if (!node.debug_name.empty()) {
+        out << ",\"debug_name\":\"" << escape_json_string(node.debug_name) << "\"";
+    }
+    out << ",\"allocation\":{\"x\":" << node.allocation.x << ",\"y\":" << node.allocation.y
+        << ",\"width\":" << node.allocation.width << ",\"height\":" << node.allocation.height
+        << "}";
+    out << ",\"state_flags\":" << static_cast<uint32_t>(node.state_flags);
+    out << ",\"visible\":" << (node.visible ? "true" : "false");
+    out << ",\"sensitive\":" << (node.sensitive ? "true" : "false");
+    out << ",\"focusable\":" << (node.focusable ? "true" : "false");
+    out << ",\"focused\":" << (node.focused ? "true" : "false");
+    out << ",\"hovered\":" << (node.hovered ? "true" : "false");
+    out << ",\"pressed\":" << (node.pressed ? "true" : "false");
+    out << ",\"retain_size_when_hidden\":" << (node.retain_size_when_hidden ? "true" : "false");
+    out << ",\"pending_redraw\":" << (node.pending_redraw ? "true" : "false");
+    out << ",\"pending_layout\":" << (node.pending_layout ? "true" : "false");
+    out << ",\"has_last_measure\":" << (node.has_last_measure ? "true" : "false");
+    out << ",\"last_measure_constraints\":{\"min_width\":";
+    append_json_number_or_null(out, node.last_constraint_min_width);
+    out << ",\"min_height\":";
+    append_json_number_or_null(out, node.last_constraint_min_height);
+    out << ",\"max_width\":";
+    append_json_number_or_null(out, node.last_constraint_max_width);
+    out << ",\"max_height\":";
+    append_json_number_or_null(out, node.last_constraint_max_height);
+    out << "}";
+    out << ",\"last_size_request\":{\"minimum_width\":" << node.last_request_minimum_width
+        << ",\"minimum_height\":" << node.last_request_minimum_height
+        << ",\"natural_width\":" << node.last_request_natural_width
+        << ",\"natural_height\":" << node.last_request_natural_height << "}";
+    out << ",\"horizontal_size_policy\":\"" << escape_json_string(node.horizontal_size_policy)
+        << "\"";
+    out << ",\"vertical_size_policy\":\"" << escape_json_string(node.vertical_size_policy) << "\"";
+    out << ",\"horizontal_stretch\":" << static_cast<unsigned int>(node.horizontal_stretch);
+    out << ",\"vertical_stretch\":" << static_cast<unsigned int>(node.vertical_stretch);
+    out << ",\"hotspot_counters\":";
+    append_widget_hotspot_counters_json(out, node.hotspot_counters);
+    out << ",\"style_classes\":[";
+    for (std::size_t index = 0; index < node.style_classes.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << "\"" << escape_json_string(node.style_classes[index]) << "\"";
+    }
+    out << "],\"children\":[";
+    for (std::size_t index = 0; index < node.children.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        append_widget_debug_json(out, node.children[index]);
+    }
+    out << "]}";
+}
+
 void append_render_snapshot_node(std::ostringstream& out,
                                  const RenderSnapshotNode& node,
                                  std::size_t depth) {
@@ -369,6 +437,818 @@ void append_frame_diagnostics_artifact_json(std::ostringstream& out,
     }
     out << "]}\n";
 }
+
+class WidgetDebugJsonParser {
+public:
+    explicit WidgetDebugJsonParser(std::string_view input) : input_(input) {}
+
+    Result<WidgetDebugNode> parse_document() {
+        skip_ws();
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+
+        std::string format;
+        std::optional<WidgetDebugNode> root;
+
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("widget debug artifact is empty"));
+        }
+
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+
+            if (*key == "format") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                format = std::move(*value);
+            } else if (*key == "root") {
+                auto value = parse_node();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                root = std::move(*value);
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        skip_ws();
+        if (!eof()) {
+            return Unexpected(make_error("unexpected trailing data"));
+        }
+        if (!format.empty() && format != widget_debug_artifact_format()) {
+            return Unexpected(
+                make_error("unsupported widget debug artifact format \"" + format + "\""));
+        }
+        if (!root.has_value()) {
+            return Unexpected(make_error("widget debug artifact is missing root"));
+        }
+        return *root;
+    }
+
+private:
+    struct NodeBuilder {
+        WidgetDebugNode node;
+        bool has_type_name = false;
+        bool has_allocation = false;
+        bool has_state_flags = false;
+        bool has_visible = false;
+        bool has_sensitive = false;
+        bool has_focusable = false;
+        bool has_focused = false;
+        bool has_hovered = false;
+        bool has_pressed = false;
+        bool has_retain_size_when_hidden = false;
+        bool has_pending_redraw = false;
+        bool has_pending_layout = false;
+        bool has_has_last_measure = false;
+        bool has_last_measure_constraints = false;
+        bool has_last_size_request = false;
+        bool has_horizontal_size_policy = false;
+        bool has_vertical_size_policy = false;
+        bool has_horizontal_stretch = false;
+        bool has_vertical_stretch = false;
+        bool has_hotspot_counters = false;
+        bool has_style_classes = false;
+        bool has_children = false;
+    };
+
+    [[nodiscard]] bool eof() const noexcept { return index_ >= input_.size(); }
+
+    [[nodiscard]] std::string make_error(std::string_view message) const {
+        std::ostringstream out;
+        out << message << " at byte " << index_;
+        return out.str();
+    }
+
+    void skip_ws() {
+        while (!eof()) {
+            const char ch = input_[index_];
+            if (ch != ' ' && ch != '\n' && ch != '\r' && ch != '\t') {
+                break;
+            }
+            ++index_;
+        }
+    }
+
+    bool consume_if(char expected) {
+        skip_ws();
+        if (!eof() && input_[index_] == expected) {
+            ++index_;
+            return true;
+        }
+        return false;
+    }
+
+    Result<void> expect(char expected) {
+        skip_ws();
+        if (eof() || input_[index_] != expected) {
+            std::string message = "expected '";
+            message += expected;
+            message += "'";
+            return Unexpected(make_error(message));
+        }
+        ++index_;
+        return {};
+    }
+
+    Result<std::string> parse_string() {
+        skip_ws();
+        if (eof() || input_[index_] != '"') {
+            return Unexpected(make_error("expected string"));
+        }
+        ++index_;
+
+        std::string value;
+        while (!eof()) {
+            const char ch = input_[index_++];
+            if (ch == '"') {
+                return value;
+            }
+            if (ch == '\\') {
+                if (eof()) {
+                    return Unexpected(make_error("unterminated escape sequence"));
+                }
+                const char escaped = input_[index_++];
+                switch (escaped) {
+                case '"':
+                case '\\':
+                case '/':
+                    value += escaped;
+                    break;
+                case 'n':
+                    value += '\n';
+                    break;
+                case 'r':
+                    value += '\r';
+                    break;
+                case 't':
+                    value += '\t';
+                    break;
+                default:
+                    return Unexpected(make_error("unsupported escape sequence"));
+                }
+                continue;
+            }
+            value += ch;
+        }
+        return Unexpected(make_error("unterminated string"));
+    }
+
+    Result<double> parse_number() {
+        skip_ws();
+        const std::size_t start = index_;
+        while (!eof()) {
+            const char ch = input_[index_];
+            if ((ch >= '0' && ch <= '9') || ch == '-' || ch == '+' || ch == '.' || ch == 'e' ||
+                ch == 'E') {
+                ++index_;
+                continue;
+            }
+            break;
+        }
+        if (start == index_) {
+            return Unexpected(make_error("expected number"));
+        }
+        const std::string token(input_.substr(start, index_ - start));
+        char* end = nullptr;
+        errno = 0;
+        const double value = std::strtod(token.c_str(), &end);
+        if (end == nullptr || *end != '\0' || errno == ERANGE) {
+            return Unexpected(make_error("invalid number"));
+        }
+        return value;
+    }
+
+    Result<std::size_t> parse_size_t() {
+        auto value = parse_number();
+        if (!value) {
+            return Unexpected(value.error());
+        }
+        if (*value < 0.0 || std::floor(*value) != *value) {
+            return Unexpected(make_error("expected non-negative integer"));
+        }
+        return static_cast<std::size_t>(*value);
+    }
+
+    Result<bool> parse_bool() {
+        skip_ws();
+        if (input_.substr(index_, 4) == "true") {
+            index_ += 4;
+            return true;
+        }
+        if (input_.substr(index_, 5) == "false") {
+            index_ += 5;
+            return false;
+        }
+        return Unexpected(make_error("expected boolean"));
+    }
+
+    Result<std::optional<double>> parse_nullable_number() {
+        skip_ws();
+        if (input_.substr(index_, 4) == "null") {
+            index_ += 4;
+            return std::optional<double>{};
+        }
+        auto value = parse_number();
+        if (!value) {
+            return Unexpected(value.error());
+        }
+        return std::optional<double>{*value};
+    }
+
+    Result<void> skip_value() {
+        skip_ws();
+        if (eof()) {
+            return Unexpected(make_error("unexpected end of input"));
+        }
+        const char ch = input_[index_];
+        if (ch == '"') {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            return {};
+        }
+        if (ch == '{') {
+            ++index_;
+            skip_ws();
+            if (consume_if('}')) {
+                return {};
+            }
+            while (true) {
+                auto key = parse_string();
+                if (!key) {
+                    return Unexpected(key.error());
+                }
+                auto colon = expect(':');
+                if (!colon) {
+                    return Unexpected(colon.error());
+                }
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if('}')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == '[') {
+            ++index_;
+            skip_ws();
+            if (consume_if(']')) {
+                return {};
+            }
+            while (true) {
+                auto nested = skip_value();
+                if (!nested) {
+                    return Unexpected(nested.error());
+                }
+                skip_ws();
+                if (consume_if(']')) {
+                    return {};
+                }
+                auto comma = expect(',');
+                if (!comma) {
+                    return Unexpected(comma.error());
+                }
+            }
+        }
+        if (ch == 't' || ch == 'f') {
+            auto value = parse_bool();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            return {};
+        }
+        auto number = parse_number();
+        if (!number) {
+            return Unexpected(number.error());
+        }
+        return {};
+    }
+
+    Result<Rect> parse_rect() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        Rect rect{};
+        bool has_x = false;
+        bool has_y = false;
+        bool has_width = false;
+        bool has_height = false;
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("rect object is empty"));
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            auto value = parse_number();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            if (*key == "x") {
+                rect.x = static_cast<float>(*value);
+                has_x = true;
+            } else if (*key == "y") {
+                rect.y = static_cast<float>(*value);
+                has_y = true;
+            } else if (*key == "width") {
+                rect.width = static_cast<float>(*value);
+                has_width = true;
+            } else if (*key == "height") {
+                rect.height = static_cast<float>(*value);
+                has_height = true;
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        if (!has_x || !has_y || !has_width || !has_height) {
+            return Unexpected(make_error("rect object is missing required fields"));
+        }
+        return rect;
+    }
+
+    Result<void> parse_constraints(NodeBuilder& builder) {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        bool has_min_width = false;
+        bool has_min_height = false;
+        bool has_max_width = false;
+        bool has_max_height = false;
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("constraints object is empty"));
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            auto value = parse_nullable_number();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            const auto maybe_value = *value;
+            if (*key == "min_width") {
+                builder.node.last_constraint_min_width =
+                    maybe_value.has_value() ? static_cast<float>(*maybe_value) : 0.0F;
+                has_min_width = true;
+            } else if (*key == "min_height") {
+                builder.node.last_constraint_min_height =
+                    maybe_value.has_value() ? static_cast<float>(*maybe_value) : 0.0F;
+                has_min_height = true;
+            } else if (*key == "max_width") {
+                builder.node.last_constraint_max_width =
+                    maybe_value.has_value() ? static_cast<float>(*maybe_value)
+                                            : std::numeric_limits<float>::infinity();
+                has_max_width = true;
+            } else if (*key == "max_height") {
+                builder.node.last_constraint_max_height =
+                    maybe_value.has_value() ? static_cast<float>(*maybe_value)
+                                            : std::numeric_limits<float>::infinity();
+                has_max_height = true;
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        if (!has_min_width || !has_min_height || !has_max_width || !has_max_height) {
+            return Unexpected(make_error("constraints object is missing required fields"));
+        }
+        builder.has_last_measure_constraints = true;
+        return {};
+    }
+
+    Result<void> parse_size_request(NodeBuilder& builder) {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        bool has_minimum_width = false;
+        bool has_minimum_height = false;
+        bool has_natural_width = false;
+        bool has_natural_height = false;
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("size request object is empty"));
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            auto value = parse_number();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            if (*key == "minimum_width") {
+                builder.node.last_request_minimum_width = static_cast<float>(*value);
+                has_minimum_width = true;
+            } else if (*key == "minimum_height") {
+                builder.node.last_request_minimum_height = static_cast<float>(*value);
+                has_minimum_height = true;
+            } else if (*key == "natural_width") {
+                builder.node.last_request_natural_width = static_cast<float>(*value);
+                has_natural_width = true;
+            } else if (*key == "natural_height") {
+                builder.node.last_request_natural_height = static_cast<float>(*value);
+                has_natural_height = true;
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        if (!has_minimum_width || !has_minimum_height || !has_natural_width ||
+            !has_natural_height) {
+            return Unexpected(make_error("size request object is missing required fields"));
+        }
+        builder.has_last_size_request = true;
+        return {};
+    }
+
+    Result<WidgetHotspotCounters> parse_widget_hotspot_counters() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        WidgetHotspotCounters counters;
+        skip_ws();
+        if (consume_if('}')) {
+            return counters;
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            auto value = parse_size_t();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            if (*key == "measure_count") {
+                counters.measure_count = *value;
+            } else if (*key == "allocate_count") {
+                counters.allocate_count = *value;
+            } else if (*key == "snapshot_count") {
+                counters.snapshot_count = *value;
+            } else if (*key == "text_measure_count") {
+                counters.text_measure_count = *value;
+            } else if (*key == "image_snapshot_count") {
+                counters.image_snapshot_count = *value;
+            } else if (*key == "model_sync_count") {
+                counters.model_sync_count = *value;
+            } else if (*key == "model_row_materialize_count") {
+                counters.model_row_materialize_count = *value;
+            } else if (*key == "model_row_reuse_count") {
+                counters.model_row_reuse_count = *value;
+            } else if (*key == "model_row_dispose_count") {
+                counters.model_row_dispose_count = *value;
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return counters;
+    }
+
+    Result<std::vector<std::string>> parse_string_array() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        std::vector<std::string> values;
+        skip_ws();
+        if (consume_if(']')) {
+            return values;
+        }
+        while (true) {
+            auto value = parse_string();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            values.push_back(std::move(*value));
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return values;
+    }
+
+    Result<std::vector<WidgetDebugNode>> parse_children() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        std::vector<WidgetDebugNode> children;
+        skip_ws();
+        if (consume_if(']')) {
+            return children;
+        }
+        while (true) {
+            auto value = parse_node();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            children.push_back(std::move(*value));
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return children;
+    }
+
+    Result<WidgetDebugNode> parse_node() {
+        auto begin = expect('{');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        NodeBuilder builder;
+        skip_ws();
+        if (consume_if('}')) {
+            return Unexpected(make_error("widget debug node is empty"));
+        }
+        while (true) {
+            auto key = parse_string();
+            if (!key) {
+                return Unexpected(key.error());
+            }
+            auto colon = expect(':');
+            if (!colon) {
+                return Unexpected(colon.error());
+            }
+            if (*key == "type_name") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.type_name = std::move(*value);
+                builder.has_type_name = true;
+            } else if (*key == "debug_name") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.debug_name = std::move(*value);
+            } else if (*key == "allocation") {
+                auto value = parse_rect();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.allocation = *value;
+                builder.has_allocation = true;
+            } else if (*key == "state_flags") {
+                auto value = parse_size_t();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.state_flags = static_cast<StateFlags>(*value);
+                builder.has_state_flags = true;
+            } else if (*key == "visible") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.visible = *value;
+                builder.has_visible = true;
+            } else if (*key == "sensitive") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.sensitive = *value;
+                builder.has_sensitive = true;
+            } else if (*key == "focusable") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.focusable = *value;
+                builder.has_focusable = true;
+            } else if (*key == "focused") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.focused = *value;
+                builder.has_focused = true;
+            } else if (*key == "hovered") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.hovered = *value;
+                builder.has_hovered = true;
+            } else if (*key == "pressed") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.pressed = *value;
+                builder.has_pressed = true;
+            } else if (*key == "retain_size_when_hidden") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.retain_size_when_hidden = *value;
+                builder.has_retain_size_when_hidden = true;
+            } else if (*key == "pending_redraw") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.pending_redraw = *value;
+                builder.has_pending_redraw = true;
+            } else if (*key == "pending_layout") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.pending_layout = *value;
+                builder.has_pending_layout = true;
+            } else if (*key == "has_last_measure") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.has_last_measure = *value;
+                builder.has_has_last_measure = true;
+            } else if (*key == "last_measure_constraints") {
+                auto value = parse_constraints(builder);
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+            } else if (*key == "last_size_request") {
+                auto value = parse_size_request(builder);
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+            } else if (*key == "horizontal_size_policy") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.horizontal_size_policy = std::move(*value);
+                builder.has_horizontal_size_policy = true;
+            } else if (*key == "vertical_size_policy") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.vertical_size_policy = std::move(*value);
+                builder.has_vertical_size_policy = true;
+            } else if (*key == "horizontal_stretch") {
+                auto value = parse_size_t();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.horizontal_stretch = static_cast<uint8_t>(*value);
+                builder.has_horizontal_stretch = true;
+            } else if (*key == "vertical_stretch") {
+                auto value = parse_size_t();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.vertical_stretch = static_cast<uint8_t>(*value);
+                builder.has_vertical_stretch = true;
+            } else if (*key == "hotspot_counters") {
+                auto value = parse_widget_hotspot_counters();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.hotspot_counters = *value;
+                builder.has_hotspot_counters = true;
+            } else if (*key == "style_classes") {
+                auto value = parse_string_array();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.style_classes = std::move(*value);
+                builder.has_style_classes = true;
+            } else if (*key == "children") {
+                auto value = parse_children();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.children = std::move(*value);
+                builder.has_children = true;
+            } else {
+                auto skipped = skip_value();
+                if (!skipped) {
+                    return Unexpected(skipped.error());
+                }
+            }
+            skip_ws();
+            if (consume_if('}')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+
+        if (!builder.has_type_name || !builder.has_allocation || !builder.has_state_flags ||
+            !builder.has_visible || !builder.has_sensitive || !builder.has_focusable ||
+            !builder.has_focused || !builder.has_hovered || !builder.has_pressed ||
+            !builder.has_retain_size_when_hidden || !builder.has_pending_redraw ||
+            !builder.has_pending_layout || !builder.has_has_last_measure ||
+            !builder.has_last_measure_constraints || !builder.has_last_size_request ||
+            !builder.has_horizontal_size_policy || !builder.has_vertical_size_policy ||
+            !builder.has_horizontal_stretch || !builder.has_vertical_stretch ||
+            !builder.has_hotspot_counters || !builder.has_style_classes || !builder.has_children) {
+            return Unexpected(make_error("widget debug node is missing required fields"));
+        }
+        return std::move(builder.node);
+    }
+
+    std::string_view input_;
+    std::size_t index_ = 0;
+};
 
 class RenderSnapshotJsonParser {
 public:
@@ -2290,6 +3170,31 @@ std::string format_widget_debug_tree(const WidgetDebugNode& root) {
     std::ostringstream out;
     append_widget_debug_node(out, root, 0);
     return out.str();
+}
+
+std::string format_widget_debug_json(const WidgetDebugNode& root) {
+    std::ostringstream out;
+    out << "{\"format\":\"" << widget_debug_artifact_format() << "\",\"root\":";
+    append_widget_debug_json(out, root);
+    out << "}\n";
+    return out.str();
+}
+
+Result<WidgetDebugNode> parse_widget_debug_json(std::string_view json) {
+    WidgetDebugJsonParser parser(json);
+    return parser.parse_document();
+}
+
+Result<WidgetDebugNode> load_widget_debug_json_file(std::string_view path) {
+    auto contents = load_text_file(path, "widget debug artifact");
+    if (!contents) {
+        return Unexpected(contents.error());
+    }
+    return parse_widget_debug_json(*contents);
+}
+
+Result<void> save_widget_debug_json_file(const WidgetDebugNode& root, std::string_view path) {
+    return save_text_file(path, format_widget_debug_json(root), "widget debug artifact");
 }
 
 std::string format_render_snapshot_tree(const RenderSnapshotNode& root) {

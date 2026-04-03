@@ -28,6 +28,7 @@ enum class DebugOverlayFlags : uint32_t {
 enum class DebugInspectorPresentation : uint8_t {
     Overlay,
     DockedRight,
+    Detached,
 };
 
 [[nodiscard]] constexpr DebugOverlayFlags operator|(DebugOverlayFlags lhs,
@@ -182,6 +183,25 @@ struct WidgetDebugNode {
     bool visible = true;
     bool sensitive = true;
     bool focusable = false;
+    bool focused = false;
+    bool hovered = false;
+    bool pressed = false;
+    bool retain_size_when_hidden = false;
+    bool pending_redraw = false;
+    bool pending_layout = false;
+    bool has_last_measure = false;
+    float last_constraint_min_width = 0.0F;
+    float last_constraint_min_height = 0.0F;
+    float last_constraint_max_width = 0.0F;
+    float last_constraint_max_height = 0.0F;
+    float last_request_minimum_width = 0.0F;
+    float last_request_minimum_height = 0.0F;
+    float last_request_natural_width = 0.0F;
+    float last_request_natural_height = 0.0F;
+    std::string horizontal_size_policy;
+    std::string vertical_size_policy;
+    uint8_t horizontal_stretch = 0;
+    uint8_t vertical_stretch = 0;
     WidgetHotspotCounters hotspot_counters;
     std::vector<std::string> style_classes;
     std::vector<WidgetDebugNode> children;
@@ -216,6 +236,10 @@ struct FrameTimeHistogram {
     return "nk-render-snapshot-v1";
 }
 
+[[nodiscard]] constexpr std::string_view widget_debug_artifact_format() noexcept {
+    return "nk-widget-debug-v1";
+}
+
 [[nodiscard]] constexpr std::string_view frame_diagnostics_artifact_format() noexcept {
     return "nk-frame-diagnostics-v1";
 }
@@ -240,6 +264,11 @@ build_frame_time_histogram(std::span<const FrameDiagnostics> frames) noexcept;
 [[nodiscard]] std::size_t count_render_snapshot_nodes(const RenderSnapshotNode& root) noexcept;
 [[nodiscard]] RenderSnapshotNode build_render_snapshot(const RenderNode& root);
 [[nodiscard]] std::string format_widget_debug_tree(const WidgetDebugNode& root);
+[[nodiscard]] std::string format_widget_debug_json(const WidgetDebugNode& root);
+[[nodiscard]] Result<WidgetDebugNode> parse_widget_debug_json(std::string_view json);
+[[nodiscard]] Result<WidgetDebugNode> load_widget_debug_json_file(std::string_view path);
+[[nodiscard]] Result<void> save_widget_debug_json_file(const WidgetDebugNode& root,
+                                                       std::string_view path);
 [[nodiscard]] std::string format_render_snapshot_tree(const RenderSnapshotNode& root);
 [[nodiscard]] std::string format_render_snapshot_json(const RenderSnapshotNode& root);
 [[nodiscard]] Result<RenderSnapshotNode> parse_render_snapshot_json(std::string_view json);
