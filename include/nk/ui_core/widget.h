@@ -3,6 +3,7 @@
 /// @file widget.h
 /// @brief Base class for all visual elements in the widget tree.
 
+#include <nk/accessibility/accessible.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
@@ -132,6 +133,16 @@ public:
     void set_focusable(bool focusable);
     void grab_focus();
 
+    // --- Accessibility ---
+
+    /// Returns the attached accessibility object when one exists.
+    [[nodiscard]] Accessible* accessible();
+    [[nodiscard]] const Accessible* accessible() const;
+
+    /// Creates the accessibility object on demand and synchronizes it with the
+    /// widget's current visible/state flags.
+    [[nodiscard]] Accessible& ensure_accessible();
+
     /// Per-widget debug counters for measure/allocate/snapshot activity.
     [[nodiscard]] WidgetHotspotCounters debug_hotspot_counters() const;
     [[nodiscard]] bool debug_pending_redraw() const;
@@ -226,6 +237,7 @@ private:
     void dispatch_pointer_controllers(const MouseEvent& event);
     void dispatch_keyboard_controllers(const KeyEvent& event);
     void dispatch_focus_controllers(bool focused);
+    void sync_accessible_state();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

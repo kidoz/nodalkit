@@ -55,6 +55,7 @@ struct Widget::Impl {
     uint8_t horizontal_stretch = 0;
     uint8_t vertical_stretch = 0;
     Window* host_window = nullptr;
+    std::unique_ptr<Accessible> accessible;
     WidgetHotspotCounters debug_hotspot_counters;
     bool debug_pending_redraw = false;
     bool debug_pending_layout = false;
@@ -100,6 +101,7 @@ void Widget::set_visible(bool visible) {
                 impl_->host_window->handle_widget_state_change(*this);
             }
         }
+        sync_accessible_state();
         queue_layout();
     }
 }
@@ -119,6 +121,7 @@ void Widget::set_sensitive(bool sensitive) {
         } else {
             set_state_flag(StateFlags::Disabled, false);
         }
+        sync_accessible_state();
         queue_redraw();
     }
 }
@@ -137,6 +140,7 @@ void Widget::set_state_flag(StateFlags flag, bool active) {
         impl_->state = impl_->state & ~flag;
     }
     if (impl_->state != previous) {
+        sync_accessible_state();
         queue_redraw();
     }
 }
@@ -290,7 +294,20 @@ bool Widget::is_focusable() const {
 }
 
 void Widget::set_focusable(bool focusable) {
+    if (impl_->focusable == focusable) {
+        return;
+    }
     impl_->focusable = focusable;
+    if (impl_->accessible != nullptr) {
+        if (focusable) {
+            impl_->accessible->add_action(AccessibleAction::Focus, [this]() {
+                grab_focus();
+                return true;
+            });
+        } else {
+            impl_->accessible->remove_action(AccessibleAction::Focus);
+        }
+    }
 }
 
 void Widget::grab_focus() {
@@ -301,6 +318,28 @@ void Widget::grab_focus() {
     set_state_flag(StateFlags::Focused, true);
     dispatch_focus_controllers(true);
     on_focus_changed(true);
+}
+
+Accessible* Widget::accessible() {
+    return impl_->accessible.get();
+}
+
+const Accessible* Widget::accessible() const {
+    return impl_->accessible.get();
+}
+
+Accessible& Widget::ensure_accessible() {
+    if (!impl_->accessible) {
+        impl_->accessible = std::make_unique<Accessible>();
+        if (impl_->focusable) {
+            impl_->accessible->add_action(AccessibleAction::Focus, [this]() {
+                grab_focus();
+                return true;
+            });
+        }
+    }
+    sync_accessible_state();
+    return *impl_->accessible;
 }
 
 WidgetHotspotCounters Widget::debug_hotspot_counters() const {
@@ -409,6 +448,14 @@ void Widget::dispatch_focus_controllers(bool focused) {
             focus->on_focus_out().emit();
         }
     }
+}
+
+void Widget::sync_accessible_state() {
+    if (!impl_->accessible) {
+        return;
+    }
+    impl_->accessible->set_hidden(!impl_->visible);
+    impl_->accessible->set_state(impl_->state);
 }
 
 // --- Signals ---
