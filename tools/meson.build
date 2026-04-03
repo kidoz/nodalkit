@@ -24,8 +24,14 @@ frame_diag_candidate_bad = meson.project_source_root() / 'tests' / 'fixtures' / 
 trace_baseline = meson.project_source_root() / 'tests' / 'fixtures' / 'trace_baseline.json'
 trace_candidate_ok = meson.project_source_root() / 'tests' / 'fixtures' / 'trace_candidate_ok.json'
 trace_candidate_bad = meson.project_source_root() / 'tests' / 'fixtures' / 'trace_candidate_bad.json'
-trace_capture_harness_artifact = meson.project_build_root() / 'trace_capture_harness_artifact.json'
-trace_capture_harness_trace = meson.project_build_root() / 'trace_capture_harness_trace.json'
+trace_capture_harness_mixed_artifact = meson.project_build_root() / 'trace_capture_harness_mixed_artifact.json'
+trace_capture_harness_mixed_trace = meson.project_build_root() / 'trace_capture_harness_mixed_trace.json'
+trace_capture_harness_text_artifact = meson.project_build_root() / 'trace_capture_harness_text_artifact.json'
+trace_capture_harness_text_trace = meson.project_build_root() / 'trace_capture_harness_text_trace.json'
+trace_capture_harness_list_artifact = meson.project_build_root() / 'trace_capture_harness_list_artifact.json'
+trace_capture_harness_list_trace = meson.project_build_root() / 'trace_capture_harness_list_trace.json'
+trace_capture_harness_animation_artifact = meson.project_build_root() / 'trace_capture_harness_animation_artifact.json'
+trace_capture_harness_animation_trace = meson.project_build_root() / 'trace_capture_harness_animation_trace.json'
 overlay_screenshot_layout = meson.project_build_root() / 'overlay_layout_bounds.ppm'
 overlay_screenshot_dirty = meson.project_build_root() / 'overlay_dirty_widgets.ppm'
 overlay_screenshot_inspector = meson.project_build_root() / 'overlay_inspector.ppm'
@@ -84,7 +90,26 @@ test('trace_diff_regression',
 
 test('trace_capture_harness',
     trace_capture_harness,
-    args : [trace_capture_harness_artifact, trace_capture_harness_trace],
+    args : ['mixed', trace_capture_harness_mixed_artifact, trace_capture_harness_mixed_trace],
+)
+
+test('trace_capture_harness_text_heavy',
+    trace_capture_harness,
+    args : ['text-heavy', trace_capture_harness_text_artifact, trace_capture_harness_text_trace],
+)
+
+test('trace_capture_harness_list_heavy',
+    trace_capture_harness,
+    args : ['list-heavy', trace_capture_harness_list_artifact, trace_capture_harness_list_trace],
+)
+
+test('trace_capture_harness_animation_heavy',
+    trace_capture_harness,
+    args : [
+        'animation-heavy',
+        trace_capture_harness_animation_artifact,
+        trace_capture_harness_animation_trace,
+    ],
 )
 
 test('overlay_screenshot_harness',
