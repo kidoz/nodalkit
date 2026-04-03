@@ -5,6 +5,7 @@
 #include <memory>
 #include <nk/layout/box_layout.h>
 #include <nk/platform/application.h>
+#include <nk/platform/events.h>
 #include <nk/platform/window.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/label.h>
@@ -42,20 +43,24 @@ bool file_starts_with_ppm_header(const std::filesystem::path& path) {
 
 int usage(const char* argv0) {
     std::cerr << "usage: " << (argv0 != nullptr ? argv0 : "nk_overlay_screenshot_harness")
-              << " <layout-bounds.ppm> <dirty-widgets.ppm> <inspector.ppm>\n";
+              << " <layout-bounds.ppm> <dirty-widgets.ppm> <inspector-overlay.ppm>"
+              << " <inspector-docked.ppm> <widget-filter.ppm> <render-focus.ppm>\n";
     return 2;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 4) {
+    if (argc != 7) {
         return usage(argc > 0 ? argv[0] : "nk_overlay_screenshot_harness");
     }
 
     const auto layout_path = std::filesystem::path(argv[1]);
     const auto dirty_path = std::filesystem::path(argv[2]);
     const auto inspector_path = std::filesystem::path(argv[3]);
+    const auto docked_path = std::filesystem::path(argv[4]);
+    const auto filter_path = std::filesystem::path(argv[5]);
+    const auto render_focus_path = std::filesystem::path(argv[6]);
 
     (void)::setenv("NK_RENDERER_BACKEND", "software", 1);
 
@@ -127,7 +132,43 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    for (const auto& path : {layout_path, dirty_path, inspector_path}) {
+    window.set_debug_inspector_presentation(nk::DebugInspectorPresentation::DockedRight);
+    if (!app.event_loop().poll()) {
+        std::cerr << "failed to render docked inspector frame\n";
+        return 1;
+    }
+    const auto save_docked = window.save_debug_screenshot_ppm_file(docked_path.string());
+    if (!save_docked) {
+        std::cerr << save_docked.error() << "\n";
+        return 1;
+    }
+
+    window.set_debug_widget_filter("button");
+    if (!app.event_loop().poll()) {
+        std::cerr << "failed to render filtered inspector frame\n";
+        return 1;
+    }
+    const auto save_filter = window.save_debug_screenshot_ppm_file(filter_path.string());
+    if (!save_filter) {
+        std::cerr << save_filter.error() << "\n";
+        return 1;
+    }
+
+    window.set_debug_widget_filter({});
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::PageDown});
+    if (!app.event_loop().poll()) {
+        std::cerr << "failed to render focused render-node frame\n";
+        return 1;
+    }
+    const auto save_render_focus =
+        window.save_debug_screenshot_ppm_file(render_focus_path.string());
+    if (!save_render_focus) {
+        std::cerr << save_render_focus.error() << "\n";
+        return 1;
+    }
+
+    for (const auto& path :
+         {layout_path, dirty_path, inspector_path, docked_path, filter_path, render_focus_path}) {
         if (!std::filesystem::exists(path) || std::filesystem::file_size(path) == 0 ||
             !file_starts_with_ppm_header(path)) {
             std::cerr << "invalid screenshot output: " << path << "\n";

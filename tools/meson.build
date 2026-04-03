@@ -29,6 +29,9 @@ trace_capture_harness_trace = meson.project_build_root() / 'trace_capture_harnes
 overlay_screenshot_layout = meson.project_build_root() / 'overlay_layout_bounds.ppm'
 overlay_screenshot_dirty = meson.project_build_root() / 'overlay_dirty_widgets.ppm'
 overlay_screenshot_inspector = meson.project_build_root() / 'overlay_inspector.ppm'
+overlay_screenshot_docked = meson.project_build_root() / 'overlay_inspector_docked.ppm'
+overlay_screenshot_filter = meson.project_build_root() / 'overlay_widget_filter.ppm'
+overlay_screenshot_render_focus = meson.project_build_root() / 'overlay_render_focus.ppm'
 
 frame_diag_diff_args = [
     '--max-total-ms-regression=0.5',
@@ -86,5 +89,12 @@ test('trace_capture_harness',
 
 test('overlay_screenshot_harness',
     overlay_screenshot_harness,
-    args : [overlay_screenshot_layout, overlay_screenshot_dirty, overlay_screenshot_inspector],
+    args : [
+        overlay_screenshot_layout,
+        overlay_screenshot_dirty,
+        overlay_screenshot_inspector,
+        overlay_screenshot_docked,
+        overlay_screenshot_filter,
+        overlay_screenshot_render_focus,
+    ],
 )
