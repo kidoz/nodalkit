@@ -4,6 +4,7 @@ project('NodalKit', 'cpp',
 
 nk_inc = include_directories('include')
 pkgconfig = import('pkgconfig')
+nk_enabled_languages = ['cpp']
 
 # --- Core sources (platform-agnostic) ---
 
@@ -30,6 +31,7 @@ nk_sources = files(
     'src/style/theme.cpp',
     'src/style/theme_selection.cpp',
     'src/accessibility/accessible.cpp',
+    'src/accessibility/atspi_bridge.cpp',
     'src/model/abstract_list_model.cpp',
     'src/model/selection_model.cpp',
     'src/text/shaped_text.cpp',
@@ -55,6 +57,7 @@ host_system = host_machine.system()
 
 if host_system == 'darwin'
     add_languages('objcpp', native : false)
+    nk_enabled_languages += ['objcpp']
 
     cocoa_dep = dependency('appleframeworks',
         modules : ['Cocoa', 'CoreGraphics', 'CoreText', 'Metal', 'QuartzCore', 'UniformTypeIdentifiers'])
@@ -70,6 +73,7 @@ if host_system == 'darwin'
 
 elif host_system == 'linux'
     add_languages('c', native : false)
+    nk_enabled_languages += ['c']
 
     wayland_client_dep = dependency('wayland-client')
     wayland_protocols_dep = dependency('wayland-protocols')
@@ -170,6 +174,15 @@ elif host_system == 'linux'
         nk_deps += vulkan_dep
         nk_cpp_args += ['-DNK_HAVE_VULKAN']
     endif
+endif
+
+# --- Sanitizer support ---
+
+if get_option('b_sanitize') != 'none'
+    foreach lang : nk_enabled_languages
+        add_project_arguments('-fno-omit-frame-pointer', language : lang)
+        add_project_link_arguments('-fno-omit-frame-pointer', language : lang)
+    endforeach
 endif
 
 # --- Build shared library ---
