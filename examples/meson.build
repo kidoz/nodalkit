@@ -8,6 +8,11 @@ executable('counter',
     dependencies : nk_dep,
 )
 
+executable('accessibility_probe',
+    'accessibility_probe.cpp',
+    dependencies : nk_dep,
+)
+
 executable('showcase',
     [
         'showcase/main.cpp',
