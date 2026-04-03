@@ -50,7 +50,6 @@ int popup_index_at(const PopupGeometry& geometry, Point point) {
 }
 
 void invalidate_popup_frame(Widget& widget) {
-    widget.queue_layout();
     widget.queue_redraw();
 }
 
@@ -156,6 +155,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
                 set_selected_index(release_index);
                 consumed = true;
             }
+            preserve_damage_regions_for_next_redraw();
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
             impl_->armed_index = -1;
@@ -171,6 +171,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
             return false;
         }
 
+        preserve_damage_regions_for_next_redraw();
         impl_->popup_open = !impl_->popup_open;
         impl_->highlighted_index = impl_->popup_open ? std::max(0, impl_->selected_index) : -1;
         invalidate_popup_frame(*this);
@@ -221,6 +222,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
 
     const auto last_index = static_cast<int>(impl_->items.size()) - 1;
     auto open_popup = [this](int highlight) {
+        preserve_damage_regions_for_next_redraw();
         impl_->popup_open = true;
         impl_->highlighted_index =
             std::clamp(highlight, 0, static_cast<int>(impl_->items.size()) - 1);
@@ -230,6 +232,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
     if (impl_->popup_open) {
         switch (event.key) {
         case KeyCode::Escape:
+            preserve_damage_regions_for_next_redraw();
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
             invalidate_popup_frame(*this);
@@ -255,6 +258,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             if (impl_->highlighted_index >= 0) {
                 set_selected_index(impl_->highlighted_index);
             }
+            preserve_damage_regions_for_next_redraw();
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
             invalidate_popup_frame(*this);
@@ -307,12 +311,27 @@ bool ComboBox::hit_test(Point point) const {
     return popup.bounds.contains(point);
 }
 
+std::vector<Rect> ComboBox::damage_regions() const {
+    auto regions = std::vector<Rect>{allocation()};
+    if (!impl_->popup_open || impl_->items.empty()) {
+        return regions;
+    }
+
+    const auto popup =
+        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
+    if (popup.visible_count > 0) {
+        regions.push_back(popup.bounds);
+    }
+    return regions;
+}
+
 CursorShape ComboBox::cursor_shape() const {
     return CursorShape::PointingHand;
 }
 
 void ComboBox::on_focus_changed(bool focused) {
     if (!focused && impl_->popup_open) {
+        preserve_damage_regions_for_next_redraw();
         impl_->popup_open = false;
         impl_->armed = false;
         impl_->armed_index = -1;
