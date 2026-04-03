@@ -60,6 +60,7 @@ struct Window::Impl {
     FrameDiagnostics last_frame_diagnostics;
     std::vector<FrameDiagnostics> frame_history;
     std::vector<Widget*> dirty_widgets;
+    std::vector<Rect> preserved_overlay_damage_regions;
     Widget* debug_selected_widget = nullptr;
     std::string debug_widget_filter;
     uint64_t debug_selected_frame_id = 0;
@@ -169,14 +170,9 @@ struct RenderInspectorEntry {
     std::vector<Rect> merged;
     merged.reserve(widgets.size());
 
-    for (auto* widget : widgets) {
-        if (widget == nullptr || !widget->is_visible()) {
-            continue;
-        }
-
-        Rect damage = intersect_rect(widget->allocation(), viewport_rect);
+    auto append_damage = [&](Rect damage) {
         if (rect_is_empty(damage)) {
-            continue;
+            return;
         }
 
         bool merged_existing = false;
@@ -190,6 +186,22 @@ struct RenderInspectorEntry {
 
         if (!merged_existing) {
             merged.push_back(damage);
+        }
+    };
+
+    for (auto* widget : widgets) {
+        if (widget == nullptr || !widget->is_visible()) {
+            continue;
+        }
+
+        for (const auto& damage : widget->debug_damage_regions()) {
+            append_damage(intersect_rect(damage, viewport_rect));
+        }
+        for (const auto& preserved : widget->debug_preserved_damage_regions()) {
+            append_damage(intersect_rect(preserved, viewport_rect));
+        }
+        if (widget->debug_has_previous_allocation()) {
+            append_damage(intersect_rect(widget->debug_previous_allocation(), viewport_rect));
         }
     }
 
@@ -205,6 +217,80 @@ struct RenderInspectorEntry {
     }
 
     return merged;
+}
+
+void append_damage_region(std::vector<Rect>& merged, Rect damage) {
+    if (rect_is_empty(damage)) {
+        return;
+    }
+
+    bool merged_existing = false;
+    for (auto& existing : merged) {
+        if (rects_overlap_or_touch(existing, damage)) {
+            existing = union_rect(existing, damage);
+            merged_existing = true;
+            break;
+        }
+    }
+
+    if (!merged_existing) {
+        merged.push_back(damage);
+    }
+}
+
+void collect_layout_damage_regions_recursive(const Widget* widget,
+                                             Rect viewport_rect,
+                                             std::vector<Rect>& merged) {
+    if (widget == nullptr || !widget->is_visible()) {
+        return;
+    }
+
+    if (widget->debug_has_previous_allocation() &&
+        widget->allocation() != widget->debug_previous_allocation()) {
+        append_damage_region(merged, intersect_rect(widget->allocation(), viewport_rect));
+        append_damage_region(merged,
+                             intersect_rect(widget->debug_previous_allocation(), viewport_rect));
+    }
+
+    for (const auto& child : widget->children()) {
+        if (child != nullptr) {
+            collect_layout_damage_regions_recursive(child.get(), viewport_rect, merged);
+        }
+    }
+}
+
+[[nodiscard]] std::vector<Rect> collect_frame_damage_regions(std::span<Widget* const> dirty_widgets,
+                                                             const std::shared_ptr<Widget>& root,
+                                                             Size viewport,
+                                                             bool had_layout) {
+    auto merged = collect_damage_regions(dirty_widgets, viewport);
+    if (!had_layout) {
+        return merged;
+    }
+
+    const Rect viewport_rect{0.0F, 0.0F, viewport.width, viewport.height};
+    collect_layout_damage_regions_recursive(root.get(), viewport_rect, merged);
+
+    for (std::size_t outer = 0; outer < merged.size(); ++outer) {
+        for (std::size_t inner = outer + 1; inner < merged.size();) {
+            if (rects_overlap_or_touch(merged[outer], merged[inner])) {
+                merged[outer] = union_rect(merged[outer], merged[inner]);
+                merged.erase(merged.begin() + static_cast<std::ptrdiff_t>(inner));
+            } else {
+                ++inner;
+            }
+        }
+    }
+
+    return merged;
+}
+
+void append_preserved_damage_regions(std::vector<Rect>& merged,
+                                     std::span<const Rect> preserved,
+                                     Rect viewport_rect) {
+    for (const auto& rect : preserved) {
+        append_damage_region(merged, intersect_rect(rect, viewport_rect));
+    }
 }
 
 struct InspectorPanelLayout {
@@ -2151,9 +2237,19 @@ void Window::request_frame(FrameRequestReason reason) {
             frame.render_snapshot_node_count = count_render_snapshot_nodes(frame.render_snapshot);
         }
 
-        const auto damage_regions = (!frame.had_layout && !impl_->dirty_widgets.empty())
-                                        ? collect_damage_regions(impl_->dirty_widgets, sz)
-                                        : std::vector<Rect>{};
+        auto damage_regions =
+            collect_frame_damage_regions(impl_->dirty_widgets, impl_->child, sz, frame.had_layout);
+        const Rect viewport_rect{0.0F, 0.0F, sz.width, sz.height};
+        append_preserved_damage_regions(
+            damage_regions, impl_->preserved_overlay_damage_regions, viewport_rect);
+        if (frame.had_layout) {
+            for (const auto& overlay : impl_->overlays) {
+                if (overlay.widget != nullptr) {
+                    collect_layout_damage_regions_recursive(
+                        overlay.widget.get(), viewport_rect, damage_regions);
+                }
+            }
+        }
 
         // 3. Render pass.
         const auto render_start = Clock::now();
@@ -2207,6 +2303,12 @@ void Window::request_frame(FrameRequestReason reason) {
         }
         sync_debug_selected_render_path();
         impl_->pending_frame_reasons.clear();
+        for (auto* widget : impl_->dirty_widgets) {
+            if (widget != nullptr) {
+                widget->clear_preserved_damage_regions();
+            }
+        }
+        impl_->preserved_overlay_damage_regions.clear();
         impl_->dirty_widgets.clear();
         impl_->redraw_request_count = 0;
         impl_->layout_request_count = 0;
@@ -3449,12 +3551,14 @@ void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {
 
     for (auto& entry : impl_->overlays) {
         if (entry.widget.get() == overlay.get()) {
+            append_unique_widget(impl_->dirty_widgets, entry.widget.get());
             entry.widget = std::move(overlay);
             entry.modal = modal;
             entry.previous_focus = modal && impl_->focused_widget != nullptr
                                        ? impl_->focused_widget->shared_from_this()
                                        : std::weak_ptr<Widget>{};
             entry.widget->set_host_window(this);
+            append_unique_widget(impl_->dirty_widgets, entry.widget.get());
             impl_->needs_layout = true;
             request_frame(FrameRequestReason::OverlayChanged);
             return;
@@ -3462,6 +3566,7 @@ void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {
     }
 
     overlay->set_host_window(this);
+    append_unique_widget(impl_->dirty_widgets, overlay.get());
     impl_->overlays.push_back({std::move(overlay),
                                modal,
                                modal && impl_->focused_widget != nullptr
@@ -3493,6 +3598,13 @@ void Window::dismiss_overlay(Widget& overlay) {
     }
 
     auto restore_focus = it->previous_focus;
+
+    for (const auto& rect : it->widget->debug_damage_regions()) {
+        impl_->preserved_overlay_damage_regions.push_back(rect);
+    }
+    for (const auto& rect : it->widget->debug_preserved_damage_regions()) {
+        impl_->preserved_overlay_damage_regions.push_back(rect);
+    }
 
     it->widget->set_host_window(nullptr);
     impl_->overlays.erase(it);
