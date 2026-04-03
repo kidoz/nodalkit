@@ -3,8 +3,28 @@ frame_diag_diff = executable('nk_frame_diag_diff',
     dependencies : nk_dep,
 )
 
+frame_diag_view = executable('nk_frame_diag_view',
+    'frame_diag_view.cpp',
+    dependencies : nk_dep,
+)
+
+render_snapshot_view = executable('nk_render_snapshot_view',
+    'render_snapshot_view.cpp',
+    dependencies : nk_dep,
+)
+
+widget_debug_view = executable('nk_widget_debug_view',
+    'widget_debug_view.cpp',
+    dependencies : nk_dep,
+)
+
 trace_diff = executable('nk_trace_diff',
     'trace_diff.cpp',
+    dependencies : nk_dep,
+)
+
+trace_view = executable('nk_trace_view',
+    'trace_view.cpp',
     dependencies : nk_dep,
 )
 
@@ -24,6 +44,14 @@ frame_diag_candidate_bad = meson.project_source_root() / 'tests' / 'fixtures' / 
 trace_baseline = meson.project_source_root() / 'tests' / 'fixtures' / 'trace_baseline.json'
 trace_candidate_ok = meson.project_source_root() / 'tests' / 'fixtures' / 'trace_candidate_ok.json'
 trace_candidate_bad = meson.project_source_root() / 'tests' / 'fixtures' / 'trace_candidate_bad.json'
+stable_mixed_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_mixed_frame_diagnostics.json'
+stable_mixed_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_mixed_trace.json'
+stable_text_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_text_heavy_frame_diagnostics.json'
+stable_text_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_text_heavy_trace.json'
+stable_list_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_list_heavy_frame_diagnostics.json'
+stable_list_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_list_heavy_trace.json'
+stable_animation_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_animation_heavy_frame_diagnostics.json'
+stable_animation_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_animation_heavy_trace.json'
 trace_capture_harness_mixed_artifact = meson.project_build_root() / 'trace_capture_harness_mixed_artifact.json'
 trace_capture_harness_mixed_trace = meson.project_build_root() / 'trace_capture_harness_mixed_trace.json'
 trace_capture_harness_text_artifact = meson.project_build_root() / 'trace_capture_harness_text_artifact.json'
@@ -77,6 +105,29 @@ test('frame_diag_diff_regression',
     should_fail : true,
 )
 
+test('frame_diag_view',
+    frame_diag_view,
+    args : [frame_diag_baseline, '--summary-only'],
+)
+
+test('render_snapshot_view',
+    render_snapshot_view,
+    args : [meson.project_source_root() / 'tests' / 'fixtures' / 'render_snapshot_fixture.json'],
+)
+
+test('widget_debug_view',
+    widget_debug_view,
+    args : [meson.project_source_root() / 'tests' / 'fixtures' / 'widget_debug_fixture.json', '--summary-only'],
+)
+
+test('widget_debug_view_filter',
+    widget_debug_view,
+    args : [
+        meson.project_source_root() / 'tests' / 'fixtures' / 'widget_debug_fixture.json',
+        '--find=accent',
+    ],
+)
+
 test('trace_diff_ok',
     trace_diff,
     args : [trace_baseline, trace_candidate_ok] + trace_diff_args,
@@ -88,19 +139,42 @@ test('trace_diff_regression',
     should_fail : true,
 )
 
+test('trace_view',
+    trace_view,
+    args : [trace_baseline, '--summary-only'],
+)
+
 test('trace_capture_harness',
     trace_capture_harness,
-    args : ['mixed', trace_capture_harness_mixed_artifact, trace_capture_harness_mixed_trace],
+    args : [
+        'mixed',
+        trace_capture_harness_mixed_artifact,
+        trace_capture_harness_mixed_trace,
+        '--baseline-artifact=' + stable_mixed_artifact,
+        '--baseline-trace=' + stable_mixed_trace,
+    ],
 )
 
 test('trace_capture_harness_text_heavy',
     trace_capture_harness,
-    args : ['text-heavy', trace_capture_harness_text_artifact, trace_capture_harness_text_trace],
+    args : [
+        'text-heavy',
+        trace_capture_harness_text_artifact,
+        trace_capture_harness_text_trace,
+        '--baseline-artifact=' + stable_text_artifact,
+        '--baseline-trace=' + stable_text_trace,
+    ],
 )
 
 test('trace_capture_harness_list_heavy',
     trace_capture_harness,
-    args : ['list-heavy', trace_capture_harness_list_artifact, trace_capture_harness_list_trace],
+    args : [
+        'list-heavy',
+        trace_capture_harness_list_artifact,
+        trace_capture_harness_list_trace,
+        '--baseline-artifact=' + stable_list_artifact,
+        '--baseline-trace=' + stable_list_trace,
+    ],
 )
 
 test('trace_capture_harness_animation_heavy',
@@ -109,6 +183,8 @@ test('trace_capture_harness_animation_heavy',
         'animation-heavy',
         trace_capture_harness_animation_artifact,
         trace_capture_harness_animation_trace,
+        '--baseline-artifact=' + stable_animation_artifact,
+        '--baseline-trace=' + stable_animation_trace,
     ],
 )
 
