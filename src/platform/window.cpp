@@ -2,7 +2,9 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <memory>
@@ -51,6 +53,10 @@ struct Window::Impl {
     std::array<bool, 256> key_state{};
     DebugOverlayFlags debug_overlay_flags = DebugOverlayFlags::None;
     DebugInspectorPresentation debug_inspector_presentation = DebugInspectorPresentation::Overlay;
+    Point debug_detached_inspector_origin{0.0F, 0.0F};
+    bool debug_detached_inspector_origin_initialized = false;
+    bool debug_detached_inspector_drag_active = false;
+    Point debug_detached_inspector_drag_offset{0.0F, 0.0F};
     FrameDiagnostics last_frame_diagnostics;
     std::vector<FrameDiagnostics> frame_history;
     std::vector<Widget*> dirty_widgets;
@@ -204,6 +210,7 @@ struct RenderInspectorEntry {
 struct InspectorPanelLayout {
     Rect content_area{};
     Rect panel{};
+    Rect titlebar_area{};
     Rect timeline_area{};
     Rect tree_area{};
     Rect render_tree_area{};
@@ -413,7 +420,35 @@ std::string debug_type_name(const Widget& widget) {
 #endif
 }
 
-WidgetDebugNode build_widget_debug_node(const Widget& widget) {
+std::string_view size_policy_name(SizePolicy policy) {
+    switch (policy) {
+    case SizePolicy::Fixed:
+        return "Fixed";
+    case SizePolicy::Preferred:
+        return "Preferred";
+    case SizePolicy::Expanding:
+        return "Expanding";
+    }
+    return "Unknown";
+}
+
+std::string format_debug_scalar(float value) {
+    if (std::isinf(value)) {
+        return "inf";
+    }
+    std::ostringstream out;
+    if (std::fabs(value - std::round(value)) < 0.01F) {
+        out << static_cast<int>(std::round(value));
+    } else {
+        out << std::fixed << std::setprecision(1) << value;
+    }
+    return out.str();
+}
+
+WidgetDebugNode build_widget_debug_node(const Widget& widget,
+                                        const Widget* focused_widget,
+                                        const Widget* hovered_widget,
+                                        const Widget* pressed_widget) {
     WidgetDebugNode node;
     node.type_name = debug_type_name(widget);
     node.debug_name = std::string(widget.debug_name());
@@ -422,13 +457,37 @@ WidgetDebugNode build_widget_debug_node(const Widget& widget) {
     node.visible = widget.is_visible();
     node.sensitive = widget.is_sensitive();
     node.focusable = widget.is_focusable();
+    node.focused = &widget == focused_widget;
+    node.hovered = &widget == hovered_widget;
+    node.pressed = &widget == pressed_widget;
+    node.retain_size_when_hidden = widget.retain_size_when_hidden();
+    node.pending_redraw = widget.debug_pending_redraw();
+    node.pending_layout = widget.debug_pending_layout();
+    node.has_last_measure = widget.debug_has_last_measure();
+    if (node.has_last_measure) {
+        const auto constraints = widget.debug_last_measure_constraints();
+        node.last_constraint_min_width = constraints.min_width;
+        node.last_constraint_min_height = constraints.min_height;
+        node.last_constraint_max_width = constraints.max_width;
+        node.last_constraint_max_height = constraints.max_height;
+        const auto request = widget.debug_last_size_request();
+        node.last_request_minimum_width = request.minimum_width;
+        node.last_request_minimum_height = request.minimum_height;
+        node.last_request_natural_width = request.natural_width;
+        node.last_request_natural_height = request.natural_height;
+    }
+    node.horizontal_size_policy = std::string(size_policy_name(widget.horizontal_size_policy()));
+    node.vertical_size_policy = std::string(size_policy_name(widget.vertical_size_policy()));
+    node.horizontal_stretch = widget.horizontal_stretch();
+    node.vertical_stretch = widget.vertical_stretch();
     node.hotspot_counters = widget.debug_hotspot_counters();
     const auto classes = widget.style_classes();
     node.style_classes.assign(classes.begin(), classes.end());
     node.children.reserve(widget.children().size());
     for (const auto& child : widget.children()) {
         if (child != nullptr) {
-            node.children.push_back(build_widget_debug_node(*child));
+            node.children.push_back(
+                build_widget_debug_node(*child, focused_widget, hovered_widget, pressed_widget));
         }
     }
     return node;
@@ -761,6 +820,7 @@ bool find_render_path_for_widget(const RenderSnapshotNode& node,
 InspectorPanelLayout compute_inspector_panel_layout(Size viewport,
                                                     Rect content_area,
                                                     DebugInspectorPresentation presentation,
+                                                    Point detached_origin,
                                                     std::size_t entry_count,
                                                     std::size_t selected_index,
                                                     std::size_t render_entry_count,
@@ -775,6 +835,17 @@ InspectorPanelLayout compute_inspector_panel_layout(Size viewport,
             std::max(0.0F, viewport.width - content_area.right() - 24.0F),
             std::max(220.0F, viewport.height - 24.0F),
         };
+    } else if (presentation == DebugInspectorPresentation::Detached) {
+        const float panel_width = std::min(600.0F, std::max(460.0F, viewport.width * 0.54F));
+        const float panel_height = std::min(380.0F, std::max(260.0F, viewport.height * 0.70F));
+        layout.panel = {
+            std::clamp(
+                detached_origin.x, 12.0F, std::max(12.0F, viewport.width - panel_width - 12.0F)),
+            std::clamp(
+                detached_origin.y, 12.0F, std::max(12.0F, viewport.height - panel_height - 12.0F)),
+            panel_width,
+            panel_height,
+        };
     } else {
         const float panel_width = std::min(560.0F, std::max(420.0F, viewport.width * 0.52F));
         const float panel_height = std::min(340.0F, std::max(220.0F, viewport.height - 116.0F));
@@ -785,6 +856,12 @@ InspectorPanelLayout compute_inspector_panel_layout(Size viewport,
             panel_height,
         };
     }
+    layout.titlebar_area = {
+        layout.panel.x + 8.0F,
+        layout.panel.y + 6.0F,
+        std::max(0.0F, layout.panel.width - 16.0F),
+        22.0F,
+    };
 
     layout.timeline_area = {
         layout.panel.x + 12.0F,
@@ -1041,7 +1118,11 @@ void append_frame_runtime_event_lines(std::vector<std::string>& lines,
     }
 }
 
-void append_widget_panel_lines(std::vector<std::string>& lines, const Widget* widget) {
+void append_widget_panel_lines(std::vector<std::string>& lines,
+                               const Widget* widget,
+                               const Widget* focused_widget,
+                               const Widget* hovered_widget,
+                               const Widget* pressed_widget) {
     if (widget == nullptr) {
         lines.push_back("No widget selected");
         lines.push_back("Use Ctrl+Shift+P to enable picker.");
@@ -1063,9 +1144,56 @@ void append_widget_panel_lines(std::vector<std::string>& lines, const Widget* wi
 
     {
         std::ostringstream flags;
-        flags << "visible " << (widget->is_visible() ? "yes" : "no") << "  focusable "
+        flags << "visible " << (widget->is_visible() ? "yes" : "no") << "  sensitive "
+              << (widget->is_sensitive() ? "yes" : "no") << "  focusable "
               << (widget->is_focusable() ? "yes" : "no");
         lines.push_back(flags.str());
+    }
+
+    {
+        std::ostringstream focus;
+        focus << "focus owner " << (&*widget == focused_widget ? "yes" : "no") << "  hovered "
+              << (&*widget == hovered_widget ? "yes" : "no") << "  pressed "
+              << (&*widget == pressed_widget ? "yes" : "no");
+        lines.push_back(focus.str());
+    }
+
+    {
+        std::ostringstream sizing;
+        sizing << "size: h " << size_policy_name(widget->horizontal_size_policy()) << " x"
+               << static_cast<int>(widget->horizontal_stretch()) << "  v "
+               << size_policy_name(widget->vertical_size_policy()) << " x"
+               << static_cast<int>(widget->vertical_stretch());
+        lines.push_back(sizing.str());
+    }
+
+    {
+        std::ostringstream invalidation;
+        invalidation << "invalidation: redraw "
+                     << (widget->debug_pending_redraw() ? "pending" : "clean") << "  layout "
+                     << (widget->debug_pending_layout() ? "pending" : "clean");
+        if (widget->retain_size_when_hidden()) {
+            invalidation << "  retain hidden yes";
+        }
+        lines.push_back(invalidation.str());
+    }
+
+    if (widget->debug_has_last_measure()) {
+        const auto constraints = widget->debug_last_measure_constraints();
+        std::ostringstream constraint_line;
+        constraint_line << "constraints: min " << format_debug_scalar(constraints.min_width) << "x"
+                        << format_debug_scalar(constraints.min_height) << "  max "
+                        << format_debug_scalar(constraints.max_width) << "x"
+                        << format_debug_scalar(constraints.max_height);
+        lines.push_back(constraint_line.str());
+
+        const auto request = widget->debug_last_size_request();
+        std::ostringstream request_line;
+        request_line << "request: min " << format_debug_scalar(request.minimum_width) << "x"
+                     << format_debug_scalar(request.minimum_height) << "  nat "
+                     << format_debug_scalar(request.natural_width) << "x"
+                     << format_debug_scalar(request.natural_height);
+        lines.push_back(request_line.str());
     }
 
     {
@@ -1137,6 +1265,19 @@ Result<void> save_text_file(std::string_view path, std::string_view text) {
     return {};
 }
 
+Result<void> ensure_directory_exists(std::string_view path) {
+    std::error_code error;
+    const auto dir = std::filesystem::path(path);
+    if (dir.empty()) {
+        return Unexpected(std::string("debug bundle directory path is empty"));
+    }
+    std::filesystem::create_directories(dir, error);
+    if (error) {
+        return Unexpected("failed to create directory: " + dir.string());
+    }
+    return {};
+}
+
 Result<void>
 save_ppm_file(std::string_view path, const uint8_t* rgba_pixels, int width, int height) {
     if (rgba_pixels == nullptr || width <= 0 || height <= 0) {
@@ -1175,9 +1316,12 @@ Result<void> copy_text_to_application_clipboard(std::string text) {
     return Unexpected(std::string("no running Application for clipboard copy"));
 }
 
-std::string format_widget_panel_text(const Widget* widget) {
+std::string format_widget_panel_text(const Widget* widget,
+                                     const Widget* focused_widget,
+                                     const Widget* hovered_widget,
+                                     const Widget* pressed_widget) {
     std::vector<std::string> lines;
-    append_widget_panel_lines(lines, widget);
+    append_widget_panel_lines(lines, widget, focused_widget, hovered_widget, pressed_widget);
     return join_detail_lines(lines);
 }
 
@@ -1417,6 +1561,379 @@ bool Window::is_fullscreen() const {
     return false;
 }
 
+void Window::perform_window_layout(Rect content_area) {
+    if (impl_->child == nullptr) {
+        return;
+    }
+
+    const auto constraints = Constraints::tight(content_area.size());
+    (void)impl_->child->measure_for_diagnostics(constraints);
+    impl_->child->allocate(content_area);
+    for (auto& overlay : impl_->overlays) {
+        if (overlay.widget != nullptr && overlay.widget->is_visible()) {
+            overlay.widget->allocate(content_area);
+        }
+    }
+    impl_->needs_layout = false;
+}
+
+std::unique_ptr<RenderNode> Window::build_window_debug_render_tree(Size viewport_size,
+                                                                   Rect content_area) {
+    if (impl_->child == nullptr) {
+        return nullptr;
+    }
+
+    SnapshotContext snap_ctx;
+    impl_->child->snapshot_subtree(snap_ctx);
+    for (auto& overlay : impl_->overlays) {
+        if (overlay.widget != nullptr && overlay.widget->is_visible()) {
+            overlay.widget->snapshot_subtree(snap_ctx);
+        }
+    }
+
+    if (impl_->debug_overlay_flags == DebugOverlayFlags::None) {
+        return snap_ctx.take_root();
+    }
+
+    snap_ctx.push_overlay_container({0.0F, 0.0F, viewport_size.width, viewport_size.height});
+
+    const bool draw_layout_bounds =
+        has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::LayoutBounds);
+    const bool draw_dirty_widgets =
+        has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::DirtyWidgets);
+    const bool draw_inspector_panel =
+        has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel);
+
+    if (draw_layout_bounds || draw_dirty_widgets) {
+        draw_widget_bounds_overlay(snap_ctx,
+                                   *impl_->child,
+                                   impl_->hovered_widget,
+                                   impl_->focused_widget,
+                                   impl_->dirty_widgets,
+                                   draw_layout_bounds,
+                                   draw_dirty_widgets);
+        for (const auto& overlay : impl_->overlays) {
+            if (overlay.widget != nullptr && overlay.widget->is_visible()) {
+                draw_widget_bounds_overlay(snap_ctx,
+                                           *overlay.widget,
+                                           impl_->hovered_widget,
+                                           impl_->focused_widget,
+                                           impl_->dirty_widgets,
+                                           draw_layout_bounds,
+                                           draw_dirty_widgets);
+            }
+        }
+    }
+
+    if (draw_inspector_panel) {
+        const auto* selected_frame =
+            selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+        const auto* selected_render_node =
+            selected_render_node_from_frame(selected_frame, impl_->debug_selected_render_path);
+        if (selected_render_node != nullptr) {
+            Rect render_rect = selected_render_node->bounds;
+            if ((render_rect.width <= 0.0F || render_rect.height <= 0.0F) &&
+                !selected_render_node->source_widget_label.empty()) {
+                if (auto* source_widget = debug_selected_render_widget();
+                    source_widget != nullptr) {
+                    render_rect = source_widget->allocation();
+                }
+            }
+            if (render_rect.width > 0.0F && render_rect.height > 0.0F) {
+                snap_ctx.add_rounded_rect(render_rect, Color{0.95F, 0.71F, 0.18F, 0.10F}, 8.0F);
+                snap_ctx.add_border(render_rect, Color{0.95F, 0.71F, 0.18F, 0.92F}, 2.0F, 8.0F);
+            }
+        }
+
+        if (impl_->debug_selected_widget != nullptr) {
+            const auto rect = impl_->debug_selected_widget->allocation();
+            snap_ctx.add_rounded_rect(rect, Color{0.17F, 0.74F, 0.70F, 0.10F}, 6.0F);
+            snap_ctx.add_border(rect, Color{0.14F, 0.73F, 0.67F, 0.95F}, 3.0F, 6.0F);
+        }
+    }
+
+    if (has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::FrameHud)) {
+        std::vector<std::string> lines;
+        const FrameDiagnostics& hud_frame = impl_->frame_history.empty()
+                                                ? impl_->last_frame_diagnostics
+                                                : impl_->frame_history.back();
+        append_frame_hud_lines(lines, hud_frame);
+        const Rect hud_rect{12.0F, 12.0F, 316.0F, 110.0F};
+        snap_ctx.add_rounded_rect(hud_rect, Color{0.10F, 0.12F, 0.15F, 0.80F}, 10.0F);
+        snap_ctx.add_border(hud_rect, Color{0.82F, 0.85F, 0.90F, 0.40F}, 1.0F, 10.0F);
+        FontDescriptor font{
+            .family = {},
+            .size = 12.0F,
+            .weight = FontWeight::Medium,
+        };
+        float y = hud_rect.y + 12.0F;
+        for (const auto& line : lines) {
+            snap_ctx.add_text({hud_rect.x + 12.0F, y}, line, Color{1.0F, 1.0F, 1.0F, 1.0F}, font);
+            y += 18.0F;
+        }
+    }
+
+    if (draw_inspector_panel) {
+        std::vector<std::shared_ptr<Widget>> overlay_widgets;
+        overlay_widgets.reserve(impl_->overlays.size());
+        for (const auto& overlay : impl_->overlays) {
+            overlay_widgets.push_back(overlay.widget);
+        }
+        const auto entries = build_inspector_entries(
+            impl_->child.get(), overlay_widgets, impl_->debug_widget_filter);
+        const auto selected_index = selected_entry_index(entries, impl_->debug_selected_widget);
+        const auto* selected_frame =
+            selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+        const auto render_entries =
+            selected_frame != nullptr
+                ? build_render_inspector_entries(selected_frame->render_snapshot)
+                : std::vector<RenderInspectorEntry>{};
+        const auto render_selected_index =
+            selected_render_entry_index(render_entries, impl_->debug_selected_render_path);
+        const auto panel_layout =
+            compute_inspector_panel_layout(viewport_size,
+                                           content_area,
+                                           impl_->debug_inspector_presentation,
+                                           impl_->debug_detached_inspector_origin,
+                                           entries.size(),
+                                           selected_index,
+                                           render_entries.size(),
+                                           render_selected_index);
+        const Rect panel_rect = panel_layout.panel;
+        const float panel_radius =
+            impl_->debug_inspector_presentation == DebugInspectorPresentation::DockedRight
+                ? 10.0F
+                : (impl_->debug_inspector_presentation == DebugInspectorPresentation::Detached
+                       ? 11.0F
+                       : 12.0F);
+        const Color panel_fill =
+            impl_->debug_inspector_presentation == DebugInspectorPresentation::DockedRight
+                ? Color{0.09F, 0.11F, 0.14F, 0.96F}
+                : (impl_->debug_inspector_presentation == DebugInspectorPresentation::Detached
+                       ? Color{0.09F, 0.11F, 0.14F, 0.92F}
+                       : Color{0.10F, 0.12F, 0.15F, 0.84F});
+        snap_ctx.add_rounded_rect(panel_rect, panel_fill, panel_radius);
+        snap_ctx.add_border(panel_rect, Color{0.83F, 0.86F, 0.90F, 0.30F}, 1.0F, panel_radius);
+        if (impl_->debug_inspector_presentation == DebugInspectorPresentation::Detached) {
+            snap_ctx.add_rounded_rect(
+                panel_layout.titlebar_area, Color{0.17F, 0.20F, 0.24F, 0.88F}, 7.0F);
+            snap_ctx.add_border(
+                panel_layout.titlebar_area, Color{0.88F, 0.91F, 0.96F, 0.18F}, 1.0F, 7.0F);
+        }
+        snap_ctx.add_rounded_rect(
+            panel_layout.timeline_area, Color{0.14F, 0.16F, 0.20F, 0.72F}, 8.0F);
+        snap_ctx.add_rounded_rect(panel_layout.tree_area, Color{0.14F, 0.16F, 0.20F, 0.72F}, 8.0F);
+        snap_ctx.add_rounded_rect(
+            panel_layout.detail_area, Color{0.14F, 0.16F, 0.20F, 0.72F}, 8.0F);
+
+        FontDescriptor title_font{
+            .family = {},
+            .size = 13.0F,
+            .weight = FontWeight::Bold,
+        };
+        FontDescriptor body_font{
+            .family = {},
+            .size = 12.0F,
+            .weight = FontWeight::Regular,
+        };
+        snap_ctx.add_text({panel_rect.x + 14.0F, panel_rect.y + 12.0F},
+                          "Inspector",
+                          Color{1.0F, 1.0F, 1.0F, 1.0F},
+                          title_font);
+        snap_ctx.add_text(
+            {panel_layout.timeline_area.x + 10.0F, panel_layout.timeline_area.y + 8.0F},
+            "Frames",
+            Color{0.90F, 0.93F, 0.97F, 1.0F},
+            title_font);
+        snap_ctx.add_text(
+            {panel_layout.tree_area.x + 10.0F, panel_layout.tree_area.y + 8.0F},
+            impl_->debug_widget_filter.empty()
+                ? "Widget Tree"
+                : ("Widget Tree [" + truncate_for_overlay(impl_->debug_widget_filter, 16) + "]"),
+            Color{0.90F, 0.93F, 0.97F, 1.0F},
+            title_font);
+        snap_ctx.add_text(
+            {panel_layout.render_tree_area.x + 10.0F, panel_layout.render_tree_area.y + 8.0F},
+            "Render Tree",
+            Color{0.90F, 0.93F, 0.97F, 1.0F},
+            title_font);
+        snap_ctx.add_text({panel_layout.detail_area.x + 10.0F, panel_layout.detail_area.y + 8.0F},
+                          "Details",
+                          Color{0.90F, 0.93F, 0.97F, 1.0F},
+                          title_font);
+
+        std::vector<std::string> lines;
+        if (selected_frame != nullptr) {
+            append_frame_detail_lines(lines, *selected_frame);
+            if (auto* app = Application::instance()) {
+                append_frame_runtime_event_lines(
+                    lines, *selected_frame, app->event_loop().debug_trace_events());
+            } else {
+                lines.push_back("runtime events: unavailable");
+            }
+            {
+                std::ostringstream render_summary;
+                render_summary << "render nodes: " << selected_frame->render_snapshot_node_count;
+                lines.push_back(render_summary.str());
+            }
+            if (const auto* selected_render_node = selected_render_node_from_frame(
+                    selected_frame, impl_->debug_selected_render_path);
+                selected_render_node != nullptr) {
+                lines.push_back("render node:");
+                lines.push_back(truncate_for_overlay(selected_render_node->kind, 40));
+                if (!selected_render_node->detail.empty()) {
+                    lines.push_back(truncate_for_overlay(selected_render_node->detail, 40));
+                }
+                std::ostringstream bounds;
+                bounds << "rect: " << static_cast<int>(selected_render_node->bounds.x) << ", "
+                       << static_cast<int>(selected_render_node->bounds.y) << "  "
+                       << static_cast<int>(selected_render_node->bounds.width) << "x"
+                       << static_cast<int>(selected_render_node->bounds.height);
+                lines.push_back(bounds.str());
+                std::ostringstream children;
+                children << "children: " << selected_render_node->children.size();
+                lines.push_back(children.str());
+            }
+        }
+        if (impl_->debug_picker_enabled) {
+            lines.push_back("Picker: active");
+            lines.push_back("Click a widget to select it.");
+        } else {
+            lines.push_back("Picker: off");
+            if (!impl_->debug_widget_filter.empty()) {
+                lines.push_back("Widget filter: " +
+                                truncate_for_overlay(impl_->debug_widget_filter, 28));
+            } else {
+                lines.push_back("Widget filter: off");
+            }
+            lines.push_back("Ctrl+Shift+P picker  Up/Down widgets  Left/Right frames");
+            lines.push_back("PageUp/PageDown render tree");
+            lines.push_back("Type to filter widgets  Backspace/Escape clear");
+            lines.push_back("Ctrl+Shift+D next inspector mode");
+            lines.push_back("Ctrl+Shift+W/R/F copy widget/render/frame");
+        }
+        append_widget_panel_lines(lines,
+                                  impl_->debug_selected_widget,
+                                  impl_->focused_widget,
+                                  impl_->hovered_widget,
+                                  impl_->pressed_widget);
+
+        if (!impl_->frame_history.empty()) {
+            const std::size_t max_visible = std::min<std::size_t>(impl_->frame_history.size(), 24);
+            const std::size_t frame_index =
+                selected_history_index(impl_->frame_history, impl_->debug_selected_frame_id);
+            const std::size_t visible_start = compute_visible_history_start(
+                impl_->frame_history.size(), frame_index, max_visible);
+            const float gap = 3.0F;
+            const float available_width =
+                panel_layout.timeline_area.width - gap * (max_visible - 1);
+            const float bar_width = std::max(
+                3.0F, available_width / static_cast<float>(std::max<std::size_t>(1, max_visible)));
+            double max_total_ms = 16.0;
+            for (const auto& history_frame : impl_->frame_history) {
+                max_total_ms = std::max(max_total_ms, history_frame.total_ms);
+            }
+
+            float x = panel_layout.timeline_area.x + 10.0F;
+            const float base_y = panel_layout.timeline_area.bottom() - 6.0F;
+            for (std::size_t offset = 0; offset < max_visible; ++offset) {
+                const std::size_t history_index = visible_start + offset;
+                if (history_index >= impl_->frame_history.size()) {
+                    break;
+                }
+                const auto& history_frame = impl_->frame_history[history_index];
+                const float normalized = static_cast<float>(
+                    std::clamp(history_frame.total_ms / max_total_ms, 0.15, 1.0));
+                const float bar_height = 6.0F + normalized * 12.0F;
+                const Rect bar_rect{
+                    x,
+                    base_y - bar_height,
+                    bar_width,
+                    bar_height,
+                };
+                const bool selected = history_frame.frame_id == impl_->debug_selected_frame_id;
+                snap_ctx.add_rounded_rect(bar_rect,
+                                          selected ? Color{0.17F, 0.74F, 0.70F, 0.92F}
+                                                   : Color{0.70F, 0.76F, 0.84F, 0.48F},
+                                          3.0F);
+                x += bar_width + gap;
+            }
+        }
+
+        float tree_y = panel_layout.tree_top;
+        for (std::size_t index = 0; index < panel_layout.visible_count; ++index) {
+            const std::size_t entry_index = panel_layout.visible_start + index;
+            if (entry_index >= entries.size()) {
+                break;
+            }
+
+            const auto& entry = entries[entry_index];
+            const Rect row_rect{
+                panel_layout.tree_area.x + 6.0F,
+                tree_y - 1.0F,
+                panel_layout.tree_area.width - 12.0F,
+                panel_layout.tree_row_height,
+            };
+            if (entry.widget == impl_->debug_selected_widget) {
+                snap_ctx.add_rounded_rect(row_rect, Color{0.17F, 0.74F, 0.70F, 0.24F}, 5.0F);
+                snap_ctx.add_border(row_rect, Color{0.17F, 0.74F, 0.70F, 0.80F}, 1.0F, 5.0F);
+            }
+
+            std::string row_label(entry.depth * 2, ' ');
+            row_label += truncate_for_overlay(entry.label, 26);
+            snap_ctx.add_text({row_rect.x + 8.0F, tree_y},
+                              row_label,
+                              Color{0.96F, 0.97F, 0.99F, 1.0F},
+                              body_font);
+            tree_y += panel_layout.tree_row_height;
+        }
+
+        float render_tree_y = panel_layout.render_tree_top;
+        for (std::size_t index = 0; index < panel_layout.render_visible_count; ++index) {
+            const std::size_t entry_index = panel_layout.render_visible_start + index;
+            if (entry_index >= render_entries.size()) {
+                break;
+            }
+
+            const auto& entry = render_entries[entry_index];
+            const Rect row_rect{
+                panel_layout.render_tree_area.x + 6.0F,
+                render_tree_y - 1.0F,
+                panel_layout.render_tree_area.width - 12.0F,
+                panel_layout.tree_row_height,
+            };
+            if (selected_render_entry_index(render_entries, impl_->debug_selected_render_path) ==
+                entry_index) {
+                snap_ctx.add_rounded_rect(row_rect, Color{0.95F, 0.71F, 0.18F, 0.22F}, 5.0F);
+                snap_ctx.add_border(row_rect, Color{0.95F, 0.71F, 0.18F, 0.82F}, 1.0F, 5.0F);
+            }
+
+            std::string row_label(entry.depth * 2, ' ');
+            row_label += truncate_for_overlay(entry.label, 24);
+            snap_ctx.add_text({row_rect.x + 8.0F, render_tree_y},
+                              row_label,
+                              Color{0.96F, 0.97F, 0.99F, 1.0F},
+                              body_font);
+            render_tree_y += panel_layout.tree_row_height;
+        }
+
+        float y = panel_layout.detail_area.y + 28.0F;
+        for (const auto& line : lines) {
+            if (y + 14.0F > panel_layout.detail_area.bottom() - 10.0F) {
+                break;
+            }
+            snap_ctx.add_text({panel_layout.detail_area.x + 10.0F, y},
+                              line,
+                              Color{0.96F, 0.97F, 0.99F, 1.0F},
+                              body_font);
+            y += 16.0F;
+        }
+    }
+
+    snap_ctx.pop_container();
+    return snap_ctx.take_root();
+}
+
 void Window::request_frame() {
     request_frame(FrameRequestReason::Manual);
 }
@@ -1489,369 +2006,13 @@ void Window::request_frame(FrameRequestReason reason) {
         // 1. Layout pass.
         if (impl_->needs_layout) {
             const auto layout_start = Clock::now();
-            const auto constraints = Constraints::tight(content_area.size());
-            (void)impl_->child->measure_for_diagnostics(constraints);
-            impl_->child->allocate(content_area);
-            for (auto& overlay : impl_->overlays) {
-                if (overlay.widget != nullptr && overlay.widget->is_visible()) {
-                    overlay.widget->allocate(content_area);
-                }
-            }
-            impl_->needs_layout = false;
+            perform_window_layout(content_area);
             frame.layout_ms = elapsed_ms(layout_start, Clock::now());
         }
 
         // 2. Snapshot pass.
         const auto snapshot_start = Clock::now();
-        SnapshotContext snap_ctx;
-        impl_->child->snapshot_subtree(snap_ctx);
-        for (auto& overlay : impl_->overlays) {
-            if (overlay.widget != nullptr && overlay.widget->is_visible()) {
-                overlay.widget->snapshot_subtree(snap_ctx);
-            }
-        }
-
-        if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
-            snap_ctx.push_overlay_container({0.0F, 0.0F, sz.width, sz.height});
-
-            const bool draw_layout_bounds =
-                has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::LayoutBounds);
-            const bool draw_dirty_widgets =
-                has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::DirtyWidgets);
-            const bool draw_inspector_panel = has_debug_overlay_flag(
-                impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel);
-            if (draw_layout_bounds || draw_dirty_widgets) {
-                draw_widget_bounds_overlay(snap_ctx,
-                                           *impl_->child,
-                                           impl_->hovered_widget,
-                                           impl_->focused_widget,
-                                           impl_->dirty_widgets,
-                                           draw_layout_bounds,
-                                           draw_dirty_widgets);
-                for (const auto& overlay : impl_->overlays) {
-                    if (overlay.widget != nullptr && overlay.widget->is_visible()) {
-                        draw_widget_bounds_overlay(snap_ctx,
-                                                   *overlay.widget,
-                                                   impl_->hovered_widget,
-                                                   impl_->focused_widget,
-                                                   impl_->dirty_widgets,
-                                                   draw_layout_bounds,
-                                                   draw_dirty_widgets);
-                    }
-                }
-            }
-
-            if (draw_inspector_panel) {
-                const auto* selected_frame =
-                    selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
-                const auto* selected_render_node = selected_render_node_from_frame(
-                    selected_frame, impl_->debug_selected_render_path);
-                if (selected_render_node != nullptr) {
-                    Rect render_rect = selected_render_node->bounds;
-                    if ((render_rect.width <= 0.0F || render_rect.height <= 0.0F) &&
-                        !selected_render_node->source_widget_label.empty()) {
-                        if (auto* source_widget = debug_selected_render_widget();
-                            source_widget != nullptr) {
-                            render_rect = source_widget->allocation();
-                        }
-                    }
-                    if (render_rect.width > 0.0F && render_rect.height > 0.0F) {
-                        snap_ctx.add_rounded_rect(
-                            render_rect, Color{0.95F, 0.71F, 0.18F, 0.10F}, 8.0F);
-                        snap_ctx.add_border(
-                            render_rect, Color{0.95F, 0.71F, 0.18F, 0.92F}, 2.0F, 8.0F);
-                    }
-                }
-
-                if (impl_->debug_selected_widget != nullptr) {
-                    const auto rect = impl_->debug_selected_widget->allocation();
-                    snap_ctx.add_rounded_rect(rect, Color{0.17F, 0.74F, 0.70F, 0.10F}, 6.0F);
-                    snap_ctx.add_border(rect, Color{0.14F, 0.73F, 0.67F, 0.95F}, 3.0F, 6.0F);
-                }
-            }
-
-            if (has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::FrameHud)) {
-                std::vector<std::string> lines;
-                const FrameDiagnostics& hud_frame = impl_->frame_history.empty()
-                                                        ? impl_->last_frame_diagnostics
-                                                        : impl_->frame_history.back();
-                append_frame_hud_lines(lines, hud_frame);
-                const Rect hud_rect{12.0F, 12.0F, 316.0F, 110.0F};
-                snap_ctx.add_rounded_rect(hud_rect, Color{0.10F, 0.12F, 0.15F, 0.80F}, 10.0F);
-                snap_ctx.add_border(hud_rect, Color{0.82F, 0.85F, 0.90F, 0.40F}, 1.0F, 10.0F);
-                FontDescriptor font{
-                    .family = {},
-                    .size = 12.0F,
-                    .weight = FontWeight::Medium,
-                };
-                float y = hud_rect.y + 12.0F;
-                for (const auto& line : lines) {
-                    snap_ctx.add_text(
-                        {hud_rect.x + 12.0F, y}, line, Color{1.0F, 1.0F, 1.0F, 1.0F}, font);
-                    y += 18.0F;
-                }
-            }
-
-            if (draw_inspector_panel) {
-                std::vector<std::shared_ptr<Widget>> overlay_widgets;
-                overlay_widgets.reserve(impl_->overlays.size());
-                for (const auto& overlay : impl_->overlays) {
-                    overlay_widgets.push_back(overlay.widget);
-                }
-                const auto entries = build_inspector_entries(
-                    impl_->child.get(), overlay_widgets, impl_->debug_widget_filter);
-                const auto selected_index =
-                    selected_entry_index(entries, impl_->debug_selected_widget);
-                const auto* selected_frame =
-                    selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
-                const auto render_entries =
-                    selected_frame != nullptr
-                        ? build_render_inspector_entries(selected_frame->render_snapshot)
-                        : std::vector<RenderInspectorEntry>{};
-                const auto render_selected_index =
-                    selected_render_entry_index(render_entries, impl_->debug_selected_render_path);
-                const auto panel_layout =
-                    compute_inspector_panel_layout(sz,
-                                                   content_area,
-                                                   impl_->debug_inspector_presentation,
-                                                   entries.size(),
-                                                   selected_index,
-                                                   render_entries.size(),
-                                                   render_selected_index);
-                const Rect panel_rect = panel_layout.panel;
-                const float panel_radius =
-                    impl_->debug_inspector_presentation == DebugInspectorPresentation::DockedRight
-                        ? 10.0F
-                        : 12.0F;
-                const Color panel_fill =
-                    impl_->debug_inspector_presentation == DebugInspectorPresentation::DockedRight
-                        ? Color{0.09F, 0.11F, 0.14F, 0.96F}
-                        : Color{0.10F, 0.12F, 0.15F, 0.84F};
-                snap_ctx.add_rounded_rect(panel_rect, panel_fill, panel_radius);
-                snap_ctx.add_border(
-                    panel_rect, Color{0.83F, 0.86F, 0.90F, 0.30F}, 1.0F, panel_radius);
-                snap_ctx.add_rounded_rect(
-                    panel_layout.timeline_area, Color{0.14F, 0.16F, 0.20F, 0.72F}, 8.0F);
-                snap_ctx.add_rounded_rect(
-                    panel_layout.tree_area, Color{0.14F, 0.16F, 0.20F, 0.72F}, 8.0F);
-                snap_ctx.add_rounded_rect(
-                    panel_layout.detail_area, Color{0.14F, 0.16F, 0.20F, 0.72F}, 8.0F);
-
-                FontDescriptor title_font{
-                    .family = {},
-                    .size = 13.0F,
-                    .weight = FontWeight::Bold,
-                };
-                FontDescriptor body_font{
-                    .family = {},
-                    .size = 12.0F,
-                    .weight = FontWeight::Regular,
-                };
-                snap_ctx.add_text({panel_rect.x + 14.0F, panel_rect.y + 12.0F},
-                                  "Inspector",
-                                  Color{1.0F, 1.0F, 1.0F, 1.0F},
-                                  title_font);
-                snap_ctx.add_text(
-                    {panel_layout.timeline_area.x + 10.0F, panel_layout.timeline_area.y + 8.0F},
-                    "Frames",
-                    Color{0.90F, 0.93F, 0.97F, 1.0F},
-                    title_font);
-                snap_ctx.add_text(
-                    {panel_layout.tree_area.x + 10.0F, panel_layout.tree_area.y + 8.0F},
-                    impl_->debug_widget_filter.empty()
-                        ? "Widget Tree"
-                        : ("Widget Tree [" + truncate_for_overlay(impl_->debug_widget_filter, 16) +
-                           "]"),
-                    Color{0.90F, 0.93F, 0.97F, 1.0F},
-                    title_font);
-                snap_ctx.add_text({panel_layout.render_tree_area.x + 10.0F,
-                                   panel_layout.render_tree_area.y + 8.0F},
-                                  "Render Tree",
-                                  Color{0.90F, 0.93F, 0.97F, 1.0F},
-                                  title_font);
-                snap_ctx.add_text(
-                    {panel_layout.detail_area.x + 10.0F, panel_layout.detail_area.y + 8.0F},
-                    "Details",
-                    Color{0.90F, 0.93F, 0.97F, 1.0F},
-                    title_font);
-
-                std::vector<std::string> lines;
-                if (selected_frame != nullptr) {
-                    append_frame_detail_lines(lines, *selected_frame);
-                    if (auto* app = Application::instance()) {
-                        append_frame_runtime_event_lines(
-                            lines, *selected_frame, app->event_loop().debug_trace_events());
-                    } else {
-                        lines.push_back("runtime events: unavailable");
-                    }
-                    {
-                        std::ostringstream render_summary;
-                        render_summary << "render nodes: "
-                                       << selected_frame->render_snapshot_node_count;
-                        lines.push_back(render_summary.str());
-                    }
-                    if (const auto* selected_render_node = selected_render_node_from_frame(
-                            selected_frame, impl_->debug_selected_render_path);
-                        selected_render_node != nullptr) {
-                        lines.push_back("render node:");
-                        lines.push_back(truncate_for_overlay(selected_render_node->kind, 40));
-                        if (!selected_render_node->detail.empty()) {
-                            lines.push_back(truncate_for_overlay(selected_render_node->detail, 40));
-                        }
-                        std::ostringstream bounds;
-                        bounds << "rect: " << static_cast<int>(selected_render_node->bounds.x)
-                               << ", " << static_cast<int>(selected_render_node->bounds.y) << "  "
-                               << static_cast<int>(selected_render_node->bounds.width) << "x"
-                               << static_cast<int>(selected_render_node->bounds.height);
-                        lines.push_back(bounds.str());
-                        std::ostringstream children;
-                        children << "children: " << selected_render_node->children.size();
-                        lines.push_back(children.str());
-                    }
-                }
-                if (impl_->debug_picker_enabled) {
-                    lines.push_back("Picker: active");
-                    lines.push_back("Click a widget to select it.");
-                } else {
-                    lines.push_back("Picker: off");
-                    if (!impl_->debug_widget_filter.empty()) {
-                        lines.push_back("Widget filter: " +
-                                        truncate_for_overlay(impl_->debug_widget_filter, 28));
-                    } else {
-                        lines.push_back("Widget filter: off");
-                    }
-                    lines.push_back("Ctrl+Shift+P picker  Up/Down widgets  Left/Right frames");
-                    lines.push_back("PageUp/PageDown render tree");
-                    lines.push_back("Type to filter widgets  Backspace/Escape clear");
-                    lines.push_back("Ctrl+Shift+D dock/overlay");
-                    lines.push_back("Ctrl+Shift+W/R/F copy widget/render/frame");
-                }
-                append_widget_panel_lines(lines, impl_->debug_selected_widget);
-
-                if (!impl_->frame_history.empty()) {
-                    const std::size_t max_visible =
-                        std::min<std::size_t>(impl_->frame_history.size(), 24);
-                    const std::size_t frame_index = selected_history_index(
-                        impl_->frame_history, impl_->debug_selected_frame_id);
-                    const std::size_t visible_start = compute_visible_history_start(
-                        impl_->frame_history.size(), frame_index, max_visible);
-                    const float gap = 3.0F;
-                    const float available_width =
-                        panel_layout.timeline_area.width - gap * (max_visible - 1);
-                    const float bar_width =
-                        std::max(3.0F,
-                                 available_width /
-                                     static_cast<float>(std::max<std::size_t>(1, max_visible)));
-                    double max_total_ms = 16.0;
-                    for (const auto& history_frame : impl_->frame_history) {
-                        max_total_ms = std::max(max_total_ms, history_frame.total_ms);
-                    }
-
-                    float x = panel_layout.timeline_area.x + 10.0F;
-                    const float base_y = panel_layout.timeline_area.bottom() - 6.0F;
-                    for (std::size_t offset = 0; offset < max_visible; ++offset) {
-                        const std::size_t history_index = visible_start + offset;
-                        if (history_index >= impl_->frame_history.size()) {
-                            break;
-                        }
-                        const auto& history_frame = impl_->frame_history[history_index];
-                        const float normalized = static_cast<float>(
-                            std::clamp(history_frame.total_ms / max_total_ms, 0.15, 1.0));
-                        const float bar_height = 6.0F + normalized * 12.0F;
-                        const Rect bar_rect{
-                            x,
-                            base_y - bar_height,
-                            bar_width,
-                            bar_height,
-                        };
-                        const bool selected =
-                            history_frame.frame_id == impl_->debug_selected_frame_id;
-                        snap_ctx.add_rounded_rect(bar_rect,
-                                                  selected ? Color{0.17F, 0.74F, 0.70F, 0.92F}
-                                                           : Color{0.70F, 0.76F, 0.84F, 0.48F},
-                                                  3.0F);
-                        x += bar_width + gap;
-                    }
-                }
-
-                float tree_y = panel_layout.tree_top;
-                for (std::size_t index = 0; index < panel_layout.visible_count; ++index) {
-                    const std::size_t entry_index = panel_layout.visible_start + index;
-                    if (entry_index >= entries.size()) {
-                        break;
-                    }
-
-                    const auto& entry = entries[entry_index];
-                    const Rect row_rect{
-                        panel_layout.tree_area.x + 6.0F,
-                        tree_y - 1.0F,
-                        panel_layout.tree_area.width - 12.0F,
-                        panel_layout.tree_row_height,
-                    };
-                    if (entry.widget == impl_->debug_selected_widget) {
-                        snap_ctx.add_rounded_rect(
-                            row_rect, Color{0.17F, 0.74F, 0.70F, 0.24F}, 5.0F);
-                        snap_ctx.add_border(
-                            row_rect, Color{0.17F, 0.74F, 0.70F, 0.80F}, 1.0F, 5.0F);
-                    }
-
-                    std::string row_label(entry.depth * 2, ' ');
-                    row_label += truncate_for_overlay(entry.label, 26);
-                    snap_ctx.add_text({row_rect.x + 8.0F, tree_y},
-                                      row_label,
-                                      Color{0.96F, 0.97F, 0.99F, 1.0F},
-                                      body_font);
-                    tree_y += panel_layout.tree_row_height;
-                }
-
-                float render_tree_y = panel_layout.render_tree_top;
-                for (std::size_t index = 0; index < panel_layout.render_visible_count; ++index) {
-                    const std::size_t entry_index = panel_layout.render_visible_start + index;
-                    if (entry_index >= render_entries.size()) {
-                        break;
-                    }
-
-                    const auto& entry = render_entries[entry_index];
-                    const Rect row_rect{
-                        panel_layout.render_tree_area.x + 6.0F,
-                        render_tree_y - 1.0F,
-                        panel_layout.render_tree_area.width - 12.0F,
-                        panel_layout.tree_row_height,
-                    };
-                    if (selected_render_entry_index(
-                            render_entries, impl_->debug_selected_render_path) == entry_index) {
-                        snap_ctx.add_rounded_rect(
-                            row_rect, Color{0.95F, 0.71F, 0.18F, 0.22F}, 5.0F);
-                        snap_ctx.add_border(
-                            row_rect, Color{0.95F, 0.71F, 0.18F, 0.82F}, 1.0F, 5.0F);
-                    }
-
-                    std::string row_label(entry.depth * 2, ' ');
-                    row_label += truncate_for_overlay(entry.label, 24);
-                    snap_ctx.add_text({row_rect.x + 8.0F, render_tree_y},
-                                      row_label,
-                                      Color{0.96F, 0.97F, 0.99F, 1.0F},
-                                      body_font);
-                    render_tree_y += panel_layout.tree_row_height;
-                }
-
-                float y = panel_layout.detail_area.y + 28.0F;
-                for (const auto& line : lines) {
-                    if (y + 14.0F > panel_layout.detail_area.bottom() - 10.0F) {
-                        break;
-                    }
-                    snap_ctx.add_text({panel_layout.detail_area.x + 10.0F, y},
-                                      line,
-                                      Color{0.96F, 0.97F, 0.99F, 1.0F},
-                                      body_font);
-                    y += 16.0F;
-                }
-            }
-
-            snap_ctx.pop_container();
-        }
-
-        auto root_node = snap_ctx.take_root();
+        auto root_node = build_window_debug_render_tree(sz, content_area);
         frame.snapshot_ms = elapsed_ms(snapshot_start, Clock::now());
         frame.widget_hotspot_totals = collect_widget_hotspot_totals(impl_->child.get());
         for (const auto& overlay : impl_->overlays) {
@@ -2113,6 +2274,17 @@ void Window::set_debug_inspector_presentation(DebugInspectorPresentation present
         return;
     }
     impl_->debug_inspector_presentation = presentation;
+    if (presentation == DebugInspectorPresentation::Detached &&
+        !impl_->debug_detached_inspector_origin_initialized) {
+        const auto viewport = size();
+        const float panel_width = std::min(600.0F, std::max(460.0F, viewport.width * 0.54F));
+        impl_->debug_detached_inspector_origin = {
+            std::max(12.0F, viewport.width - panel_width - 24.0F),
+            24.0F,
+        };
+        impl_->debug_detached_inspector_origin_initialized = true;
+    }
+    impl_->debug_detached_inspector_drag_active = false;
     impl_->needs_layout = true;
     request_frame(FrameRequestReason::DebugOverlayChanged);
 }
@@ -2138,11 +2310,15 @@ WidgetDebugNode Window::debug_tree() const {
     root.sensitive = true;
     root.focusable = false;
     if (impl_->child != nullptr) {
-        root.children.push_back(build_widget_debug_node(*impl_->child));
+        root.children.push_back(build_widget_debug_node(
+            *impl_->child, impl_->focused_widget, impl_->hovered_widget, impl_->pressed_widget));
     }
     for (const auto& overlay : impl_->overlays) {
         if (overlay.widget != nullptr) {
-            root.children.push_back(build_widget_debug_node(*overlay.widget));
+            root.children.push_back(build_widget_debug_node(*overlay.widget,
+                                                            impl_->focused_widget,
+                                                            impl_->hovered_widget,
+                                                            impl_->pressed_widget));
         }
     }
     return root;
@@ -2150,6 +2326,14 @@ WidgetDebugNode Window::debug_tree() const {
 
 std::string Window::dump_widget_tree() const {
     return format_widget_debug_tree(debug_tree());
+}
+
+std::string Window::dump_widget_tree_json() const {
+    return format_widget_debug_json(debug_tree());
+}
+
+Result<void> Window::save_widget_tree_json_file(std::string_view path) const {
+    return save_widget_debug_json_file(debug_tree(), path);
 }
 
 std::string Window::dump_frame_trace_json() const {
@@ -2167,6 +2351,79 @@ Result<void> Window::save_frame_diagnostics_artifact_json_file(std::string_view 
 
 Result<void> Window::save_frame_trace_json_file(std::string_view path) const {
     return save_text_file(path, dump_frame_trace_json());
+}
+
+Result<void> Window::save_debug_bundle(std::string_view directory_path) const {
+    const auto ensure_dir = ensure_directory_exists(directory_path);
+    if (!ensure_dir) {
+        return ensure_dir;
+    }
+
+    const auto bundle_dir = std::filesystem::path(directory_path);
+    const auto widget_tree_path = bundle_dir / "widget_tree.txt";
+    const auto widget_tree_json_path = bundle_dir / "widget_tree.json";
+    const auto frame_trace_path = bundle_dir / "frame_trace.json";
+    const auto frame_artifact_path = bundle_dir / "frame_diagnostics.json";
+    const auto render_snapshot_path = bundle_dir / "render_snapshot.json";
+    const auto frame_summary_path = bundle_dir / "selected_frame_summary.txt";
+    const auto selected_widget_path = bundle_dir / "selected_widget.json";
+    const auto screenshot_path = bundle_dir / "screenshot.ppm";
+    const auto manifest_path = bundle_dir / "manifest.json";
+
+    if (const auto result = save_text_file(widget_tree_path.string(), dump_widget_tree());
+        !result) {
+        return result;
+    }
+    if (const auto result = save_widget_tree_json_file(widget_tree_json_path.string()); !result) {
+        return result;
+    }
+    if (const auto result = save_frame_trace_json_file(frame_trace_path.string()); !result) {
+        return result;
+    }
+    if (const auto result = save_frame_diagnostics_artifact_json_file(frame_artifact_path.string());
+        !result) {
+        return result;
+    }
+    if (const auto result = save_render_snapshot_json_file(debug_selected_frame_render_snapshot(),
+                                                           render_snapshot_path.string());
+        !result) {
+        return result;
+    }
+    if (const auto result =
+            save_text_file(frame_summary_path.string(), dump_selected_frame_summary());
+        !result) {
+        return result;
+    }
+    if (const auto result = save_selected_widget_details_json_file(selected_widget_path.string());
+        !result) {
+        return result;
+    }
+    if (const auto result = save_debug_screenshot_ppm_file(screenshot_path.string()); !result) {
+        return result;
+    }
+
+    std::ostringstream manifest;
+    manifest << "{\n";
+    manifest << "  \"format\": \"nk-debug-bundle-v1\",\n";
+    manifest << "  \"title\": \"" << impl_->config.title << "\",\n";
+    manifest << "  \"renderer_backend\": \"" << renderer_backend_name(renderer_backend())
+             << "\",\n";
+    manifest << "  \"files\": {\n";
+    manifest << "    \"widget_tree\": \"" << widget_tree_path.filename().string() << "\",\n";
+    manifest << "    \"widget_tree_json\": \"" << widget_tree_json_path.filename().string()
+             << "\",\n";
+    manifest << "    \"frame_trace\": \"" << frame_trace_path.filename().string() << "\",\n";
+    manifest << "    \"frame_diagnostics\": \"" << frame_artifact_path.filename().string()
+             << "\",\n";
+    manifest << "    \"render_snapshot\": \"" << render_snapshot_path.filename().string()
+             << "\",\n";
+    manifest << "    \"frame_summary\": \"" << frame_summary_path.filename().string() << "\",\n";
+    manifest << "    \"selected_widget\": \"" << selected_widget_path.filename().string()
+             << "\",\n";
+    manifest << "    \"screenshot\": \"" << screenshot_path.filename().string() << "\"\n";
+    manifest << "  }\n";
+    manifest << "}\n";
+    return save_text_file(manifest_path.string(), manifest.str());
 }
 
 std::vector<TraceEvent> Window::debug_selected_frame_runtime_events() const {
@@ -2335,12 +2592,22 @@ std::string_view Window::debug_widget_filter() const {
 
 WidgetDebugNode Window::debug_selected_widget_info() const {
     return impl_->debug_selected_widget != nullptr
-               ? build_widget_debug_node(*impl_->debug_selected_widget)
+               ? build_widget_debug_node(*impl_->debug_selected_widget,
+                                         impl_->focused_widget,
+                                         impl_->hovered_widget,
+                                         impl_->pressed_widget)
                : WidgetDebugNode{};
 }
 
 std::string Window::dump_selected_widget_details() const {
-    return format_widget_panel_text(impl_->debug_selected_widget);
+    return format_widget_panel_text(impl_->debug_selected_widget,
+                                    impl_->focused_widget,
+                                    impl_->hovered_widget,
+                                    impl_->pressed_widget);
+}
+
+std::string Window::dump_selected_widget_details_json() const {
+    return format_widget_debug_json(debug_selected_widget_info());
 }
 
 Result<void> Window::copy_selected_widget_details_to_clipboard() const {
@@ -2351,10 +2618,44 @@ Result<void> Window::save_selected_widget_details_file(std::string_view path) co
     return save_text_file(path, dump_selected_widget_details());
 }
 
+Result<void> Window::save_selected_widget_details_json_file(std::string_view path) const {
+    return save_widget_debug_json_file(debug_selected_widget_info(), path);
+}
+
 Result<void> Window::save_debug_screenshot_ppm_file(std::string_view path) const {
     const auto* renderer = dynamic_cast<const SoftwareRenderer*>(impl_->renderer.get());
     if (renderer == nullptr) {
-        return Unexpected(std::string("debug screenshot capture requires the software renderer"));
+        if (impl_->child == nullptr) {
+            return Unexpected(std::string("debug screenshot capture requires a root widget"));
+        }
+
+        const auto viewport_size = size();
+        const float scale_factor =
+            impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
+        const auto content_area = compute_debug_content_area(
+            viewport_size, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
+
+        auto* self = const_cast<Window*>(this);
+        if (impl_->needs_layout) {
+            self->perform_window_layout(content_area);
+        }
+
+        auto root_node = self->build_window_debug_render_tree(viewport_size, content_area);
+        auto screenshot_renderer = create_renderer(RendererBackend::Software);
+        auto* software = dynamic_cast<SoftwareRenderer*>(screenshot_renderer.get());
+        if (software == nullptr) {
+            return Unexpected(std::string("failed to create software renderer for screenshot"));
+        }
+        if (impl_->text_shaper != nullptr) {
+            software->set_text_shaper(impl_->text_shaper.get());
+        }
+        software->begin_frame(viewport_size, scale_factor);
+        if (root_node) {
+            software->render(*root_node);
+        }
+        software->end_frame();
+        return save_ppm_file(
+            path, software->pixel_data(), software->pixel_width(), software->pixel_height());
     }
     return save_ppm_file(
         path, renderer->pixel_data(), renderer->pixel_width(), renderer->pixel_height());
@@ -2404,6 +2705,7 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         compute_inspector_panel_layout(viewport_size,
                                        content_area,
                                        impl_->debug_inspector_presentation,
+                                       impl_->debug_detached_inspector_origin,
                                        inspector_entries.size(),
                                        inspector_selected_index,
                                        render_entries.size(),
@@ -2545,6 +2847,21 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
     switch (event.type) {
     case MouseEvent::Type::Enter:
     case MouseEvent::Type::Move: {
+        if (impl_->debug_detached_inspector_drag_active &&
+            impl_->debug_inspector_presentation == DebugInspectorPresentation::Detached) {
+            impl_->debug_detached_inspector_origin = {
+                std::clamp(
+                    point.x - impl_->debug_detached_inspector_drag_offset.x,
+                    12.0F,
+                    std::max(12.0F, viewport_size.width - inspector_layout.panel.width - 12.0F)),
+                std::clamp(
+                    point.y - impl_->debug_detached_inspector_drag_offset.y,
+                    12.0F,
+                    std::max(12.0F, viewport_size.height - inspector_layout.panel.height - 12.0F)),
+            };
+            request_frame(FrameRequestReason::DebugOverlayChanged);
+            break;
+        }
         if (has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             inspector_layout.panel.contains(point)) {
             if (impl_->debug_picker_enabled) {
@@ -2577,6 +2894,7 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Leave:
         set_hovered_widget(nullptr);
         update_cursor_shape(nullptr);
+        impl_->debug_detached_inspector_drag_active = false;
         if (impl_->pressed_widget != nullptr) {
             impl_->pressed_widget->set_state_flag(StateFlags::Pressed, false);
         }
@@ -2585,7 +2903,14 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         if (has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             inspector_layout.panel.contains(point) && !impl_->debug_picker_enabled) {
             if (event.button == 1) {
-                if (selected_timeline_frame_id != 0) {
+                if (impl_->debug_inspector_presentation == DebugInspectorPresentation::Detached &&
+                    inspector_layout.titlebar_area.contains(point)) {
+                    impl_->debug_detached_inspector_drag_active = true;
+                    impl_->debug_detached_inspector_drag_offset = {
+                        point.x - inspector_layout.panel.x,
+                        point.y - inspector_layout.panel.y,
+                    };
+                } else if (selected_timeline_frame_id != 0) {
                     impl_->debug_selected_frame_id = selected_timeline_frame_id;
                     sync_debug_selected_render_path();
                     request_frame(FrameRequestReason::DebugSelectionChanged);
@@ -2619,6 +2944,7 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         break;
     }
     case MouseEvent::Type::Release: {
+        impl_->debug_detached_inspector_drag_active = false;
         if (has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             inspector_layout.panel.contains(point) && !impl_->debug_picker_enabled) {
             break;
@@ -2765,10 +3091,14 @@ void Window::dispatch_key_event(const KeyEvent& event) {
                                         DebugOverlayFlags::InspectorPanel)) {
                 impl_->debug_overlay_flags |= DebugOverlayFlags::InspectorPanel;
             }
-            set_debug_inspector_presentation(impl_->debug_inspector_presentation ==
-                                                     DebugInspectorPresentation::Overlay
-                                                 ? DebugInspectorPresentation::DockedRight
-                                                 : DebugInspectorPresentation::Overlay);
+            const auto next_presentation =
+                impl_->debug_inspector_presentation == DebugInspectorPresentation::Overlay
+                    ? DebugInspectorPresentation::DockedRight
+                    : (impl_->debug_inspector_presentation ==
+                               DebugInspectorPresentation::DockedRight
+                           ? DebugInspectorPresentation::Detached
+                           : DebugInspectorPresentation::Overlay);
+            set_debug_inspector_presentation(next_presentation);
             return;
         }
         if (event.modifiers == ctrl_shift && event.key == KeyCode::W &&

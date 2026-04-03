@@ -20,6 +20,7 @@ class NativeSurface;
 class TextShaper;
 class Widget;
 class Dialog;
+class RenderNode;
 struct MouseEvent;
 struct KeyEvent;
 struct WindowEvent;
@@ -101,7 +102,8 @@ public:
     void set_debug_overlay_flags(DebugOverlayFlags flags);
     [[nodiscard]] DebugOverlayFlags debug_overlay_flags() const;
 
-    /// Choose whether the inspector is drawn as a floating overlay or a docked side pane.
+    /// Choose whether the inspector is drawn as a floating overlay, a docked side pane,
+    /// or a detachable sidecar-style pane.
     void set_debug_inspector_presentation(DebugInspectorPresentation presentation);
     [[nodiscard]] DebugInspectorPresentation debug_inspector_presentation() const;
 
@@ -117,6 +119,12 @@ public:
     /// Format the current widget tree into a readable text dump.
     [[nodiscard]] std::string dump_widget_tree() const;
 
+    /// Format the current widget tree into versioned JSON.
+    [[nodiscard]] std::string dump_widget_tree_json() const;
+
+    /// Save the current widget tree as a versioned JSON file.
+    [[nodiscard]] Result<void> save_widget_tree_json_file(std::string_view path) const;
+
     /// Export recent frame history as Chrome Trace JSON.
     [[nodiscard]] std::string dump_frame_trace_json() const;
 
@@ -126,6 +134,10 @@ public:
 
     /// Save recent frame history and runtime events as a trace JSON file.
     [[nodiscard]] Result<void> save_frame_trace_json_file(std::string_view path) const;
+
+    /// Save a one-shot diagnostics bundle containing trace, widget tree, render snapshot,
+    /// screenshot, and supporting summaries into a directory.
+    [[nodiscard]] Result<void> save_debug_bundle(std::string_view directory_path) const;
 
     /// Runtime trace events correlated to the currently selected inspector frame.
     [[nodiscard]] std::vector<TraceEvent> debug_selected_frame_runtime_events() const;
@@ -174,11 +186,17 @@ public:
     /// Format the selected widget as a readable summary.
     [[nodiscard]] std::string dump_selected_widget_details() const;
 
+    /// Format the selected widget as versioned JSON.
+    [[nodiscard]] std::string dump_selected_widget_details_json() const;
+
     /// Copy the selected widget summary to the clipboard.
     [[nodiscard]] Result<void> copy_selected_widget_details_to_clipboard() const;
 
     /// Save the selected widget summary to a text file.
     [[nodiscard]] Result<void> save_selected_widget_details_file(std::string_view path) const;
+
+    /// Save the selected widget details as a versioned JSON file.
+    [[nodiscard]] Result<void> save_selected_widget_details_json_file(std::string_view path) const;
 
     /// Save the currently rendered debug surface to a PPM file when readback is available.
     [[nodiscard]] Result<void> save_debug_screenshot_ppm_file(std::string_view path) const;
@@ -198,6 +216,9 @@ private:
 
     [[nodiscard]] TextShaper* text_shaper() const;
     void request_frame(FrameRequestReason reason);
+    void perform_window_layout(Rect content_area);
+    [[nodiscard]] std::unique_ptr<RenderNode> build_window_debug_render_tree(Size viewport_size,
+                                                                             Rect content_area);
     void sync_debug_selected_render_path();
     [[nodiscard]] Widget* debug_selected_render_widget() const;
     void sync_debug_selected_widget_from_render_selection();
