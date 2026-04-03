@@ -50,28 +50,6 @@ Rect popup_item_rect(const PopupGeometry& geometry, int index) {
 
 } // namespace
 
-// --- MenuItem factory helpers ---
-
-MenuItem MenuItem::action(std::string label, std::string action) {
-    MenuItem item;
-    item.label = std::move(label);
-    item.action_name = std::move(action);
-    return item;
-}
-
-MenuItem MenuItem::submenu(std::string label, std::vector<MenuItem> items) {
-    MenuItem item;
-    item.label = std::move(label);
-    item.children = std::move(items);
-    return item;
-}
-
-MenuItem MenuItem::make_separator() {
-    MenuItem item;
-    item.separator = true;
-    return item;
-}
-
 // --- MenuBar ---
 
 struct MenuBar::Impl {

@@ -5,36 +5,14 @@
 
 #include <memory>
 #include <nk/foundation/signal.h>
+#include <nk/platform/native_menu.h>
 #include <nk/ui_core/widget.h>
-#include <string>
 #include <string_view>
-#include <vector>
 
 namespace nk {
 
-/// A single menu item (can have submenu children).
-struct MenuItem {
-    std::string label;
-    std::string action_name; ///< Links to ActionGroup (e.g. "app.open").
-    bool enabled = true;
-    bool separator = false; ///< If true, renders as a separator line.
-    std::vector<MenuItem> children;
-
-    /// Create an action item with a label and action name.
-    static MenuItem action(std::string label, std::string action);
-
-    /// Create a submenu item containing child items.
-    static MenuItem submenu(std::string label, std::vector<MenuItem> items);
-
-    /// Create a separator line.
-    static MenuItem make_separator();
-};
-
-/// A top-level menu in the menu bar.
-struct Menu {
-    std::string title;
-    std::vector<MenuItem> items;
-};
+using MenuItem = NativeMenuItem;
+using Menu = NativeMenu;
 
 /// Horizontal menu bar at the top of a window.
 class MenuBar : public Widget {
