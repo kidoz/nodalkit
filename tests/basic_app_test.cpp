@@ -1150,13 +1150,13 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     }
 
     auto selected_runtime_events = window.debug_selected_frame_runtime_events();
-    for (int step = 0;
+    for (std::size_t step = 0;
          selected_runtime_events.empty() ||
          !std::any_of(selected_runtime_events.begin(),
                       selected_runtime_events.end(),
                       [](const nk::TraceEvent& event) { return event.name == "posted-task"; });
          ++step) {
-        REQUIRE(step < 8);
+        REQUIRE(step < updated_history.size());
         window.dispatch_key_event({
             .type = nk::KeyEvent::Type::Press,
             .key = nk::KeyCode::Left,
@@ -1401,6 +1401,102 @@ TEST_CASE("Window debug picker selects widgets and honors inspector shortcuts", 
     });
     REQUIRE_FALSE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
                                              nk::DebugOverlayFlags::InspectorPanel));
+}
+
+TEST_CASE("Window can dock the inspector and shrink the content area", "[app][debug]") {
+    nk::Application app(0, nullptr);
+    app.set_system_preferences_observation_enabled(false);
+
+    nk::Window window({.title = "Docked inspector", .width = 720, .height = 420});
+    auto root = TestContainer::create();
+    auto child = FixedWidget::create(160.0F, 120.0F);
+    root->append(child);
+    window.set_child(root);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto viewport_size = window.size();
+    REQUIRE(root->allocation().x == Catch::Approx(0.0F));
+    REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
+    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
+
+    window.set_debug_overlay_flags(nk::DebugOverlayFlags::InspectorPanel);
+    window.set_debug_inspector_presentation(nk::DebugInspectorPresentation::DockedRight);
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(root->allocation().width < viewport_size.width);
+    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::D,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::D,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(root->allocation().width < viewport_size.width);
+}
+
+TEST_CASE("Window widget-tree filter matches debug name, class, and type", "[app][debug]") {
+    nk::Window window({.title = "Widget filter", .width = 320, .height = 160});
+    auto root = TestContainer::create();
+    root->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal));
+
+    auto first = FocusProbeWidget::create(80.0F, 40.0F);
+    first->set_debug_name("first");
+    first->add_style_class("alpha");
+    auto second = FocusProbeWidget::create(80.0F, 40.0F);
+    second->set_debug_name("second");
+    second->add_style_class("beta");
+    root->append(first);
+    root->append(second);
+    window.set_child(root);
+    root->allocate({0.0F, 0.0F, 220.0F, 60.0F});
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::I,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+                                       nk::DebugOverlayFlags::InspectorPanel));
+
+    window.set_debug_selected_widget(first.get());
+    window.set_debug_widget_filter("second");
+    REQUIRE(window.debug_widget_filter() == "second");
+    REQUIRE(window.debug_selected_widget() == second.get());
+
+    window.set_debug_widget_filter("beta");
+    REQUIRE(window.debug_selected_widget() == second.get());
+
+    window.set_debug_widget_filter("focusprobewidget");
+    REQUIRE(window.debug_selected_widget() != nullptr);
+
+    window.set_debug_widget_filter("missing");
+    REQUIRE(window.debug_selected_widget() == nullptr);
+
+    window.set_debug_widget_filter({});
+    REQUIRE(window.debug_widget_filter().empty());
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::S});
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::E});
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::C});
+    REQUIRE(window.debug_widget_filter() == "sec");
+    REQUIRE(window.debug_selected_widget() == second.get());
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace});
+    REQUIRE(window.debug_widget_filter() == "se");
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    REQUIRE(window.debug_widget_filter().empty());
 }
 
 TEST_CASE("TextField supports caret movement, selection, clipboard, and undo", "[app][text]") {
