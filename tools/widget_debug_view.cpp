@@ -13,6 +13,13 @@ struct MatchEntry {
     const nk::WidgetDebugNode* node = nullptr;
 };
 
+struct Options {
+    std::string_view artifact_path;
+    bool summary_only = false;
+    std::string filter;
+    std::string state_filter;
+};
+
 std::string lowercase(std::string_view text) {
     std::string value(text);
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -21,7 +28,38 @@ std::string lowercase(std::string_view text) {
     return value;
 }
 
-bool node_matches(const nk::WidgetDebugNode& node, std::string_view needle_lower) {
+bool matches_state(const nk::WidgetDebugNode& node, std::string_view state_filter) {
+    if (state_filter.empty()) {
+        return true;
+    }
+    if (state_filter == "focused") {
+        return node.focused;
+    }
+    if (state_filter == "hovered") {
+        return node.hovered;
+    }
+    if (state_filter == "pressed") {
+        return node.pressed;
+    }
+    if (state_filter == "focusable") {
+        return node.focusable;
+    }
+    if (state_filter == "visible") {
+        return node.visible;
+    }
+    if (state_filter == "sensitive") {
+        return node.sensitive;
+    }
+    if (state_filter == "pending-redraw") {
+        return node.pending_redraw;
+    }
+    if (state_filter == "pending-layout") {
+        return node.pending_layout;
+    }
+    return false;
+}
+
+bool matches_text_filter(const nk::WidgetDebugNode& node, std::string_view needle_lower) {
     if (needle_lower.empty()) {
         return true;
     }
@@ -37,6 +75,10 @@ bool node_matches(const nk::WidgetDebugNode& node, std::string_view needle_lower
         }
     }
     return false;
+}
+
+bool node_matches(const nk::WidgetDebugNode& node, const Options& options) {
+    return matches_text_filter(node, options.filter) && matches_state(node, options.state_filter);
 }
 
 std::size_t count_nodes(const nk::WidgetDebugNode& node) {
@@ -63,11 +105,11 @@ std::string node_label(const nk::WidgetDebugNode& node) {
 }
 
 void collect_matches(const nk::WidgetDebugNode& node,
-                     std::string_view needle_lower,
+                     const Options& options,
                      std::vector<std::string>& path_parts,
                      std::vector<MatchEntry>& matches) {
     path_parts.push_back(node_label(node));
-    if (node_matches(node, needle_lower)) {
+    if (node_matches(node, options)) {
         std::string path;
         for (std::size_t index = 0; index < path_parts.size(); ++index) {
             if (index > 0) {
@@ -78,7 +120,7 @@ void collect_matches(const nk::WidgetDebugNode& node,
         matches.push_back({.path = std::move(path), .node = &node});
     }
     for (const auto& child : node.children) {
-        collect_matches(child, needle_lower, path_parts, matches);
+        collect_matches(child, options, path_parts, matches);
     }
     path_parts.pop_back();
 }
@@ -105,34 +147,44 @@ void print_node_summary(const nk::WidgetDebugNode& node) {
 
 int usage(const char* argv0) {
     std::cerr << "usage: " << (argv0 != nullptr ? argv0 : "nk_widget_debug_view")
-              << " <widget_debug.json> [--summary-only] [--find=<needle>]\n";
+              << " <widget_debug.json> [--summary-only] [--find=<needle>] [--state=<name>]\n";
     return 2;
+}
+
+bool parse_options(int argc, char** argv, Options& options) {
+    if (argc < 2) {
+        return false;
+    }
+
+    options.artifact_path = argv[1];
+    for (int index = 2; index < argc; ++index) {
+        const std::string_view arg = argv[index];
+        if (arg == "--summary-only") {
+            options.summary_only = true;
+            continue;
+        }
+        if (arg.starts_with("--find=")) {
+            options.filter = lowercase(arg.substr(std::string_view("--find=").size()));
+            continue;
+        }
+        if (arg.starts_with("--state=")) {
+            options.state_filter = lowercase(arg.substr(std::string_view("--state=").size()));
+            continue;
+        }
+        return false;
+    }
+    return true;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 2 || argc > 4) {
+    Options options;
+    if (!parse_options(argc, argv, options)) {
         return usage(argc > 0 ? argv[0] : "nk_widget_debug_view");
     }
 
-    const std::string_view artifact_path = argv[1];
-    bool summary_only = false;
-    std::string filter;
-    for (int index = 2; index < argc; ++index) {
-        const std::string_view arg = argv[index];
-        if (arg == "--summary-only") {
-            summary_only = true;
-            continue;
-        }
-        if (arg.starts_with("--find=")) {
-            filter = lowercase(arg.substr(std::string_view("--find=").size()));
-            continue;
-        }
-        return usage(argv[0]);
-    }
-
-    const auto root = nk::load_widget_debug_json_file(artifact_path);
+    const auto root = nk::load_widget_debug_json_file(options.artifact_path);
     if (!root) {
         std::cerr << root.error() << "\n";
         return 1;
@@ -143,11 +195,17 @@ int main(int argc, char** argv) {
     std::cout << "max depth: " << max_depth(*root) << "\n";
     std::cout << "root:\n";
     print_node_summary(*root);
+    if (!options.filter.empty()) {
+        std::cout << "filter text: " << options.filter << "\n";
+    }
+    if (!options.state_filter.empty()) {
+        std::cout << "filter state: " << options.state_filter << "\n";
+    }
 
-    if (!filter.empty()) {
+    if (!options.filter.empty() || !options.state_filter.empty()) {
         std::vector<std::string> path_parts;
         std::vector<MatchEntry> matches;
-        collect_matches(*root, filter, path_parts, matches);
+        collect_matches(*root, options, path_parts, matches);
         std::cout << "matches: " << matches.size() << "\n";
         for (const auto& match : matches) {
             std::cout << "- " << match.path << "\n";
@@ -155,7 +213,7 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    if (summary_only) {
+    if (options.summary_only) {
         return 0;
     }
 
