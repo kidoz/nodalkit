@@ -3,14 +3,39 @@
 /// @file accessible.h
 /// @brief Accessibility metadata attached to widgets.
 
+#include <functional>
+#include <memory>
 #include <nk/accessibility/role.h>
 #include <nk/ui_core/state_flags.h>
-
-#include <memory>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace nk {
+
+enum class AccessibleAction : uint8_t {
+    Activate,
+    Focus,
+    Toggle,
+};
+
+[[nodiscard]] std::string_view accessible_action_name(AccessibleAction action) noexcept;
+
+enum class AccessibleRelationKind : uint8_t {
+    LabelledBy,
+    DescribedBy,
+    Controls,
+};
+
+[[nodiscard]] std::string_view accessible_relation_kind_name(AccessibleRelationKind kind) noexcept;
+
+struct AccessibleRelation {
+    AccessibleRelationKind kind = AccessibleRelationKind::LabelledBy;
+    std::string target_debug_name;
+
+    bool operator==(const AccessibleRelation&) const = default;
+};
 
 /// Provides accessibility information for a widget.
 /// Each widget can have an Accessible that exposes its role,
@@ -20,8 +45,8 @@ public:
     Accessible();
     ~Accessible();
 
-    Accessible(Accessible const&) = delete;
-    Accessible& operator=(Accessible const&) = delete;
+    Accessible(const Accessible&) = delete;
+    Accessible& operator=(const Accessible&) = delete;
 
     /// The semantic role (Button, TextInput, etc.).
     [[nodiscard]] AccessibleRole role() const;
@@ -42,6 +67,22 @@ public:
     /// Current interactive state flags relevant to AT.
     [[nodiscard]] StateFlags state() const;
     void set_state(StateFlags state);
+
+    /// Optional user-visible value for editable/value-bearing widgets.
+    [[nodiscard]] std::string_view value() const;
+    void set_value(std::string value);
+
+    /// Supported accessible actions.
+    void add_action(AccessibleAction action, std::function<bool()> handler = {});
+    void remove_action(AccessibleAction action);
+    [[nodiscard]] bool supports_action(AccessibleAction action) const;
+    [[nodiscard]] std::span<const AccessibleAction> actions() const;
+    [[nodiscard]] bool perform_action(AccessibleAction action) const;
+
+    /// Debug-visible semantic relations to other widgets.
+    void set_relation(AccessibleRelationKind kind, std::string target_debug_name);
+    void remove_relation(AccessibleRelationKind kind);
+    [[nodiscard]] std::span<const AccessibleRelation> relations() const;
 
 private:
     struct Impl;
