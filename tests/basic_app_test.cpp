@@ -23,6 +23,7 @@
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/combo_box.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
@@ -149,6 +150,40 @@ private:
 
     float width_ = 0.0F;
     float height_ = 0.0F;
+};
+
+class ResizableColorWidget : public nk::Widget {
+public:
+    static std::shared_ptr<ResizableColorWidget>
+    create(float width, float height, nk::Color color) {
+        return std::shared_ptr<ResizableColorWidget>(
+            new ResizableColorWidget(width, height, color));
+    }
+
+    void set_width(float width) {
+        if (width_ == width) {
+            return;
+        }
+        width_ = width;
+        queue_layout();
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, height_, width_, height_};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        ctx.add_color_rect(allocation(), color_);
+    }
+
+private:
+    ResizableColorWidget(float width, float height, nk::Color color)
+        : width_(width), height_(height), color_(color) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
+    nk::Color color_{};
 };
 
 class ImageClipWidget : public nk::Widget {
@@ -524,6 +559,151 @@ TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
 #endif
 }
 
+TEST_CASE("macOS Metal redraws fewer GPU commands for localized widget damage", "[app][render]") {
+#if defined(__APPLE__)
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "metal", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Metal partial redraw", .width = 420, .height = 220});
+
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal);
+    layout->set_spacing(24.0F);
+    root->set_layout_manager(std::move(layout));
+
+    auto left = PrimitiveClipWidget::create(160.0F, 120.0F);
+    auto right = PrimitiveClipWidget::create(160.0F, 120.0F);
+    root->append(left);
+    root->append(right);
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Metal);
+
+    const auto first_frame = window.last_frame_diagnostics();
+    REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 6);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_viewport_pixel_count > 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::FullRedrawCopyBack);
+
+    left->queue_redraw();
+    REQUIRE(app.event_loop().poll());
+
+    const auto second_frame = window.last_frame_diagnostics();
+    REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count <=
+            second_frame.render_hotspot_counters.damage_region_count);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count <
+            first_frame.render_hotspot_counters.gpu_draw_call_count);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::PartialRedrawCopy);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::DrawFavored);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+#else
+    SUCCEED("Metal partial redraw is macOS-specific");
+#endif
+}
+
+TEST_CASE("Window damage regions include previous widget bounds after movement", "[app][render]") {
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "software", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Software previous damage", .width = 260, .height = 160});
+
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal);
+    layout->set_spacing(12.0F);
+    root->set_layout_manager(std::move(layout));
+
+    auto left = PrimitiveClipWidget::create(80.0F, 80.0F);
+    auto right = PrimitiveClipWidget::create(80.0F, 80.0F);
+    root->append(left);
+    root->append(right);
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    const auto original = left->allocation();
+    left->allocate({original.x + 120.0F, original.y, original.width, original.height});
+    left->queue_redraw();
+    REQUIRE(app.event_loop().poll());
+
+    const auto frame = window.last_frame_diagnostics();
+    REQUIRE_FALSE(frame.had_layout);
+    REQUIRE(frame.render_hotspot_counters.damage_region_count >= 2);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
+            frame.render_hotspot_counters.gpu_viewport_pixel_count);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+}
+
+TEST_CASE("Window layout damage regions include sibling reflow after size change",
+          "[app][render]") {
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "software", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Layout reflow damage", .width = 320, .height = 160});
+
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal);
+    layout->set_spacing(12.0F);
+    root->set_layout_manager(std::move(layout));
+
+    auto first = ResizableColorWidget::create(48.0F, 72.0F, nk::Color::from_rgb(26, 153, 150));
+    auto second = ResizableColorWidget::create(72.0F, 72.0F, nk::Color::from_rgb(51, 89, 170));
+    root->append(first);
+    root->append(second);
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    const auto second_original = second->allocation();
+    first->set_width(132.0F);
+    REQUIRE(app.event_loop().poll());
+
+    REQUIRE(second->allocation().x > second_original.x);
+    REQUIRE(second->debug_has_previous_allocation());
+    REQUIRE(second->debug_previous_allocation() == second_original);
+
+    const auto frame = window.last_frame_diagnostics();
+    REQUIRE(frame.had_layout);
+    REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetLayout));
+    REQUIRE(frame.render_hotspot_counters.damage_region_count >= 2);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
+            frame.render_hotspot_counters.gpu_viewport_pixel_count);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+}
+
 TEST_CASE("Linux Vulkan adapts large full redraws to copy-back scene preservation",
           "[app][render]") {
 #if defined(__linux__)
@@ -681,8 +861,12 @@ TEST_CASE("MenuBar opens popups and emits actions on click", "[app][menu]") {
     REQUIRE(action == "app.open");
 }
 
-TEST_CASE("Window menu popups trigger a full-frame repaint beyond the menu bar bounds",
+TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar bounds",
           "[app][menu][render]") {
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "software", 1) == 0);
+
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Menu popup render", .width = 320, .height = 220});
 
@@ -723,12 +907,74 @@ TEST_CASE("Window menu popups trigger a full-frame repaint beyond the menu bar b
     const auto history = window.debug_frame_history();
     REQUIRE(history.size() >= 2);
     const auto& frame = history.back();
-    REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetLayout));
-    REQUIRE(frame.had_layout);
+    REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetRedraw));
+    REQUIRE_FALSE(frame.had_layout);
+    REQUIRE(frame.render_hotspot_counters.damage_region_count >= 2);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
+            frame.render_hotspot_counters.gpu_viewport_pixel_count);
     REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") != std::string::npos);
-#if defined(__linux__)
-    REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
-#endif
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
+}
+
+TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds",
+          "[app][combo][render]") {
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "software", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Combo popup render", .width = 320, .height = 220});
+
+    auto root = TestContainer::create();
+    root->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical));
+
+    auto combo = nk::ComboBox::create();
+    combo->set_items({"NTSC", "PAL", "Dendy", "Famicom", "NES", "VS."});
+    combo->set_selected_index(0);
+    root->append(combo);
+    root->append(nk::Label::create("Body"));
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Press,
+        .x = combo->allocation().x + 18.0F,
+        .y = combo->allocation().y + (combo->allocation().height * 0.5F),
+        .button = 1,
+    });
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Release,
+        .x = combo->allocation().x + 18.0F,
+        .y = combo->allocation().y + (combo->allocation().height * 0.5F),
+        .button = 1,
+    });
+
+    REQUIRE(app.event_loop().poll());
+
+    const auto history = window.debug_frame_history();
+    REQUIRE(history.size() >= 2);
+    const auto& frame = history.back();
+    REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetRedraw));
+    REQUIRE_FALSE(frame.had_layout);
+    REQUIRE(frame.render_hotspot_counters.damage_region_count >= 2);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
+            frame.render_hotspot_counters.gpu_viewport_pixel_count);
+    REQUIRE(window.dump_selected_frame_render_snapshot().find("Famicom") != std::string::npos);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
 }
 
 TEST_CASE("Dialog present installs a modal overlay and routes Escape dismissal", "[app][dialog]") {
@@ -751,6 +997,50 @@ TEST_CASE("Dialog present installs a modal overlay and routes Escape dismissal",
 
     REQUIRE(response == nk::DialogResponse::Cancel);
     REQUIRE_FALSE(dialog->is_presented());
+}
+
+TEST_CASE("Dialog overlay changes contribute damage regions on show and dismiss",
+          "[app][dialog][render]") {
+    const char* previous = std::getenv("NK_RENDERER_BACKEND");
+    std::string previous_value = previous != nullptr ? previous : "";
+    REQUIRE(setenv("NK_RENDERER_BACKEND", "software", 1) == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Dialog damage", .width = 320, .height = 240});
+    auto root = TestContainer::create();
+    root->append(nk::Label::create("Body"));
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    auto dialog = nk::Dialog::create("Confirm", "Proceed?");
+    dialog->add_button("Cancel", nk::DialogResponse::Cancel);
+    dialog->present(window);
+    REQUIRE(app.event_loop().poll());
+
+    const auto present_frame = window.last_frame_diagnostics();
+    REQUIRE(has_frame_request_reason(present_frame, nk::FrameRequestReason::OverlayChanged));
+    REQUIRE(present_frame.had_layout);
+    REQUIRE(present_frame.render_hotspot_counters.damage_region_count >= 1);
+    REQUIRE(present_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+
+    window.dispatch_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Escape,
+    });
+    REQUIRE(app.event_loop().poll());
+
+    const auto dismiss_frame = window.last_frame_diagnostics();
+    REQUIRE(has_frame_request_reason(dismiss_frame, nk::FrameRequestReason::OverlayChanged));
+    REQUIRE(dismiss_frame.had_layout);
+    REQUIRE(dismiss_frame.render_hotspot_counters.damage_region_count >= 1);
+    REQUIRE(dismiss_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+
+    if (previous != nullptr) {
+        REQUIRE(setenv("NK_RENDERER_BACKEND", previous_value.c_str(), 1) == 0);
+    } else {
+        REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
+    }
 }
 
 TEST_CASE("Window dispatches pointer, keyboard, and focus controllers", "[app][controllers]") {
