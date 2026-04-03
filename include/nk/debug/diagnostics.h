@@ -25,6 +25,11 @@ enum class DebugOverlayFlags : uint32_t {
     InspectorPanel = 1U << 3,
 };
 
+enum class DebugInspectorPresentation : uint8_t {
+    Overlay,
+    DockedRight,
+};
+
 [[nodiscard]] constexpr DebugOverlayFlags operator|(DebugOverlayFlags lhs,
                                                     DebugOverlayFlags rhs) noexcept {
     return static_cast<DebugOverlayFlags>(static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs));
