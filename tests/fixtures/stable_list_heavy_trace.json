@@ -1,0 +1,24 @@
+{
+  "format": "chrome-trace-event-array-v1",
+  "traceEvents": [
+    {"name":"posted-task","cat":"event-loop-task","ph":"X","ts":268866,"dur":27,"pid":1,"tid":2,"args":{"detail":"queued_ms=2.275667","source_label":"harness.list-heavy.post"}},
+    {"name":"timeout","cat":"event-loop-timer","ph":"X","ts":268897,"dur":18,"pid":1,"tid":2,"args":{"detail":"lateness_ms=2.305041","source_label":"harness.list-heavy.timeout"}},
+    {"name":"timeout","cat":"event-loop-timer","ph":"X","ts":268918,"dur":18,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.324333","source_label":"harness.list-heavy.interval"}},
+    {"name":"idle","cat":"event-loop-idle","ph":"X","ts":271196,"dur":2,"pid":1,"tid":2,"args":{"detail":"queued_ms=4.601709","source_label":"harness.list-heavy.idle"}},
+    {"name":"idle","cat":"event-loop-idle","ph":"X","ts":271200,"dur":59121,"pid":1,"tid":2,"args":{"detail":"queued_ms=4.603833"}},
+    {"name":"present","cat":"frame-request","ph":"i","s":"t","ts":48111,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"frame","cat":"frame","ph":"X","ts":48132,"dur":114340,"pid":1,"tid":1,"args":{"frame":1,"queue_delay_ms":0.021708,"present_path":"none","present_tradeoff":"none","gpu_draw_calls":0,"gpu_viewport_pixels":0,"gpu_draw_pixels":0,"gpu_present_regions":0,"gpu_swapchain_copies":0}},
+    {"name":"layout","cat":"frame-phase","ph":"X","ts":48132,"dur":2064,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"snapshot","cat":"frame-phase","ph":"X","ts":50197,"dur":583,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"render","cat":"frame-phase","ph":"X","ts":50779,"dur":86482,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"present","cat":"frame-phase","ph":"X","ts":137261,"dur":25138,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"manual","cat":"frame-request","ph":"i","s":"t","ts":162522,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"widget-layout","cat":"frame-request","ph":"i","s":"t","ts":162522,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"widget-redraw","cat":"frame-request","ph":"i","s":"t","ts":162522,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"frame","cat":"frame","ph":"X","ts":167135,"dur":59071,"pid":1,"tid":1,"args":{"frame":2,"queue_delay_ms":4.61358,"present_path":"none","present_tradeoff":"none","gpu_draw_calls":0,"gpu_viewport_pixels":0,"gpu_draw_pixels":0,"gpu_present_regions":0,"gpu_swapchain_copies":0}},
+    {"name":"layout","cat":"frame-phase","ph":"X","ts":167135,"dur":451,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"snapshot","cat":"frame-phase","ph":"X","ts":167586,"dur":489,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"render","cat":"frame-phase","ph":"X","ts":168075,"dur":57929,"pid":1,"tid":1,"args":{"frame":2}},
+    {"name":"present","cat":"frame-phase","ph":"X","ts":226004,"dur":128,"pid":1,"tid":1,"args":{"frame":2}}
+  ]
+}

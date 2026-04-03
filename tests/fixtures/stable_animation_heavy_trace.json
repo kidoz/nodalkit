@@ -1,0 +1,26 @@
+{
+  "format": "chrome-trace-event-array-v1",
+  "traceEvents": [
+    {"name":"posted-task","cat":"event-loop-task","ph":"X","ts":262780,"dur":7,"pid":1,"tid":2,"args":{"detail":"queued_ms=2.271166","source_label":"harness.animation-heavy.post"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":262789,"dur":73,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.271708","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":265128,"dur":77,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.348292","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":267466,"dur":74,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.338708","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":269800,"dur":74,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.334333","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":272141,"dur":70,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.341125","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":274472,"dur":68,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.331416","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":276796,"dur":69,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.324792","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":279122,"dur":70,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.325792","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":281457,"dur":73,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.335625","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":283798,"dur":69,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.343833","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":286128,"dur":73,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.329750","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":288458,"dur":69,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.330625","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":290785,"dur":68,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.327333","source_label":"harness.animation-heavy.interval"}},
+    {"name":"interval","cat":"event-loop-timer","ph":"X","ts":293111,"dur":70,"pid":1,"tid":2,"args":{"detail":"lateness_ms=1.325500","source_label":"harness.animation-heavy.interval"}},
+    {"name":"present","cat":"frame-request","ph":"i","s":"t","ts":48329,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"frame","cat":"frame","ph":"X","ts":48341,"dur":108256,"pid":1,"tid":1,"args":{"frame":1,"queue_delay_ms":0.011875,"present_path":"none","present_tradeoff":"none","gpu_draw_calls":0,"gpu_viewport_pixels":0,"gpu_draw_pixels":0,"gpu_present_regions":0,"gpu_swapchain_copies":0}},
+    {"name":"layout","cat":"frame-phase","ph":"X","ts":48341,"dur":2054,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"snapshot","cat":"frame-phase","ph":"X","ts":50395,"dur":130,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"render","cat":"frame-phase","ph":"X","ts":50525,"dur":80144,"pid":1,"tid":1,"args":{"frame":1}},
+    {"name":"present","cat":"frame-phase","ph":"X","ts":130669,"dur":25880,"pid":1,"tid":1,"args":{"frame":1}}
+  ]
+}
