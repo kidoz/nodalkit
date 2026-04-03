@@ -6,8 +6,8 @@
 #include <cstdlib>
 #include <string_view>
 
-ShowcasePlatformFlavor detect_showcase_platform_flavor(
-    nk::SystemPreferences const& system_preferences) {
+ShowcasePlatformFlavor
+detect_showcase_platform_flavor(const nk::SystemPreferences& system_preferences) {
     switch (system_preferences.platform_family) {
     case nk::PlatformFamily::MacOS:
         return ShowcasePlatformFlavor::MacOS;
@@ -30,7 +30,7 @@ ShowcasePlatformFlavor detect_showcase_platform_flavor(
     return ShowcasePlatformFlavor::Generic;
 }
 
-ShowcaseProfile make_showcase_profile(nk::SystemPreferences const& system_preferences) {
+ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_preferences) {
     ShowcaseProfile profile;
     profile.theme_family = nk::default_theme_family_for(system_preferences);
 
@@ -87,8 +87,7 @@ ShowcaseProfile make_showcase_profile(nk::SystemPreferences const& system_prefer
         profile.preview_subtitle =
             "Live raster output with explicit scaling in the Linux compatibility profile.";
         profile.actions_title = "Runtime Actions";
-        profile.actions_subtitle =
-            "Shared runtime hooks and modal flow in a more compact shell.";
+        profile.actions_subtitle = "Shared runtime hooks and modal flow in a more compact shell.";
         profile.platform_pill_text = "X11";
         profile.ready_segment = "Linux ready";
         profile.window_width = 1200.0F;
@@ -174,7 +173,7 @@ ShowcaseProfile make_showcase_profile(nk::SystemPreferences const& system_prefer
     return profile;
 }
 
-std::vector<nk::Menu> build_showcase_menus(ShowcaseProfile const& profile) {
+std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
     switch (profile.flavor) {
     case ShowcasePlatformFlavor::MacOS:
         return {
@@ -189,6 +188,8 @@ std::vector<nk::Menu> build_showcase_menus(ShowcaseProfile const& profile) {
              {
                  nk::MenuItem::action("New Workspace", "file.new"),
                  nk::MenuItem::action("Open...", "file.open"),
+                 nk::MenuItem::make_separator(),
+                 nk::MenuItem::action("Export Diagnostics Bundle", "debug.export_bundle"),
              }},
             {"Edit",
              {
@@ -215,6 +216,8 @@ std::vector<nk::Menu> build_showcase_menus(ShowcaseProfile const& profile) {
              {
                  nk::MenuItem::action("New", "file.new"),
                  nk::MenuItem::action("Open...", "file.open"),
+                 nk::MenuItem::make_separator(),
+                 nk::MenuItem::action("Export Diagnostics Bundle", "debug.export_bundle"),
                  nk::MenuItem::make_separator(),
                  nk::MenuItem::action("Exit", "file.quit"),
              }},
@@ -250,6 +253,8 @@ std::vector<nk::Menu> build_showcase_menus(ShowcaseProfile const& profile) {
              {
                  nk::MenuItem::action("New", "file.new"),
                  nk::MenuItem::action("Open...", "file.open"),
+                 nk::MenuItem::make_separator(),
+                 nk::MenuItem::action("Export Diagnostics Bundle", "debug.export_bundle"),
                  nk::MenuItem::make_separator(),
                  nk::MenuItem::action("Quit", "file.quit"),
              }},

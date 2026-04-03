@@ -8,6 +8,7 @@
 #include "showcase_widgets.h"
 
 #include <chrono>
+#include <filesystem>
 #include <nk/foundation/property.h>
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/selection_model.h>
@@ -23,6 +24,7 @@
 #include <nk/widgets/text_field.h>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -275,6 +277,34 @@ int run_showcase(int argc, char** argv) {
     auto runtime_status = ValueText::create("Waiting for an action.");
     auto runtime_status_detail = SecondaryText::create("No runtime action has fired yet.");
 
+    auto export_debug_bundle = [&] {
+        const auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
+        const auto bundle_dir = std::filesystem::temp_directory_path() /
+                                ("nodalkit-showcase-debug-bundle-" + std::to_string(timestamp));
+        const auto result = window.save_debug_bundle(bundle_dir.string());
+        if (result) {
+            const auto bundle_label = bundle_dir.filename().string();
+            status_bar->set_segment(0, "Diagnostics bundle exported");
+            runtime_status->set_text("Diagnostics bundle exported.");
+            runtime_status_detail->set_text("Saved to " + bundle_label + " in the temp directory.");
+
+            auto dialog = nk::Dialog::create(
+                "Diagnostics Bundle", "Exported showcase diagnostics to:\n" + bundle_dir.string());
+            dialog->add_button("OK", nk::DialogResponse::Accept);
+            dialog->present(window);
+            return;
+        }
+
+        status_bar->set_segment(0, "Diagnostics export failed");
+        runtime_status->set_text("Diagnostics export failed.");
+        runtime_status_detail->set_text(std::string(result.error()));
+
+        auto dialog =
+            nk::Dialog::create("Diagnostics Bundle Export Failed", std::string(result.error()));
+        dialog->add_button("OK", nk::DialogResponse::Accept);
+        dialog->present(window);
+    };
+
     (void)prop_btn->on_clicked().connect([&] {
         source_prop.set(99);
         prop_value_label->set_text("Source: " + std::to_string(source_prop.get()) +
@@ -348,8 +378,8 @@ int run_showcase(int argc, char** argv) {
     actions_card->set_vertical_size_policy(nk::SizePolicy::Expanding);
     actions_card->set_vertical_stretch(1);
 
-    auto content_row = SplitColumns::create(
-        left_column, right_column, profile.main_split_ratio, 24.0F);
+    auto content_row =
+        SplitColumns::create(left_column, right_column, profile.main_split_ratio, 24.0F);
     auto hero_banner = HeroBanner::create(
         profile.hero_title,
         profile.hero_subtitle,
@@ -368,6 +398,11 @@ int run_showcase(int argc, char** argv) {
     (void)menu_bar->on_action().connect([&](std::string_view action) {
         if (action == "file.quit") {
             app.quit(0);
+            return;
+        }
+
+        if (action == "debug.export_bundle") {
+            export_debug_bundle();
             return;
         }
 
