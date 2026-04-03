@@ -178,6 +178,15 @@ struct TraceEvent {
 struct WidgetDebugNode {
     std::string type_name;
     std::string debug_name;
+    std::vector<std::size_t> tree_path;
+    std::string accessible_role;
+    std::string accessible_name;
+    std::string accessible_description;
+    std::string accessible_value;
+    std::vector<std::string> accessible_actions;
+    std::vector<std::string> accessible_relations;
+    bool accessible_hidden = false;
+    StateFlags accessible_state = StateFlags::None;
     Rect allocation{};
     StateFlags state_flags = StateFlags::None;
     bool visible = true;

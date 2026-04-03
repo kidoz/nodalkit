@@ -227,6 +227,52 @@ void append_widget_debug_node(std::ostringstream& out,
         << " focusable=" << (node.focusable ? "true" : "false")
         << " state=" << static_cast<uint32_t>(node.state_flags) << "\n";
 
+    if (!node.accessible_role.empty() || !node.accessible_name.empty() ||
+        !node.accessible_description.empty() || !node.accessible_value.empty()) {
+        for (std::size_t index = 0; index < depth + 1; ++index) {
+            out << "  ";
+        }
+        out << "a11y role=" << (node.accessible_role.empty() ? "none" : node.accessible_role)
+            << " hidden=" << (node.accessible_hidden ? "true" : "false")
+            << " state=" << static_cast<uint32_t>(node.accessible_state);
+        if (!node.accessible_name.empty()) {
+            out << " name=\"" << node.accessible_name << "\"";
+        }
+        if (!node.accessible_description.empty()) {
+            out << " desc=\"" << node.accessible_description << "\"";
+        }
+        if (!node.accessible_value.empty()) {
+            out << " value=\"" << node.accessible_value << "\"";
+        }
+        out << "\n";
+        if (!node.accessible_actions.empty()) {
+            for (std::size_t index = 0; index < depth + 1; ++index) {
+                out << "  ";
+            }
+            out << "a11y actions=";
+            for (std::size_t index = 0; index < node.accessible_actions.size(); ++index) {
+                if (index > 0) {
+                    out << ",";
+                }
+                out << node.accessible_actions[index];
+            }
+            out << "\n";
+        }
+        if (!node.accessible_relations.empty()) {
+            for (std::size_t index = 0; index < depth + 1; ++index) {
+                out << "  ";
+            }
+            out << "a11y relations=";
+            for (std::size_t index = 0; index < node.accessible_relations.size(); ++index) {
+                if (index > 0) {
+                    out << ",";
+                }
+                out << node.accessible_relations[index];
+            }
+            out << "\n";
+        }
+    }
+
     for (const auto& child : node.children) {
         append_widget_debug_node(out, child, depth + 1);
     }
@@ -240,6 +286,37 @@ void append_widget_debug_json(std::ostringstream& out, const WidgetDebugNode& no
     if (!node.debug_name.empty()) {
         out << ",\"debug_name\":\"" << escape_json_string(node.debug_name) << "\"";
     }
+    out << ",\"tree_path\":[";
+    for (std::size_t index = 0; index < node.tree_path.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << node.tree_path[index];
+    }
+    out << "]";
+    out << ",\"accessible_role\":\"" << escape_json_string(node.accessible_role) << "\"";
+    out << ",\"accessible_name\":\"" << escape_json_string(node.accessible_name) << "\"";
+    out << ",\"accessible_description\":\"" << escape_json_string(node.accessible_description)
+        << "\"";
+    out << ",\"accessible_value\":\"" << escape_json_string(node.accessible_value) << "\"";
+    out << ",\"accessible_actions\":[";
+    for (std::size_t index = 0; index < node.accessible_actions.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << "\"" << escape_json_string(node.accessible_actions[index]) << "\"";
+    }
+    out << "]";
+    out << ",\"accessible_relations\":[";
+    for (std::size_t index = 0; index < node.accessible_relations.size(); ++index) {
+        if (index > 0) {
+            out << ",";
+        }
+        out << "\"" << escape_json_string(node.accessible_relations[index]) << "\"";
+    }
+    out << "]";
+    out << ",\"accessible_hidden\":" << (node.accessible_hidden ? "true" : "false");
+    out << ",\"accessible_state\":" << static_cast<uint32_t>(node.accessible_state);
     out << ",\"allocation\":{\"x\":" << node.allocation.x << ",\"y\":" << node.allocation.y
         << ",\"width\":" << node.allocation.width << ",\"height\":" << node.allocation.height
         << "}";
@@ -514,6 +591,15 @@ private:
     struct NodeBuilder {
         WidgetDebugNode node;
         bool has_type_name = false;
+        bool has_tree_path = false;
+        bool has_accessible_role = false;
+        bool has_accessible_name = false;
+        bool has_accessible_description = false;
+        bool has_accessible_value = false;
+        bool has_accessible_actions = false;
+        bool has_accessible_relations = false;
+        bool has_accessible_hidden = false;
+        bool has_accessible_state = false;
         bool has_allocation = false;
         bool has_state_flags = false;
         bool has_visible = false;
@@ -1013,6 +1099,34 @@ private:
         return values;
     }
 
+    Result<std::vector<std::size_t>> parse_size_t_array() {
+        auto begin = expect('[');
+        if (!begin) {
+            return Unexpected(begin.error());
+        }
+        std::vector<std::size_t> values;
+        skip_ws();
+        if (consume_if(']')) {
+            return values;
+        }
+        while (true) {
+            auto value = parse_size_t();
+            if (!value) {
+                return Unexpected(value.error());
+            }
+            values.push_back(*value);
+            skip_ws();
+            if (consume_if(']')) {
+                break;
+            }
+            auto comma = expect(',');
+            if (!comma) {
+                return Unexpected(comma.error());
+            }
+        }
+        return values;
+    }
+
     Result<std::vector<WidgetDebugNode>> parse_children() {
         auto begin = expect('[');
         if (!begin) {
@@ -1067,6 +1181,69 @@ private:
                 }
                 builder.node.type_name = std::move(*value);
                 builder.has_type_name = true;
+            } else if (*key == "tree_path") {
+                auto value = parse_size_t_array();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.tree_path = std::move(*value);
+                builder.has_tree_path = true;
+            } else if (*key == "accessible_role") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_role = std::move(*value);
+                builder.has_accessible_role = true;
+            } else if (*key == "accessible_name") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_name = std::move(*value);
+                builder.has_accessible_name = true;
+            } else if (*key == "accessible_description") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_description = std::move(*value);
+                builder.has_accessible_description = true;
+            } else if (*key == "accessible_value") {
+                auto value = parse_string();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_value = std::move(*value);
+                builder.has_accessible_value = true;
+            } else if (*key == "accessible_actions") {
+                auto value = parse_string_array();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_actions = std::move(*value);
+                builder.has_accessible_actions = true;
+            } else if (*key == "accessible_relations") {
+                auto value = parse_string_array();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_relations = std::move(*value);
+                builder.has_accessible_relations = true;
+            } else if (*key == "accessible_hidden") {
+                auto value = parse_bool();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_hidden = *value;
+                builder.has_accessible_hidden = true;
+            } else if (*key == "accessible_state") {
+                auto value = parse_size_t();
+                if (!value) {
+                    return Unexpected(value.error());
+                }
+                builder.node.accessible_state = static_cast<StateFlags>(*value);
+                builder.has_accessible_state = true;
             } else if (*key == "debug_name") {
                 auto value = parse_string();
                 if (!value) {
