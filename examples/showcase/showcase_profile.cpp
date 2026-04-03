@@ -174,31 +174,82 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
 }
 
 std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
+    using nk::KeyCode;
+    using nk::NativeMenuModifier;
+    using nk::NativeMenuShortcut;
+
     switch (profile.flavor) {
     case ShowcasePlatformFlavor::MacOS:
         return {
             {"NodalKit Showcase",
              {
                  nk::MenuItem::action("About NodalKit Showcase", "help.about"),
-                 nk::MenuItem::action("Preferences...", "app.preferences"),
+                 nk::MenuItem::action("Preferences...",
+                                      "app.preferences",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Comma,
+                                          .modifiers = NativeMenuModifier::Super,
+                                      }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Quit NodalKit Showcase", "file.quit"),
+                 nk::MenuItem::action("Quit NodalKit Showcase",
+                                      "file.quit",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Q,
+                                          .modifiers = NativeMenuModifier::Super,
+                                      }),
              }},
             {"File",
              {
                  nk::MenuItem::action("New Workspace", "file.new"),
-                 nk::MenuItem::action("Open...", "file.open"),
+                 nk::MenuItem::action("Open...",
+                                      "file.open",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::O,
+                                          .modifiers = NativeMenuModifier::Super,
+                                      }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Export Diagnostics Bundle", "debug.export_bundle"),
+                 nk::MenuItem::action(
+                     "Export Diagnostics Bundle",
+                     "debug.export_bundle",
+                     NativeMenuShortcut{
+                         .key = KeyCode::E,
+                         .modifiers = NativeMenuModifier::Super | NativeMenuModifier::Shift,
+                     }),
              }},
             {"Edit",
              {
-                 nk::MenuItem::action("Undo", "edit.undo"),
-                 nk::MenuItem::action("Redo", "edit.redo"),
+                 nk::MenuItem::action("Undo",
+                                      "edit.undo",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Z,
+                                          .modifiers = NativeMenuModifier::Super,
+                                      }),
+                 nk::MenuItem::action(
+                     "Redo",
+                     "edit.redo",
+                     NativeMenuShortcut{
+                         .key = KeyCode::Z,
+                         .modifiers = NativeMenuModifier::Super | NativeMenuModifier::Shift,
+                     }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Cut", "edit.cut"),
-                 nk::MenuItem::action("Copy", "edit.copy"),
-                 nk::MenuItem::action("Paste", "edit.paste"),
+                 nk::MenuItem::action("Cut",
+                                      "edit.cut",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::X,
+                                          .modifiers = NativeMenuModifier::Super,
+                                      }),
+                 nk::MenuItem::action("Copy",
+                                      "edit.copy",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::C,
+                                          .modifiers = NativeMenuModifier::Super,
+                                      }),
+                 nk::MenuItem::action("Paste",
+                                      "edit.paste",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::V,
+                                          .modifiers = NativeMenuModifier::Super,
+                                      }),
              }},
             {"Window",
              {
@@ -215,20 +266,61 @@ std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
             {"File",
              {
                  nk::MenuItem::action("New", "file.new"),
-                 nk::MenuItem::action("Open...", "file.open"),
+                 nk::MenuItem::action("Open...",
+                                      "file.open",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::O,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Export Diagnostics Bundle", "debug.export_bundle"),
+                 nk::MenuItem::action(
+                     "Export Diagnostics Bundle",
+                     "debug.export_bundle",
+                     NativeMenuShortcut{
+                         .key = KeyCode::E,
+                         .modifiers = NativeMenuModifier::Ctrl | NativeMenuModifier::Shift,
+                     }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Exit", "file.quit"),
+                 nk::MenuItem::action("Exit",
+                                      "file.quit",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Q,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
              }},
             {"Edit",
              {
-                 nk::MenuItem::action("Undo", "edit.undo"),
-                 nk::MenuItem::action("Redo", "edit.redo"),
+                 nk::MenuItem::action("Undo",
+                                      "edit.undo",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Z,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
+                 nk::MenuItem::action("Redo",
+                                      "edit.redo",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Y,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Cut", "edit.cut"),
-                 nk::MenuItem::action("Copy", "edit.copy"),
-                 nk::MenuItem::action("Paste", "edit.paste"),
+                 nk::MenuItem::action("Cut",
+                                      "edit.cut",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::X,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
+                 nk::MenuItem::action("Copy",
+                                      "edit.copy",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::C,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
+                 nk::MenuItem::action("Paste",
+                                      "edit.paste",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::V,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
              }},
             {"View",
              {
@@ -252,20 +344,62 @@ std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
             {"File",
              {
                  nk::MenuItem::action("New", "file.new"),
-                 nk::MenuItem::action("Open...", "file.open"),
+                 nk::MenuItem::action("Open...",
+                                      "file.open",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::O,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Export Diagnostics Bundle", "debug.export_bundle"),
+                 nk::MenuItem::action(
+                     "Export Diagnostics Bundle",
+                     "debug.export_bundle",
+                     NativeMenuShortcut{
+                         .key = KeyCode::E,
+                         .modifiers = NativeMenuModifier::Ctrl | NativeMenuModifier::Shift,
+                     }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Quit", "file.quit"),
+                 nk::MenuItem::action("Quit",
+                                      "file.quit",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Q,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
              }},
             {"Edit",
              {
-                 nk::MenuItem::action("Undo", "edit.undo"),
-                 nk::MenuItem::action("Redo", "edit.redo"),
+                 nk::MenuItem::action("Undo",
+                                      "edit.undo",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::Z,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
+                 nk::MenuItem::action(
+                     "Redo",
+                     "edit.redo",
+                     NativeMenuShortcut{
+                         .key = KeyCode::Z,
+                         .modifiers = NativeMenuModifier::Ctrl | NativeMenuModifier::Shift,
+                     }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Cut", "edit.cut"),
-                 nk::MenuItem::action("Copy", "edit.copy"),
-                 nk::MenuItem::action("Paste", "edit.paste"),
+                 nk::MenuItem::action("Cut",
+                                      "edit.cut",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::X,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
+                 nk::MenuItem::action("Copy",
+                                      "edit.copy",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::C,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
+                 nk::MenuItem::action("Paste",
+                                      "edit.paste",
+                                      NativeMenuShortcut{
+                                          .key = KeyCode::V,
+                                          .modifiers = NativeMenuModifier::Ctrl,
+                                      }),
              }},
             {"View",
              {
