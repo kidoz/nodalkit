@@ -36,7 +36,6 @@ struct PopupGeometry {
 using MenuPath = std::vector<int>;
 
 void invalidate_popup_frame(Widget& widget) {
-    widget.queue_layout();
     widget.queue_redraw();
 }
 
@@ -319,6 +318,43 @@ bool popup_contains_point(const MenuBar& bar,
     return recurse(menu.items, title_rects[static_cast<std::size_t>(menu_index)], false, 0);
 }
 
+std::vector<Rect> popup_damage_regions(const MenuBar& bar,
+                                       const std::vector<Menu>& menus,
+                                       int menu_index,
+                                       const MenuPath& open_path) {
+    std::vector<Rect> regions{bar.allocation()};
+    const auto title_rects = menu_title_rects(bar, menus);
+    if (menu_index < 0 || menu_index >= static_cast<int>(title_rects.size())) {
+        return regions;
+    }
+
+    const auto& menu = menus[static_cast<std::size_t>(menu_index)];
+    std::function<void(const std::vector<MenuItem>&, Rect, bool, std::size_t)> recurse;
+    recurse =
+        [&](const std::vector<MenuItem>& items, Rect anchor, bool submenu, std::size_t depth) {
+            const auto geometry = popup_geometry(bar, anchor, items, submenu);
+            regions.push_back(geometry.bounds);
+            if (depth >= open_path.size()) {
+                return;
+            }
+
+            const int open_index = open_path[depth];
+            if (open_index < 0 || open_index >= static_cast<int>(items.size())) {
+                return;
+            }
+
+            const auto& item = items[static_cast<std::size_t>(open_index)];
+            if (item.children.empty()) {
+                return;
+            }
+
+            recurse(item.children, popup_item_rect(geometry, open_index), true, depth + 1);
+        };
+
+    recurse(menu.items, title_rects[static_cast<std::size_t>(menu_index)], false, 0);
+    return regions;
+}
+
 } // namespace
 
 SizeRequest MenuBar::measure(const Constraints& constraints) const {
@@ -340,6 +376,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                              point);
 
     auto close_popups = [this] {
+        preserve_damage_regions_for_next_redraw();
         impl_->open_menu = -1;
         impl_->armed_menu = -1;
         impl_->open_path.clear();
@@ -373,6 +410,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
             if (impl_->open_menu == hovered_menu) {
                 close_popups();
             } else {
+                preserve_damage_regions_for_next_redraw();
                 impl_->open_menu = hovered_menu;
                 impl_->open_path.clear();
                 impl_->highlighted_path.clear();
@@ -397,6 +435,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                         return true;
                     }
                     if (!item->children.empty()) {
+                        preserve_damage_regions_for_next_redraw();
                         impl_->open_path = *released_path;
                         impl_->highlighted_path = *released_path;
                         invalidate_popup_frame(*this);
@@ -420,6 +459,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Move:
         if (impl_->open_menu >= 0) {
             if (hovered_menu >= 0 && hovered_menu != impl_->open_menu) {
+                preserve_damage_regions_for_next_redraw();
                 impl_->open_menu = hovered_menu;
                 impl_->open_path.clear();
                 impl_->highlighted_path.clear();
@@ -438,6 +478,9 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                     const auto next_open_path = submenu_chain_for_path(
                         impl_->menus[static_cast<std::size_t>(impl_->open_menu)], *path);
                     if (impl_->highlighted_path != *path || impl_->open_path != next_open_path) {
+                        if (impl_->open_path != next_open_path) {
+                            preserve_damage_regions_for_next_redraw();
+                        }
                         impl_->highlighted_path = *path;
                         impl_->open_path = next_open_path;
                         invalidate_popup_frame(*this);
@@ -464,6 +507,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
     }
 
     auto close_popups = [this] {
+        preserve_damage_regions_for_next_redraw();
         impl_->open_menu = -1;
         impl_->open_path.clear();
         impl_->highlighted_path.clear();
@@ -474,6 +518,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         if (impl_->menus.empty()) {
             return;
         }
+        preserve_damage_regions_for_next_redraw();
         if (impl_->open_menu < 0) {
             impl_->open_menu = delta >= 0 ? 0 : static_cast<int>(impl_->menus.size()) - 1;
         } else {
@@ -528,6 +573,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
                     next_path.back() = next_index;
                 }
                 impl_->highlighted_path = next_path;
+                preserve_damage_regions_for_next_redraw();
                 impl_->open_path = submenu_chain_for_path(menu, next_path);
                 invalidate_popup_frame(*this);
                 break;
@@ -544,6 +590,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         return true;
     case KeyCode::Left:
         if (!impl_->open_path.empty()) {
+            preserve_damage_regions_for_next_redraw();
             impl_->open_path.pop_back();
             impl_->highlighted_path = impl_->open_path;
             invalidate_popup_frame(*this);
@@ -555,6 +602,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         if (!impl_->highlighted_path.empty()) {
             if (auto* item = item_at_path(menu, impl_->highlighted_path);
                 item != nullptr && !item->children.empty()) {
+                preserve_damage_regions_for_next_redraw();
                 impl_->open_path = impl_->highlighted_path;
                 invalidate_popup_frame(*this);
                 return true;
@@ -576,6 +624,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         }
         if (auto* item = item_at_path(menu, impl_->highlighted_path)) {
             if (!item->children.empty()) {
+                preserve_damage_regions_for_next_redraw();
                 impl_->open_path = impl_->highlighted_path;
                 invalidate_popup_frame(*this);
                 return true;
@@ -609,6 +658,13 @@ bool MenuBar::hit_test(Point point) const {
                                 point);
 }
 
+std::vector<Rect> MenuBar::damage_regions() const {
+    if (impl_->open_menu < 0) {
+        return {allocation()};
+    }
+    return popup_damage_regions(*this, impl_->menus, impl_->open_menu, impl_->open_path);
+}
+
 CursorShape MenuBar::cursor_shape() const {
     return CursorShape::PointingHand;
 }
@@ -618,6 +674,7 @@ void MenuBar::on_focus_changed(bool focused) {
         return;
     }
 
+    preserve_damage_regions_for_next_redraw();
     impl_->open_menu = -1;
     impl_->armed_menu = -1;
     impl_->open_path.clear();

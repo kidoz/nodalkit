@@ -56,6 +56,7 @@ public:
     bool handle_mouse_event(const MouseEvent& event) override;
     bool handle_key_event(const KeyEvent& event) override;
     [[nodiscard]] bool hit_test(Point point) const override;
+    [[nodiscard]] std::vector<Rect> damage_regions() const override;
     [[nodiscard]] CursorShape cursor_shape() const override;
     void on_focus_changed(bool focused) override;
 
