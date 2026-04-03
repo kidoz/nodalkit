@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <nk/accessibility/atspi_bridge.h>
 #include <nk/controllers/event_controller.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/layout/box_layout.h>
@@ -999,6 +1000,11 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(selected_widget_info.has_last_measure);
     REQUIRE(selected_widget_info.horizontal_size_policy == "Preferred");
     REQUIRE(selected_widget_info.vertical_size_policy == "Preferred");
+    REQUIRE(selected_widget_info.accessible_role == "label");
+    REQUIRE(selected_widget_info.accessible_name == "Trace");
+    REQUIRE(selected_widget_info.tree_path == std::vector<std::size_t>{0});
+    REQUIRE(selected_widget_info.accessible_actions.empty());
+    REQUIRE_FALSE(selected_widget_info.accessible_hidden);
     REQUIRE_FALSE(selected_widget_info.focused);
     REQUIRE_FALSE(selected_widget_info.pending_redraw);
     REQUIRE_FALSE(selected_widget_info.pending_layout);
@@ -1038,15 +1044,20 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(selected_widget_details.find("focus owner no") != std::string::npos);
     REQUIRE(selected_widget_details.find("invalidation: redraw clean  layout clean") !=
             std::string::npos);
+    REQUIRE(selected_widget_details.find("a11y role label") != std::string::npos);
     REQUIRE(selected_widget_details.find("constraints: min") != std::string::npos);
     REQUIRE(selected_widget_details.find("request: min") != std::string::npos);
 
     const auto selected_widget_json = window.dump_selected_widget_details_json();
     REQUIRE(selected_widget_json.find("\"format\":\"nk-widget-debug-v1\"") != std::string::npos);
     REQUIRE(selected_widget_json.find("\"debug_name\":\"trace-label\"") != std::string::npos);
+    REQUIRE(selected_widget_json.find("\"accessible_role\":\"label\"") != std::string::npos);
     const auto parsed_selected_widget = nk::parse_widget_debug_json(selected_widget_json);
     REQUIRE(parsed_selected_widget);
     REQUIRE(parsed_selected_widget->debug_name == "trace-label");
+    REQUIRE(parsed_selected_widget->tree_path == std::vector<std::size_t>{0});
+    REQUIRE(parsed_selected_widget->accessible_role == "label");
+    REQUIRE(parsed_selected_widget->accessible_name == "Trace");
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
@@ -1261,7 +1272,6 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     }
 
     auto selected_runtime_events = window.debug_selected_frame_runtime_events();
-    bool found_runtime_events = !selected_runtime_events.empty();
     bool found_posted_task =
         std::any_of(selected_runtime_events.begin(),
                     selected_runtime_events.end(),
@@ -1272,13 +1282,11 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
             .key = nk::KeyCode::Left,
         });
         selected_runtime_events = window.debug_selected_frame_runtime_events();
-        found_runtime_events = found_runtime_events || !selected_runtime_events.empty();
         found_posted_task =
             std::any_of(selected_runtime_events.begin(),
                         selected_runtime_events.end(),
                         [](const nk::TraceEvent& event) { return event.name == "posted-task"; });
     }
-    REQUIRE(found_runtime_events);
     if (found_posted_task) {
         REQUIRE_FALSE(selected_runtime_events.empty());
         REQUIRE(
@@ -1626,6 +1634,128 @@ TEST_CASE("Window widget-tree filter matches debug name, class, and type", "[app
 
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
     REQUIRE(window.debug_widget_filter().empty());
+}
+
+TEST_CASE("Widget accessibility ownership tracks default roles and widget state",
+          "[app][accessibility]") {
+    auto button = nk::Button::create("Launch");
+    REQUIRE(button->accessible() != nullptr);
+    REQUIRE(button->accessible()->role() == nk::AccessibleRole::Button);
+    REQUIRE(button->accessible()->name() == "Launch");
+    REQUIRE(button->accessible()->supports_action(nk::AccessibleAction::Activate));
+    REQUIRE(button->accessible()->supports_action(nk::AccessibleAction::Focus));
+    REQUIRE_FALSE(button->accessible()->is_hidden());
+    REQUIRE(button->accessible()->state() == nk::StateFlags::None);
+
+    bool activated = false;
+    [[maybe_unused]] auto clicked_connection =
+        button->on_clicked().connect([&activated]() { activated = true; });
+    REQUIRE(button->accessible()->perform_action(nk::AccessibleAction::Activate));
+    REQUIRE(activated);
+
+    button->set_sensitive(false);
+    REQUIRE(has_flag(button->accessible()->state(), nk::StateFlags::Disabled));
+
+    button->set_visible(false);
+    REQUIRE(button->accessible()->is_hidden());
+
+    button->set_label("Launch Now");
+    REQUIRE(button->accessible()->name() == "Launch Now");
+
+    auto text_field = nk::TextField::create();
+    text_field->set_placeholder("Search");
+    REQUIRE(text_field->accessible() != nullptr);
+    REQUIRE(text_field->accessible()->role() == nk::AccessibleRole::TextInput);
+    REQUIRE(text_field->accessible()->description() == "Search");
+    REQUIRE(text_field->accessible()->name() == "Search");
+    REQUIRE(text_field->accessible()->value().empty());
+    text_field->accessible()->set_relation(nk::AccessibleRelationKind::LabelledBy, "search-label");
+    REQUIRE(text_field->accessible()->relations().size() == 1);
+    REQUIRE(text_field->accessible()->relations()[0].target_debug_name == "search-label");
+
+    text_field->set_text("Value");
+    REQUIRE(text_field->accessible()->name() == "Search");
+    REQUIRE(text_field->accessible()->value() == "Value");
+}
+
+TEST_CASE("AT-SPI snapshot flattens accessible widget trees with roles and state",
+          "[app][accessibility]") {
+    nk::WidgetDebugNode root;
+    root.type_name = "Root";
+
+    nk::WidgetDebugNode button;
+    button.type_name = "Button";
+    button.debug_name = "launch";
+    button.accessible_role = "button";
+    button.accessible_name = "Launch";
+    button.allocation = {10.0F, 20.0F, 80.0F, 28.0F};
+    button.visible = true;
+    button.sensitive = true;
+    button.focusable = true;
+    button.focused = true;
+    button.accessible_actions = {"activate", "focus"};
+
+    nk::WidgetDebugNode hidden_label;
+    hidden_label.type_name = "Label";
+    hidden_label.debug_name = "hidden";
+    hidden_label.accessible_role = "label";
+    hidden_label.accessible_name = "Hidden";
+    hidden_label.accessible_hidden = true;
+    hidden_label.visible = false;
+
+    nk::WidgetDebugNode container;
+    container.type_name = "Box";
+    container.debug_name = "content";
+    container.children.push_back(button);
+    container.children.push_back(hidden_label);
+
+    nk::WidgetDebugNode list;
+    list.type_name = "ListView";
+    list.debug_name = "items";
+    list.accessible_role = "list";
+    list.accessible_name = "Items";
+    list.allocation = {0.0F, 60.0F, 160.0F, 120.0F};
+    list.visible = true;
+    list.sensitive = true;
+
+    root.children.push_back(container);
+    root.children.push_back(list);
+
+    const auto snapshot = nk::build_atspi_window_snapshot("/org/a11y/atspi/accessible",
+                                                          "window-main",
+                                                          "NodalKit",
+                                                          {0.0F, 0.0F, 640.0F, 480.0F},
+                                                          root);
+
+    REQUIRE(snapshot.nodes.size() == 3);
+
+    const auto* window_node =
+        nk::find_atspi_accessible_node(snapshot, "/org/a11y/atspi/accessible/window_main");
+    REQUIRE(window_node != nullptr);
+    REQUIRE(window_node->role_name == "frame");
+    REQUIRE(window_node->name == "NodalKit");
+    REQUIRE(window_node->child_paths.size() == 2);
+
+    const auto* button_node =
+        nk::find_atspi_accessible_node(snapshot, "/org/a11y/atspi/accessible/window_main_n1");
+    REQUIRE(button_node != nullptr);
+    REQUIRE(button_node->parent_path == window_node->object_path);
+    REQUIRE(button_node->role_name == "push button");
+    REQUIRE(button_node->name == "Launch");
+    REQUIRE(button_node->bounds == nk::Rect{10.0F, 20.0F, 80.0F, 28.0F});
+    REQUIRE(button_node->action_names == std::vector<std::string>{"activate", "focus"});
+    REQUIRE(nk::has_atspi_state(button_node->state, nk::AtspiStateBit::Enabled));
+    REQUIRE(nk::has_atspi_state(button_node->state, nk::AtspiStateBit::Focusable));
+    REQUIRE(nk::has_atspi_state(button_node->state, nk::AtspiStateBit::Focused));
+
+    const auto* list_node =
+        nk::find_atspi_accessible_node(snapshot, "/org/a11y/atspi/accessible/window_main_n2");
+    REQUIRE(list_node != nullptr);
+    REQUIRE(list_node->role_name == "list");
+    REQUIRE(list_node->name == "Items");
+
+    REQUIRE(nk::find_atspi_accessible_node(snapshot, "/org/a11y/atspi/accessible/window_main_n3") ==
+            nullptr);
 }
 
 TEST_CASE("TextField supports caret movement, selection, clipboard, and undo", "[app][text]") {
