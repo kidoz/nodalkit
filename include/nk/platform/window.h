@@ -101,6 +101,10 @@ public:
     void set_debug_overlay_flags(DebugOverlayFlags flags);
     [[nodiscard]] DebugOverlayFlags debug_overlay_flags() const;
 
+    /// Choose whether the inspector is drawn as a floating overlay or a docked side pane.
+    void set_debug_inspector_presentation(DebugInspectorPresentation presentation);
+    [[nodiscard]] DebugInspectorPresentation debug_inspector_presentation() const;
+
     /// Frame diagnostics captured for the most recently rendered frame.
     [[nodiscard]] const FrameDiagnostics& last_frame_diagnostics() const;
 
@@ -163,6 +167,8 @@ public:
     /// Currently selected widget in the live inspector, if any.
     [[nodiscard]] Widget* debug_selected_widget() const;
     void set_debug_selected_widget(Widget* widget);
+    void set_debug_widget_filter(std::string_view filter);
+    [[nodiscard]] std::string_view debug_widget_filter() const;
     [[nodiscard]] WidgetDebugNode debug_selected_widget_info() const;
 
     /// Format the selected widget as a readable summary.

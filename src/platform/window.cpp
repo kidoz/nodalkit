@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -49,10 +50,12 @@ struct Window::Impl {
     std::weak_ptr<Widget> pending_focus_restore;
     std::array<bool, 256> key_state{};
     DebugOverlayFlags debug_overlay_flags = DebugOverlayFlags::None;
+    DebugInspectorPresentation debug_inspector_presentation = DebugInspectorPresentation::Overlay;
     FrameDiagnostics last_frame_diagnostics;
     std::vector<FrameDiagnostics> frame_history;
     std::vector<Widget*> dirty_widgets;
     Widget* debug_selected_widget = nullptr;
+    std::string debug_widget_filter;
     uint64_t debug_selected_frame_id = 0;
     std::vector<std::size_t> debug_selected_render_path;
     bool debug_picker_enabled = false;
@@ -199,6 +202,7 @@ struct RenderInspectorEntry {
 }
 
 struct InspectorPanelLayout {
+    Rect content_area{};
     Rect panel{};
     Rect timeline_area{};
     Rect tree_area{};
@@ -450,10 +454,52 @@ std::string widget_label_for_inspector(const Widget& widget) {
     return type;
 }
 
+std::string lowercase_copy(std::string_view value) {
+    std::string lowered;
+    lowered.reserve(value.size());
+    for (const char ch : value) {
+        lowered += static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return lowered;
+}
+
+bool widget_matches_filter(const Widget& widget, std::string_view filter_lower) {
+    if (filter_lower.empty()) {
+        return true;
+    }
+
+    std::string haystack = lowercase_copy(debug_type_name(widget));
+    if (!widget.debug_name().empty()) {
+        haystack += " ";
+        haystack += lowercase_copy(widget.debug_name());
+    }
+    for (const auto& style_class : widget.style_classes()) {
+        haystack += " .";
+        haystack += lowercase_copy(style_class);
+    }
+    return haystack.find(filter_lower) != std::string::npos;
+}
+
 void collect_inspector_entries(Widget* widget,
                                std::size_t depth,
+                               std::string_view filter_lower,
                                std::vector<InspectorEntry>& out) {
     if (widget == nullptr) {
+        return;
+    }
+
+    std::vector<InspectorEntry> child_entries;
+    bool has_matching_descendant = false;
+    for (const auto& child : widget->children()) {
+        if (child != nullptr) {
+            const auto before = child_entries.size();
+            collect_inspector_entries(child.get(), depth + 1, filter_lower, child_entries);
+            has_matching_descendant = has_matching_descendant || child_entries.size() > before;
+        }
+    }
+
+    const bool matches = widget_matches_filter(*widget, filter_lower);
+    if (!matches && !has_matching_descendant) {
         return;
     }
 
@@ -462,26 +508,58 @@ void collect_inspector_entries(Widget* widget,
         .depth = depth,
         .label = widget_label_for_inspector(*widget),
     });
-
-    for (const auto& child : widget->children()) {
-        if (child != nullptr) {
-            collect_inspector_entries(child.get(), depth + 1, out);
-        }
-    }
+    out.insert(out.end(), child_entries.begin(), child_entries.end());
 }
 
-std::vector<InspectorEntry>
-build_inspector_entries(Widget* root, std::span<const std::shared_ptr<Widget>> overlays) {
+std::vector<InspectorEntry> build_inspector_entries(
+    Widget* root, std::span<const std::shared_ptr<Widget>> overlays, std::string_view filter) {
     std::vector<InspectorEntry> entries;
+    const auto filter_lower = lowercase_copy(filter);
     if (root != nullptr) {
-        collect_inspector_entries(root, 0, entries);
+        collect_inspector_entries(root, 0, filter_lower, entries);
     }
     for (const auto& overlay : overlays) {
         if (overlay != nullptr) {
-            collect_inspector_entries(overlay.get(), 0, entries);
+            collect_inspector_entries(overlay.get(), 0, filter_lower, entries);
         }
     }
     return entries;
+}
+
+std::optional<char> debug_filter_character(KeyCode key, Modifiers modifiers) {
+    if ((modifiers & Modifiers::Ctrl) != Modifiers::None ||
+        (modifiers & Modifiers::Alt) != Modifiers::None ||
+        (modifiers & Modifiers::Super) != Modifiers::None) {
+        return std::nullopt;
+    }
+
+    if (key >= KeyCode::A && key <= KeyCode::Z) {
+        const auto offset = static_cast<int>(key) - static_cast<int>(KeyCode::A);
+        return static_cast<char>('a' + offset);
+    }
+    if (key >= KeyCode::Num1 && key <= KeyCode::Num9) {
+        const auto offset = static_cast<int>(key) - static_cast<int>(KeyCode::Num1);
+        return static_cast<char>('1' + offset);
+    }
+    if (key == KeyCode::Num0) {
+        return '0';
+    }
+    switch (key) {
+    case KeyCode::Space:
+        return ' ';
+    case KeyCode::Minus:
+        return '-';
+    case KeyCode::Period:
+        return '.';
+    case KeyCode::Slash:
+        return '/';
+    case KeyCode::Semicolon:
+        return ';';
+    case KeyCode::Apostrophe:
+        return '\'';
+    default:
+        return std::nullopt;
+    }
 }
 
 void collect_render_inspector_entries(const RenderSnapshotNode& node,
@@ -512,6 +590,26 @@ std::vector<RenderInspectorEntry> build_render_inspector_entries(const RenderSna
     std::vector<std::size_t> path;
     collect_render_inspector_entries(root, 0, path, entries);
     return entries;
+}
+
+Rect compute_debug_content_area(Size viewport,
+                                DebugOverlayFlags flags,
+                                DebugInspectorPresentation presentation) {
+    Rect content{0.0F, 0.0F, viewport.width, viewport.height};
+    if (!has_debug_overlay_flag(flags, DebugOverlayFlags::InspectorPanel) ||
+        presentation != DebugInspectorPresentation::DockedRight) {
+        return content;
+    }
+
+    const float panel_width = std::min(460.0F, std::max(340.0F, viewport.width * 0.34F));
+    const float gap = 12.0F;
+    const float reserved_width = panel_width + gap;
+    if (viewport.width <= reserved_width + 180.0F) {
+        return content;
+    }
+
+    content.width = std::max(0.0F, viewport.width - reserved_width);
+    return content;
 }
 
 std::size_t selected_entry_index(const std::vector<InspectorEntry>& entries,
@@ -561,6 +659,20 @@ std::size_t last_navigable_entry_index(const std::vector<InspectorEntry>& entrie
         }
     }
     return entries.empty() ? 0 : entries.size() - 1;
+}
+
+Widget* normalized_selected_widget(const std::vector<InspectorEntry>& entries, Widget* selected) {
+    if (entries.empty()) {
+        return nullptr;
+    }
+    if (selected != nullptr) {
+        for (const auto& entry : entries) {
+            if (entry.widget == selected) {
+                return selected;
+            }
+        }
+    }
+    return entries[first_navigable_entry_index(entries)].widget;
 }
 
 bool is_navigable_render_entry(const RenderInspectorEntry& entry) {
@@ -647,19 +759,32 @@ bool find_render_path_for_widget(const RenderSnapshotNode& node,
 }
 
 InspectorPanelLayout compute_inspector_panel_layout(Size viewport,
+                                                    Rect content_area,
+                                                    DebugInspectorPresentation presentation,
                                                     std::size_t entry_count,
                                                     std::size_t selected_index,
                                                     std::size_t render_entry_count,
                                                     std::size_t render_selected_index) {
     InspectorPanelLayout layout;
-    const float panel_width = std::min(560.0F, std::max(420.0F, viewport.width * 0.52F));
-    const float panel_height = std::min(340.0F, std::max(220.0F, viewport.height - 116.0F));
-    layout.panel = {
-        viewport.width - panel_width - 12.0F,
-        112.0F,
-        panel_width,
-        panel_height,
-    };
+    layout.content_area = content_area;
+    if (presentation == DebugInspectorPresentation::DockedRight &&
+        content_area.width < viewport.width) {
+        layout.panel = {
+            content_area.right() + 12.0F,
+            12.0F,
+            std::max(0.0F, viewport.width - content_area.right() - 24.0F),
+            std::max(220.0F, viewport.height - 24.0F),
+        };
+    } else {
+        const float panel_width = std::min(560.0F, std::max(420.0F, viewport.width * 0.52F));
+        const float panel_height = std::min(340.0F, std::max(220.0F, viewport.height - 116.0F));
+        layout.panel = {
+            viewport.width - panel_width - 12.0F,
+            112.0F,
+            panel_width,
+            panel_height,
+        };
+    }
 
     layout.timeline_area = {
         layout.panel.x + 12.0F,
@@ -1331,6 +1456,8 @@ void Window::request_frame(FrameRequestReason reason) {
         const auto sz = size();
         const float scale_factor =
             impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
+        const auto content_area = compute_debug_content_area(
+            sz, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
         FrameDiagnostics frame;
         frame.frame_id = impl_->next_frame_id++;
         frame.logical_viewport = sz;
@@ -1362,12 +1489,12 @@ void Window::request_frame(FrameRequestReason reason) {
         // 1. Layout pass.
         if (impl_->needs_layout) {
             const auto layout_start = Clock::now();
-            const auto constraints = Constraints::tight(sz);
+            const auto constraints = Constraints::tight(content_area.size());
             (void)impl_->child->measure_for_diagnostics(constraints);
-            impl_->child->allocate({0, 0, sz.width, sz.height});
+            impl_->child->allocate(content_area);
             for (auto& overlay : impl_->overlays) {
                 if (overlay.widget != nullptr && overlay.widget->is_visible()) {
-                    overlay.widget->allocate({0, 0, sz.width, sz.height});
+                    overlay.widget->allocate(content_area);
                 }
             }
             impl_->needs_layout = false;
@@ -1471,7 +1598,8 @@ void Window::request_frame(FrameRequestReason reason) {
                 for (const auto& overlay : impl_->overlays) {
                     overlay_widgets.push_back(overlay.widget);
                 }
-                const auto entries = build_inspector_entries(impl_->child.get(), overlay_widgets);
+                const auto entries = build_inspector_entries(
+                    impl_->child.get(), overlay_widgets, impl_->debug_widget_filter);
                 const auto selected_index =
                     selected_entry_index(entries, impl_->debug_selected_widget);
                 const auto* selected_frame =
@@ -1482,14 +1610,26 @@ void Window::request_frame(FrameRequestReason reason) {
                         : std::vector<RenderInspectorEntry>{};
                 const auto render_selected_index =
                     selected_render_entry_index(render_entries, impl_->debug_selected_render_path);
-                const auto panel_layout = compute_inspector_panel_layout(sz,
-                                                                         entries.size(),
-                                                                         selected_index,
-                                                                         render_entries.size(),
-                                                                         render_selected_index);
+                const auto panel_layout =
+                    compute_inspector_panel_layout(sz,
+                                                   content_area,
+                                                   impl_->debug_inspector_presentation,
+                                                   entries.size(),
+                                                   selected_index,
+                                                   render_entries.size(),
+                                                   render_selected_index);
                 const Rect panel_rect = panel_layout.panel;
-                snap_ctx.add_rounded_rect(panel_rect, Color{0.10F, 0.12F, 0.15F, 0.84F}, 12.0F);
-                snap_ctx.add_border(panel_rect, Color{0.83F, 0.86F, 0.90F, 0.30F}, 1.0F, 12.0F);
+                const float panel_radius =
+                    impl_->debug_inspector_presentation == DebugInspectorPresentation::DockedRight
+                        ? 10.0F
+                        : 12.0F;
+                const Color panel_fill =
+                    impl_->debug_inspector_presentation == DebugInspectorPresentation::DockedRight
+                        ? Color{0.09F, 0.11F, 0.14F, 0.96F}
+                        : Color{0.10F, 0.12F, 0.15F, 0.84F};
+                snap_ctx.add_rounded_rect(panel_rect, panel_fill, panel_radius);
+                snap_ctx.add_border(
+                    panel_rect, Color{0.83F, 0.86F, 0.90F, 0.30F}, 1.0F, panel_radius);
                 snap_ctx.add_rounded_rect(
                     panel_layout.timeline_area, Color{0.14F, 0.16F, 0.20F, 0.72F}, 8.0F);
                 snap_ctx.add_rounded_rect(
@@ -1518,7 +1658,10 @@ void Window::request_frame(FrameRequestReason reason) {
                     title_font);
                 snap_ctx.add_text(
                     {panel_layout.tree_area.x + 10.0F, panel_layout.tree_area.y + 8.0F},
-                    "Widget Tree",
+                    impl_->debug_widget_filter.empty()
+                        ? "Widget Tree"
+                        : ("Widget Tree [" + truncate_for_overlay(impl_->debug_widget_filter, 16) +
+                           "]"),
                     Color{0.90F, 0.93F, 0.97F, 1.0F},
                     title_font);
                 snap_ctx.add_text({panel_layout.render_tree_area.x + 10.0F,
@@ -1571,8 +1714,16 @@ void Window::request_frame(FrameRequestReason reason) {
                     lines.push_back("Click a widget to select it.");
                 } else {
                     lines.push_back("Picker: off");
+                    if (!impl_->debug_widget_filter.empty()) {
+                        lines.push_back("Widget filter: " +
+                                        truncate_for_overlay(impl_->debug_widget_filter, 28));
+                    } else {
+                        lines.push_back("Widget filter: off");
+                    }
                     lines.push_back("Ctrl+Shift+P picker  Up/Down widgets  Left/Right frames");
                     lines.push_back("PageUp/PageDown render tree");
+                    lines.push_back("Type to filter widgets  Backspace/Escape clear");
+                    lines.push_back("Ctrl+Shift+D dock/overlay");
                     lines.push_back("Ctrl+Shift+W/R/F copy widget/render/frame");
                 }
                 append_widget_panel_lines(lines, impl_->debug_selected_widget);
@@ -1957,6 +2108,19 @@ DebugOverlayFlags Window::debug_overlay_flags() const {
     return impl_->debug_overlay_flags;
 }
 
+void Window::set_debug_inspector_presentation(DebugInspectorPresentation presentation) {
+    if (impl_->debug_inspector_presentation == presentation) {
+        return;
+    }
+    impl_->debug_inspector_presentation = presentation;
+    impl_->needs_layout = true;
+    request_frame(FrameRequestReason::DebugOverlayChanged);
+}
+
+DebugInspectorPresentation Window::debug_inspector_presentation() const {
+    return impl_->debug_inspector_presentation;
+}
+
 const FrameDiagnostics& Window::last_frame_diagnostics() const {
     return impl_->last_frame_diagnostics;
 }
@@ -2145,6 +2309,30 @@ void Window::set_debug_selected_widget(Widget* widget) {
     request_frame(FrameRequestReason::DebugSelectionChanged);
 }
 
+void Window::set_debug_widget_filter(std::string_view filter) {
+    const std::string normalized = lowercase_copy(filter);
+    if (impl_->debug_widget_filter == normalized) {
+        return;
+    }
+    impl_->debug_widget_filter = normalized;
+
+    std::vector<std::shared_ptr<Widget>> overlay_widgets;
+    overlay_widgets.reserve(impl_->overlays.size());
+    for (const auto& overlay : impl_->overlays) {
+        overlay_widgets.push_back(overlay.widget);
+    }
+    const auto entries =
+        build_inspector_entries(impl_->child.get(), overlay_widgets, impl_->debug_widget_filter);
+    impl_->debug_selected_widget =
+        normalized_selected_widget(entries, impl_->debug_selected_widget);
+    sync_debug_selected_render_path();
+    request_frame(FrameRequestReason::DebugSelectionChanged);
+}
+
+std::string_view Window::debug_widget_filter() const {
+    return impl_->debug_widget_filter;
+}
+
 WidgetDebugNode Window::debug_selected_widget_info() const {
     return impl_->debug_selected_widget != nullptr
                ? build_widget_debug_node(*impl_->debug_selected_widget)
@@ -2198,7 +2386,8 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
     for (const auto& overlay : impl_->overlays) {
         overlay_widgets.push_back(overlay.widget);
     }
-    const auto inspector_entries = build_inspector_entries(impl_->child.get(), overlay_widgets);
+    const auto inspector_entries =
+        build_inspector_entries(impl_->child.get(), overlay_widgets, impl_->debug_widget_filter);
     const auto inspector_selected_index =
         selected_entry_index(inspector_entries, impl_->debug_selected_widget);
     const auto* selected_frame =
@@ -2208,11 +2397,17 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
                                   : std::vector<RenderInspectorEntry>{};
     const auto render_selected_index =
         selected_render_entry_index(render_entries, impl_->debug_selected_render_path);
-    const auto inspector_layout = compute_inspector_panel_layout(size(),
-                                                                 inspector_entries.size(),
-                                                                 inspector_selected_index,
-                                                                 render_entries.size(),
-                                                                 render_selected_index);
+    const auto viewport_size = size();
+    const auto content_area = compute_debug_content_area(
+        viewport_size, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
+    const auto inspector_layout =
+        compute_inspector_panel_layout(viewport_size,
+                                       content_area,
+                                       impl_->debug_inspector_presentation,
+                                       inspector_entries.size(),
+                                       inspector_selected_index,
+                                       render_entries.size(),
+                                       render_selected_index);
     const auto selected_timeline_frame_id = frame_id_at_timeline_point(
         impl_->frame_history, impl_->debug_selected_frame_id, inspector_layout, point);
     auto inspector_entry_at_point = [&]() -> Widget* {
@@ -2468,7 +2663,8 @@ void Window::dispatch_key_event(const KeyEvent& event) {
     for (const auto& overlay : impl_->overlays) {
         overlay_widgets.push_back(overlay.widget);
     }
-    auto inspector_entries = build_inspector_entries(impl_->child.get(), overlay_widgets);
+    auto inspector_entries =
+        build_inspector_entries(impl_->child.get(), overlay_widgets, impl_->debug_widget_filter);
     const auto* selected_frame =
         selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
     auto render_entries = selected_frame != nullptr
@@ -2479,15 +2675,16 @@ void Window::dispatch_key_event(const KeyEvent& event) {
             set_debug_selected_widget(nullptr);
             return;
         }
+        const auto normalized_selected =
+            normalized_selected_widget(inspector_entries, impl_->debug_selected_widget);
         const auto first_index = first_navigable_entry_index(inspector_entries);
         const auto last_index = last_navigable_entry_index(inspector_entries);
-        if (impl_->debug_selected_widget == nullptr) {
+        if (normalized_selected == nullptr) {
             const std::size_t initial_index = delta < 0 ? last_index : first_index;
             set_debug_selected_widget(inspector_entries[initial_index].widget);
             return;
         }
-        const auto current_index =
-            selected_entry_index(inspector_entries, impl_->debug_selected_widget);
+        const auto current_index = selected_entry_index(inspector_entries, normalized_selected);
         const int next_index = std::clamp(static_cast<int>(current_index) + delta,
                                           static_cast<int>(first_index),
                                           static_cast<int>(last_index));
@@ -2563,6 +2760,17 @@ void Window::dispatch_key_event(const KeyEvent& event) {
             set_debug_picker_enabled(!impl_->debug_picker_enabled);
             return;
         }
+        if (event.modifiers == ctrl_shift && event.key == KeyCode::D) {
+            if (!has_debug_overlay_flag(impl_->debug_overlay_flags,
+                                        DebugOverlayFlags::InspectorPanel)) {
+                impl_->debug_overlay_flags |= DebugOverlayFlags::InspectorPanel;
+            }
+            set_debug_inspector_presentation(impl_->debug_inspector_presentation ==
+                                                     DebugInspectorPresentation::Overlay
+                                                 ? DebugInspectorPresentation::DockedRight
+                                                 : DebugInspectorPresentation::Overlay);
+            return;
+        }
         if (event.modifiers == ctrl_shift && event.key == KeyCode::W &&
             has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             !impl_->debug_picker_enabled) {
@@ -2587,6 +2795,23 @@ void Window::dispatch_key_event(const KeyEvent& event) {
         }
         if (!impl_->debug_picker_enabled &&
             has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel)) {
+            if (event.key == KeyCode::Escape && !impl_->debug_widget_filter.empty()) {
+                set_debug_widget_filter({});
+                return;
+            }
+            if (event.key == KeyCode::Backspace && !impl_->debug_widget_filter.empty()) {
+                auto next_filter = impl_->debug_widget_filter;
+                next_filter.pop_back();
+                set_debug_widget_filter(next_filter);
+                return;
+            }
+            if (const auto typed = debug_filter_character(event.key, event.modifiers);
+                typed.has_value()) {
+                auto next_filter = impl_->debug_widget_filter;
+                next_filter += *typed;
+                set_debug_widget_filter(next_filter);
+                return;
+            }
             if (event.key == KeyCode::Up) {
                 move_debug_selection(-1);
                 return;
