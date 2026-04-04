@@ -8,12 +8,7 @@ Color rgb(uint8_t r, uint8_t g, uint8_t b) {
     return Color::from_rgb(r, g, b);
 }
 
-void set_color_token(
-    Theme& theme,
-    std::string name,
-    uint8_t r,
-    uint8_t g,
-    uint8_t b) {
+void set_color_token(Theme& theme, std::string name, uint8_t r, uint8_t g, uint8_t b) {
     theme.set_token(std::move(name), StyleValue{rgb(r, g, b)});
 }
 
@@ -21,46 +16,57 @@ void set_metric_token(Theme& theme, std::string name, float value) {
     theme.set_token(std::move(name), StyleValue{value});
 }
 
-void add_rule(
-    Theme& theme,
-    std::vector<std::string> classes,
-    StateFlags pseudo_state,
-    std::initializer_list<std::pair<std::string_view, StyleValue>> properties) {
+void add_rule(Theme& theme,
+              std::vector<std::string> classes,
+              StateFlags pseudo_state,
+              std::initializer_list<std::pair<std::string_view, StyleValue>> properties) {
 
     StyleRule rule;
     rule.selector.classes = std::move(classes);
     rule.selector.pseudo_state = pseudo_state;
-    for (auto const& [name, value] : properties) {
+    for (const auto& [name, value] : properties) {
         rule.properties.emplace(std::string(name), value);
     }
     theme.add_rule(std::move(rule));
 }
 
 void install_shared_rules(Theme& theme) {
-    add_rule(theme, {"label"}, StateFlags::None,
+    add_rule(theme,
+             {"label"},
+             StateFlags::None,
              {{"text-color", StyleValue{std::string("text-primary")}}});
-    add_rule(theme, {"label", "muted"}, StateFlags::None,
+    add_rule(theme,
+             {"label", "muted"},
+             StateFlags::None,
              {{"text-color", StyleValue{std::string("text-secondary")}}});
-    add_rule(theme, {"label", "heading"}, StateFlags::None,
+    add_rule(theme,
+             {"label", "heading"},
+             StateFlags::None,
              {
                  {"text-color", StyleValue{std::string("text-primary")}},
                  {"accent-color", StyleValue{std::string("accent")}},
              });
 
-    add_rule(theme, {"card"}, StateFlags::None,
+    add_rule(theme,
+             {"card"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("surface-card")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"padding", StyleValue{18.0F}},
                  {"corner-radius", StyleValue{12.0F}},
              });
-    add_rule(theme, {"page"}, StateFlags::None,
+    add_rule(theme,
+             {"page"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("window-bg")}},
                  {"padding", StyleValue{28.0F}},
              });
 
-    add_rule(theme, {"menu-bar"}, StateFlags::None,
+    add_rule(theme,
+             {"menu-bar"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
@@ -68,18 +74,21 @@ void install_shared_rules(Theme& theme) {
                  {"min-height", StyleValue{30.0F}},
              });
 
-    add_rule(theme, {"status-bar"}, StateFlags::None,
+    add_rule(theme,
+             {"status-bar"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"text-color", StyleValue{std::string("text-secondary")}},
-                 {"separator-color",
-                  StyleValue{std::string("border-subtle")}},
+                 {"separator-color", StyleValue{std::string("border-subtle")}},
                  {"min-height", StyleValue{std::string("status-height")}},
                  {"segment-gap", StyleValue{18.0F}},
              });
 
-    add_rule(theme, {"button"}, StateFlags::None,
+    add_rule(theme,
+             {"button"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("surface-raised")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
@@ -91,64 +100,89 @@ void install_shared_rules(Theme& theme) {
                  {"min-height", StyleValue{36.0F}},
                  {"corner-radius", StyleValue{10.0F}},
              });
-    add_rule(theme, {"button"}, StateFlags::Hovered,
+    add_rule(theme,
+             {"button"},
+             StateFlags::Hovered,
              {
                  {"background", StyleValue{std::string("surface-hover")}},
                  {"border-color", StyleValue{std::string("border-strong")}},
              });
-    add_rule(theme, {"button"}, StateFlags::Pressed,
+    add_rule(theme,
+             {"button"},
+             StateFlags::Pressed,
              {
                  {"background", StyleValue{std::string("surface-pressed")}},
                  {"border-color", StyleValue{std::string("border-strong")}},
              });
-    add_rule(theme, {"button"}, StateFlags::Disabled,
+    add_rule(theme,
+             {"button"},
+             StateFlags::Disabled,
              {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"text-color", StyleValue{std::string("text-disabled")}},
              });
-    add_rule(theme, {"button", "suggested"}, StateFlags::None,
+    add_rule(theme,
+             {"button", "suggested"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("accent")}},
                  {"border-color", StyleValue{std::string("accent")}},
                  {"text-color", StyleValue{std::string("accent-contrast")}},
              });
-    add_rule(theme, {"button", "suggested"}, StateFlags::Hovered,
+    add_rule(theme,
+             {"button", "suggested"},
+             StateFlags::Hovered,
              {{"background", StyleValue{std::string("accent-hover")}}});
-    add_rule(theme, {"button", "suggested"}, StateFlags::Pressed,
+    add_rule(theme,
+             {"button", "suggested"},
+             StateFlags::Pressed,
              {{"background", StyleValue{std::string("accent-pressed")}}});
-    add_rule(theme, {"button", "flat"}, StateFlags::None,
+    add_rule(theme,
+             {"button", "flat"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("surface-card")}},
                  {"border-color", StyleValue{std::string("surface-card")}},
                  {"text-color", StyleValue{std::string("text-secondary")}},
              });
-    add_rule(theme, {"button", "flat"}, StateFlags::Hovered,
+    add_rule(theme,
+             {"button", "flat"},
+             StateFlags::Hovered,
              {{"background", StyleValue{std::string("surface-hover")}}});
-    add_rule(theme, {"button", "flat"}, StateFlags::Pressed,
+    add_rule(theme,
+             {"button", "flat"},
+             StateFlags::Pressed,
              {{"background", StyleValue{std::string("surface-pressed")}}});
 
-    add_rule(theme, {"text-field"}, StateFlags::None,
+    add_rule(theme,
+             {"text-field"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("field-bg")}},
                  {"border-color", StyleValue{std::string("field-border")}},
                  {"text-color", StyleValue{std::string("text-primary")}},
-                 {"placeholder-color",
-                  StyleValue{std::string("text-secondary")}},
+                 {"placeholder-color", StyleValue{std::string("text-secondary")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
                  {"min-height", StyleValue{36.0F}},
                  {"min-width", StyleValue{240.0F}},
                  {"corner-radius", StyleValue{10.0F}},
              });
-    add_rule(theme, {"text-field"}, StateFlags::Focused,
+    add_rule(theme,
+             {"text-field"},
+             StateFlags::Focused,
              {{"border-color", StyleValue{std::string("focus-ring")}}});
-    add_rule(theme, {"text-field"}, StateFlags::Disabled,
+    add_rule(theme,
+             {"text-field"},
+             StateFlags::Disabled,
              {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"text-color", StyleValue{std::string("text-disabled")}},
              });
 
-    add_rule(theme, {"combo-box"}, StateFlags::None,
+    add_rule(theme,
+             {"combo-box"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("field-bg")}},
                  {"border-color", StyleValue{std::string("field-border")}},
@@ -156,12 +190,9 @@ void install_shared_rules(Theme& theme) {
                  {"chevron-color", StyleValue{std::string("text-secondary")}},
                  {"popup-background", StyleValue{std::string("surface-card")}},
                  {"popup-border-color", StyleValue{std::string("border-subtle")}},
-                 {"popup-hover-background",
-                  StyleValue{std::string("surface-hover")}},
-                 {"popup-selected-background",
-                  StyleValue{std::string("accent-soft")}},
-                 {"popup-separator-color",
-                  StyleValue{std::string("border-subtle")}},
+                 {"popup-hover-background", StyleValue{std::string("surface-hover")}},
+                 {"popup-selected-background", StyleValue{std::string("accent-soft")}},
+                 {"popup-separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
                  {"popup-item-height", StyleValue{30.0F}},
                  {"min-height", StyleValue{36.0F}},
@@ -170,28 +201,63 @@ void install_shared_rules(Theme& theme) {
                  {"popup-radius", StyleValue{12.0F}},
                  {"selection-radius", StyleValue{8.0F}},
              });
-    add_rule(theme, {"combo-box"}, StateFlags::Focused,
+    add_rule(theme,
+             {"combo-box"},
+             StateFlags::Focused,
              {{"border-color", StyleValue{std::string("focus-ring")}}});
 
-    add_rule(theme, {"list-view"}, StateFlags::None,
+    add_rule(theme,
+             {"segmented-control"},
+             StateFlags::None,
+             {
+                 {"background", StyleValue{std::string("surface-panel")}},
+                 {"border-color", StyleValue{std::string("border-subtle")}},
+                 {"text-color", StyleValue{std::string("text-secondary")}},
+                 {"selected-background", StyleValue{std::string("surface-raised")}},
+                 {"selected-border-color", StyleValue{std::string("border-subtle")}},
+                 {"selected-text-color", StyleValue{std::string("text-primary")}},
+                 {"hover-background", StyleValue{std::string("surface-hover")}},
+                 {"pressed-background", StyleValue{std::string("surface-pressed")}},
+                 {"separator-color", StyleValue{std::string("border-subtle")}},
+                 {"focus-ring-color", StyleValue{std::string("focus-ring")}},
+                 {"min-height", StyleValue{36.0F}},
+                 {"min-segment-width", StyleValue{84.0F}},
+                 {"padding-x", StyleValue{16.0F}},
+                 {"track-padding", StyleValue{4.0F}},
+                 {"corner-radius", StyleValue{12.0F}},
+                 {"selection-radius", StyleValue{10.0F}},
+                 {"separator-inset", StyleValue{8.0F}},
+             });
+    add_rule(theme,
+             {"segmented-control"},
+             StateFlags::Disabled,
+             {
+                 {"text-color", StyleValue{std::string("text-disabled")}},
+                 {"selected-text-color", StyleValue{std::string("text-disabled")}},
+             });
+
+    add_rule(theme,
+             {"list-view"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("surface-card")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"text-color", StyleValue{std::string("text-primary")}},
-                 {"selected-background",
-                  StyleValue{std::string("accent-soft")}},
-                 {"selected-text-color",
-                  StyleValue{std::string("text-primary")}},
-                 {"row-separator-color",
-                  StyleValue{std::string("border-subtle")}},
+                 {"selected-background", StyleValue{std::string("accent-soft")}},
+                 {"selected-text-color", StyleValue{std::string("text-primary")}},
+                 {"row-separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
                  {"corner-radius", StyleValue{12.0F}},
                  {"selection-radius", StyleValue{8.0F}},
              });
-    add_rule(theme, {"list-view"}, StateFlags::Focused,
+    add_rule(theme,
+             {"list-view"},
+             StateFlags::Focused,
              {{"border-color", StyleValue{std::string("focus-ring")}}});
 
-    add_rule(theme, {"image-view"}, StateFlags::None,
+    add_rule(theme,
+             {"image-view"},
+             StateFlags::None,
              {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
@@ -227,14 +293,15 @@ struct Theme::Impl {
     std::unordered_map<std::string, StyleValue> tokens;
 };
 
-Theme::Theme(std::string name)
-    : impl_(std::make_unique<Impl>()) {
+Theme::Theme(std::string name) : impl_(std::make_unique<Impl>()) {
     impl_->name = std::move(name);
 }
 
 Theme::~Theme() = default;
 
-std::string_view Theme::name() const { return impl_->name; }
+std::string_view Theme::name() const {
+    return impl_->name;
+}
 
 void Theme::add_rule(StyleRule rule) {
     impl_->rules.push_back(std::move(rule));
@@ -244,7 +311,7 @@ void Theme::set_token(std::string name, StyleValue value) {
     impl_->tokens[std::move(name)] = std::move(value);
 }
 
-StyleValue const* Theme::token(std::string_view name) const {
+const StyleValue* Theme::token(std::string_view name) const {
     auto it = impl_->tokens.find(std::string(name));
     if (it != impl_->tokens.end()) {
         return &it->second;
@@ -252,17 +319,16 @@ StyleValue const* Theme::token(std::string_view name) const {
     return nullptr;
 }
 
-StyleValue const* Theme::resolve(
-    std::string_view type_name,
-    std::vector<std::string> const& classes,
-    StateFlags state,
-    std::string_view property_name) const {
+const StyleValue* Theme::resolve(std::string_view type_name,
+                                 const std::vector<std::string>& classes,
+                                 StateFlags state,
+                                 std::string_view property_name) const {
 
-    StyleRule const* best_match = nullptr;
+    const StyleRule* best_match = nullptr;
     int best_specificity = -1;
 
-    for (auto const& rule : impl_->rules) {
-        auto const& sel = rule.selector;
+    for (const auto& rule : impl_->rules) {
+        const auto& sel = rule.selector;
 
         // Type must match (or be empty = wildcard).
         if (!sel.type_name.empty() && sel.type_name != type_name) {
@@ -271,9 +337,9 @@ StyleValue const* Theme::resolve(
 
         // All selector classes must be present.
         bool class_match = true;
-        for (auto const& sc : sel.classes) {
+        for (const auto& sc : sel.classes) {
             bool found = false;
-            for (auto const& c : classes) {
+            for (const auto& c : classes) {
                 if (c == sc) {
                     found = true;
                     break;
@@ -300,7 +366,7 @@ StyleValue const* Theme::resolve(
             continue;
         }
 
-        int const spec = sel.specificity();
+        const int spec = sel.specificity();
         if (spec > best_specificity) {
             best_specificity = spec;
             best_match = &rule;
@@ -411,9 +477,7 @@ std::unique_ptr<Theme> Theme::make_dark() {
 }
 
 std::unique_ptr<Theme> Theme::make_linux_gnome(ColorScheme color_scheme) {
-    auto theme = color_scheme == ColorScheme::Dark
-        ? Theme::make_dark()
-        : Theme::make_light();
+    auto theme = color_scheme == ColorScheme::Dark ? Theme::make_dark() : Theme::make_light();
     theme->set_token("theme-family", StyleValue{std::string("linux-gnome")});
     return theme;
 }
