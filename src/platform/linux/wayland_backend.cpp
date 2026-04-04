@@ -3,6 +3,8 @@
 
 #include "wayland_backend.h"
 
+#include "primary-selection-unstable-v1-client-protocol.h"
+#include "text-input-unstable-v3-client-protocol.h"
 #include "wayland_input.h"
 #include "wayland_portal_helpers.h"
 #include "wayland_surface.h"
@@ -345,8 +347,13 @@ struct WaylandBackend::Impl {
     wl_shm* shm = nullptr;
     struct xdg_wm_base* wm_base = nullptr;
     wl_seat* seat = nullptr;
+    wl_data_device_manager* data_device_manager = nullptr;
+    zwp_text_input_manager_v3* text_input_manager = nullptr;
+    zwp_primary_selection_device_manager_v1* primary_selection_manager = nullptr;
 
     std::unique_ptr<WaylandInput> input;
+    std::string clipboard_text_cache;
+    std::string primary_selection_text_cache;
 
     int wake_fd = -1;
     EventLoop* current_loop = nullptr;
@@ -956,6 +963,9 @@ static void registry_global(void* data,
     } else if (std::strcmp(interface, wl_shm_interface.name) == 0) {
         impl->shm = static_cast<wl_shm*>(
             wl_registry_bind(registry, name, &wl_shm_interface, std::min(version, 1u)));
+    } else if (std::strcmp(interface, wl_data_device_manager_interface.name) == 0) {
+        impl->data_device_manager = static_cast<wl_data_device_manager*>(wl_registry_bind(
+            registry, name, &wl_data_device_manager_interface, std::min(version, 3u)));
     } else if (std::strcmp(interface, xdg_wm_base_interface.name) == 0) {
         impl->wm_base = static_cast<struct xdg_wm_base*>(
             wl_registry_bind(registry, name, &xdg_wm_base_interface, std::min(version, 1u)));
@@ -963,6 +973,16 @@ static void registry_global(void* data,
     } else if (std::strcmp(interface, wl_seat_interface.name) == 0) {
         impl->seat = static_cast<wl_seat*>(
             wl_registry_bind(registry, name, &wl_seat_interface, std::min(version, 5u)));
+    } else if (std::strcmp(interface, zwp_text_input_manager_v3_interface.name) == 0) {
+        impl->text_input_manager = static_cast<zwp_text_input_manager_v3*>(wl_registry_bind(
+            registry, name, &zwp_text_input_manager_v3_interface, std::min(version, 1u)));
+    } else if (std::strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name) ==
+               0) {
+        impl->primary_selection_manager = static_cast<zwp_primary_selection_device_manager_v1*>(
+            wl_registry_bind(registry,
+                             name,
+                             &zwp_primary_selection_device_manager_v1_interface,
+                             std::min(version, 1u)));
     }
 }
 
@@ -1005,6 +1025,12 @@ Result<void> WaylandBackend::initialize() {
     // Set up input handling if a seat was advertised.
     if (impl_->seat) {
         impl_->input = std::make_unique<WaylandInput>(*this, impl_->seat);
+        if (!impl_->clipboard_text_cache.empty()) {
+            impl_->input->set_clipboard_text(impl_->clipboard_text_cache);
+        }
+        if (!impl_->primary_selection_text_cache.empty()) {
+            impl_->input->set_primary_selection_text(impl_->primary_selection_text_cache);
+        }
         // Process seat capabilities immediately.
         wl_display_roundtrip(impl_->display);
     }
@@ -1040,6 +1066,8 @@ Result<void> WaylandBackend::initialize() {
 void WaylandBackend::shutdown() {
     stop_system_preferences_observation();
     impl_->input.reset();
+    impl_->clipboard_text_cache.clear();
+    impl_->primary_selection_text_cache.clear();
 
     if (impl_->accessibility_connection != nullptr) {
         if (impl_->accessibility_subtree_id != 0U) {
@@ -1062,6 +1090,18 @@ void WaylandBackend::shutdown() {
     if (impl_->seat) {
         wl_seat_destroy(impl_->seat);
         impl_->seat = nullptr;
+    }
+    if (impl_->data_device_manager) {
+        wl_data_device_manager_destroy(impl_->data_device_manager);
+        impl_->data_device_manager = nullptr;
+    }
+    if (impl_->primary_selection_manager) {
+        zwp_primary_selection_device_manager_v1_destroy(impl_->primary_selection_manager);
+        impl_->primary_selection_manager = nullptr;
+    }
+    if (impl_->text_input_manager) {
+        zwp_text_input_manager_v3_destroy(impl_->text_input_manager);
+        impl_->text_input_manager = nullptr;
     }
     if (impl_->shm) {
         wl_shm_destroy(impl_->shm);
@@ -1269,6 +1309,42 @@ WaylandBackend::show_open_file_dialog(std::string_view title,
     return result;
 }
 
+bool WaylandBackend::supports_clipboard_text() const {
+    return impl_->data_device_manager != nullptr;
+}
+
+std::string WaylandBackend::clipboard_text() const {
+    if (impl_->input != nullptr) {
+        return impl_->input->clipboard_text();
+    }
+    return impl_->clipboard_text_cache;
+}
+
+void WaylandBackend::set_clipboard_text(std::string_view text) {
+    impl_->clipboard_text_cache = std::string(text);
+    if (impl_->input != nullptr) {
+        impl_->input->set_clipboard_text(impl_->clipboard_text_cache);
+    }
+}
+
+bool WaylandBackend::supports_primary_selection_text() const {
+    return impl_->primary_selection_manager != nullptr;
+}
+
+std::string WaylandBackend::primary_selection_text() const {
+    if (impl_->input != nullptr) {
+        return impl_->input->primary_selection_text();
+    }
+    return impl_->primary_selection_text_cache;
+}
+
+void WaylandBackend::set_primary_selection_text(std::string_view text) {
+    impl_->primary_selection_text_cache = std::string(text);
+    if (impl_->input != nullptr) {
+        impl_->input->set_primary_selection_text(impl_->primary_selection_text_cache);
+    }
+}
+
 SystemPreferences WaylandBackend::system_preferences() const {
     return query_linux_preferences();
 }
@@ -1386,6 +1462,18 @@ wl_shm* WaylandBackend::shm() const {
 
 xdg_wm_base* WaylandBackend::wm_base() const {
     return impl_->wm_base;
+}
+
+wl_data_device_manager* WaylandBackend::data_device_manager() const {
+    return impl_->data_device_manager;
+}
+
+zwp_text_input_manager_v3* WaylandBackend::text_input_manager() const {
+    return impl_->text_input_manager;
+}
+
+zwp_primary_selection_device_manager_v1* WaylandBackend::primary_selection_manager() const {
+    return impl_->primary_selection_manager;
 }
 
 void WaylandBackend::register_surface(wl_surface* wl_surf, WaylandSurface* surface) {

@@ -14,7 +14,10 @@ struct wl_compositor;
 struct wl_shm;
 struct wl_seat;
 struct wl_surface;
+struct wl_data_device_manager;
 struct xdg_wm_base;
+struct zwp_text_input_manager_v3;
+struct zwp_primary_selection_device_manager_v1;
 
 namespace nk {
 
@@ -38,6 +41,12 @@ public:
     [[nodiscard]] bool supports_open_file_dialog() const override;
     [[nodiscard]] OpenFileDialogResult
     show_open_file_dialog(std::string_view title, const std::vector<std::string>& filters) override;
+    [[nodiscard]] bool supports_clipboard_text() const override;
+    [[nodiscard]] std::string clipboard_text() const override;
+    void set_clipboard_text(std::string_view text) override;
+    [[nodiscard]] bool supports_primary_selection_text() const override;
+    [[nodiscard]] std::string primary_selection_text() const override;
+    void set_primary_selection_text(std::string_view text) override;
 
     [[nodiscard]] SystemPreferences system_preferences() const override;
     [[nodiscard]] bool supports_system_preferences_observation() const override;
@@ -49,6 +58,9 @@ public:
     [[nodiscard]] wl_compositor* compositor() const;
     [[nodiscard]] wl_shm* shm() const;
     [[nodiscard]] xdg_wm_base* wm_base() const;
+    [[nodiscard]] wl_data_device_manager* data_device_manager() const;
+    [[nodiscard]] zwp_text_input_manager_v3* text_input_manager() const;
+    [[nodiscard]] zwp_primary_selection_device_manager_v1* primary_selection_manager() const;
 
     // Surface registration for input event routing.
     void register_surface(wl_surface* wl_surf, WaylandSurface* surface);
