@@ -41,6 +41,7 @@ struct Dialog::Impl {
     std::shared_ptr<Widget> content;
     Window* parent_window = nullptr;
     bool presented = false;
+    mutable bool backdrop_dirty = false;
     int armed_button = -1;
     DialogPresentationStyle presentation_style = DialogPresentationStyle::Default;
     float minimum_panel_width = 280.0F;
@@ -121,6 +122,7 @@ void Dialog::present(Window& parent) {
 
     impl_->parent_window = &parent;
     impl_->presented = true;
+    impl_->backdrop_dirty = true;
     impl_->armed_button = -1;
     parent.show_overlay(shared_from_this(), true);
 }
@@ -131,6 +133,7 @@ bool Dialog::is_presented() const {
 
 void Dialog::close(DialogResponse response) {
     if (impl_->presented && impl_->parent_window != nullptr) {
+        impl_->backdrop_dirty = true;
         impl_->parent_window->dismiss_overlay(*this);
     }
     impl_->parent_window = nullptr;
@@ -336,6 +339,28 @@ bool Dialog::hit_test(Point point) const {
     return impl_->presented && allocation().contains(point);
 }
 
+std::vector<Rect> Dialog::damage_regions() const {
+    if (!impl_->presented) {
+        return {};
+    }
+
+    if (impl_->backdrop_dirty) {
+        return {allocation()};
+    }
+
+    constexpr float shadow_offset = 2.0F;
+    if (impl_->panel_bounds.width <= 0.0F || impl_->panel_bounds.height <= 0.0F) {
+        return {allocation()};
+    }
+
+    return {{
+        impl_->panel_bounds.x,
+        impl_->panel_bounds.y,
+        impl_->panel_bounds.width,
+        impl_->panel_bounds.height + shadow_offset,
+    }};
+}
+
 void Dialog::snapshot(SnapshotContext& ctx) const {
     if (!impl_->presented) {
         return;
@@ -409,6 +434,7 @@ void Dialog::snapshot(SnapshotContext& ctx) const {
                      button_font);
     }
     ctx.pop_container();
+    impl_->backdrop_dirty = false;
 }
 
 } // namespace nk
