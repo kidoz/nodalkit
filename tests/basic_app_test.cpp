@@ -1439,6 +1439,14 @@ TEST_CASE("Window tracks current key state and cursor shape", "[app][input]") {
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Release, .key = nk::KeyCode::LeftShift});
     REQUIRE_FALSE(window.is_key_pressed(nk::KeyCode::LeftShift));
 
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::A});
+    REQUIRE(window.is_key_pressed(nk::KeyCode::A));
+    window.dispatch_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::A, .is_repeat = true});
+    REQUIRE(window.is_key_pressed(nk::KeyCode::A));
+    window.dispatch_window_event({.type = nk::WindowEvent::Type::FocusOut});
+    REQUIRE_FALSE(window.is_key_pressed(nk::KeyCode::A));
+
     window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 20.0F, .y = 20.0F});
     REQUIRE(window.current_cursor_shape() == nk::CursorShape::PointingHand);
 
@@ -2371,6 +2379,422 @@ TEST_CASE("TextField supports caret movement, selection, clipboard, and undo", "
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
     REQUIRE(field->text() == "restored");
+}
+
+TEST_CASE("TextField publishes primary selection ownership and pastes it on middle click",
+          "[app][text]") {
+    nk::Application app(0, nullptr);
+
+    auto source = nk::TextField::create("alpha beta");
+    source->allocate({0.0F, 0.0F, 240.0F, 36.0F});
+    source->select_all();
+    REQUIRE(app.primary_selection_text() == "alpha beta");
+
+    source->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right});
+    REQUIRE_FALSE(source->has_selection());
+    REQUIRE(app.primary_selection_text().empty());
+
+    source->select_all();
+    REQUIRE(app.primary_selection_text() == "alpha beta");
+
+    auto target = nk::TextField::create();
+    target->allocate({0.0F, 0.0F, 240.0F, 36.0F});
+    REQUIRE(target->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 0.0F, .y = 18.0F, .button = 3}));
+    REQUIRE(target->text() == "alpha beta");
+    REQUIRE(target->cursor_position() == target->text().size());
+}
+
+TEST_CASE("TextField keeps preedit separate until commit", "[app][text]") {
+    auto field = nk::TextField::create("ab");
+    field->allocate({0.0F, 0.0F, 220.0F, 36.0F});
+
+    field->handle_text_input_event({
+        .type = nk::TextInputEvent::Type::Preedit,
+        .text = "xyz",
+        .selection_start = 1,
+        .selection_end = 3,
+    });
+    REQUIRE(field->text() == "ab");
+
+    field->handle_text_input_event({
+        .type = nk::TextInputEvent::Type::Commit,
+        .text = "xyz",
+    });
+    REQUIRE(field->text() == "abxyz");
+
+    field->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit, .text = "qq"});
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left});
+    field->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "!"});
+    REQUIRE(field->text() == "abxy!z");
+}
+
+TEST_CASE("Window routes text input events to the focused widget", "[app][text]") {
+    nk::Window window({.title = "Text route", .width = 240, .height = 80});
+    auto field = nk::TextField::create("seed");
+    window.set_child(field);
+    field->allocate({0.0F, 0.0F, 220.0F, 36.0F});
+    field->grab_focus();
+
+    window.dispatch_text_input_event({
+        .type = nk::TextInputEvent::Type::Commit,
+        .text = "!",
+    });
+
+    REQUIRE(field->text() == "seed!");
+}
+
+TEST_CASE("Window exposes the focused text caret rect", "[app][text]") {
+    nk::Window window({.title = "Caret rect", .width = 240, .height = 80});
+    auto field = nk::TextField::create("seed");
+    window.set_child(field);
+    field->allocate({10.0F, 12.0F, 220.0F, 36.0F});
+    field->grab_focus();
+
+    const auto end_rect = window.current_text_input_caret_rect();
+    REQUIRE(end_rect.has_value());
+    REQUIRE(end_rect->x > 10.0F);
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left});
+    const auto moved_rect = window.current_text_input_caret_rect();
+    REQUIRE(moved_rect.has_value());
+    REQUIRE(moved_rect->x < end_rect->x);
+
+    field->handle_text_input_event({
+        .type = nk::TextInputEvent::Type::Preedit,
+        .text = "xyz",
+        .selection_start = 3,
+        .selection_end = 3,
+    });
+    const auto preedit_rect = window.current_text_input_caret_rect();
+    REQUIRE(preedit_rect.has_value());
+    REQUIRE(preedit_rect->x > moved_rect->x);
+}
+
+TEST_CASE("Window exposes the focused text input state", "[app][text]") {
+    nk::Window window({.title = "Text state", .width = 240, .height = 80});
+    auto field = nk::TextField::create("hello");
+    window.set_child(field);
+    field->allocate({10.0F, 12.0F, 220.0F, 36.0F});
+    field->grab_focus();
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left});
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Left,
+        .modifiers = nk::Modifiers::Shift,
+    });
+
+    const auto state = window.current_text_input_state();
+    REQUIRE(state.has_value());
+    REQUIRE(state->text == "hello");
+    REQUIRE(state->cursor == field->cursor_position());
+    REQUIRE(state->anchor != state->cursor);
+    REQUIRE(state->caret_rect.width > 0.0F);
+}
+
+TEST_CASE("TextField moves and deletes by grapheme cluster", "[app][text]") {
+    auto field = nk::TextField::create(std::string("e\xCC\x81") + "x");
+    field->allocate({0.0F, 0.0F, 220.0F, 36.0F});
+
+    REQUIRE(field->cursor_position() == field->text().size());
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left});
+    REQUIRE(field->cursor_position() == std::string("e\xCC\x81").size());
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace});
+    REQUIRE(field->text() == "x");
+    REQUIRE(field->cursor_position() == 0);
+}
+
+TEST_CASE("TextField supports delete-surrounding text input events", "[app][text]") {
+    auto field = nk::TextField::create("hello world");
+    field->allocate({0.0F, 0.0F, 220.0F, 36.0F});
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Left,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE(field->cursor_position() == 6);
+
+    field->handle_text_input_event({
+        .type = nk::TextInputEvent::Type::DeleteSurrounding,
+        .delete_before_length = 6,
+        .delete_after_length = 0,
+    });
+    REQUIRE(field->text() == "world");
+    REQUIRE(field->cursor_position() == 0);
+}
+
+TEST_CASE("TextField coalesces continuous typing into a single undo step", "[app][text]") {
+    auto field = nk::TextField::create("");
+    field->allocate({0.0F, 0.0F, 220.0F, 36.0F});
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::A});
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::B});
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::C});
+    REQUIRE(field->text() == "abc");
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Z,
+        .modifiers = nk::Modifiers::Ctrl,
+    });
+    REQUIRE(field->text().empty());
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Z,
+        .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
+    });
+    REQUIRE(field->text() == "abc");
+}
+
+TEST_CASE("TextField coalesces repeated single-character deletes", "[app][text]") {
+    auto field = nk::TextField::create("abcd");
+    field->allocate({0.0F, 0.0F, 220.0F, 36.0F});
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace});
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace});
+    REQUIRE(field->text() == "ab");
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Z,
+        .modifiers = nk::Modifiers::Ctrl,
+    });
+    REQUIRE(field->text() == "abcd");
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home});
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Delete});
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Delete});
+    REQUIRE(field->text() == "cd");
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Z,
+        .modifiers = nk::Modifiers::Ctrl,
+    });
+    REQUIRE(field->text() == "abcd");
+}
+
+TEST_CASE("TextField treats emoji clusters as single editing units", "[app][text]") {
+    const std::string flag = "\xF0\x9F\x87\xBA\xF0\x9F\x87\xB8";
+    const std::string family = "\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F"
+                               "\x91\xA7\xE2\x80\x8D\xF0\x9F\x91\xA6";
+    auto field = nk::TextField::create(flag + family + "!");
+    field->allocate({0.0F, 0.0F, 260.0F, 36.0F});
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left});
+    REQUIRE(field->cursor_position() == flag.size() + family.size());
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left});
+    REQUIRE(field->cursor_position() == flag.size());
+
+    field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Delete});
+    REQUIRE(field->text() == flag + "!");
+}
+
+TEST_CASE("TextField supports word navigation and selection by modifier", "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 260.0F, 36.0F});
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Left,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE(field->cursor_position() == 11);
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Left,
+        .modifiers = nk::Modifiers::Alt | nk::Modifiers::Shift,
+    });
+    REQUIRE(field->has_selection());
+    REQUIRE(field->selection_start() == 6);
+    REQUIRE(field->selection_end() == 11);
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Right,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE_FALSE(field->has_selection());
+    REQUIRE(field->cursor_position() == 11);
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Right,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE(field->cursor_position() == field->text().size());
+}
+
+TEST_CASE("TextField deletes words by modifier", "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 260.0F, 36.0F});
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Backspace,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE(field->text() == "alpha beta ");
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Left,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE(field->cursor_position() == 6);
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Delete,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE(field->text() == "alpha  ");
+}
+
+TEST_CASE("TextField selects whole words on double click and word drag", "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 320.0F, 36.0F});
+
+    REQUIRE(field->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                       .x = 62.0F,
+                                       .y = 18.0F,
+                                       .button = 1,
+                                       .click_count = 2}));
+    REQUIRE(field->has_selection());
+    REQUIRE(field->selection_start() == 6);
+    REQUIRE(field->selection_end() == 10);
+
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Move, .x = 132.0F, .y = 18.0F, .button = 1}));
+    REQUIRE(field->selection_start() == 6);
+    REQUIRE(field->selection_end() == 16);
+
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 132.0F, .y = 18.0F, .button = 1}));
+    REQUIRE(field->selection_start() == 6);
+    REQUIRE(field->selection_end() == 16);
+}
+
+TEST_CASE("TextField keeps full-word selection when double-click drag extends left",
+          "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 320.0F, 36.0F});
+
+    REQUIRE(field->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                       .x = 62.0F,
+                                       .y = 18.0F,
+                                       .button = 1,
+                                       .click_count = 2}));
+    REQUIRE(field->selection_start() == 6);
+    REQUIRE(field->selection_end() == 10);
+
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Move, .x = 20.0F, .y = 18.0F, .button = 1}));
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == 10);
+
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 20.0F, .y = 18.0F, .button = 1}));
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == 10);
+}
+
+TEST_CASE("TextField extends selection anchor on shift-click", "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 320.0F, 36.0F});
+
+    field->handle_key_event({
+        .type = nk::KeyEvent::Type::Press,
+        .key = nk::KeyCode::Left,
+        .modifiers = nk::Modifiers::Alt,
+    });
+    REQUIRE(field->cursor_position() == 11);
+
+    REQUIRE(field->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                       .x = 0.0F,
+                                       .y = 18.0F,
+                                       .button = 1,
+                                       .modifiers = nk::Modifiers::Shift}));
+    REQUIRE(field->has_selection());
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == 11);
+
+    REQUIRE(field->handle_mouse_event({.type = nk::MouseEvent::Type::Release,
+                                       .x = 0.0F,
+                                       .y = 18.0F,
+                                       .button = 1,
+                                       .modifiers = nk::Modifiers::Shift}));
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == 11);
+}
+
+TEST_CASE("TextField selects the full line on triple click", "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 320.0F, 36.0F});
+
+    REQUIRE(field->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                       .x = 62.0F,
+                                       .y = 18.0F,
+                                       .button = 1,
+                                       .click_count = 3}));
+    REQUIRE(field->has_selection());
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == field->text().size());
+}
+
+TEST_CASE("TextField keeps the full line selected when triple-click drag continues",
+          "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 320.0F, 36.0F});
+
+    REQUIRE(field->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                       .x = 62.0F,
+                                       .y = 18.0F,
+                                       .button = 1,
+                                       .click_count = 3}));
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == field->text().size());
+
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Move, .x = 140.0F, .y = 18.0F, .button = 1}));
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == field->text().size());
+
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 8.0F, .y = 18.0F, .button = 1}));
+    REQUIRE(field->selection_start() == 0);
+    REQUIRE(field->selection_end() == field->text().size());
+}
+
+TEST_CASE("TextField cancels active word-drag selection when committed text replaces it",
+          "[app][text]") {
+    auto field = nk::TextField::create("alpha beta gamma");
+    field->allocate({0.0F, 0.0F, 320.0F, 36.0F});
+
+    REQUIRE(field->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                       .x = 62.0F,
+                                       .y = 18.0F,
+                                       .button = 1,
+                                       .click_count = 2}));
+    REQUIRE(field->selection_start() == 6);
+    REQUIRE(field->selection_end() == 10);
+
+    REQUIRE(
+        field->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "z"}));
+    REQUIRE(field->text() == "alpha z gamma");
+    REQUIRE_FALSE(field->has_selection());
+    REQUIRE(field->cursor_position() == 7);
+
+    REQUIRE_FALSE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Move, .x = 8.0F, .y = 18.0F, .button = 1}));
+    REQUIRE_FALSE(field->has_selection());
+    REQUIRE(field->cursor_position() == 7);
 }
 
 TEST_CASE("StringListModel supports append and remove", "[app]") {
