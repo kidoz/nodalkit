@@ -781,7 +781,8 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     }
     const auto modifiers = macos_modifiers(event.modifierFlags);
     const auto key = macos_keycode_to_nk(event.keyCode);
-    if (!should_dispatch_key_directly(key, modifiers)) {
+    const bool text_input_active = _surface->owner().current_text_input_state().has_value();
+    if (text_input_active && !should_dispatch_key_directly(key, modifiers)) {
         [self interpretKeyEvents:@[ event ]];
         return;
     }
