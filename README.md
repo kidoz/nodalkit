@@ -63,6 +63,9 @@ The `showcase` example is the current best overview of the toolkit surface:
 menus, layout, text entry, list/model behavior, image presentation, dialogs,
 and status surfaces in one window.
 
+For public best practices on building real applications with NodalKit, read
+[docs/BUILDING_APPLICATIONS.md](docs/BUILDING_APPLICATIONS.md).
+
 ## Architecture at a Glance
 
 | Module | Responsibility |
