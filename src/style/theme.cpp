@@ -207,6 +207,14 @@ void install_shared_rules(Theme& theme) {
              {{"border-color", StyleValue{std::string("focus-ring")}}});
 
     add_rule(theme,
+             {"scroll-area"},
+             StateFlags::None,
+             {
+                 {"scrollbar-track-color", StyleValue{std::string("scrollbar-track")}},
+                 {"scrollbar-thumb-color", StyleValue{std::string("scrollbar-thumb")}},
+             });
+
+    add_rule(theme,
              {"segmented-control"},
              StateFlags::None,
              {
@@ -247,6 +255,8 @@ void install_shared_rules(Theme& theme) {
                  {"selected-text-color", StyleValue{std::string("text-primary")}},
                  {"row-separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
+                 {"scrollbar-track-color", StyleValue{std::string("scrollbar-track")}},
+                 {"scrollbar-thumb-color", StyleValue{std::string("scrollbar-thumb")}},
                  {"corner-radius", StyleValue{12.0F}},
                  {"selection-radius", StyleValue{8.0F}},
              });
@@ -416,6 +426,8 @@ std::unique_ptr<Theme> Theme::make_light() {
     set_color_token(*theme, "accent-soft", 222, 236, 252);
     set_color_token(*theme, "accent-contrast", 255, 255, 255);
     set_color_token(*theme, "focus-ring", 76, 144, 228);
+    set_color_token(*theme, "scrollbar-track", 226, 231, 238);
+    set_color_token(*theme, "scrollbar-thumb", 170, 180, 192);
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
@@ -457,6 +469,8 @@ std::unique_ptr<Theme> Theme::make_dark() {
     set_color_token(*theme, "accent-soft", 62, 84, 122);
     set_color_token(*theme, "accent-contrast", 248, 250, 255);
     set_color_token(*theme, "focus-ring", 131, 187, 255);
+    set_color_token(*theme, "scrollbar-track", 61, 67, 76);
+    set_color_token(*theme, "scrollbar-thumb", 111, 121, 136);
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
