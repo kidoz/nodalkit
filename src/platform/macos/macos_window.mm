@@ -402,7 +402,7 @@ static nk::Widget* resolve_widget_by_tree_path(nk::Window& window,
 
 @class NKAccessibilityNode;
 
-@interface NKView : NSView
+@interface NKView : NSView <NSTextInputClient>
 @property(nonatomic, assign) nk::MacosSurface* surface;
 @end
 
@@ -416,20 +416,97 @@ build_accessibility_children(const nk::WidgetDebugNode& root, id parent, NKView*
 static id accessibility_hit_test(NSArray<id>* elements, NSPoint point);
 static id accessibility_focused_element(NSArray<id>* elements);
 
+static std::string objc_text_to_utf8(id value) {
+    NSString* string = nil;
+    if ([value isKindOfClass:[NSAttributedString class]]) {
+        string = [(NSAttributedString*)value string];
+    } else if ([value isKindOfClass:[NSString class]]) {
+        string = (NSString*)value;
+    }
+
+    if (string == nil) {
+        return {};
+    }
+
+    const char* utf8 = [string UTF8String];
+    return utf8 != nullptr ? std::string(utf8) : std::string{};
+}
+
+static bool should_dispatch_key_directly(nk::KeyCode key, nk::Modifiers modifiers) {
+    if ((modifiers & nk::Modifiers::Super) == nk::Modifiers::Super ||
+        (modifiers & nk::Modifiers::Ctrl) == nk::Modifiers::Ctrl) {
+        return true;
+    }
+
+    switch (key) {
+    case nk::KeyCode::Unknown:
+        return false;
+    case nk::KeyCode::Return:
+    case nk::KeyCode::Escape:
+    case nk::KeyCode::Backspace:
+    case nk::KeyCode::Delete:
+    case nk::KeyCode::Tab:
+    case nk::KeyCode::Home:
+    case nk::KeyCode::End:
+    case nk::KeyCode::PageUp:
+    case nk::KeyCode::PageDown:
+    case nk::KeyCode::Left:
+    case nk::KeyCode::Right:
+    case nk::KeyCode::Up:
+    case nk::KeyCode::Down:
+    case nk::KeyCode::F1:
+    case nk::KeyCode::F2:
+    case nk::KeyCode::F3:
+    case nk::KeyCode::F4:
+    case nk::KeyCode::F5:
+    case nk::KeyCode::F6:
+    case nk::KeyCode::F7:
+    case nk::KeyCode::F8:
+    case nk::KeyCode::F9:
+    case nk::KeyCode::F10:
+    case nk::KeyCode::F11:
+    case nk::KeyCode::F12:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugNode& node) {
+    if (node.focused) {
+        return &node;
+    }
+    for (const auto& child : node.children) {
+        if (const auto* focused = find_focused_debug_node(child); focused != nullptr) {
+            return focused;
+        }
+    }
+    return nullptr;
+}
+
 @implementation NKView {
     NSTrackingArea* tracking_area_;
+    NSRange marked_range_;
+    NSRange selected_range_;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame surface:(nk::MacosSurface*)surface {
     self = [super initWithFrame:frame];
     if (self) {
         _surface = surface;
+        marked_range_ = NSMakeRange(NSNotFound, 0);
+        selected_range_ = NSMakeRange(0, 0);
         [self updateTrackingAreas];
     }
     return self;
 }
 
 - (BOOL)acceptsFirstResponder {
+    return YES;
+}
+
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+    (void)event;
     return YES;
 }
 
@@ -548,6 +625,7 @@ static id accessibility_focused_element(NSArray<id>* elements);
     me.x = static_cast<float>(loc.x);
     me.y = static_cast<float>(loc.y);
     me.button = 1;
+    me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
 }
@@ -562,6 +640,7 @@ static id accessibility_focused_element(NSArray<id>* elements);
     me.x = static_cast<float>(loc.x);
     me.y = static_cast<float>(loc.y);
     me.button = 1;
+    me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
 }
@@ -576,6 +655,7 @@ static id accessibility_focused_element(NSArray<id>* elements);
     me.x = static_cast<float>(loc.x);
     me.y = static_cast<float>(loc.y);
     me.button = 2;
+    me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
 }
@@ -590,6 +670,7 @@ static id accessibility_focused_element(NSArray<id>* elements);
     me.x = static_cast<float>(loc.x);
     me.y = static_cast<float>(loc.y);
     me.button = 2;
+    me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
 }
@@ -604,6 +685,7 @@ static id accessibility_focused_element(NSArray<id>* elements);
     me.x = static_cast<float>(loc.x);
     me.y = static_cast<float>(loc.y);
     me.button = macos_button_number(event);
+    me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
 }
@@ -618,6 +700,7 @@ static id accessibility_focused_element(NSArray<id>* elements);
     me.x = static_cast<float>(loc.x);
     me.y = static_cast<float>(loc.y);
     me.button = macos_button_number(event);
+    me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
 }
@@ -696,10 +779,16 @@ static id accessibility_focused_element(NSArray<id>* elements);
     if (!_surface) {
         return;
     }
+    const auto modifiers = macos_modifiers(event.modifierFlags);
+    const auto key = macos_keycode_to_nk(event.keyCode);
+    if (!should_dispatch_key_directly(key, modifiers)) {
+        [self interpretKeyEvents:@[ event ]];
+        return;
+    }
     nk::KeyEvent ke{};
     ke.type = nk::KeyEvent::Type::Press;
-    ke.key = macos_keycode_to_nk(event.keyCode);
-    ke.modifiers = macos_modifiers(event.modifierFlags);
+    ke.key = key;
+    ke.modifiers = modifiers;
     ke.is_repeat = event.isARepeat;
     _surface->owner().dispatch_key_event(ke);
 }
@@ -714,6 +803,112 @@ static id accessibility_focused_element(NSArray<id>* elements);
     ke.modifiers = macos_modifiers(event.modifierFlags);
     ke.is_repeat = false;
     _surface->owner().dispatch_key_event(ke);
+}
+
+- (BOOL)hasMarkedText {
+    return marked_range_.location != NSNotFound && marked_range_.length > 0;
+}
+
+- (NSRange)markedRange {
+    return [self hasMarkedText] ? marked_range_ : NSMakeRange(NSNotFound, 0);
+}
+
+- (NSRange)selectedRange {
+    return selected_range_;
+}
+
+- (void)setMarkedText:(id)string
+        selectedRange:(NSRange)selectedRange
+     replacementRange:(NSRange)replacementRange {
+    (void)replacementRange;
+    if (!_surface) {
+        return;
+    }
+    auto text = objc_text_to_utf8(string);
+    marked_range_ = text.empty() ? NSMakeRange(NSNotFound, 0) : NSMakeRange(0, text.size());
+    selected_range_ = selectedRange;
+    nk::TextInputEvent te{};
+    te.type = nk::TextInputEvent::Type::Preedit;
+    te.text = std::move(text);
+    te.selection_start = std::min<std::size_t>(selectedRange.location, te.text.size());
+    te.selection_end =
+        std::min<std::size_t>(selectedRange.location + selectedRange.length, te.text.size());
+    _surface->owner().dispatch_text_input_event(te);
+}
+
+- (void)unmarkText {
+    if (!_surface) {
+        return;
+    }
+    marked_range_ = NSMakeRange(NSNotFound, 0);
+    selected_range_ = NSMakeRange(0, 0);
+    nk::TextInputEvent te{};
+    te.type = nk::TextInputEvent::Type::ClearPreedit;
+    _surface->owner().dispatch_text_input_event(te);
+}
+
+- (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText {
+    return @[];
+}
+
+- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range
+                                               actualRange:(NSRangePointer)actualRange {
+    if (actualRange != nullptr) {
+        *actualRange = NSMakeRange(NSNotFound, 0);
+    }
+    (void)range;
+    return nil;
+}
+
+- (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
+    (void)replacementRange;
+    if (!_surface) {
+        return;
+    }
+    auto text = objc_text_to_utf8(string);
+    if (text.empty()) {
+        return;
+    }
+    marked_range_ = NSMakeRange(NSNotFound, 0);
+    selected_range_ = NSMakeRange(text.size(), 0);
+    nk::TextInputEvent te{};
+    te.type = nk::TextInputEvent::Type::Commit;
+    te.text = std::move(text);
+    _surface->owner().dispatch_text_input_event(te);
+}
+
+- (NSUInteger)characterIndexForPoint:(NSPoint)point {
+    (void)point;
+    return NSNotFound;
+}
+
+- (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
+    (void)range;
+    if (actualRange != nullptr) {
+        *actualRange = NSMakeRange(NSNotFound, 0);
+    }
+
+    NSRect local_rect = NSMakeRect(0.0, 0.0, 1.0, 20.0);
+    if (_surface) {
+        if (const auto caret_rect = _surface->owner().current_text_input_caret_rect();
+            caret_rect.has_value()) {
+            local_rect = NSMakeRect(caret_rect->x,
+                                    caret_rect->y,
+                                    std::max(1.0F, caret_rect->width),
+                                    std::max(20.0F, caret_rect->height));
+        } else {
+            const auto tree = _surface->owner().debug_tree();
+            if (const auto* focused = find_focused_debug_node(tree); focused != nullptr) {
+                local_rect = NSMakeRect(focused->allocation.x,
+                                        focused->allocation.y,
+                                        std::max(1.0F, focused->allocation.width),
+                                        std::max(20.0F, focused->allocation.height));
+            }
+        }
+    }
+
+    const NSRect window_rect = [self convertRect:local_rect toView:nil];
+    return [self.window convertRectToScreen:window_rect];
 }
 
 - (void)flagsChanged:(NSEvent*)event {
