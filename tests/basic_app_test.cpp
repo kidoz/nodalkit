@@ -1122,6 +1122,10 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
         {centered_title->bounds.x + 1.0F, centered_title->bounds.y + 1.0F},
         "RoundedRect");
     REQUIRE(centered_panel_width >= 420.0F);
+    const auto centered_damage = centered->debug_damage_regions();
+    REQUIRE(centered_damage.size() == 1);
+    REQUIRE(centered_damage.front().width < window.size().width);
+    REQUIRE(centered_damage.front().height < window.size().height);
 
     centered->close();
     REQUIRE(app.event_loop().poll());
@@ -1144,6 +1148,10 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
         "RoundedRect");
     REQUIRE(sheet_panel_width >= 420.0F);
     REQUIRE(sheet_title->bounds.y + 40.0F < centered_title->bounds.y);
+    const auto sheet_damage = sheet->debug_damage_regions();
+    REQUIRE(sheet_damage.size() == 1);
+    REQUIRE(sheet_damage.front().width < window.size().width);
+    REQUIRE(sheet_damage.front().height < window.size().height);
 
     restore_backend();
 }
