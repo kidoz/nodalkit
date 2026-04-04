@@ -30,6 +30,7 @@
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/scroll_area.h>
+#include <nk/widgets/segmented_control.h>
 #include <nk/widgets/text_field.h>
 #include <sstream>
 #include <string>
@@ -1024,6 +1025,41 @@ TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds
     } else {
         REQUIRE(unsetenv("NK_RENDERER_BACKEND") == 0);
     }
+}
+
+TEST_CASE("SegmentedControl selects segments through API, mouse, and keyboard", "[app][widgets]") {
+    auto control = nk::SegmentedControl::create();
+    control->set_segments({"Input", "Video", "Audio"});
+
+    REQUIRE(control->segment_count() == 3);
+    REQUIRE(control->selected_index() == 0);
+    REQUIRE(control->selected_text() == "Input");
+    REQUIRE(control->measure({}).natural_width > 0.0F);
+
+    int selected = -1;
+    [[maybe_unused]] auto connection =
+        control->on_selection_changed().connect([&selected](int index) { selected = index; });
+
+    control->set_selected_index(2);
+    REQUIRE(control->selected_index() == 2);
+    REQUIRE(control->selected_text() == "Audio");
+    REQUIRE(selected == 2);
+
+    control->allocate({0.0F, 0.0F, 300.0F, 36.0F});
+    control->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 150.0F, .y = 18.0F, .button = 1});
+    control->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 150.0F, .y = 18.0F, .button = 1});
+    REQUIRE(control->selected_index() == 1);
+
+    control->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End});
+    REQUIRE(control->selected_index() == 2);
+
+    control->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left});
+    REQUIRE(control->selected_index() == 1);
+
+    control->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home});
+    REQUIRE(control->selected_index() == 0);
 }
 
 TEST_CASE("Dialog present installs a modal overlay and routes Escape dismissal", "[app][dialog]") {
@@ -2079,6 +2115,16 @@ TEST_CASE("Widget accessibility ownership tracks default roles and widget state"
     text_field->set_text("Value");
     REQUIRE(text_field->accessible()->name() == "Search");
     REQUIRE(text_field->accessible()->value() == "Value");
+
+    auto segmented = nk::SegmentedControl::create();
+    segmented->set_segments({"Input", "Video", "Audio"});
+    REQUIRE(segmented->accessible() != nullptr);
+    REQUIRE(segmented->accessible()->role() == nk::AccessibleRole::TabList);
+    REQUIRE(segmented->accessible()->value() == "Input");
+    REQUIRE(segmented->accessible()->description().find("Audio") != std::string::npos);
+
+    segmented->set_selected_index(1);
+    REQUIRE(segmented->accessible()->value() == "Video");
 }
 
 TEST_CASE("AT-SPI snapshot flattens accessible widget trees with roles and state",
