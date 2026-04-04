@@ -46,6 +46,7 @@ nk_sources = files(
     'src/widgets/menu_bar.cpp',
     'src/widgets/status_bar.cpp',
     'src/widgets/combo_box.cpp',
+    'src/widgets/segmented_control.cpp',
 )
 
 nk_deps = []
