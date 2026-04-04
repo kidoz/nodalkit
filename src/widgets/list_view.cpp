@@ -321,10 +321,10 @@ void ListView::snapshot(SnapshotContext& ctx) const {
     const float selection_radius = theme_number("selection-radius", 8.0F);
     auto body = a;
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
-        body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
+        const auto focus_ring = theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F});
+        ctx.add_rounded_rect(
+            a, Color{focus_ring.r, focus_ring.g, focus_ring.b, 0.08F}, corner_radius + 1.5F);
+        body = {a.x + 1.5F, a.y + 1.5F, a.width - 3.0F, a.height - 3.0F};
     }
 
     ctx.add_rounded_rect(
@@ -342,11 +342,11 @@ void ListView::snapshot(SnapshotContext& ctx) const {
         const auto font = list_font();
         const float total_height = static_cast<float>(total_rows) * row_h;
         const bool show_scrollbar = total_height > inner.height;
-        const float scrollbar_width = show_scrollbar ? 10.0F : 0.0F;
+        const float scrollbar_width = show_scrollbar ? 11.0F : 0.0F;
         Rect content_rect = {
             inner.x,
             inner.y,
-            std::max(0.0F, inner.width - scrollbar_width - (show_scrollbar ? 6.0F : 0.0F)),
+            std::max(0.0F, inner.width - scrollbar_width - (show_scrollbar ? 12.0F : 0.0F)),
             inner.height,
         };
         const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
@@ -354,8 +354,10 @@ void ListView::snapshot(SnapshotContext& ctx) const {
             theme_color("selected-background", Color{0.86F, 0.92F, 0.99F, 1.0F});
         const auto selected_text = theme_color("selected-text-color", text_color);
         const auto separator = theme_color("row-separator-color", Color{0.9F, 0.91F, 0.94F, 1.0F});
-        const auto scrollbar_track = Color{0.16F, 0.19F, 0.23F, 0.06F};
-        const auto scrollbar_thumb = Color{0.16F, 0.19F, 0.23F, 0.22F};
+        const auto scrollbar_track =
+            theme_color("scrollbar-track-color", Color{0.88F, 0.90F, 0.93F, 1.0F});
+        const auto scrollbar_thumb =
+            theme_color("scrollbar-thumb-color", Color{0.67F, 0.71F, 0.76F, 1.0F});
 
         const auto first_row = static_cast<std::size_t>(impl_->scroll_offset / row_h);
         float y = content_rect.y - std::fmod(impl_->scroll_offset, row_h);
@@ -370,7 +372,7 @@ void ListView::snapshot(SnapshotContext& ctx) const {
             if (selected) {
                 ctx.add_rounded_rect(
                     {content_rect.x + 4.0F, y + 2.0F, content_rect.width - 8.0F, row_h - 4.0F},
-                    selected_bg,
+                    Color{selected_bg.r, selected_bg.g, selected_bg.b, 0.82F},
                     selection_radius);
             }
 
@@ -396,17 +398,17 @@ void ListView::snapshot(SnapshotContext& ctx) const {
         }
 
         if (show_scrollbar) {
-            const float track_x = inner.right() - scrollbar_width;
-            ctx.add_rounded_rect({track_x, inner.y + 4.0F, scrollbar_width, inner.height - 8.0F},
+            const float track_x = inner.right() - scrollbar_width - 4.0F;
+            ctx.add_rounded_rect({track_x, inner.y + 6.0F, scrollbar_width, inner.height - 12.0F},
                                  scrollbar_track,
                                  scrollbar_width * 0.5F);
 
             const float max_offset = std::max(1.0F, total_height - content_rect.height);
             const float thumb_height =
-                std::max(28.0F, (content_rect.height / total_height) * (inner.height - 8.0F));
+                std::max(28.0F, (content_rect.height / total_height) * (inner.height - 12.0F));
             const float thumb_y =
-                inner.y + 4.0F +
-                (impl_->scroll_offset / max_offset) * ((inner.height - 8.0F) - thumb_height);
+                inner.y + 6.0F +
+                (impl_->scroll_offset / max_offset) * ((inner.height - 12.0F) - thumb_height);
             ctx.add_rounded_rect({track_x + 2.0F, thumb_y, scrollbar_width - 4.0F, thumb_height},
                                  scrollbar_thumb,
                                  (scrollbar_width - 4.0F) * 0.5F);
