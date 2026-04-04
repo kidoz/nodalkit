@@ -9,6 +9,11 @@ namespace {
 
 float max_h_offset(const Widget* content, Rect viewport);
 float max_v_offset(const Widget* content, Rect viewport);
+bool rect_is_empty(Rect rect);
+bool should_show_v_scrollbar(ScrollPolicy policy, const Widget* content, Rect viewport);
+bool should_show_h_scrollbar(ScrollPolicy policy, const Widget* content, Rect viewport);
+Rect v_thumb_rect(ScrollPolicy policy, const Widget* content, Rect viewport, float v_offset);
+Rect h_thumb_rect(ScrollPolicy policy, const Widget* content, Rect viewport, float h_offset);
 
 } // namespace
 
@@ -18,6 +23,12 @@ struct ScrollArea::Impl {
     ScrollPolicy v_policy = ScrollPolicy::Automatic;
     float h_offset = 0;
     float v_offset = 0;
+    bool dragging_h_thumb = false;
+    bool dragging_v_thumb = false;
+    float drag_origin_x = 0;
+    float drag_origin_y = 0;
+    float drag_start_h_offset = 0;
+    float drag_start_v_offset = 0;
     Signal<float, float> scroll_changed;
 };
 
@@ -66,9 +77,13 @@ void ScrollArea::scroll_to(float h, float v) {
     const auto viewport = allocation();
     const float next_h = std::clamp(h, 0.0F, max_h_offset(impl_->content.get(), viewport));
     const float next_v = std::clamp(v, 0.0F, max_v_offset(impl_->content.get(), viewport));
+    if (impl_->h_offset == next_h && impl_->v_offset == next_v) {
+        return;
+    }
     impl_->h_offset = next_h;
     impl_->v_offset = next_v;
     impl_->scroll_changed.emit(next_h, next_v);
+    queue_layout();
     queue_redraw();
 }
 
@@ -94,18 +109,68 @@ float max_v_offset(const Widget* content, Rect viewport) {
     return std::max(0.0F, req.natural_height - viewport.height);
 }
 
+bool rect_is_empty(Rect rect) {
+    return rect.width <= 0.0F || rect.height <= 0.0F;
+}
+
 Rect scrollbar_track(Rect viewport, bool vertical) {
-    constexpr float thickness = 10.0F;
+    constexpr float thickness = 11.0F;
+    constexpr float edge_inset = 6.0F;
     if (vertical) {
-        return {viewport.right() - thickness,
-                viewport.y + 4.0F,
+        return {viewport.right() - thickness - edge_inset,
+                viewport.y + 6.0F,
                 thickness,
-                std::max(0.0F, viewport.height - 8.0F)};
+                std::max(0.0F, viewport.height - 12.0F)};
     }
-    return {viewport.x + 4.0F,
-            viewport.bottom() - thickness,
-            std::max(0.0F, viewport.width - 8.0F),
+    return {viewport.x + 6.0F,
+            viewport.bottom() - thickness - edge_inset,
+            std::max(0.0F, viewport.width - 12.0F),
             thickness};
+}
+
+bool should_show_v_scrollbar(ScrollPolicy policy, const Widget* content, Rect viewport) {
+    if (content == nullptr) {
+        return false;
+    }
+    const auto req = content->measure_for_diagnostics(Constraints::unbounded());
+    return policy == ScrollPolicy::Always ||
+           (policy == ScrollPolicy::Automatic && req.natural_height > viewport.height);
+}
+
+bool should_show_h_scrollbar(ScrollPolicy policy, const Widget* content, Rect viewport) {
+    if (content == nullptr) {
+        return false;
+    }
+    const auto req = content->measure_for_diagnostics(Constraints::unbounded());
+    return policy == ScrollPolicy::Always ||
+           (policy == ScrollPolicy::Automatic && req.natural_width > viewport.width);
+}
+
+Rect v_thumb_rect(ScrollPolicy policy, const Widget* content, Rect viewport, float v_offset) {
+    if (!should_show_v_scrollbar(policy, content, viewport)) {
+        return {};
+    }
+    const auto req = content->measure_for_diagnostics(Constraints::unbounded());
+    const auto track = scrollbar_track(viewport, true);
+    const float max_offset = std::max(1.0F, req.natural_height - viewport.height);
+    const float thumb_height =
+        std::max(28.0F, (viewport.height / req.natural_height) * track.height);
+    const float thumb_y =
+        track.y + (v_offset / max_offset) * std::max(0.0F, track.height - thumb_height);
+    return {track.x + 2.0F, thumb_y, track.width - 4.0F, thumb_height};
+}
+
+Rect h_thumb_rect(ScrollPolicy policy, const Widget* content, Rect viewport, float h_offset) {
+    if (!should_show_h_scrollbar(policy, content, viewport)) {
+        return {};
+    }
+    const auto req = content->measure_for_diagnostics(Constraints::unbounded());
+    const auto track = scrollbar_track(viewport, false);
+    const float max_offset = std::max(1.0F, req.natural_width - viewport.width);
+    const float thumb_width = std::max(28.0F, (viewport.width / req.natural_width) * track.width);
+    const float thumb_x =
+        track.x + (h_offset / max_offset) * std::max(0.0F, track.width - thumb_width);
+    return {thumb_x, track.y + 2.0F, thumb_width, track.height - 4.0F};
 }
 
 } // namespace
@@ -128,28 +193,120 @@ void ScrollArea::allocate(const Rect& allocation) {
         const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
         const float cw = std::max(allocation.width, req.natural_width);
         const float ch = std::max(allocation.height, req.natural_height);
-        impl_->content->allocate({-impl_->h_offset, -impl_->v_offset, cw, ch});
+        impl_->content->allocate(
+            {allocation.x - impl_->h_offset, allocation.y - impl_->v_offset, cw, ch});
     }
 }
 
 bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
-    if (event.type != MouseEvent::Type::Scroll || !allocation().contains({event.x, event.y})) {
+    const auto viewport = allocation();
+    const Point point{event.x, event.y};
+    if (!viewport.contains(point)) {
+        if (event.type == MouseEvent::Type::Release) {
+            impl_->dragging_h_thumb = false;
+            impl_->dragging_v_thumb = false;
+        }
         return false;
     }
 
-    constexpr float scroll_step = 40.0F;
-    float next_h = impl_->h_offset;
-    float next_v = impl_->v_offset;
+    const auto v_track = scrollbar_track(viewport, true);
+    const auto h_track = scrollbar_track(viewport, false);
+    const auto v_thumb =
+        v_thumb_rect(impl_->v_policy, impl_->content.get(), viewport, impl_->v_offset);
+    const auto h_thumb =
+        h_thumb_rect(impl_->h_policy, impl_->content.get(), viewport, impl_->h_offset);
 
-    if (impl_->h_policy != ScrollPolicy::Never) {
-        next_h -= event.scroll_dx * scroll_step;
+    switch (event.type) {
+    case MouseEvent::Type::Scroll: {
+        const float scroll_step = event.precise_scrolling ? 1.0F : 40.0F;
+        float next_h = impl_->h_offset;
+        float next_v = impl_->v_offset;
+
+        if (impl_->h_policy != ScrollPolicy::Never) {
+            next_h -= event.scroll_dx * scroll_step;
+        }
+        if (impl_->v_policy != ScrollPolicy::Never) {
+            next_v -= event.scroll_dy * scroll_step;
+        }
+
+        scroll_to(next_h, next_v);
+        return true;
     }
-    if (impl_->v_policy != ScrollPolicy::Never) {
-        next_v -= event.scroll_dy * scroll_step;
+    case MouseEvent::Type::Press: {
+        if (event.button != 1) {
+            return false;
+        }
+        if (v_thumb.contains(point)) {
+            impl_->dragging_v_thumb = true;
+            impl_->drag_origin_y = point.y;
+            impl_->drag_start_v_offset = impl_->v_offset;
+            return true;
+        }
+        if (h_thumb.contains(point)) {
+            impl_->dragging_h_thumb = true;
+            impl_->drag_origin_x = point.x;
+            impl_->drag_start_h_offset = impl_->h_offset;
+            return true;
+        }
+        if (v_track.contains(point) && !rect_is_empty(v_thumb)) {
+            const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
+            const float max_offset = std::max(1.0F, req.natural_height - viewport.height);
+            const float travel = std::max(1.0F, v_track.height - v_thumb.height);
+            const float thumb_top = std::clamp(
+                point.y - (v_thumb.height * 0.5F), v_track.y, v_track.bottom() - v_thumb.height);
+            const float ratio = (thumb_top - v_track.y) / travel;
+            scroll_to(impl_->h_offset, ratio * max_offset);
+            impl_->dragging_v_thumb = true;
+            impl_->drag_origin_y = point.y;
+            impl_->drag_start_v_offset = impl_->v_offset;
+            return true;
+        }
+        if (h_track.contains(point) && !rect_is_empty(h_thumb)) {
+            const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
+            const float max_offset = std::max(1.0F, req.natural_width - viewport.width);
+            const float travel = std::max(1.0F, h_track.width - h_thumb.width);
+            const float thumb_left = std::clamp(
+                point.x - (h_thumb.width * 0.5F), h_track.x, h_track.right() - h_thumb.width);
+            const float ratio = (thumb_left - h_track.x) / travel;
+            scroll_to(ratio * max_offset, impl_->v_offset);
+            impl_->dragging_h_thumb = true;
+            impl_->drag_origin_x = point.x;
+            impl_->drag_start_h_offset = impl_->h_offset;
+            return true;
+        }
+        return false;
+    }
+    case MouseEvent::Type::Move: {
+        if (impl_->dragging_v_thumb && !rect_is_empty(v_thumb)) {
+            const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
+            const float max_offset = std::max(1.0F, req.natural_height - viewport.height);
+            const float travel = std::max(1.0F, v_track.height - v_thumb.height);
+            const float delta = point.y - impl_->drag_origin_y;
+            const float offset_delta = (delta / travel) * max_offset;
+            scroll_to(impl_->h_offset, impl_->drag_start_v_offset + offset_delta);
+            return true;
+        }
+        if (impl_->dragging_h_thumb && !rect_is_empty(h_thumb)) {
+            const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
+            const float max_offset = std::max(1.0F, req.natural_width - viewport.width);
+            const float travel = std::max(1.0F, h_track.width - h_thumb.width);
+            const float delta = point.x - impl_->drag_origin_x;
+            const float offset_delta = (delta / travel) * max_offset;
+            scroll_to(impl_->drag_start_h_offset + offset_delta, impl_->v_offset);
+            return true;
+        }
+        return false;
+    }
+    case MouseEvent::Type::Release:
+        impl_->dragging_h_thumb = false;
+        impl_->dragging_v_thumb = false;
+        return event.button == 1;
+    case MouseEvent::Type::Enter:
+    case MouseEvent::Type::Leave:
+        return false;
     }
 
-    scroll_to(next_h, next_v);
-    return true;
+    return false;
 }
 
 void ScrollArea::snapshot(SnapshotContext& ctx) const {
@@ -167,43 +324,30 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
         return;
     }
 
-    const auto req = impl_->content->measure_for_diagnostics(Constraints::unbounded());
     const bool show_v_scrollbar =
-        impl_->v_policy == ScrollPolicy::Always ||
-        (impl_->v_policy == ScrollPolicy::Automatic && req.natural_height > viewport.height);
+        should_show_v_scrollbar(impl_->v_policy, impl_->content.get(), viewport);
     const bool show_h_scrollbar =
-        impl_->h_policy == ScrollPolicy::Always ||
-        (impl_->h_policy == ScrollPolicy::Automatic && req.natural_width > viewport.width);
+        should_show_h_scrollbar(impl_->h_policy, impl_->content.get(), viewport);
 
-    const auto track_color =
-        theme_color("scrollbar-track-color", Color{0.16F, 0.19F, 0.23F, 0.06F});
-    const auto thumb_color =
-        theme_color("scrollbar-thumb-color", Color{0.16F, 0.19F, 0.23F, 0.22F});
+    const auto raw_track = theme_color("scrollbar-track-color", Color{0.88F, 0.90F, 0.93F, 1.0F});
+    const auto raw_thumb = theme_color("scrollbar-thumb-color", Color{0.67F, 0.71F, 0.76F, 1.0F});
+    const auto track_color = Color{raw_track.r, raw_track.g, raw_track.b, 0.72F};
+    const auto thumb_color = Color{raw_thumb.r, raw_thumb.g, raw_thumb.b, 0.86F};
 
     if (show_v_scrollbar) {
         const auto track = scrollbar_track(viewport, true);
-        const float max_offset = std::max(1.0F, req.natural_height - viewport.height);
-        const float thumb_height =
-            std::max(28.0F, (viewport.height / req.natural_height) * track.height);
-        const float thumb_y =
-            track.y + (impl_->v_offset / max_offset) * std::max(0.0F, track.height - thumb_height);
+        const auto thumb =
+            v_thumb_rect(impl_->v_policy, impl_->content.get(), viewport, impl_->v_offset);
         ctx.add_rounded_rect(track, track_color, track.width * 0.5F);
-        ctx.add_rounded_rect({track.x + 2.0F, thumb_y, track.width - 4.0F, thumb_height},
-                             thumb_color,
-                             (track.width - 4.0F) * 0.5F);
+        ctx.add_rounded_rect(thumb, thumb_color, thumb.width * 0.5F);
     }
 
     if (show_h_scrollbar) {
         const auto track = scrollbar_track(viewport, false);
-        const float max_offset = std::max(1.0F, req.natural_width - viewport.width);
-        const float thumb_width =
-            std::max(28.0F, (viewport.width / req.natural_width) * track.width);
-        const float thumb_x =
-            track.x + (impl_->h_offset / max_offset) * std::max(0.0F, track.width - thumb_width);
+        const auto thumb =
+            h_thumb_rect(impl_->h_policy, impl_->content.get(), viewport, impl_->h_offset);
         ctx.add_rounded_rect(track, track_color, track.height * 0.5F);
-        ctx.add_rounded_rect({thumb_x, track.y + 2.0F, thumb_width, track.height - 4.0F},
-                             thumb_color,
-                             (track.height - 4.0F) * 0.5F);
+        ctx.add_rounded_rect(thumb, thumb_color, thumb.height * 0.5F);
     }
 }
 
