@@ -20,6 +20,7 @@
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
+#include <nk/widgets/scroll_area.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
 #include <string>
@@ -276,11 +277,13 @@ int run_showcase(int argc, char** argv) {
         ValueText::create("Source: 42, Target: " + std::to_string(target_prop.get()));
     auto prop_detail = SecondaryText::create("Shared state updates the footer and live status.");
     auto prop_btn = nk::Button::create("Set Source = 99");
+    prop_btn->set_horizontal_size_policy(nk::SizePolicy::Preferred);
     auto dialog_label = FieldLabel::create("Sheet dialog");
     auto dialog_detail =
         SecondaryText::create("Open a window-attached sheet with explicit minimum width.");
     auto dialog_btn = nk::Button::create("Show Preferences Sheet");
     dialog_btn->add_style_class("suggested");
+    dialog_btn->set_horizontal_size_policy(nk::SizePolicy::Expanding);
     auto runtime_status = ValueText::create("Waiting for an action.");
     auto runtime_status_detail = SecondaryText::create("No runtime action has fired yet.");
 
@@ -352,22 +355,22 @@ int run_showcase(int argc, char** argv) {
     property_group->append(prop_value_label);
     property_group->append(prop_detail);
     property_group->append(prop_btn);
-    auto property_panel = InsetStage::create(property_group, 108.0F, 112.0F, 14.0F);
+    auto property_panel = InsetStage::create(property_group, 124.0F, 132.0F, 16.0F);
 
     auto dialog_group = Box::vertical(8.0F);
     dialog_group->append(dialog_label);
     dialog_group->append(dialog_detail);
     dialog_group->append(dialog_btn);
-    auto dialog_panel = InsetStage::create(dialog_group, 100.0F, 104.0F, 14.0F);
+    auto dialog_panel = InsetStage::create(dialog_group, 124.0F, 132.0F, 16.0F);
 
     auto status_label = FieldLabel::create("Latest result");
     auto status_group = Box::vertical(8.0F);
     status_group->append(status_label);
     status_group->append(runtime_status);
     status_group->append(runtime_status_detail);
-    auto status_panel = InsetStage::create(status_group, 94.0F, 100.0F, 14.0F);
+    auto status_panel = InsetStage::create(status_group, 108.0F, 118.0F, 16.0F);
 
-    auto actions_row = SplitColumns::create(property_panel, dialog_panel, 0.58F, 18.0F);
+    auto actions_row = SplitColumns::create(property_panel, dialog_panel, 0.52F, 18.0F);
 
     auto actions_content = Box::vertical(14.0F);
     actions_content->append(actions_title);
@@ -378,23 +381,18 @@ int run_showcase(int argc, char** argv) {
 
     auto left_column = Box::vertical(profile.controls_spacing);
     left_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
-    left_column->set_vertical_size_policy(nk::SizePolicy::Expanding);
     left_column->append(controls_card);
     left_column->append(list_card);
 
     auto right_column = Box::vertical(profile.controls_spacing);
     right_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
-    right_column->set_vertical_size_policy(nk::SizePolicy::Expanding);
     right_column->append(preview_card);
     right_column->append(actions_card);
 
-    preview_card->set_vertical_size_policy(nk::SizePolicy::Expanding);
-    preview_card->set_vertical_stretch(2);
-    actions_card->set_vertical_size_policy(nk::SizePolicy::Expanding);
-    actions_card->set_vertical_stretch(1);
-
     auto content_row =
         SplitColumns::create(left_column, right_column, profile.main_split_ratio, 24.0F);
+    content_row->set_vertical_size_policy(nk::SizePolicy::Preferred);
+    content_row->set_vertical_stretch(0);
     auto hero_banner = HeroBanner::create(
         profile.hero_title,
         profile.hero_subtitle,
@@ -403,9 +401,18 @@ int run_showcase(int argc, char** argv) {
     auto body_content = Box::vertical(profile.section_spacing);
     body_content->append(hero_banner);
     body_content->append(content_row);
+    auto page_bottom_spacer = InsetStage::create(Spacer::create(), 34.0F, 34.0F, 0.0F);
+    body_content->append(page_bottom_spacer);
 
     auto body_page = SurfacePanel::page(body_content);
-    auto root = ShowcaseShell::create(menu_surface, body_page, status_bar);
+    body_page->set_vertical_size_policy(nk::SizePolicy::Preferred);
+    body_page->set_vertical_stretch(0);
+    auto scroll_body = nk::ScrollArea::create();
+    scroll_body->set_h_scroll_policy(nk::ScrollPolicy::Never);
+    scroll_body->set_v_scroll_policy(nk::ScrollPolicy::Always);
+    scroll_body->set_content(body_page);
+
+    auto root = ShowcaseShell::create(menu_surface, scroll_body, status_bar);
     window.set_child(root);
 
     list_view->grab_focus();

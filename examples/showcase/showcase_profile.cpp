@@ -123,9 +123,9 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
         profile.platform_pill_text = "macOS";
         profile.ready_segment = "macOS ready";
         profile.window_width = 1280.0F;
-        profile.window_height = 900.0F;
+        profile.window_height = 1020.0F;
         profile.main_split_ratio = 0.45F;
-        profile.preview_split_ratio = 0.66F;
+        profile.preview_split_ratio = 0.61F;
         profile.preview_stage_min_height = 336.0F;
         profile.preview_stage_natural_height = 360.0F;
         profile.controls_spacing = 18.0F;

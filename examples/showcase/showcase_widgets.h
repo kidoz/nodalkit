@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/layout/box_layout.h>
@@ -14,7 +15,6 @@
 #include <nk/text/font.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/image_view.h>
-#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -65,8 +65,7 @@ inline WrappedTextLayout wrap_text_lines(std::string_view text,
     };
 
     while (words >> word) {
-        const auto candidate =
-            current_line.empty() ? word : current_line + ' ' + word;
+        const auto candidate = current_line.empty() ? word : current_line + ' ' + word;
         const auto candidate_size = measure_text(candidate);
         if (current_line.empty() || candidate_size.width <= max_width) {
             current_line = candidate;
@@ -87,7 +86,8 @@ inline WrappedTextLayout wrap_text_lines(std::string_view text,
     }
 
     const auto line_count = static_cast<float>(layout.lines.size());
-    layout.height = (layout.line_height * line_count) + (line_spacing * std::max(0.0F, line_count - 1.0F));
+    layout.height =
+        (layout.line_height * line_count) + (line_spacing * std::max(0.0F, line_count - 1.0F));
     return layout;
 }
 
@@ -549,8 +549,8 @@ public:
 protected:
     void snapshot(nk::SnapshotContext& ctx) const override {
         const auto a = allocation();
-        const auto background = armed_ ? nk::Color{0.88F, 0.90F, 0.93F, 1.0F}
-                                       : nk::Color{0.95F, 0.96F, 0.98F, 1.0F};
+        const auto background =
+            armed_ ? nk::Color{0.88F, 0.90F, 0.93F, 1.0F} : nk::Color{0.95F, 0.96F, 0.98F, 1.0F};
         const auto border = theme_color("border-color", nk::Color{0.84F, 0.87F, 0.91F, 1.0F});
         const auto text_color = theme_color("text-color", nk::Color{0.30F, 0.33F, 0.37F, 1.0F});
         const float radius = a.height * 0.5F;
@@ -798,12 +798,11 @@ public:
                 subtitle_width_limit -= tray_width + 28.0F;
             }
         }
-        const auto subtitle_layout =
-            showcase_detail::wrap_text_lines(
-                subtitle_,
-                [&](std::string_view line) { return measure_text(line, subtitle_font()); },
-                subtitle_width_limit,
-                3.0F);
+        const auto subtitle_layout = showcase_detail::wrap_text_lines(
+            subtitle_,
+            [&](std::string_view line) { return measure_text(line, subtitle_font()); },
+            subtitle_width_limit,
+            3.0F);
         const float left_width = std::max(title_size.width, subtitle_layout.width);
         const float left_height = title_size.height + 10.0F + subtitle_layout.height;
         const float content_width = left_width + (tray_width > 0.0F ? tray_width + 28.0F : 0.0F);
@@ -841,7 +840,8 @@ public:
         }
 
         float x = allocation.right() - 30.0F - pills_width;
-        const float y = allocation.y + std::max(0.0F, (allocation.height - pills_height) * 0.5F);
+        const float y =
+            allocation.y + std::max(0.0F, (allocation.height - pills_height) * 0.5F) - 1.0F;
         for (std::size_t index = 0; index < pills_.size(); ++index) {
             if (!pills_[index]) {
                 continue;
@@ -897,17 +897,15 @@ protected:
 
             if (have_bounds) {
                 nk::Rect tray = {
-                    pill_bounds.x - 10.0F,
-                    pill_bounds.y - 8.0F,
-                    pill_bounds.width + 20.0F,
-                    pill_bounds.height + 16.0F,
+                    pill_bounds.x - 8.0F,
+                    pill_bounds.y - 6.0F,
+                    pill_bounds.width + 16.0F,
+                    pill_bounds.height + 12.0F,
                 };
-                ctx.add_rounded_rect(
-                    tray, nk::Color{0.95F, 0.97F, 0.985F, 1.0F}, tray.height * 0.5F);
-                ctx.add_border(tray,
-                               theme_color("border-color", nk::Color{0.86F, 0.89F, 0.92F, 1.0F}),
-                               1.0F,
-                               tray.height * 0.5F);
+                const auto tray_fill = nk::Color{accent.r, accent.g, accent.b, 0.06F};
+                ctx.add_rounded_rect(tray, tray_fill, tray.height * 0.5F);
+                ctx.add_border(
+                    tray, nk::Color{accent.r, accent.g, accent.b, 0.14F}, 1.0F, tray.height * 0.5F);
             }
         }
 
@@ -929,12 +927,11 @@ protected:
         if (tray_width > 0.0F) {
             subtitle_width_limit -= tray_width + 28.0F;
         }
-        const auto subtitle_layout =
-            showcase_detail::wrap_text_lines(
-                subtitle_,
-                [&](std::string_view line) { return measure_text(line, subtitle_font()); },
-                subtitle_width_limit,
-                3.0F);
+        const auto subtitle_layout = showcase_detail::wrap_text_lines(
+            subtitle_,
+            [&](std::string_view line) { return measure_text(line, subtitle_font()); },
+            subtitle_width_limit,
+            3.0F);
         const float text_block_height = title_size.height + 10.0F + subtitle_layout.height;
         const float title_x = a.x + 22.0F;
         const float title_y = a.y + std::max(0.0F, (a.height - text_block_height) * 0.5F);
