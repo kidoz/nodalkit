@@ -86,10 +86,12 @@ elif host_system == 'linux'
     harfbuzz_dep = dependency('harfbuzz')
     gio_dep = dependency('gio-2.0')
 
-    # Generate XDG shell protocol code via wayland-scanner.
+    # Generate Wayland protocol code via wayland-scanner.
     wayland_scanner = find_program('wayland-scanner')
     wl_protocol_dir = wayland_protocols_dep.get_variable('pkgdatadir')
     xdg_shell_xml = wl_protocol_dir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
+    text_input_v3_xml = wl_protocol_dir / 'unstable' / 'text-input' / 'text-input-unstable-v3.xml'
+    primary_selection_v1_xml = wl_protocol_dir / 'unstable' / 'primary-selection' / 'primary-selection-unstable-v1.xml'
 
     xdg_shell_header = custom_target('xdg-shell-client-header',
         input : xdg_shell_xml,
@@ -101,6 +103,26 @@ elif host_system == 'linux'
         output : 'xdg-shell-protocol.c',
         command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
+    text_input_v3_header = custom_target('text-input-v3-client-header',
+        input : text_input_v3_xml,
+        output : 'text-input-unstable-v3-client-protocol.h',
+        command : [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+    text_input_v3_code = custom_target('text-input-v3-private-code',
+        input : text_input_v3_xml,
+        output : 'text-input-unstable-v3-protocol.c',
+        command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
+    primary_selection_v1_header = custom_target('primary-selection-v1-client-header',
+        input : primary_selection_v1_xml,
+        output : 'primary-selection-unstable-v1-client-protocol.h',
+        command : [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+    primary_selection_v1_code = custom_target('primary-selection-v1-private-code',
+        input : primary_selection_v1_xml,
+        output : 'primary-selection-unstable-v1-protocol.c',
+        command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
     nk_sources += files(
         'src/platform/linux/wayland_backend.cpp',
         'src/platform/linux/wayland_portal_helpers.cpp',
@@ -108,7 +130,14 @@ elif host_system == 'linux'
         'src/platform/linux/wayland_input.cpp',
         'src/text/linux/freetype_shaper.cpp',
     )
-    nk_sources += [xdg_shell_header, xdg_shell_code]
+    nk_sources += [
+        xdg_shell_header,
+        xdg_shell_code,
+        text_input_v3_header,
+        text_input_v3_code,
+        primary_selection_v1_header,
+        primary_selection_v1_code,
+    ]
 
     nk_deps += [wayland_client_dep, xkbcommon_dep, freetype_dep, fontconfig_dep, harfbuzz_dep, gio_dep]
 
