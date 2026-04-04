@@ -477,6 +477,37 @@ TEST_CASE("Window repeatedly presents mixed text and image content on the active
     REQUIRE_FALSE(nk::renderer_backend_name(window.renderer_backend()).empty());
 }
 
+TEST_CASE("Window frame requests are not starved by continuously ready timers", "[app][render]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Frame scheduling", .width = 240, .height = 120});
+    auto child = FixedWidget::create(120.0F, 40.0F);
+    window.set_child(child);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto first_frame_id = window.last_frame_diagnostics().frame_id;
+
+    int timer_ticks = 0;
+    nk::CallbackHandle interval{};
+    interval = app.event_loop().set_interval(
+        std::chrono::milliseconds{0},
+        [&] {
+            ++timer_ticks;
+            child->queue_redraw();
+            if (timer_ticks >= 2) {
+                app.event_loop().cancel(interval);
+            }
+        },
+        "test.frame-starvation");
+
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(timer_ticks >= 1);
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.last_frame_diagnostics().frame_id > first_frame_id);
+    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+                                         nk::FrameRequestReason::WidgetRedraw));
+}
+
 TEST_CASE("Linux Vulkan mixed-content frames upload image and text textures", "[app][render]") {
 #if defined(__linux__)
     const char* previous = std::getenv("NK_RENDERER_BACKEND");
@@ -1840,7 +1871,9 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
                         [](const nk::TraceEvent& event) { return event.name == "posted-task"; }));
         REQUIRE(std::any_of(selected_runtime_events.begin(),
                             selected_runtime_events.end(),
-                            [](const nk::TraceEvent& event) { return event.name == "idle"; }));
+                            [](const nk::TraceEvent& event) {
+                                return event.source_label == "window.request-frame";
+                            }));
     }
 
     const auto trace = window.dump_frame_trace_json();
