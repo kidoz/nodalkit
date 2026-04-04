@@ -46,6 +46,8 @@ struct Dialog::Impl {
     DialogPresentationStyle presentation_style = DialogPresentationStyle::Default;
     float minimum_panel_width = 280.0F;
     Rect panel_bounds{};
+    Rect previous_panel_bounds{};
+    bool has_previous_panel_bounds = false;
     std::vector<Rect> button_bounds;
 
     struct ButtonEntry {
@@ -211,7 +213,13 @@ void Dialog::allocate(const Rect& allocation) {
         panel_y = allocation.y + margin;
     }
 
-    impl_->panel_bounds = {panel_x, panel_y, panel_width, panel_height};
+    const Rect next_panel_bounds{panel_x, panel_y, panel_width, panel_height};
+    if (impl_->panel_bounds != next_panel_bounds && impl_->panel_bounds.width > 0.0F &&
+        impl_->panel_bounds.height > 0.0F) {
+        impl_->previous_panel_bounds = impl_->panel_bounds;
+        impl_->has_previous_panel_bounds = true;
+    }
+    impl_->panel_bounds = next_panel_bounds;
 
     impl_->button_bounds.clear();
     float inner_x = impl_->panel_bounds.x + padding;
@@ -353,12 +361,23 @@ std::vector<Rect> Dialog::damage_regions() const {
         return {allocation()};
     }
 
-    return {{
+    std::vector<Rect> regions;
+    regions.push_back({
         impl_->panel_bounds.x,
         impl_->panel_bounds.y,
         impl_->panel_bounds.width,
         impl_->panel_bounds.height + shadow_offset,
-    }};
+    });
+    if (impl_->has_previous_panel_bounds && impl_->previous_panel_bounds.width > 0.0F &&
+        impl_->previous_panel_bounds.height > 0.0F) {
+        regions.push_back({
+            impl_->previous_panel_bounds.x,
+            impl_->previous_panel_bounds.y,
+            impl_->previous_panel_bounds.width,
+            impl_->previous_panel_bounds.height + shadow_offset,
+        });
+    }
+    return regions;
 }
 
 void Dialog::snapshot(SnapshotContext& ctx) const {
@@ -435,6 +454,7 @@ void Dialog::snapshot(SnapshotContext& ctx) const {
     }
     ctx.pop_container();
     impl_->backdrop_dirty = false;
+    impl_->has_previous_panel_bounds = false;
 }
 
 } // namespace nk
