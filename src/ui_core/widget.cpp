@@ -645,6 +645,10 @@ bool Widget::handle_key_event(const KeyEvent& /*event*/) {
     return false;
 }
 
+bool Widget::handle_text_input_event(const TextInputEvent& /*event*/) {
+    return false;
+}
+
 bool Widget::hit_test(Point point) const {
     return allocation().contains(point);
 }

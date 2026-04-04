@@ -8,6 +8,7 @@
 
 #include <nk/actions/shortcut.h>
 #include <nk/platform/key_codes.h>
+#include <string>
 
 namespace nk {
 
@@ -30,6 +31,28 @@ struct MouseEvent {
     float scroll_dy = 0;            ///< Vertical scroll delta (Scroll only).
     bool precise_scrolling = false; ///< Pixel-like scroll deltas (e.g. trackpad) when true.
     Modifiers modifiers = Modifiers::None;
+    int click_count = 1; ///< 1 for single-click, 2 for double-click, etc.
+};
+
+/// Platform text-input event.
+///
+/// This is distinct from key events: key events describe physical key presses,
+/// while text-input events describe committed or in-progress text produced by
+/// the platform text system (including IME/preedit composition).
+struct TextInputEvent {
+    enum class Type : uint8_t {
+        Commit,
+        Preedit,
+        ClearPreedit,
+        DeleteSurrounding,
+    };
+
+    Type type{};
+    std::string text;
+    std::size_t selection_start = 0;      ///< Relative selection start within `text` for preedit.
+    std::size_t selection_end = 0;        ///< Relative selection end within `text` for preedit.
+    std::size_t delete_before_length = 0; ///< Bytes before the cursor to remove.
+    std::size_t delete_after_length = 0;  ///< Bytes after the cursor to remove.
 };
 
 /// Keyboard event.

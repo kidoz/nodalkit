@@ -30,6 +30,7 @@ struct FontDescriptor;
 class LayoutManager;
 struct KeyEvent;
 struct MouseEvent;
+struct TextInputEvent;
 class Window;
 
 /// Child layout policy for each axis.
@@ -182,6 +183,10 @@ public:
     /// Handle a key event targeted at this widget.
     /// Returns true if the event was consumed.
     virtual bool handle_key_event(const KeyEvent& event);
+
+    /// Handle a platform text-input event targeted at this widget.
+    /// Returns true if the event was consumed.
+    virtual bool handle_text_input_event(const TextInputEvent& event);
 
     /// Whether the widget wants to receive pointer events at the given point.
     /// Widgets with transient popup content may override this to extend the
