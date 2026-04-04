@@ -866,6 +866,96 @@ TEST_CASE("ScrollArea clamps offsets and consumes bubbled scroll input", "[app][
     REQUIRE(reported_v == Catch::Approx(220.0F));
 }
 
+TEST_CASE("ScrollArea uses precise scroll deltas without wheel-step amplification",
+          "[app][scroll]") {
+    nk::Window window({.title = "Precise scroll test", .width = 120, .height = 80});
+    auto scroll_area = nk::ScrollArea::create();
+    auto content = FixedWidget::create(200.0F, 300.0F);
+    scroll_area->set_content(content);
+    window.set_child(scroll_area);
+
+    scroll_area->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Scroll,
+        .x = 40.0F,
+        .y = 40.0F,
+        .scroll_dx = 0.0F,
+        .scroll_dy = -12.0F,
+        .precise_scrolling = true,
+    });
+
+    REQUIRE(scroll_area->v_offset() == Catch::Approx(12.0F));
+}
+
+TEST_CASE("ScrollArea supports dragging the vertical scrollbar thumb", "[app][scroll]") {
+    nk::Window window({.title = "Scroll drag test", .width = 120, .height = 80});
+    auto scroll_area = nk::ScrollArea::create();
+    scroll_area->set_h_scroll_policy(nk::ScrollPolicy::Never);
+    scroll_area->set_v_scroll_policy(nk::ScrollPolicy::Always);
+    auto content = FixedWidget::create(120.0F, 320.0F);
+    scroll_area->set_content(content);
+    window.set_child(scroll_area);
+
+    scroll_area->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+
+    const float track_x = 108.0F;
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Press,
+        .x = track_x,
+        .y = 20.0F,
+        .button = 1,
+    });
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Move,
+        .x = track_x,
+        .y = 56.0F,
+        .button = 1,
+    });
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Release,
+        .x = track_x,
+        .y = 56.0F,
+        .button = 1,
+    });
+
+    REQUIRE(scroll_area->v_offset() > 0.0F);
+}
+
+TEST_CASE("ScrollArea positions content relative to its viewport origin", "[app][scroll]") {
+    auto scroll_area = nk::ScrollArea::create();
+    auto content = FixedWidget::create(200.0F, 300.0F);
+    scroll_area->set_content(content);
+
+    scroll_area->allocate({24.0F, 36.0F, 120.0F, 80.0F});
+    REQUIRE(content->allocation() == nk::Rect{24.0F, 36.0F, 200.0F, 300.0F});
+
+    scroll_area->scroll_to(18.0F, 40.0F);
+    scroll_area->allocate({24.0F, 36.0F, 120.0F, 80.0F});
+    REQUIRE(content->allocation() == nk::Rect{6.0F, -4.0F, 200.0F, 300.0F});
+}
+
+TEST_CASE("ScrollArea queues layout when the scroll offset changes", "[app][scroll]") {
+    nk::Window window({.title = "Scroll layout test", .width = 120, .height = 80});
+    auto scroll_area = nk::ScrollArea::create();
+    auto content = FixedWidget::create(200.0F, 300.0F);
+    scroll_area->set_content(content);
+    window.set_child(scroll_area);
+    scroll_area->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Scroll,
+        .x = 40.0F,
+        .y = 40.0F,
+        .scroll_dx = 0.0F,
+        .scroll_dy = -1.0F,
+    });
+
+    REQUIRE(scroll_area->v_offset() > 0.0F);
+    scroll_area->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+    REQUIRE(content->allocation().y < 0.0F);
+}
+
 TEST_CASE("MenuBar opens popups and emits actions on click", "[app][menu]") {
     auto menu_bar = nk::MenuBar::create();
     menu_bar->add_menu({
