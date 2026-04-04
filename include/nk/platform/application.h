@@ -122,6 +122,17 @@ public:
     /// native clipboard is available.
     void set_clipboard_text(std::string text);
 
+    /// Whether text primary selection is bridged to the active platform backend.
+    [[nodiscard]] bool supports_primary_selection_text() const;
+
+    /// Read primary-selection text, falling back to a process-local buffer when
+    /// no native primary selection is available.
+    [[nodiscard]] std::string primary_selection_text() const;
+
+    /// Write primary-selection text, falling back to a process-local buffer
+    /// when no native primary selection is available.
+    void set_primary_selection_text(std::string text);
+
     /// Whether the active backend supports a native application menu.
     [[nodiscard]] bool supports_native_app_menu() const;
 

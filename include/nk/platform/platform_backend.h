@@ -129,6 +129,15 @@ public:
     /// Write UTF-8 text to the platform clipboard.
     virtual void set_clipboard_text(std::string_view text) { (void)text; }
 
+    /// Whether the backend implements a primary-selection text buffer.
+    [[nodiscard]] virtual bool supports_primary_selection_text() const { return false; }
+
+    /// Read UTF-8 text from the platform primary selection buffer.
+    [[nodiscard]] virtual std::string primary_selection_text() const { return {}; }
+
+    /// Write UTF-8 text to the platform primary selection buffer.
+    virtual void set_primary_selection_text(std::string_view text) { (void)text; }
+
     /// Query current visual/system preferences used for theme selection.
     [[nodiscard]] virtual SystemPreferences system_preferences() const = 0;
 

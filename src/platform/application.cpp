@@ -19,6 +19,7 @@ struct Application::Impl {
     ThemeSelection theme_selection;
     ResolvedThemeSelection resolved_theme_selection;
     std::string clipboard_text;
+    std::string primary_selection_text;
     std::vector<NativeMenu> native_app_menus;
     Signal<const SystemPreferences&> system_preferences_changed;
     Signal<const ThemeSelection&> theme_selection_changed;
@@ -262,6 +263,24 @@ void Application::set_clipboard_text(std::string text) {
     impl_->clipboard_text = std::move(text);
     if (impl_->backend != nullptr && impl_->backend->supports_clipboard_text()) {
         impl_->backend->set_clipboard_text(impl_->clipboard_text);
+    }
+}
+
+bool Application::supports_primary_selection_text() const {
+    return impl_->backend != nullptr && impl_->backend->supports_primary_selection_text();
+}
+
+std::string Application::primary_selection_text() const {
+    if (impl_->backend != nullptr && impl_->backend->supports_primary_selection_text()) {
+        return impl_->backend->primary_selection_text();
+    }
+    return impl_->primary_selection_text;
+}
+
+void Application::set_primary_selection_text(std::string text) {
+    impl_->primary_selection_text = std::move(text);
+    if (impl_->backend != nullptr && impl_->backend->supports_primary_selection_text()) {
+        impl_->backend->set_primary_selection_text(impl_->primary_selection_text);
     }
 }
 
