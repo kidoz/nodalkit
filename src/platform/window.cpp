@@ -2167,153 +2167,156 @@ void Window::request_frame(FrameRequestReason reason) {
         return;
     }
 
-    (void)app->event_loop().add_idle([this] {
-        impl_->frame_pending = false;
+    app->event_loop().post(
+        [this] {
+            impl_->frame_pending = false;
 
-        if (!impl_->visible || !impl_->child) {
-            impl_->pending_frame_reasons.clear();
-            return;
-        }
-
-        using Clock = std::chrono::steady_clock;
-        auto elapsed_ms = [](Clock::time_point start, Clock::time_point end) {
-            return std::chrono::duration<double, std::milli>(end - start).count();
-        };
-
-        const auto sz = size();
-        const float scale_factor =
-            impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
-        const auto content_area = compute_debug_content_area(
-            sz, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
-        FrameDiagnostics frame;
-        frame.frame_id = impl_->next_frame_id++;
-        frame.logical_viewport = sz;
-        frame.scale_factor = scale_factor;
-        frame.had_layout = impl_->needs_layout;
-        const auto frame_start = Clock::now();
-        frame.requested_at_ms =
-            elapsed_ms(impl_->diagnostics_origin, impl_->pending_frame_requested_at);
-        frame.started_at_ms = elapsed_ms(impl_->diagnostics_origin, frame_start);
-        frame.queue_delay_ms = elapsed_ms(impl_->pending_frame_requested_at, frame_start);
-        frame.redraw_request_count = impl_->redraw_request_count;
-        frame.layout_request_count = impl_->layout_request_count;
-        frame.dirty_widget_count = impl_->dirty_widgets.size();
-        frame.request_reasons = impl_->pending_frame_reasons;
-        frame.widget_count = count_widgets_recursive(impl_->child.get());
-        for (const auto& overlay : impl_->overlays) {
-            if (overlay.widget != nullptr) {
-                frame.widget_count += count_widgets_recursive(overlay.widget.get());
+            if (!impl_->visible || !impl_->child) {
+                impl_->pending_frame_reasons.clear();
+                return;
             }
-        }
 
-        impl_->child->reset_debug_hotspot_counters_recursive();
-        for (auto& overlay : impl_->overlays) {
-            if (overlay.widget != nullptr) {
-                overlay.widget->reset_debug_hotspot_counters_recursive();
-            }
-        }
+            using Clock = std::chrono::steady_clock;
+            auto elapsed_ms = [](Clock::time_point start, Clock::time_point end) {
+                return std::chrono::duration<double, std::milli>(end - start).count();
+            };
 
-        // 1. Layout pass.
-        if (impl_->needs_layout) {
-            const auto layout_start = Clock::now();
-            perform_window_layout(content_area);
-            frame.layout_ms = elapsed_ms(layout_start, Clock::now());
-        }
-
-        // 2. Snapshot pass.
-        const auto snapshot_start = Clock::now();
-        auto root_node = build_window_debug_render_tree(sz, content_area);
-        frame.snapshot_ms = elapsed_ms(snapshot_start, Clock::now());
-        frame.widget_hotspot_totals = collect_widget_hotspot_totals(impl_->child.get());
-        for (const auto& overlay : impl_->overlays) {
-            if (overlay.widget != nullptr) {
-                accumulate_widget_hotspot_counters(
-                    frame.widget_hotspot_totals,
-                    collect_widget_hotspot_totals(overlay.widget.get()));
-            }
-        }
-        frame.render_node_count = count_render_nodes_recursive(root_node.get());
-        if (root_node) {
-            frame.render_snapshot = build_render_snapshot(*root_node);
-            frame.render_snapshot_node_count = count_render_snapshot_nodes(frame.render_snapshot);
-        }
-
-        auto damage_regions =
-            collect_frame_damage_regions(impl_->dirty_widgets, impl_->child, sz, frame.had_layout);
-        const Rect viewport_rect{0.0F, 0.0F, sz.width, sz.height};
-        append_preserved_damage_regions(
-            damage_regions, impl_->preserved_overlay_damage_regions, viewport_rect);
-        if (frame.had_layout) {
+            const auto sz = size();
+            const float scale_factor =
+                impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
+            const auto content_area = compute_debug_content_area(
+                sz, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
+            FrameDiagnostics frame;
+            frame.frame_id = impl_->next_frame_id++;
+            frame.logical_viewport = sz;
+            frame.scale_factor = scale_factor;
+            frame.had_layout = impl_->needs_layout;
+            const auto frame_start = Clock::now();
+            frame.requested_at_ms =
+                elapsed_ms(impl_->diagnostics_origin, impl_->pending_frame_requested_at);
+            frame.started_at_ms = elapsed_ms(impl_->diagnostics_origin, frame_start);
+            frame.queue_delay_ms = elapsed_ms(impl_->pending_frame_requested_at, frame_start);
+            frame.redraw_request_count = impl_->redraw_request_count;
+            frame.layout_request_count = impl_->layout_request_count;
+            frame.dirty_widget_count = impl_->dirty_widgets.size();
+            frame.request_reasons = impl_->pending_frame_reasons;
+            frame.widget_count = count_widgets_recursive(impl_->child.get());
             for (const auto& overlay : impl_->overlays) {
                 if (overlay.widget != nullptr) {
-                    collect_layout_damage_regions_recursive(
-                        overlay.widget.get(), viewport_rect, damage_regions);
+                    frame.widget_count += count_widgets_recursive(overlay.widget.get());
                 }
             }
-        }
 
-        // 3. Render pass.
-        const auto render_start = Clock::now();
-        if (impl_->renderer == nullptr) {
-            impl_->renderer = create_renderer(RendererBackend::Software);
-            if (impl_->renderer != nullptr && impl_->text_shaper) {
-                impl_->renderer->set_text_shaper(impl_->text_shaper.get());
+            impl_->child->reset_debug_hotspot_counters_recursive();
+            for (auto& overlay : impl_->overlays) {
+                if (overlay.widget != nullptr) {
+                    overlay.widget->reset_debug_hotspot_counters_recursive();
+                }
             }
-        }
-        if (impl_->renderer == nullptr) {
-            impl_->pending_frame_reasons.clear();
-            return;
-        }
-        impl_->renderer->begin_frame(sz, scale_factor);
-        impl_->renderer->set_damage_regions(damage_regions);
-        if (root_node) {
-            impl_->renderer->render(*root_node);
-        }
-        impl_->renderer->end_frame();
-        frame.render_hotspot_counters = impl_->renderer->last_hotspot_counters();
-        frame.render_ms = elapsed_ms(render_start, Clock::now());
 
-        // 4. Present pass.
-        const auto present_start = Clock::now();
-        if (impl_->surface && impl_->renderer != nullptr) {
-            impl_->renderer->present(*impl_->surface);
+            // 1. Layout pass.
+            if (impl_->needs_layout) {
+                const auto layout_start = Clock::now();
+                perform_window_layout(content_area);
+                frame.layout_ms = elapsed_ms(layout_start, Clock::now());
+            }
+
+            // 2. Snapshot pass.
+            const auto snapshot_start = Clock::now();
+            auto root_node = build_window_debug_render_tree(sz, content_area);
+            frame.snapshot_ms = elapsed_ms(snapshot_start, Clock::now());
+            frame.widget_hotspot_totals = collect_widget_hotspot_totals(impl_->child.get());
+            for (const auto& overlay : impl_->overlays) {
+                if (overlay.widget != nullptr) {
+                    accumulate_widget_hotspot_counters(
+                        frame.widget_hotspot_totals,
+                        collect_widget_hotspot_totals(overlay.widget.get()));
+                }
+            }
+            frame.render_node_count = count_render_nodes_recursive(root_node.get());
+            if (root_node) {
+                frame.render_snapshot = build_render_snapshot(*root_node);
+                frame.render_snapshot_node_count =
+                    count_render_snapshot_nodes(frame.render_snapshot);
+            }
+
+            auto damage_regions = collect_frame_damage_regions(
+                impl_->dirty_widgets, impl_->child, sz, frame.had_layout);
+            const Rect viewport_rect{0.0F, 0.0F, sz.width, sz.height};
+            append_preserved_damage_regions(
+                damage_regions, impl_->preserved_overlay_damage_regions, viewport_rect);
+            if (frame.had_layout) {
+                for (const auto& overlay : impl_->overlays) {
+                    if (overlay.widget != nullptr) {
+                        collect_layout_damage_regions_recursive(
+                            overlay.widget.get(), viewport_rect, damage_regions);
+                    }
+                }
+            }
+
+            // 3. Render pass.
+            const auto render_start = Clock::now();
+            if (impl_->renderer == nullptr) {
+                impl_->renderer = create_renderer(RendererBackend::Software);
+                if (impl_->renderer != nullptr && impl_->text_shaper) {
+                    impl_->renderer->set_text_shaper(impl_->text_shaper.get());
+                }
+            }
+            if (impl_->renderer == nullptr) {
+                impl_->pending_frame_reasons.clear();
+                return;
+            }
+            impl_->renderer->begin_frame(sz, scale_factor);
+            impl_->renderer->set_damage_regions(damage_regions);
+            if (root_node) {
+                impl_->renderer->render(*root_node);
+            }
+            impl_->renderer->end_frame();
             frame.render_hotspot_counters = impl_->renderer->last_hotspot_counters();
-        }
-        frame.present_ms = elapsed_ms(present_start, Clock::now());
-        frame.total_ms = elapsed_ms(frame_start, Clock::now());
-        frame.performance_marker = classify_frame_time(frame.total_ms);
-        frame.budget_overrun_ms = std::max(0.0, frame.total_ms - frame_budget_ms());
-        impl_->last_frame_diagnostics = frame;
-        const uint64_t previous_selected_frame_id = impl_->debug_selected_frame_id;
-        const uint64_t previous_latest_frame_id =
-            impl_->frame_history.empty() ? 0 : impl_->frame_history.back().frame_id;
-        impl_->frame_history.push_back(frame);
-        if (impl_->frame_history.size() > kDebugFrameHistoryLimit) {
-            impl_->frame_history.erase(impl_->frame_history.begin());
-        }
-        const auto selected_it =
-            std::find_if(impl_->frame_history.begin(),
-                         impl_->frame_history.end(),
-                         [&](const FrameDiagnostics& item) {
-                             return item.frame_id == previous_selected_frame_id;
-                         });
-        if (previous_selected_frame_id == 0 ||
-            previous_selected_frame_id == previous_latest_frame_id ||
-            selected_it == impl_->frame_history.end()) {
-            impl_->debug_selected_frame_id = frame.frame_id;
-        }
-        sync_debug_selected_render_path();
-        impl_->pending_frame_reasons.clear();
-        for (auto* widget : impl_->dirty_widgets) {
-            if (widget != nullptr) {
-                widget->clear_preserved_damage_regions();
+            frame.render_ms = elapsed_ms(render_start, Clock::now());
+
+            // 4. Present pass.
+            const auto present_start = Clock::now();
+            if (impl_->surface && impl_->renderer != nullptr) {
+                impl_->renderer->present(*impl_->surface);
+                frame.render_hotspot_counters = impl_->renderer->last_hotspot_counters();
             }
-        }
-        impl_->preserved_overlay_damage_regions.clear();
-        impl_->dirty_widgets.clear();
-        impl_->redraw_request_count = 0;
-        impl_->layout_request_count = 0;
-    });
+            frame.present_ms = elapsed_ms(present_start, Clock::now());
+            frame.total_ms = elapsed_ms(frame_start, Clock::now());
+            frame.performance_marker = classify_frame_time(frame.total_ms);
+            frame.budget_overrun_ms = std::max(0.0, frame.total_ms - frame_budget_ms());
+            impl_->last_frame_diagnostics = frame;
+            const uint64_t previous_selected_frame_id = impl_->debug_selected_frame_id;
+            const uint64_t previous_latest_frame_id =
+                impl_->frame_history.empty() ? 0 : impl_->frame_history.back().frame_id;
+            impl_->frame_history.push_back(frame);
+            if (impl_->frame_history.size() > kDebugFrameHistoryLimit) {
+                impl_->frame_history.erase(impl_->frame_history.begin());
+            }
+            const auto selected_it =
+                std::find_if(impl_->frame_history.begin(),
+                             impl_->frame_history.end(),
+                             [&](const FrameDiagnostics& item) {
+                                 return item.frame_id == previous_selected_frame_id;
+                             });
+            if (previous_selected_frame_id == 0 ||
+                previous_selected_frame_id == previous_latest_frame_id ||
+                selected_it == impl_->frame_history.end()) {
+                impl_->debug_selected_frame_id = frame.frame_id;
+            }
+            sync_debug_selected_render_path();
+            impl_->pending_frame_reasons.clear();
+            for (auto* widget : impl_->dirty_widgets) {
+                if (widget != nullptr) {
+                    widget->clear_preserved_damage_regions();
+                }
+            }
+            impl_->preserved_overlay_damage_regions.clear();
+            impl_->dirty_widgets.clear();
+            impl_->redraw_request_count = 0;
+            impl_->layout_request_count = 0;
+        },
+        "window.request-frame");
 }
 
 void Window::invalidate_layout() {
