@@ -685,6 +685,7 @@ static id accessibility_focused_element(NSArray<id>* elements);
     me.y = static_cast<float>(loc.y);
     me.scroll_dx = static_cast<float>(event.scrollingDeltaX);
     me.scroll_dy = static_cast<float>(event.scrollingDeltaY);
+    me.precise_scrolling = event.hasPreciseScrollingDeltas;
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
 }

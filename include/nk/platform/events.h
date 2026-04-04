@@ -23,11 +23,12 @@ struct MouseEvent {
     };
 
     Type type{};
-    float x = 0;          ///< Position relative to the window.
+    float x = 0; ///< Position relative to the window.
     float y = 0;
-    int button = 0;        ///< 1=left, 2=right, 3=middle (Press/Release only).
-    float scroll_dx = 0;   ///< Horizontal scroll delta (Scroll only).
-    float scroll_dy = 0;   ///< Vertical scroll delta (Scroll only).
+    int button = 0;                 ///< 1=left, 2=right, 3=middle (Press/Release only).
+    float scroll_dx = 0;            ///< Horizontal scroll delta (Scroll only).
+    float scroll_dy = 0;            ///< Vertical scroll delta (Scroll only).
+    bool precise_scrolling = false; ///< Pixel-like scroll deltas (e.g. trackpad) when true.
     Modifiers modifiers = Modifiers::None;
 };
 
@@ -55,7 +56,7 @@ struct WindowEvent {
     };
 
     Type type{};
-    int width = 0;   ///< New size (Resize only).
+    int width = 0; ///< New size (Resize only).
     int height = 0;
 };
 
