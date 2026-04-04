@@ -20,6 +20,7 @@
 #include <nk/render/snapshot_context.h>
 #include <nk/text/text_shaper.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/text_field.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -2479,6 +2480,41 @@ bool Window::is_key_pressed(KeyCode key) const {
     return impl_->key_state[index];
 }
 
+std::optional<Rect> Window::current_text_input_caret_rect() const {
+    auto* text_field = dynamic_cast<TextField*>(impl_->focused_widget);
+    if (text_field == nullptr) {
+        return std::nullopt;
+    }
+    return text_field->text_input_caret_rect();
+}
+
+std::optional<WindowTextInputState> Window::current_text_input_state() const {
+    auto* text_field = dynamic_cast<TextField*>(impl_->focused_widget);
+    if (text_field == nullptr || !text_field->is_editable()) {
+        return std::nullopt;
+    }
+
+    const auto caret_rect = text_field->text_input_caret_rect();
+    if (!caret_rect.has_value()) {
+        return std::nullopt;
+    }
+
+    WindowTextInputState state{};
+    state.text = std::string(text_field->text());
+    state.cursor = text_field->cursor_position();
+    if (text_field->has_selection()) {
+        if (state.cursor == text_field->selection_start()) {
+            state.anchor = text_field->selection_end();
+        } else {
+            state.anchor = text_field->selection_start();
+        }
+    } else {
+        state.anchor = state.cursor;
+    }
+    state.caret_rect = *caret_rect;
+    return state;
+}
+
 void Window::set_debug_overlay_flags(DebugOverlayFlags flags) {
     if (impl_->debug_overlay_flags == flags) {
         return;
@@ -3476,6 +3512,35 @@ void Window::dispatch_key_event(const KeyEvent& event) {
 
     if (impl_->focused_widget != nullptr) {
         (void)dispatch_key_bubble(impl_->focused_widget);
+    }
+}
+
+void Window::dispatch_text_input_event(const TextInputEvent& event) {
+    auto dispatch_text_input_bubble = [&event](Widget* target) {
+        for (auto* current = target; current != nullptr; current = current->parent()) {
+            if (current->handle_text_input_event(event)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    for (auto it = impl_->overlays.rbegin(); it != impl_->overlays.rend(); ++it) {
+        if (!it->modal || it->widget == nullptr || !it->widget->is_visible()) {
+            continue;
+        }
+
+        if (impl_->focused_widget != nullptr &&
+            is_descendant_of(impl_->focused_widget, it->widget.get())) {
+            (void)dispatch_text_input_bubble(impl_->focused_widget);
+        } else {
+            (void)dispatch_text_input_bubble(it->widget.get());
+        }
+        return;
+    }
+
+    if (impl_->focused_widget != nullptr) {
+        (void)dispatch_text_input_bubble(impl_->focused_widget);
     }
 }
 

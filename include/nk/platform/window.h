@@ -10,6 +10,7 @@
 #include <nk/platform/key_codes.h>
 #include <nk/render/renderer.h>
 #include <nk/ui_core/cursor_shape.h>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,6 +24,7 @@ class Dialog;
 class RenderNode;
 struct MouseEvent;
 struct KeyEvent;
+struct TextInputEvent;
 struct WindowEvent;
 
 /// Configuration for window creation.
@@ -32,6 +34,14 @@ struct WindowConfig {
     int height = 600;
     bool resizable = true;
     bool decorated = true;
+};
+
+/// Focused text-input state exposed to platform backends for IME integration.
+struct WindowTextInputState {
+    std::string text;
+    std::size_t cursor = 0;
+    std::size_t anchor = 0;
+    Rect caret_rect{};
 };
 
 /// A top-level application window. Owns a root widget and manages
@@ -84,6 +94,7 @@ public:
     /// Deliver a platform event to this window.
     void dispatch_mouse_event(const MouseEvent& event);
     void dispatch_key_event(const KeyEvent& event);
+    void dispatch_text_input_event(const TextInputEvent& event);
     void dispatch_window_event(const WindowEvent& event);
 
     /// Access the native surface (nullptr until present() is called).
@@ -97,6 +108,12 @@ public:
 
     /// Whether the given key is currently pressed according to window input state.
     [[nodiscard]] bool is_key_pressed(KeyCode key) const;
+
+    /// Caret rectangle for the currently focused text-input widget, when one exists.
+    [[nodiscard]] std::optional<Rect> current_text_input_caret_rect() const;
+
+    /// Full text-input state for the currently focused editable text widget, when one exists.
+    [[nodiscard]] std::optional<WindowTextInputState> current_text_input_state() const;
 
     /// Configure built-in debug overlays for layout, dirtiness, and frame HUD output.
     void set_debug_overlay_flags(DebugOverlayFlags flags);
