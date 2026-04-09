@@ -17,6 +17,16 @@ enum class ShowcasePlatformFlavor {
     Generic,
 };
 
+enum class ShowcasePreviewLayoutMode {
+    Split,
+    Stacked,
+};
+
+enum class ShowcaseActionsLayoutMode {
+    Expanded,
+    Compact,
+};
+
 struct ShowcaseProfile {
     ShowcasePlatformFlavor flavor = ShowcasePlatformFlavor::Generic;
     nk::ThemeFamily theme_family = nk::ThemeFamily::LinuxGnome;
@@ -40,12 +50,50 @@ struct ShowcaseProfile {
         "Status-first runtime hooks for shared state and modal flow.";
     std::string platform_pill_text = "Generic";
     std::string ready_segment = "Ready";
+    std::string palette_label = "Accent preset";
+    std::string palette_value_prefix = "Selected: ";
+    ShowcasePreviewLayoutMode preview_layout_mode = ShowcasePreviewLayoutMode::Split;
+    ShowcaseActionsLayoutMode actions_layout_mode = ShowcaseActionsLayoutMode::Expanded;
+    bool show_hero_close_button = false;
     float window_width = 1180.0F;
     float window_height = 760.0F;
     float main_split_ratio = 0.44F;
     float preview_split_ratio = 0.74F;
+    float main_column_spacing = 24.0F;
+    float preview_section_spacing = 16.0F;
+    float actions_row_spacing = 18.0F;
+    float page_padding_top = 16.0F;
+    float page_padding_right = 16.0F;
+    float page_padding_bottom = 16.0F;
+    float page_padding_left = 16.0F;
+    float scrollbar_safe_gutter = 0.0F;
+    float page_bottom_spacer_height = 34.0F;
+    float hero_min_height = 120.0F;
+    float hero_natural_height = 132.0F;
+    float command_stage_min_height = 92.0F;
+    float command_stage_natural_height = 96.0F;
+    float command_stage_padding = 14.0F;
+    float counter_stage_min_height = 122.0F;
+    float counter_stage_natural_height = 126.0F;
+    float counter_stage_padding = 14.0F;
+    float palette_stage_min_height = 96.0F;
+    float palette_stage_natural_height = 100.0F;
+    float palette_stage_padding = 14.0F;
+    float list_stage_min_height = 204.0F;
+    float list_stage_natural_height = 208.0F;
+    float list_stage_padding = 4.0F;
     float preview_stage_min_height = 324.0F;
     float preview_stage_natural_height = 340.0F;
+    float preview_stage_padding = 4.0F;
+    float runtime_status_min_height = 108.0F;
+    float runtime_status_natural_height = 118.0F;
+    float runtime_status_padding = 16.0F;
+    float runtime_property_min_height = 124.0F;
+    float runtime_property_natural_height = 132.0F;
+    float runtime_property_padding = 16.0F;
+    float runtime_dialog_min_height = 124.0F;
+    float runtime_dialog_natural_height = 132.0F;
+    float runtime_dialog_padding = 16.0F;
     float controls_spacing = 16.0F;
     float section_spacing = 18.0F;
 };

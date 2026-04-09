@@ -66,8 +66,7 @@ int run_showcase(int argc, char** argv) {
     auto hero_items_pill = StatusPill::create("10 items");
     auto hero_preview_pill = StatusPill::create(profile.platform_pill_text);
     std::shared_ptr<nk::Widget> hero_close_button;
-    if (profile.flavor == ShowcasePlatformFlavor::LinuxWayland ||
-        profile.flavor == ShowcasePlatformFlavor::LinuxX11) {
+    if (profile.show_hero_close_button) {
         auto close_button = HeaderActionButton::create("×");
         (void)close_button->on_clicked().connect([&] { app.quit(0); });
         hero_close_button = close_button;
@@ -100,13 +99,12 @@ int run_showcase(int argc, char** argv) {
         hero_counter_pill->set_text("Counter 0");
     });
 
-    auto primary_counter_actions = Box::horizontal(10.0F);
+    auto primary_counter_actions = Box::horizontal(8.0F);
     primary_counter_actions->append(increment_btn);
     primary_counter_actions->append(decrement_btn);
+    primary_counter_actions->append(Spacer::create());
+    primary_counter_actions->append(reset_btn);
     primary_counter_actions->set_horizontal_size_policy(nk::SizePolicy::Preferred);
-    auto secondary_counter_actions = Box::horizontal(0.0F);
-    secondary_counter_actions->set_horizontal_size_policy(nk::SizePolicy::Preferred);
-    secondary_counter_actions->append(reset_btn);
 
     auto input_title = SectionTitle::create(profile.input_title);
     auto input_subtitle = SecondaryText::create(profile.input_subtitle);
@@ -116,12 +114,12 @@ int run_showcase(int argc, char** argv) {
     text_field->set_placeholder("Type a short command...");
     auto echo_result = SecondaryText::create("Echo will appear here.");
     auto counter_caption = FieldLabel::create("Counter");
-    auto combo_label = FieldLabel::create("Accent preset");
+    auto combo_label = FieldLabel::create(profile.palette_label);
     auto combo = nk::ComboBox::create();
     combo->set_horizontal_size_policy(nk::SizePolicy::Expanding);
     combo->set_items({"Red", "Green", "Blue", "Yellow", "Cyan", "Magenta"});
     combo->set_selected_index(0);
-    auto combo_result = SecondaryText::create("Selected: Red");
+    auto combo_result = SecondaryText::create(profile.palette_value_prefix + "Red");
 
     (void)text_field->on_text_changed().connect([&](std::string_view text) {
         echo_result->set_text(text.empty() ? "Echo will appear here."
@@ -135,10 +133,10 @@ int run_showcase(int argc, char** argv) {
 
     (void)combo->on_selection_changed().connect([&](int index) {
         if (index >= 0) {
-            combo_result->set_text("Selected: " +
+            combo_result->set_text(profile.palette_value_prefix +
                                    std::string(combo->item(static_cast<std::size_t>(index))));
         } else {
-            combo_result->set_text("Selected: (none)");
+            combo_result->set_text(profile.palette_value_prefix + "(none)");
         }
     });
 
@@ -151,7 +149,6 @@ int run_showcase(int argc, char** argv) {
     counter_group->append(counter_caption);
     counter_group->append(counter_label);
     counter_group->append(primary_counter_actions);
-    counter_group->append(secondary_counter_actions);
 
     auto accent_group = Box::vertical(8.0F);
     accent_group->append(combo_label);
@@ -161,9 +158,18 @@ int run_showcase(int argc, char** argv) {
     auto controls_content = Box::vertical(profile.controls_spacing);
     controls_content->append(input_title);
     controls_content->append(input_subtitle);
-    controls_content->append(InsetStage::create(command_group, 92.0F, 96.0F, 14.0F));
-    controls_content->append(InsetStage::create(counter_group, 122.0F, 126.0F, 14.0F));
-    controls_content->append(InsetStage::create(accent_group, 96.0F, 100.0F, 14.0F));
+    controls_content->append(InsetStage::create(command_group,
+                                                profile.command_stage_min_height,
+                                                profile.command_stage_natural_height,
+                                                profile.command_stage_padding));
+    controls_content->append(InsetStage::create(counter_group,
+                                                profile.counter_stage_min_height,
+                                                profile.counter_stage_natural_height,
+                                                profile.counter_stage_padding));
+    controls_content->append(InsetStage::create(accent_group,
+                                                profile.palette_stage_min_height,
+                                                profile.palette_stage_natural_height,
+                                                profile.palette_stage_padding));
     auto controls_card = SurfacePanel::card(controls_content);
 
     auto list_title = SectionTitle::create(profile.list_title);
@@ -186,7 +192,10 @@ int run_showcase(int argc, char** argv) {
     list_view->set_model(model);
     list_view->set_selection_model(selection);
     list_view->set_row_height(30.0F);
-    auto list_stage = InsetStage::create(list_view, 204.0F, 208.0F, 4.0F);
+    auto list_stage = InsetStage::create(list_view,
+                                         profile.list_stage_min_height,
+                                         profile.list_stage_natural_height,
+                                         profile.list_stage_padding);
     auto list_status = StatusPill::create("10 items");
     auto add_item_btn = nk::Button::create("Add Item");
     add_item_btn->add_style_class("suggested");
@@ -214,13 +223,13 @@ int run_showcase(int argc, char** argv) {
     auto preview_title = SectionTitle::create(profile.preview_title);
     auto preview_subtitle = SecondaryText::create(profile.preview_subtitle);
     auto image_label = FieldLabel::create("Live image");
-    auto image_meta = ValueText::create("128 x 96 source");
+    auto image_meta = SecondaryText::create("128 x 96 source");
     auto image_detail = SecondaryText::create("Animated sample with explicit display scaling.");
     auto preview_canvas = PreviewCanvas::create();
     auto preview_stage = InsetStage::create(preview_canvas,
                                             profile.preview_stage_min_height,
                                             profile.preview_stage_natural_height,
-                                            4.0F);
+                                            profile.preview_stage_padding);
     auto scale_label = FieldLabel::create("Scale mode");
     auto scale_combo = nk::ComboBox::create();
     scale_combo->set_horizontal_size_policy(nk::SizePolicy::Expanding);
@@ -242,26 +251,48 @@ int run_showcase(int argc, char** argv) {
                                                : profile.platform_pill_text + " Bilinear");
     });
 
-    auto preview_meta = Box::vertical(6.0F);
-    preview_meta->append(image_label);
-    preview_meta->append(image_meta);
-    preview_meta->append(image_detail);
+    std::shared_ptr<nk::Widget> preview_display;
+    if (profile.preview_layout_mode == ShowcasePreviewLayoutMode::Stacked) {
+        auto preview_meta_row = Box::horizontal(12.0F);
+        preview_meta_row->append(image_label);
+        preview_meta_row->append(image_meta);
+        preview_meta_row->append(Spacer::create());
 
-    auto preview_controls = Box::vertical(8.0F);
-    preview_controls->append(scale_label);
-    preview_controls->append(scale_combo);
-    preview_controls->append(scale_state);
+        auto preview_controls = Box::vertical(6.0F);
+        preview_controls->append(scale_label);
+        preview_controls->append(scale_combo);
+        preview_controls->append(scale_state);
 
-    auto preview_info = Box::vertical(20.0F);
-    preview_info->set_horizontal_size_policy(nk::SizePolicy::Preferred);
-    preview_info->append(preview_meta);
-    preview_info->append(preview_controls);
-    preview_info->append(Spacer::create());
+        auto preview_stack = Box::vertical(profile.preview_section_spacing);
+        preview_stack->append(preview_meta_row);
+        preview_stack->append(image_detail);
+        preview_stack->append(preview_stage);
+        preview_stack->append(preview_controls);
+        preview_display = preview_stack;
+    } else {
+        auto preview_meta = Box::vertical(6.0F);
+        preview_meta->append(image_label);
+        preview_meta->append(image_meta);
+        preview_meta->append(image_detail);
 
-    auto preview_display =
-        SplitColumns::create(preview_stage, preview_info, profile.preview_split_ratio, 16.0F);
+        auto preview_controls = Box::vertical(8.0F);
+        preview_controls->append(scale_label);
+        preview_controls->append(scale_combo);
+        preview_controls->append(scale_state);
 
-    auto preview_content = Box::vertical(profile.controls_spacing);
+        auto preview_info = Box::vertical(20.0F);
+        preview_info->set_horizontal_size_policy(nk::SizePolicy::Preferred);
+        preview_info->append(preview_meta);
+        preview_info->append(preview_controls);
+        preview_info->append(Spacer::create());
+
+        preview_display = SplitColumns::create(preview_stage,
+                                               preview_info,
+                                               profile.preview_split_ratio,
+                                               profile.preview_section_spacing);
+    }
+
+    auto preview_content = Box::vertical(profile.preview_section_spacing);
     preview_content->append(preview_title);
     preview_content->append(preview_subtitle);
     preview_content->append(preview_display);
@@ -276,12 +307,18 @@ int run_showcase(int argc, char** argv) {
     auto prop_value_label =
         ValueText::create("Source: 42, Target: " + std::to_string(target_prop.get()));
     auto prop_detail = SecondaryText::create("Shared state updates the footer and live status.");
-    auto prop_btn = nk::Button::create("Set Source = 99");
+    auto prop_btn = nk::Button::create(profile.actions_layout_mode ==
+                                               ShowcaseActionsLayoutMode::Compact
+                                           ? "Sync Source = 99"
+                                           : "Set Source = 99");
     prop_btn->set_horizontal_size_policy(nk::SizePolicy::Preferred);
     auto dialog_label = FieldLabel::create("Sheet dialog");
     auto dialog_detail =
         SecondaryText::create("Open a window-attached sheet with explicit minimum width.");
-    auto dialog_btn = nk::Button::create("Show Preferences Sheet");
+    auto dialog_btn = nk::Button::create(profile.actions_layout_mode ==
+                                                 ShowcaseActionsLayoutMode::Compact
+                                             ? "Show Sheet"
+                                             : "Show Preferences Sheet");
     dialog_btn->add_style_class("suggested");
     dialog_btn->set_horizontal_size_policy(nk::SizePolicy::Expanding);
     auto runtime_status = ValueText::create("Waiting for an action.");
@@ -350,29 +387,56 @@ int run_showcase(int argc, char** argv) {
 
     (void)dialog_btn->on_clicked().connect(present_preferences_sheet);
 
-    auto property_group = Box::vertical(8.0F);
+    auto property_group = Box::vertical(profile.actions_layout_mode ==
+                                                ShowcaseActionsLayoutMode::Compact
+                                            ? 6.0F
+                                            : 8.0F);
     property_group->append(prop_label);
-    property_group->append(prop_value_label);
-    property_group->append(prop_detail);
-    property_group->append(prop_btn);
-    auto property_panel = InsetStage::create(property_group, 124.0F, 132.0F, 16.0F);
+    if (profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact) {
+        property_group->append(prop_btn);
+    } else {
+        property_group->append(prop_value_label);
+        property_group->append(prop_detail);
+        property_group->append(prop_btn);
+    }
+    auto property_panel = InsetStage::create(property_group,
+                                             profile.runtime_property_min_height,
+                                             profile.runtime_property_natural_height,
+                                             profile.runtime_property_padding);
 
-    auto dialog_group = Box::vertical(8.0F);
+    auto dialog_group = Box::vertical(profile.actions_layout_mode ==
+                                              ShowcaseActionsLayoutMode::Compact
+                                          ? 6.0F
+                                          : 8.0F);
     dialog_group->append(dialog_label);
-    dialog_group->append(dialog_detail);
-    dialog_group->append(dialog_btn);
-    auto dialog_panel = InsetStage::create(dialog_group, 124.0F, 132.0F, 16.0F);
+    if (profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact) {
+        dialog_group->append(dialog_btn);
+    } else {
+        dialog_group->append(dialog_detail);
+        dialog_group->append(dialog_btn);
+    }
+    auto dialog_panel = InsetStage::create(dialog_group,
+                                           profile.runtime_dialog_min_height,
+                                           profile.runtime_dialog_natural_height,
+                                           profile.runtime_dialog_padding);
 
     auto status_label = FieldLabel::create("Latest result");
-    auto status_group = Box::vertical(8.0F);
+    auto status_group = Box::vertical(profile.actions_layout_mode ==
+                                              ShowcaseActionsLayoutMode::Compact
+                                          ? 4.0F
+                                          : 8.0F);
     status_group->append(status_label);
     status_group->append(runtime_status);
     status_group->append(runtime_status_detail);
-    auto status_panel = InsetStage::create(status_group, 108.0F, 118.0F, 16.0F);
+    auto status_panel = InsetStage::create(status_group,
+                                           profile.runtime_status_min_height,
+                                           profile.runtime_status_natural_height,
+                                           profile.runtime_status_padding);
 
-    auto actions_row = SplitColumns::create(property_panel, dialog_panel, 0.52F, 18.0F);
+    auto actions_row =
+        SplitColumns::create(property_panel, dialog_panel, 0.5F, profile.actions_row_spacing);
 
-    auto actions_content = Box::vertical(14.0F);
+    auto actions_content = Box::vertical(profile.preview_section_spacing);
     actions_content->append(actions_title);
     actions_content->append(actions_subtitle);
     actions_content->append(status_panel);
@@ -389,27 +453,43 @@ int run_showcase(int argc, char** argv) {
     right_column->append(preview_card);
     right_column->append(actions_card);
 
-    auto content_row =
-        SplitColumns::create(left_column, right_column, profile.main_split_ratio, 24.0F);
+    auto content_row = SplitColumns::create(left_column,
+                                            right_column,
+                                            profile.main_split_ratio,
+                                            profile.main_column_spacing);
     content_row->set_vertical_size_policy(nk::SizePolicy::Preferred);
     content_row->set_vertical_stretch(0);
-    auto hero_banner = HeroBanner::create(
-        profile.hero_title,
-        profile.hero_subtitle,
-        {hero_counter_pill, hero_items_pill, hero_preview_pill, hero_close_button});
+    std::vector<std::shared_ptr<nk::Widget>> hero_pills = {
+        hero_counter_pill,
+        hero_items_pill,
+        hero_preview_pill,
+    };
+    if (hero_close_button) {
+        hero_pills.push_back(hero_close_button);
+    }
+    auto hero_banner =
+        HeroBanner::create(profile.hero_title, profile.hero_subtitle, std::move(hero_pills));
+    hero_banner->set_height(profile.hero_min_height, profile.hero_natural_height);
 
     auto body_content = Box::vertical(profile.section_spacing);
     body_content->append(hero_banner);
     body_content->append(content_row);
-    auto page_bottom_spacer = InsetStage::create(Spacer::create(), 34.0F, 34.0F, 0.0F);
+    auto page_bottom_spacer = InsetStage::create(Spacer::create(),
+                                                 profile.page_bottom_spacer_height,
+                                                 profile.page_bottom_spacer_height,
+                                                 0.0F);
     body_content->append(page_bottom_spacer);
 
     auto body_page = SurfacePanel::page(body_content);
+    body_page->set_padding(profile.page_padding_top,
+                           profile.page_padding_right + profile.scrollbar_safe_gutter,
+                           profile.page_padding_bottom,
+                           profile.page_padding_left);
     body_page->set_vertical_size_policy(nk::SizePolicy::Preferred);
     body_page->set_vertical_stretch(0);
     auto scroll_body = nk::ScrollArea::create();
     scroll_body->set_h_scroll_policy(nk::ScrollPolicy::Never);
-    scroll_body->set_v_scroll_policy(nk::ScrollPolicy::Always);
+    scroll_body->set_v_scroll_policy(nk::ScrollPolicy::Automatic);
     scroll_body->set_content(body_page);
 
     auto root = ShowcaseShell::create(menu_surface, scroll_body, status_bar);

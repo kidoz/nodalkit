@@ -377,18 +377,34 @@ public:
         queue_layout();
     }
 
+    void set_padding(float padding) {
+        set_padding(padding, padding, padding, padding);
+    }
+
+    void set_padding(float top, float right, float bottom, float left) {
+        padding_top_ = top;
+        padding_right_ = right;
+        padding_bottom_ = bottom;
+        padding_left_ = left;
+        queue_layout();
+    }
+
     [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& constraints) const override {
-        const float padding = theme_number("padding", 16.0F);
         if (!content_) {
-            return {padding * 2.0F, padding * 2.0F, padding * 2.0F, padding * 2.0F};
+            return {
+                padding_left_ + padding_right_,
+                padding_top_ + padding_bottom_,
+                padding_left_ + padding_right_,
+                padding_top_ + padding_bottom_,
+            };
         }
 
         const auto req = content_->measure(constraints);
         return {
-            req.minimum_width + (padding * 2.0F),
-            req.minimum_height + (padding * 2.0F),
-            req.natural_width + (padding * 2.0F),
-            req.natural_height + (padding * 2.0F),
+            req.minimum_width + padding_left_ + padding_right_,
+            req.minimum_height + padding_top_ + padding_bottom_,
+            req.natural_width + padding_left_ + padding_right_,
+            req.natural_height + padding_top_ + padding_bottom_,
         };
     }
 
@@ -398,13 +414,12 @@ public:
             return;
         }
 
-        const float padding = theme_number("padding", 16.0F);
         const float inset = bordered_ ? 1.0F : 0.0F;
         content_->allocate({
-            allocation.x + padding + inset,
-            allocation.y + padding + inset,
-            std::max(0.0F, allocation.width - ((padding + inset) * 2.0F)),
-            std::max(0.0F, allocation.height - ((padding + inset) * 2.0F)),
+            allocation.x + padding_left_ + inset,
+            allocation.y + padding_top_ + inset,
+            std::max(0.0F, allocation.width - padding_left_ - padding_right_ - (inset * 2.0F)),
+            std::max(0.0F, allocation.height - padding_top_ - padding_bottom_ - (inset * 2.0F)),
         });
     }
 
@@ -435,6 +450,10 @@ private:
 
     std::shared_ptr<nk::Widget> content_;
     bool bordered_ = false;
+    float padding_top_ = 16.0F;
+    float padding_right_ = 16.0F;
+    float padding_bottom_ = 16.0F;
+    float padding_left_ = 16.0F;
 };
 
 class StatusPill : public nk::Widget {
@@ -771,6 +790,12 @@ public:
         queue_layout();
     }
 
+    void set_height(float min_height, float natural_height) {
+        min_height_ = min_height;
+        natural_height_ = natural_height;
+        queue_layout();
+    }
+
     [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& constraints) const override {
         if (!cached_title_size_) {
             cached_title_size_ = measure_text(title_, title_font());
@@ -809,9 +834,9 @@ public:
         const float content_height = std::max(left_height, tray_height);
         return {
             480.0F,
-            120.0F,
+            min_height_,
             std::max(660.0F, content_width + 52.0F),
-            std::max(132.0F, content_height + 46.0F),
+            std::max(natural_height_, content_height + 46.0F),
         };
     }
 
@@ -968,6 +993,8 @@ private:
     std::string subtitle_;
     std::vector<std::shared_ptr<nk::Widget>> pills_;
     mutable std::optional<nk::Size> cached_title_size_;
+    float min_height_ = 120.0F;
+    float natural_height_ = 132.0F;
 };
 
 class ShowcaseShell : public nk::Widget {
