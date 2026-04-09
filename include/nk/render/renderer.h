@@ -18,6 +18,7 @@ class TextShaper;
 
 enum class RendererBackend {
     Software,
+    D3D11,
     Metal,
     OpenGL,
     Vulkan,
@@ -25,6 +26,7 @@ enum class RendererBackend {
 
 struct RendererBackendSupport {
     bool software = true;
+    bool d3d11 = false;
     bool metal = false;
     bool open_gl = false;
     bool vulkan = false;
@@ -38,7 +40,7 @@ struct RendererBackendSupport {
 
 /// Abstract renderer backend. The MVP ships a software renderer that
 /// rasterizes render nodes to a pixel buffer. Future backends will
-/// target Vulkan, OpenGL, or Metal.
+/// target D3D11, Vulkan, OpenGL, or Metal.
 class Renderer {
 public:
     virtual ~Renderer();

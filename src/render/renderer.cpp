@@ -12,17 +12,84 @@
 #include <unordered_map>
 #include <vector>
 
+#if defined(_WIN32)
+#include <d3d11.h>
+#endif
+
 namespace nk {
 
 #if defined(__APPLE__)
 std::unique_ptr<Renderer> create_metal_renderer();
 #endif
 
-#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+#if defined(_WIN32)
+std::unique_ptr<Renderer> create_d3d11_renderer();
+#endif
+
+#if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
 std::unique_ptr<Renderer> create_vulkan_renderer();
 #endif
 
 namespace {
+
+FontDescriptor renderer_font_for_shape(FontDescriptor font, float scale_factor) {
+#if defined(_WIN32)
+    (void)scale_factor;
+    return font;
+#else
+    font.size *= scale_factor;
+    return font;
+#endif
+}
+
+#if defined(_WIN32)
+bool d3d11_hardware_available() {
+    static const bool available = [] {
+        ID3D11Device* device = nullptr;
+        ID3D11DeviceContext* context = nullptr;
+        D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
+        const D3D_FEATURE_LEVEL requested_levels[] = {
+            D3D_FEATURE_LEVEL_11_1,
+            D3D_FEATURE_LEVEL_11_0,
+        };
+
+        HRESULT result = D3D11CreateDevice(nullptr,
+                                           D3D_DRIVER_TYPE_HARDWARE,
+                                           nullptr,
+                                           0,
+                                           requested_levels,
+                                           static_cast<UINT>(std::size(requested_levels)),
+                                           D3D11_SDK_VERSION,
+                                           &device,
+                                           &feature_level,
+                                           &context);
+        if (result == E_INVALIDARG) {
+            const D3D_FEATURE_LEVEL fallback_levels[] = {
+                D3D_FEATURE_LEVEL_11_0,
+            };
+            result = D3D11CreateDevice(nullptr,
+                                       D3D_DRIVER_TYPE_HARDWARE,
+                                       nullptr,
+                                       0,
+                                       fallback_levels,
+                                       static_cast<UINT>(std::size(fallback_levels)),
+                                       D3D11_SDK_VERSION,
+                                       &device,
+                                       &feature_level,
+                                       &context);
+        }
+
+        if (context != nullptr) {
+            context->Release();
+        }
+        if (device != nullptr) {
+            device->Release();
+        }
+        return SUCCEEDED(result);
+    }();
+    return available;
+}
+#endif
 
 struct ClipRegion {
     Rect bounds;
@@ -209,6 +276,8 @@ std::string_view renderer_backend_name(RendererBackend backend) noexcept {
     switch (backend) {
     case RendererBackend::Software:
         return "software";
+    case RendererBackend::D3D11:
+        return "d3d11";
     case RendererBackend::Metal:
         return "metal";
     case RendererBackend::OpenGL:
@@ -227,6 +296,8 @@ bool renderer_backend_supported(RendererBackendSupport support, RendererBackend 
     switch (backend) {
     case RendererBackend::Software:
         return support.software;
+    case RendererBackend::D3D11:
+        return support.d3d11;
     case RendererBackend::Metal:
         return support.metal;
     case RendererBackend::OpenGL:
@@ -241,6 +312,12 @@ bool renderer_backend_available(RendererBackend backend) noexcept {
     switch (backend) {
     case RendererBackend::Software:
         return true;
+    case RendererBackend::D3D11:
+#if defined(_WIN32)
+        return d3d11_hardware_available();
+#else
+        return false;
+#endif
     case RendererBackend::Metal:
 #if defined(__APPLE__)
         return true;
@@ -250,7 +327,7 @@ bool renderer_backend_available(RendererBackend backend) noexcept {
     case RendererBackend::OpenGL:
         return false;
     case RendererBackend::Vulkan:
-#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+#if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
         return true;
 #else
         return false;
@@ -546,8 +623,7 @@ void SoftwareRenderer::render(const RenderNode& root) {
             ++impl_->last_hotspot_counters.text_node_count;
             const auto& text_node = static_cast<const TextNode&>(node);
             if (impl_->text_shaper && !text_node.text().empty()) {
-                auto font = text_node.font();
-                font.size *= impl_->scale_factor;
+                auto font = renderer_font_for_shape(text_node.font(), impl_->scale_factor);
                 const auto color = text_node.text_color();
                 TextKey key{text_node.text(),
                             font.family,
@@ -744,6 +820,12 @@ std::unique_ptr<Renderer> create_renderer(RendererBackend backend) {
     switch (backend) {
     case RendererBackend::Software:
         return std::make_unique<SoftwareRenderer>();
+    case RendererBackend::D3D11:
+#if defined(_WIN32)
+        return create_d3d11_renderer();
+#else
+        return nullptr;
+#endif
     case RendererBackend::Metal:
 #if defined(__APPLE__)
         return create_metal_renderer();
@@ -753,7 +835,7 @@ std::unique_ptr<Renderer> create_renderer(RendererBackend backend) {
     case RendererBackend::OpenGL:
         return nullptr;
     case RendererBackend::Vulkan:
-#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+#if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
         return create_vulkan_renderer();
 #else
         return nullptr;

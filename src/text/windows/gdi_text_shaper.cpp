@@ -44,13 +44,14 @@ int font_weight_to_gdi(FontWeight weight) {
     return static_cast<int>(weight);
 }
 
-LONG font_height_pixels(float point_size) {
+LONG font_height_pixels(float logical_pixel_size) {
     HDC screen_dc = GetDC(nullptr);
     const int dpi = screen_dc != nullptr ? GetDeviceCaps(screen_dc, LOGPIXELSY) : 96;
     if (screen_dc != nullptr) {
         ReleaseDC(nullptr, screen_dc);
     }
-    const auto scaled = std::max(1, static_cast<int>(std::lround(point_size * dpi / 72.0F)));
+    const auto scaled =
+        std::max(1, static_cast<int>(std::lround(logical_pixel_size * static_cast<float>(dpi) / 96.0F)));
     return -scaled;
 }
 
@@ -201,62 +202,6 @@ std::vector<uint8_t> rasterize_text_bitmap(std::wstring_view text,
     return rgba;
 }
 
-struct TrimmedBitmap {
-    std::vector<uint8_t> pixels;
-    int width = 0;
-    int height = 0;
-    int top_crop = 0;
-};
-
-TrimmedBitmap trim_bitmap_rows(std::vector<uint8_t> rgba, int width, int height) {
-    TrimmedBitmap trimmed{std::move(rgba), width, height, 0};
-    if (width <= 0 || height <= 0 || trimmed.pixels.empty()) {
-        return trimmed;
-    }
-
-    int first_row = -1;
-    int last_row = -1;
-    for (int y = 0; y < height; ++y) {
-        bool has_alpha = false;
-        for (int x = 0; x < width; ++x) {
-            const auto index =
-                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) *
-                    4 +
-                3;
-            if (trimmed.pixels[index] != 0) {
-                has_alpha = true;
-                break;
-            }
-        }
-        if (has_alpha) {
-            if (first_row < 0) {
-                first_row = y;
-            }
-            last_row = y;
-        }
-    }
-
-    if (first_row <= 0 || last_row < first_row || last_row == height - 1) {
-        return trimmed;
-    }
-
-    const int cropped_height = last_row - first_row + 1;
-    std::vector<uint8_t> cropped(static_cast<std::size_t>(width) * static_cast<std::size_t>(cropped_height) * 4,
-                                 0);
-    for (int y = 0; y < cropped_height; ++y) {
-        const auto* source = trimmed.pixels.data() +
-                             static_cast<std::size_t>(first_row + y) * static_cast<std::size_t>(width) * 4;
-        auto* destination =
-            cropped.data() + static_cast<std::size_t>(y) * static_cast<std::size_t>(width) * 4;
-        std::copy(source, source + static_cast<std::size_t>(width) * 4, destination);
-    }
-
-    trimmed.pixels = std::move(cropped);
-    trimmed.height = cropped_height;
-    trimmed.top_crop = first_row;
-    return trimmed;
-}
-
 } // namespace
 
 GdiTextShaper::GdiTextShaper() = default;
@@ -294,17 +239,16 @@ ShapedText GdiTextShaper::shape(std::string_view text, const FontDescriptor& fon
 
     const int bitmap_width = std::max<LONG>(1, metrics.extent.cx);
     const int bitmap_height = std::max<LONG>(1, metrics.extent.cy);
-    auto trimmed =
-        trim_bitmap_rows(rasterize_text_bitmap(wide, font, color, bitmap_width, bitmap_height),
-                         bitmap_width,
-                         bitmap_height);
+    auto rgba = rasterize_text_bitmap(wide, font, color, bitmap_width, bitmap_height);
     shaped.set_text_size({
         static_cast<float>(metrics.extent.cx),
-        static_cast<float>(trimmed.height),
+        static_cast<float>(bitmap_height),
     });
-    shaped.set_baseline(
-        static_cast<float>(std::max<LONG>(0, metrics.metrics.tmAscent - trimmed.top_crop)));
-    shaped.set_bitmap(std::move(trimmed.pixels), trimmed.width, trimmed.height);
+    shaped.set_baseline(static_cast<float>(std::max<LONG>(0, metrics.metrics.tmAscent)));
+    // Preserve the full raster height. The current ShapedText contract does
+    // not carry bitmap bearings, so trimming leading transparent rows would
+    // shift glyph coverage upward at draw time.
+    shaped.set_bitmap(std::move(rgba), bitmap_width, bitmap_height);
     return shaped;
 }
 

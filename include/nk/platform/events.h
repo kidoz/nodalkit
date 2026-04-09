@@ -72,6 +72,7 @@ struct KeyEvent {
 struct WindowEvent {
     enum class Type : uint8_t {
         Resize,
+        ScaleFactorChanged,
         Close,
         FocusIn,
         FocusOut,
@@ -81,6 +82,7 @@ struct WindowEvent {
     Type type{};
     int width = 0; ///< New size (Resize only).
     int height = 0;
+    float scale_factor = 1.0F; ///< New content scale (ScaleFactorChanged only).
 };
 
 } // namespace nk

@@ -1,11 +1,15 @@
 /// @file vulkan_renderer.cpp
-/// @brief Experimental Vulkan renderer scaffold for Linux Wayland.
+/// @brief Experimental Vulkan renderer scaffold for Linux Wayland and Win32.
 
 #include <nk/render/renderer.h>
 
-#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+#if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
 
+#if defined(__linux__)
 #define VK_USE_PLATFORM_WAYLAND_KHR
+#elif defined(_WIN32)
+#define VK_USE_PLATFORM_WIN32_KHR
+#endif
 
 #include "vulkan_image_frag_spv.h"
 #include "vulkan_image_vert_spv.h"
@@ -31,11 +35,27 @@
 #include <unordered_map>
 #include <vector>
 #include <vulkan/vulkan.h>
+#if defined(__linux__)
 #include <wayland-client-core.h>
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace nk {
 
 namespace {
+
+FontDescriptor renderer_font_for_shape(FontDescriptor font, float scale_factor) {
+#if defined(_WIN32)
+    (void)scale_factor;
+    return font;
+#else
+    font.size *= scale_factor;
+    return font;
+#endif
+}
 
 struct ClipRegion {
     Rect rect{};
@@ -385,6 +405,7 @@ public:
     bool attach_surface(NativeSurface& surface) override {
         (void)software_->attach_surface(surface);
 
+#if defined(__linux__)
         auto* display = static_cast<wl_display*>(surface.native_display_handle());
         auto* wl_surface = static_cast<struct wl_surface*>(surface.native_handle());
         if (display == nullptr || wl_surface == nullptr) {
@@ -397,12 +418,30 @@ public:
         if (ready_ && display == display_ && wl_surface == surface_) {
             return true;
         }
+#elif defined(_WIN32)
+        auto* instance = static_cast<HINSTANCE>(surface.native_display_handle());
+        auto* hwnd = static_cast<HWND>(surface.native_handle());
+        if (instance == nullptr || hwnd == nullptr) {
+            NK_LOG_WARN("VulkanRenderer",
+                        "Win32 instance or window handle is missing; Vulkan cannot attach");
+            destroy_context();
+            return false;
+        }
+
+        if (ready_ && instance == instance_handle_ && hwnd == hwnd_) {
+            return true;
+        }
+#endif
 
         destroy_context();
 
         constexpr const char* instance_extensions[] = {
             VK_KHR_SURFACE_EXTENSION_NAME,
+#if defined(__linux__)
             VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+#elif defined(_WIN32)
+            VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#endif
         };
 
         const VkApplicationInfo application_info = {
@@ -431,6 +470,7 @@ public:
             return false;
         }
 
+#if defined(__linux__)
         const VkWaylandSurfaceCreateInfoKHR wayland_surface_info = {
             .sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR,
             .pNext = nullptr,
@@ -444,6 +484,21 @@ public:
             destroy_context();
             return false;
         }
+#elif defined(_WIN32)
+        const VkWin32SurfaceCreateInfoKHR win32_surface_info = {
+            .sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+            .pNext = nullptr,
+            .flags = 0,
+            .hinstance = instance,
+            .hwnd = hwnd,
+        };
+
+        if (!vk_ok(vkCreateWin32SurfaceKHR(instance_, &win32_surface_info, nullptr, &vk_surface_),
+                   "vkCreateWin32SurfaceKHR")) {
+            destroy_context();
+            return false;
+        }
+#endif
 
         uint32_t physical_device_count = 0;
         if (!vk_ok(vkEnumeratePhysicalDevices(instance_, &physical_device_count, nullptr),
@@ -503,7 +558,7 @@ public:
 
         if (physical_device_ == VK_NULL_HANDLE) {
             NK_LOG_WARN("VulkanRenderer",
-                        "No Vulkan device with graphics and Wayland present support was found");
+                        "No Vulkan device with graphics and present support was found");
             destroy_context();
             return false;
         }
@@ -579,10 +634,15 @@ public:
             return false;
         }
 
+#if defined(__linux__)
         display_ = display;
         surface_ = wl_surface;
+#elif defined(_WIN32)
+        instance_handle_ = instance;
+        hwnd_ = hwnd;
+#endif
         ready_ = true;
-        NK_LOG_INFO("VulkanRenderer", "Wayland Vulkan instance/device attach succeeded");
+        NK_LOG_INFO("VulkanRenderer", "Vulkan instance/device attach succeeded");
         return true;
     }
 
@@ -660,6 +720,8 @@ public:
                 auto counters = software_->last_hotspot_counters();
                 counters.damage_region_count = preserved.damage_region_count;
                 counters.gpu_draw_call_count = preserved.gpu_draw_call_count;
+                counters.gpu_replayed_command_count = preserved.gpu_replayed_command_count;
+                counters.gpu_skipped_command_count = preserved.gpu_skipped_command_count;
                 counters.gpu_present_region_count = preserved.gpu_present_region_count;
                 counters.gpu_swapchain_copy_count = preserved.gpu_swapchain_copy_count;
                 counters.gpu_viewport_pixel_count = preserved.gpu_viewport_pixel_count;
@@ -1005,6 +1067,9 @@ private:
         DrawCommandKind active_kind = DrawCommandKind::Primitive;
         bool pipeline_bound = false;
         std::size_t gpu_draw_call_count = 0;
+        if (full_redraw) {
+            last_hotspot_counters_.gpu_replayed_command_count += draw_commands_.size();
+        }
 
         for (std::size_t draw_index = 0; draw_index < draw_commands_.size(); ++draw_index) {
             const auto& draw_command = draw_commands_[draw_index];
@@ -1044,6 +1109,7 @@ private:
                     vkCmdDraw(command_buffer_, 4, 1, 0, 0);
                     ++gpu_draw_call_count;
                 } else {
+                    bool replayed = false;
                     for (const auto& damage : damage_regions_) {
                         if (!rects_intersect(command_bounds, damage)) {
                             continue;
@@ -1075,6 +1141,11 @@ private:
                                            &push_constants);
                         vkCmdDraw(command_buffer_, 4, 1, 0, 0);
                         ++gpu_draw_call_count;
+                        ++last_hotspot_counters_.gpu_replayed_command_count;
+                        replayed = true;
+                    }
+                    if (!replayed) {
+                        ++last_hotspot_counters_.gpu_skipped_command_count;
                     }
                 }
                 continue;
@@ -1142,6 +1213,7 @@ private:
                 vkCmdDraw(command_buffer_, 4, 1, 0, 0);
                 ++gpu_draw_call_count;
             } else {
+                bool replayed = false;
                 for (const auto& damage : damage_regions_) {
                     if (!rects_intersect(command_bounds, damage)) {
                         continue;
@@ -1172,6 +1244,11 @@ private:
                                        &push_constants);
                     vkCmdDraw(command_buffer_, 4, 1, 0, 0);
                     ++gpu_draw_call_count;
+                    ++last_hotspot_counters_.gpu_replayed_command_count;
+                    replayed = true;
+                }
+                if (!replayed) {
+                    ++last_hotspot_counters_.gpu_skipped_command_count;
                 }
             }
         }
@@ -1923,7 +2000,7 @@ private:
                                                         nullptr),
                    "vkGetPhysicalDeviceSurfaceFormatsKHR(count)") ||
             format_count == 0) {
-            NK_LOG_WARN("VulkanRenderer", "Wayland surface reported no Vulkan swapchain formats");
+            NK_LOG_WARN("VulkanRenderer", "Native surface reported no Vulkan swapchain formats");
             return false;
         }
 
@@ -1943,7 +2020,7 @@ private:
                                                              nullptr),
                    "vkGetPhysicalDeviceSurfacePresentModesKHR(count)") ||
             present_mode_count == 0) {
-            NK_LOG_WARN("VulkanRenderer", "Wayland surface reported no Vulkan present modes");
+            NK_LOG_WARN("VulkanRenderer", "Native surface reported no Vulkan present modes");
             return false;
         }
 
@@ -2457,6 +2534,7 @@ private:
         };
         if (auto it = image_texture_cache_.find(cache_key); it != image_texture_cache_.end()) {
             it->second.last_used_frame = frame_serial_;
+            ++last_hotspot_counters_.image_texture_cache_hit_count;
             if (!ensure_texture_descriptor_sets(it->second, true)) {
                 destroy_texture_entry(it->second);
                 image_texture_cache_.erase(it);
@@ -2513,6 +2591,7 @@ private:
         };
         if (auto it = text_texture_cache_.find(cache_key); it != text_texture_cache_.end()) {
             it->second.last_used_frame = frame_serial_;
+            ++last_hotspot_counters_.text_texture_cache_hit_count;
             if (!ensure_texture_descriptor_sets(it->second, false)) {
                 destroy_texture_entry(it->second);
                 text_texture_cache_.erase(it);
@@ -2548,8 +2627,7 @@ private:
             return nullptr;
         }
 
-        auto font = text_node.font();
-        font.size *= scale_factor_;
+        auto font = renderer_font_for_shape(text_node.font(), scale_factor_);
         const auto color = text_node.text_color();
         TextKey key{
             .text = text_node.text(),
@@ -2842,6 +2920,8 @@ private:
 
         const bool copy_back_full_redraw = full_redraw && should_copy_back_full_redraw();
         std::size_t gpu_draw_call_count = 0;
+        last_hotspot_counters_.gpu_replayed_command_count = 0;
+        last_hotspot_counters_.gpu_skipped_command_count = 0;
         if (full_redraw && !copy_back_full_redraw) {
             last_hotspot_counters_.gpu_swapchain_copy_count = 0;
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::FullRedrawDirect;
@@ -3315,6 +3395,8 @@ private:
             auto counters = software_->last_hotspot_counters();
             counters.damage_region_count = preserved.damage_region_count;
             counters.gpu_draw_call_count = preserved.gpu_draw_call_count;
+            counters.gpu_replayed_command_count = preserved.gpu_replayed_command_count;
+            counters.gpu_skipped_command_count = preserved.gpu_skipped_command_count;
             counters.gpu_present_region_count = preserved.gpu_present_region_count;
             counters.gpu_swapchain_copy_count = preserved.gpu_swapchain_copy_count;
             counters.gpu_viewport_pixel_count = preserved.gpu_viewport_pixel_count;
@@ -3482,8 +3564,13 @@ private:
         recreate_swapchain_ = false;
         graphics_queue_ = VK_NULL_HANDLE;
         queue_family_index_ = std::numeric_limits<uint32_t>::max();
+#if defined(__linux__)
         surface_ = nullptr;
         display_ = nullptr;
+#elif defined(_WIN32)
+        hwnd_ = nullptr;
+        instance_handle_ = nullptr;
+#endif
         last_root_ = nullptr;
         draw_commands_.clear();
         primitive_commands_.clear();
@@ -3608,8 +3695,13 @@ private:
     std::vector<Rect> damage_regions_;
     std::vector<VkRectLayerKHR> present_regions_;
     uint32_t queue_family_index_ = std::numeric_limits<uint32_t>::max();
+#if defined(__linux__)
     wl_display* display_ = nullptr;
     wl_surface* surface_ = nullptr;
+#elif defined(_WIN32)
+    HINSTANCE instance_handle_ = nullptr;
+    HWND hwnd_ = nullptr;
+#endif
     Size logical_viewport_{};
     float scale_factor_ = 1.0F;
     uint64_t frame_serial_ = 0;

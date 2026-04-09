@@ -70,9 +70,8 @@ std::wstring resolve_font_family(const FontDescriptor& font) {
     return family.empty() ? L"Segoe UI" : family;
 }
 
-float font_em_size_dips(float point_size) {
-    constexpr float kDipsPerPoint = 96.0F / 72.0F;
-    return std::max(1.0F, point_size * kDipsPerPoint);
+float font_em_size_dips(float logical_pixel_size) {
+    return std::max(1.0F, logical_pixel_size);
 }
 
 float system_pixels_per_dip() {
@@ -89,66 +88,6 @@ struct TextLayoutMetrics {
     float height = 0.0F;
     float baseline = 0.0F;
 };
-
-struct TrimmedBitmap {
-    std::vector<uint8_t> pixels;
-    int width = 0;
-    int height = 0;
-    int top_crop = 0;
-};
-
-TrimmedBitmap trim_bitmap_rows(std::vector<uint8_t> rgba, int width, int height) {
-    TrimmedBitmap trimmed{std::move(rgba), width, height, 0};
-    if (width <= 0 || height <= 0 || trimmed.pixels.empty()) {
-        return trimmed;
-    }
-
-    int first_row = -1;
-    int last_row = -1;
-    for (int y = 0; y < height; ++y) {
-        bool has_alpha = false;
-        for (int x = 0; x < width; ++x) {
-            const auto alpha_index =
-                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
-                 static_cast<std::size_t>(x)) *
-                    4 +
-                3;
-            if (trimmed.pixels[alpha_index] != 0) {
-                has_alpha = true;
-                break;
-            }
-        }
-
-        if (has_alpha) {
-            if (first_row < 0) {
-                first_row = y;
-            }
-            last_row = y;
-        }
-    }
-
-    if (first_row <= 0 || last_row < first_row || last_row == height - 1) {
-        return trimmed;
-    }
-
-    const int cropped_height = last_row - first_row + 1;
-    std::vector<uint8_t> cropped(static_cast<std::size_t>(width) *
-                                     static_cast<std::size_t>(cropped_height) * 4,
-                                 0);
-    for (int y = 0; y < cropped_height; ++y) {
-        const auto* source = trimmed.pixels.data() +
-                             static_cast<std::size_t>(first_row + y) *
-                                 static_cast<std::size_t>(width) * 4;
-        auto* destination = cropped.data() +
-                            static_cast<std::size_t>(y) * static_cast<std::size_t>(width) * 4;
-        std::copy(source, source + static_cast<std::size_t>(width) * 4, destination);
-    }
-
-    trimmed.pixels = std::move(cropped);
-    trimmed.height = cropped_height;
-    trimmed.top_crop = first_row;
-    return trimmed;
-}
 
 class BitmapTextRenderer final : public IDWriteTextRenderer {
 public:
@@ -502,8 +441,9 @@ ShapedText DirectWriteTextShaper::shape(std::string_view text,
     }
 
     const auto metrics = impl_->layout_metrics(layout);
-    const int bitmap_width = std::max(1, static_cast<int>(std::ceil(metrics.width)));
-    const int bitmap_height = std::max(1, static_cast<int>(std::ceil(metrics.height)));
+    const float ppd = impl_->pixels_per_dip;
+    const int bitmap_width = std::max(1, static_cast<int>(std::ceil(metrics.width * ppd)));
+    const int bitmap_height = std::max(1, static_cast<int>(std::ceil(metrics.height * ppd)));
 
     HDC screen_dc = GetDC(nullptr);
     IDWriteBitmapRenderTarget* render_target = nullptr;
@@ -551,15 +491,16 @@ ShapedText DirectWriteTextShaper::shape(std::string_view text,
         return fallback_.shape(text, font, color);
     }
 
-    auto trimmed = trim_bitmap_rows(std::move(rgba), bitmap_width, bitmap_height);
-
     ShapedText shaped;
     shaped.set_text_size({
-        static_cast<float>(bitmap_width),
-        static_cast<float>(trimmed.height),
+        std::ceil(metrics.width),
+        std::ceil(metrics.height),
     });
-    shaped.set_baseline(std::max(0.0F, metrics.baseline - static_cast<float>(trimmed.top_crop)));
-    shaped.set_bitmap(std::move(trimmed.pixels), trimmed.width, trimmed.height);
+    shaped.set_baseline(std::max(0.0F, metrics.baseline));
+    // Preserve the full raster height. The current ShapedText contract does
+    // not carry bitmap bearings, so trimming leading transparent rows would
+    // shift glyph coverage upward at draw time.
+    shaped.set_bitmap(std::move(rgba), bitmap_width, bitmap_height);
     return shaped;
 }
 

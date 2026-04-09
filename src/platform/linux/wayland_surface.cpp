@@ -231,6 +231,7 @@ float WaylandSurface::scale_factor() const {
 RendererBackendSupport WaylandSurface::renderer_backend_support() const {
     return {
         .software = true,
+        .d3d11 = false,
         .metal = false,
         .open_gl = false,
         .vulkan = true,

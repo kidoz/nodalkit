@@ -80,6 +80,7 @@ struct Window::Impl {
 
     Signal<> close_request;
     Signal<int, int> resize_signal;
+    Signal<float> scale_factor_signal;
 };
 
 namespace {
@@ -87,6 +88,9 @@ namespace {
 std::optional<RendererBackend> parse_renderer_backend_override(std::string_view value) {
     if (value == "software") {
         return RendererBackend::Software;
+    }
+    if (value == "d3d11" || value == "direct3d11" || value == "dx11") {
+        return RendererBackend::D3D11;
     }
     if (value == "metal") {
         return RendererBackend::Metal;
@@ -109,8 +113,8 @@ std::optional<RendererBackend> renderer_backend_override_from_environment() {
     const auto requested = parse_renderer_backend_override(env);
     if (!requested.has_value()) {
         NK_LOG_WARN("Window",
-                    "Ignoring unknown NK_RENDERER_BACKEND override; expected software, metal, "
-                    "opengl, or vulkan");
+                    "Ignoring unknown NK_RENDERER_BACKEND override; expected software, d3d11, "
+                    "metal, opengl, or vulkan");
         return std::nullopt;
     }
 
@@ -334,6 +338,9 @@ RendererBackend select_renderer_backend(const NativeSurface* surface) {
     }
 
     constexpr RendererBackend preferred_backends[] = {
+#if defined(_WIN32)
+        RendererBackend::D3D11,
+#endif
         RendererBackend::Metal,
         RendererBackend::Vulkan,
         RendererBackend::OpenGL,
@@ -1178,7 +1185,9 @@ void append_frame_hud_lines(std::vector<std::string>& lines, const FrameDiagnost
                  << gpu_present_tradeoff_name(frame.render_hotspot_counters.gpu_present_tradeoff)
                  << "  draws " << frame.render_hotspot_counters.gpu_draw_call_count << "  px "
                  << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count << "/"
-                 << frame.render_hotspot_counters.gpu_viewport_pixel_count;
+                 << frame.render_hotspot_counters.gpu_viewport_pixel_count << "  replay "
+                 << frame.render_hotspot_counters.gpu_replayed_command_count << "  skip "
+                 << frame.render_hotspot_counters.gpu_skipped_command_count;
         lines.push_back(gpu_line.str());
     }
 }
@@ -1209,7 +1218,9 @@ void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagn
         text_line << "text: measure " << frame.widget_hotspot_totals.text_measure_count
                   << "  nodes " << frame.render_hotspot_counters.text_node_count << "  shape "
                   << frame.render_hotspot_counters.text_shape_count << "  cache hit "
-                  << frame.render_hotspot_counters.text_shape_cache_hit_count;
+                  << frame.render_hotspot_counters.text_shape_cache_hit_count << "  tex hit "
+                  << frame.render_hotspot_counters.text_texture_cache_hit_count << "  tex up "
+                  << frame.render_hotspot_counters.text_texture_upload_count;
         lines.push_back(text_line.str());
     }
 
@@ -1218,7 +1229,9 @@ void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagn
         std::ostringstream image_line;
         image_line << "image: snapshot " << frame.widget_hotspot_totals.image_snapshot_count
                    << "  nodes " << frame.render_hotspot_counters.image_node_count << "  src px "
-                   << frame.render_hotspot_counters.image_source_pixel_count;
+                   << frame.render_hotspot_counters.image_source_pixel_count << "  tex hit "
+                   << frame.render_hotspot_counters.image_texture_cache_hit_count << "  tex up "
+                   << frame.render_hotspot_counters.image_texture_upload_count;
         lines.push_back(image_line.str());
     }
 
@@ -1240,7 +1253,9 @@ void append_frame_detail_lines(std::vector<std::string>& lines, const FrameDiagn
                  << frame.render_hotspot_counters.gpu_present_region_count << "  copies "
                  << frame.render_hotspot_counters.gpu_swapchain_copy_count << "  draw px "
                  << frame.render_hotspot_counters.gpu_estimated_draw_pixel_count << "  viewport px "
-                 << frame.render_hotspot_counters.gpu_viewport_pixel_count;
+                 << frame.render_hotspot_counters.gpu_viewport_pixel_count << "  replay "
+                 << frame.render_hotspot_counters.gpu_replayed_command_count << "  skip "
+                 << frame.render_hotspot_counters.gpu_skipped_command_count;
         lines.push_back(gpu_line.str());
     }
 }
@@ -1677,6 +1692,22 @@ Size Window::size() const {
         return impl_->surface->size();
     }
     return {static_cast<float>(impl_->config.width), static_cast<float>(impl_->config.height)};
+}
+
+float Window::scale_factor() const {
+    return impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
+}
+
+Size Window::framebuffer_size() const {
+    if (impl_->surface != nullptr) {
+        return impl_->surface->framebuffer_size();
+    }
+    const auto logical = size();
+    const auto scale = scale_factor();
+    return {
+        std::round(logical.width * scale),
+        std::round(logical.height * scale),
+    };
 }
 
 void Window::set_child(std::shared_ptr<Widget> child) {
@@ -2202,18 +2233,20 @@ void Window::request_frame(FrameRequestReason reason) {
             frame.layout_request_count = impl_->layout_request_count;
             frame.dirty_widget_count = impl_->dirty_widgets.size();
             frame.request_reasons = impl_->pending_frame_reasons;
+            if (impl_->child != nullptr) {
+                impl_->child->reset_debug_hotspot_counters_recursive();
+                for (auto& overlay : impl_->overlays) {
+                    if (overlay.widget != nullptr) {
+                        overlay.widget->reset_debug_hotspot_counters_recursive();
+                    }
+                }
+            }
+
             if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
                 frame.widget_count = count_widgets_recursive(impl_->child.get());
                 for (const auto& overlay : impl_->overlays) {
                     if (overlay.widget != nullptr) {
                         frame.widget_count += count_widgets_recursive(overlay.widget.get());
-                    }
-                }
-
-                impl_->child->reset_debug_hotspot_counters_recursive();
-                for (auto& overlay : impl_->overlays) {
-                    if (overlay.widget != nullptr) {
-                        overlay.widget->reset_debug_hotspot_counters_recursive();
                     }
                 }
             }
@@ -2229,16 +2262,15 @@ void Window::request_frame(FrameRequestReason reason) {
             const auto snapshot_start = Clock::now();
             auto root_node = build_window_debug_render_tree(sz, content_area);
             frame.snapshot_ms = elapsed_ms(snapshot_start, Clock::now());
-            if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
-                frame.widget_hotspot_totals =
-                    collect_widget_hotspot_totals(impl_->child.get());
-                for (const auto& overlay : impl_->overlays) {
-                    if (overlay.widget != nullptr) {
-                        accumulate_widget_hotspot_counters(
-                            frame.widget_hotspot_totals,
-                            collect_widget_hotspot_totals(overlay.widget.get()));
-                    }
+            frame.widget_hotspot_totals = collect_widget_hotspot_totals(impl_->child.get());
+            for (const auto& overlay : impl_->overlays) {
+                if (overlay.widget != nullptr) {
+                    accumulate_widget_hotspot_counters(frame.widget_hotspot_totals,
+                                                       collect_widget_hotspot_totals(
+                                                           overlay.widget.get()));
                 }
+            }
+            if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
                 frame.render_node_count = count_render_nodes_recursive(root_node.get());
                 if (root_node) {
                     frame.render_snapshot = build_render_snapshot(*root_node);
@@ -2259,6 +2291,10 @@ void Window::request_frame(FrameRequestReason reason) {
                             overlay.widget.get(), viewport_rect, damage_regions);
                     }
                 }
+                // Layout-bearing frames are not safe candidates for localized redraw.
+                // Child allocations and clips may have shifted, so promote them to a
+                // full render/present instead of replaying stale pre-layout damage.
+                damage_regions.clear();
             }
 
             // 3. Render pass.
@@ -2316,6 +2352,7 @@ void Window::request_frame(FrameRequestReason reason) {
             impl_->pending_frame_reasons.clear();
             for (auto* widget : impl_->dirty_widgets) {
                 if (widget != nullptr) {
+                    widget->clear_queued_redraw_regions();
                     widget->clear_preserved_damage_regions();
                 }
             }
@@ -3578,6 +3615,10 @@ void Window::dispatch_window_event(const WindowEvent& event) {
         impl_->resize_signal.emit(event.width, event.height);
         request_frame(FrameRequestReason::Resize);
         break;
+    case WindowEvent::Type::ScaleFactorChanged:
+        impl_->scale_factor_signal.emit(event.scale_factor);
+        request_frame(FrameRequestReason::ScaleFactorChanged);
+        break;
     case WindowEvent::Type::Close:
         close();
         break;
@@ -3698,6 +3739,10 @@ Signal<>& Window::on_close_request() {
 
 Signal<int, int>& Window::on_resize() {
     return impl_->resize_signal;
+}
+
+Signal<float>& Window::on_scale_factor_changed() {
+    return impl_->scale_factor_signal;
 }
 
 } // namespace nk

@@ -6,6 +6,7 @@
 /// This is a private interface — application code does not use it
 /// directly. Application and Window delegate to the active backend.
 
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -61,6 +62,16 @@ public:
 
     /// Device pixel ratio for the current content area.
     [[nodiscard]] virtual float scale_factor() const = 0;
+
+    /// Current framebuffer size in physical pixels.
+    [[nodiscard]] virtual Size framebuffer_size() const {
+        const auto logical = size();
+        const auto scale = std::max(scale_factor(), 0.0F);
+        return {
+            std::round(logical.width * scale),
+            std::round(logical.height * scale),
+        };
+    }
 
     /// Renderer backends that this surface can host.
     [[nodiscard]] virtual RendererBackendSupport renderer_backend_support() const { return {}; }

@@ -5,6 +5,7 @@ project('NodalKit', 'cpp',
 nk_inc = include_directories('include')
 pkgconfig = import('pkgconfig')
 nk_enabled_languages = ['cpp']
+cpp_compiler = meson.get_compiler('cpp')
 
 # --- Core sources (platform-agnostic) ---
 
@@ -204,6 +205,101 @@ elif host_system == 'linux'
         nk_deps += vulkan_dep
         nk_cpp_args += ['-DNK_HAVE_VULKAN']
     endif
+elif host_system == 'windows'
+    add_project_arguments(
+        '-DWIN32_LEAN_AND_MEAN',
+        '-DNOMINMAX',
+        '-DUNICODE',
+        '-D_UNICODE',
+        '-D_CRT_SECURE_NO_WARNINGS',
+        '-Wno-c2y-extensions',
+        language : 'cpp',
+    )
+
+    user32_dep = cpp_compiler.find_library('user32', required : true)
+    gdi32_dep = cpp_compiler.find_library('gdi32', required : true)
+    comdlg32_dep = cpp_compiler.find_library('comdlg32', required : true)
+    advapi32_dep = cpp_compiler.find_library('advapi32', required : true)
+    dwmapi_dep = cpp_compiler.find_library('dwmapi', required : true)
+    shcore_dep = cpp_compiler.find_library('shcore', required : true)
+    dwrite_dep = cpp_compiler.find_library('dwrite', required : true)
+    d3d11_dep = cpp_compiler.find_library('d3d11', required : true)
+    d3dcompiler_dep = cpp_compiler.find_library('d3dcompiler', required : true)
+    dxgi_dep = cpp_compiler.find_library('dxgi', required : true)
+    vulkan_dep = dependency('vulkan', required : false)
+    glslang_validator = find_program('glslangValidator', required : false)
+
+    nk_sources += files(
+        'src/platform/windows/win32_backend.cpp',
+        'src/render/d3d11_renderer.cpp',
+        'src/text/windows/directwrite_text_shaper.cpp',
+        'src/text/windows/gdi_text_shaper.cpp',
+    )
+
+    nk_deps += [user32_dep, gdi32_dep, comdlg32_dep, advapi32_dep, dwmapi_dep, shcore_dep, dwrite_dep, d3d11_dep, d3dcompiler_dep, dxgi_dep]
+    if vulkan_dep.found() and glslang_validator.found()
+        vulkan_primitive_vert_spv = custom_target('vulkan-primitive-vert-spv',
+            input : 'src/render/shaders/vulkan_primitive.vert',
+            output : 'vulkan_primitive_vert_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'vert',
+                '-x',
+                '--vn', 'nk_vulkan_primitive_vert_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        vulkan_primitive_frag_spv = custom_target('vulkan-primitive-frag-spv',
+            input : 'src/render/shaders/vulkan_primitive.frag',
+            output : 'vulkan_primitive_frag_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'frag',
+                '-x',
+                '--vn', 'nk_vulkan_primitive_frag_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        vulkan_image_vert_spv = custom_target('vulkan-image-vert-spv',
+            input : 'src/render/shaders/vulkan_image.vert',
+            output : 'vulkan_image_vert_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'vert',
+                '-x',
+                '--vn', 'nk_vulkan_image_vert_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        vulkan_image_frag_spv = custom_target('vulkan-image-frag-spv',
+            input : 'src/render/shaders/vulkan_image.frag',
+            output : 'vulkan_image_frag_spv.h',
+            command : [
+                glslang_validator,
+                '-V',
+                '-S', 'frag',
+                '-x',
+                '--vn', 'nk_vulkan_image_frag_spv',
+                '@INPUT@',
+                '-o', '@OUTPUT@',
+            ])
+
+        nk_sources += files('src/render/vulkan_renderer.cpp')
+        nk_sources += [
+            vulkan_primitive_vert_spv,
+            vulkan_primitive_frag_spv,
+            vulkan_image_vert_spv,
+            vulkan_image_frag_spv,
+        ]
+        nk_deps += vulkan_dep
+        nk_cpp_args += ['-DNK_HAVE_VULKAN']
+    endif
 endif
 
 # --- Sanitizer support ---
@@ -215,14 +311,23 @@ if get_option('b_sanitize') != 'none'
     endforeach
 endif
 
-# --- Build shared library ---
+# --- Build library ---
 
-nk_lib = shared_library('NodalKit', nk_sources,
-    include_directories : nk_inc,
-    dependencies : nk_deps,
-    install : true,
-    cpp_args : nk_cpp_args,
-)
+if host_system == 'windows'
+    nk_lib = static_library('NodalKit', nk_sources,
+        include_directories : nk_inc,
+        dependencies : nk_deps,
+        install : true,
+        cpp_args : nk_cpp_args,
+    )
+else
+    nk_lib = shared_library('NodalKit', nk_sources,
+        include_directories : nk_inc,
+        dependencies : nk_deps,
+        install : true,
+        cpp_args : nk_cpp_args,
+    )
+endif
 
 nk_dep = declare_dependency(
     include_directories : nk_inc,

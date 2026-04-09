@@ -62,6 +62,8 @@ public:
     /// Resize the window.
     void resize(int width, int height);
     [[nodiscard]] Size size() const;
+    [[nodiscard]] float scale_factor() const;
+    [[nodiscard]] Size framebuffer_size() const;
 
     /// Set the root widget displayed in this window.
     void set_child(std::shared_ptr<Widget> child);
@@ -226,6 +228,9 @@ public:
 
     /// Emitted when the window is resized.
     Signal<int, int>& on_resize();
+
+    /// Emitted when the window content scale changes.
+    Signal<float>& on_scale_factor_changed();
 
 private:
     friend class Widget;
