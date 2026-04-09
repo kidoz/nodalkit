@@ -21,6 +21,14 @@
 
 namespace {
 
+void set_renderer_backend_env(std::string_view backend) {
+#if defined(_WIN32)
+    (void)_putenv_s("NK_RENDERER_BACKEND", std::string(backend).c_str());
+#else
+    (void)::setenv("NK_RENDERER_BACKEND", std::string(backend).c_str(), 1);
+#endif
+}
+
 class Box : public nk::Widget {
 public:
     static std::shared_ptr<Box> vertical(float spacing = 8.0F) {
@@ -761,6 +769,27 @@ int poll_steps_for(Scenario scenario) {
 bool validate_backend_expectations(nk::RendererBackend backend,
                                    Scenario scenario,
                                    std::span<const nk::FrameDiagnostics> frames) {
+    const auto has_localized_replay_reduction = [&frames]() {
+        std::size_t full_replayed_command_count = 0;
+        for (const auto& frame : frames) {
+            if (frame.render_hotspot_counters.damage_region_count == 0) {
+                full_replayed_command_count = std::max(
+                    full_replayed_command_count,
+                    frame.render_hotspot_counters.gpu_replayed_command_count);
+            }
+        }
+        if (full_replayed_command_count == 0) {
+            return false;
+        }
+        return std::any_of(frames.begin(), frames.end(), [&](const auto& frame) {
+            return frame.render_hotspot_counters.damage_region_count > 0 &&
+                   frame.render_hotspot_counters.gpu_replayed_command_count > 0 &&
+                   frame.render_hotspot_counters.gpu_replayed_command_count <
+                       full_replayed_command_count &&
+                   frame.render_hotspot_counters.gpu_skipped_command_count > 0;
+        });
+    };
+
     switch (backend) {
     case nk::RendererBackend::Software:
         if (scenario == Scenario::LocalizedRedraw) {
@@ -769,6 +798,19 @@ bool validate_backend_expectations(nk::RendererBackend backend,
                        frame.render_hotspot_counters.gpu_present_region_count > 0 &&
                        frame.render_hotspot_counters.gpu_present_path ==
                            nk::GpuPresentPath::SoftwareUpload;
+            });
+        }
+        return true;
+    case nk::RendererBackend::D3D11:
+        if (scenario == Scenario::LocalizedRedraw) {
+            return has_localized_replay_reduction() &&
+                   std::any_of(frames.begin(), frames.end(), [](const auto& frame) {
+                return frame.render_hotspot_counters.damage_region_count > 0 &&
+                       frame.render_hotspot_counters.gpu_present_region_count > 0 &&
+                       frame.render_hotspot_counters.gpu_present_path ==
+                           nk::GpuPresentPath::PartialRedrawCopy &&
+                       frame.render_hotspot_counters.gpu_present_tradeoff ==
+                           nk::GpuPresentTradeoff::BandwidthFavored;
             });
         }
         return true;
@@ -786,7 +828,18 @@ bool validate_backend_expectations(nk::RendererBackend backend,
         }
         return true;
     case nk::RendererBackend::OpenGL:
+        return true;
     case nk::RendererBackend::Vulkan:
+        if (scenario == Scenario::LocalizedRedraw) {
+            return has_localized_replay_reduction() &&
+                   std::any_of(frames.begin(), frames.end(), [](const auto& frame) {
+                return frame.render_hotspot_counters.damage_region_count > 0 &&
+                       frame.render_hotspot_counters.gpu_present_path ==
+                           nk::GpuPresentPath::PartialRedrawCopy &&
+                       frame.render_hotspot_counters.gpu_present_tradeoff ==
+                           nk::GpuPresentTradeoff::DrawFavored;
+            });
+        }
         return true;
     }
     return true;
@@ -839,7 +892,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    (void)::setenv("NK_RENDERER_BACKEND", options.backend.c_str(), 1);
+    set_renderer_backend_env(options.backend);
 
     nk::Application app({
         .app_id = "org.nodalkit.trace_capture_harness." + scenario_name(*scenario),

@@ -14,6 +14,14 @@
 
 namespace {
 
+void set_renderer_backend_env(std::string_view backend) {
+#if defined(_WIN32)
+    (void)_putenv_s("NK_RENDERER_BACKEND", std::string(backend).c_str());
+#else
+    (void)::setenv("NK_RENDERER_BACKEND", std::string(backend).c_str(), 1);
+#endif
+}
+
 class Box : public nk::Widget {
 public:
     static std::shared_ptr<Box> vertical(float spacing = 8.0F) {
@@ -62,7 +70,7 @@ int main(int argc, char** argv) {
     const auto filter_path = std::filesystem::path(argv[5]);
     const auto render_focus_path = std::filesystem::path(argv[6]);
 
-    (void)::setenv("NK_RENDERER_BACKEND", "software", 1);
+    set_renderer_backend_env("software");
 
     nk::Application app({
         .app_id = "org.nodalkit.overlay_screenshot_harness",
