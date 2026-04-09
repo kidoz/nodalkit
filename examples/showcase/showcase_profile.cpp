@@ -175,28 +175,29 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
         profile.window_title = "NodalKit Showcase";
         profile.hero_title = "NodalKit Windows Showcase";
         profile.hero_subtitle =
-            "A command-and-preview shell with stronger focus hierarchy and room for runtime state.";
+            "A Windows shell for commands, preview, and live runtime status.";
         profile.input_title = "Command Workspace";
         profile.input_subtitle =
-            "Primary actions, short command entry, and preset controls in a Windows profile.";
+            "Primary actions, command entry, and preset controls in a Windows shell.";
         profile.list_title = "List & Selection";
-        profile.list_subtitle =
-            "A bounded list viewport keeps selection and keyboard behavior visible.";
+        profile.list_subtitle = "A bounded list viewport keeps keyboard selection visible.";
         profile.preview_title = "Preview Stage";
         profile.preview_subtitle =
-            "Live raster output with explicit scaling and a wider control column.";
+            "Live raster output with explicit scaling and compact metadata.";
         profile.actions_title = "Runtime Actions";
         profile.actions_subtitle =
-            "Shared runtime hooks for state, dialog flow, and status updates.";
+            "Shared runtime hooks for status changes, state, and dialogs.";
         profile.platform_pill_text = "Windows";
         profile.ready_segment = "Windows ready";
+        profile.preview_layout_mode = ShowcasePreviewLayoutMode::Stacked;
         profile.show_hero_close_button = false;
-        profile.window_width = 1260.0F;
+        profile.window_width = 1320.0F;
         profile.window_height = 860.0F;
         profile.main_split_ratio = 0.45F;
-        profile.preview_split_ratio = 0.68F;
+        profile.preview_split_ratio = 0.62F;
         profile.main_column_spacing = 24.0F;
-        profile.preview_section_spacing = 16.0F;
+        profile.preview_section_spacing = 14.0F;
+        profile.scrollbar_safe_gutter = 18.0F;
         profile.preview_stage_min_height = 330.0F;
         profile.preview_stage_natural_height = 350.0F;
         profile.controls_spacing = 18.0F;
