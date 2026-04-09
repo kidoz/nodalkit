@@ -3,11 +3,13 @@
 
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <nk/platform/platform_backend.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/text/text_shaper.h>
 
 namespace {
 
@@ -43,7 +45,7 @@ public:
 
     [[nodiscard]] nk::Size size() const override { return size_; }
 
-    [[nodiscard]] float scale_factor() const override { return 1.0F; }
+    [[nodiscard]] float scale_factor() const override { return scale_factor_; }
 
     void present(const uint8_t* /*rgba*/,
                  int w,
@@ -63,9 +65,36 @@ public:
     void set_cursor_shape(nk::CursorShape /*shape*/) override {}
 
     nk::Size size_{};
+    float scale_factor_ = 1.0F;
     int present_width = 0;
     int present_height = 0;
     std::vector<nk::Rect> present_regions;
+};
+
+class RecordingTextShaper final : public nk::TextShaper {
+public:
+    [[nodiscard]] nk::Size measure(std::string_view /*text*/,
+                                   nk::FontDescriptor const& font) const override {
+        last_measured_font_size = font.size;
+        return {font.size, font.size};
+    }
+
+    [[nodiscard]] nk::ShapedText shape(std::string_view /*text*/,
+                                       nk::FontDescriptor const& font,
+                                       nk::Color color) const override {
+        last_shaped_font_size = font.size;
+        nk::ShapedText shaped;
+        shaped.set_text_size({font.size, font.size});
+        shaped.set_baseline(font.size * 0.8F);
+        const auto red = static_cast<uint8_t>(color.r * 255.0F);
+        const auto green = static_cast<uint8_t>(color.g * 255.0F);
+        const auto blue = static_cast<uint8_t>(color.b * 255.0F);
+        shaped.set_bitmap({red, green, blue, 255}, 1, 1);
+        return shaped;
+    }
+
+    mutable float last_measured_font_size = 0.0F;
+    mutable float last_shaped_font_size = 0.0F;
 };
 
 } // namespace
@@ -96,6 +125,17 @@ TEST_CASE("SoftwareRenderer scales logical content into a HiDPI framebuffer", "[
     REQUIRE(outside.g == 255);
     REQUIRE(outside.b == 255);
     REQUIRE(outside.a == 255);
+}
+
+TEST_CASE("NativeSurface derives framebuffer size from logical size and scale factor",
+          "[renderer]") {
+    RecordingSurface surface;
+    surface.size_ = {123.0F, 45.0F};
+    surface.scale_factor_ = 1.5F;
+
+    const auto framebuffer = surface.framebuffer_size();
+    REQUIRE(framebuffer.width == 185.0F);
+    REQUIRE(framebuffer.height == 68.0F);
 }
 
 TEST_CASE("SoftwareRenderer preserves undamaged pixels across partial redraws", "[renderer]") {
@@ -175,4 +215,29 @@ TEST_CASE("SoftwareRenderer forwards partial present regions to native surfaces"
     REQUIRE(renderer.last_hotspot_counters().gpu_present_region_count == 1);
     REQUIRE(renderer.last_hotspot_counters().gpu_present_path ==
             nk::GpuPresentPath::SoftwareUpload);
+}
+
+TEST_CASE("SoftwareRenderer forwards logical font sizes to text shaping on Windows", "[renderer]") {
+    nk::SnapshotContext snapshot;
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 12.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+    snapshot.add_text({2.0F, 3.0F}, "Scale", nk::Color::from_rgb(0, 0, 0), font);
+    auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+
+    nk::SoftwareRenderer renderer;
+    RecordingTextShaper text_shaper;
+    renderer.set_text_shaper(&text_shaper);
+    renderer.begin_frame({40.0F, 20.0F}, 2.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+
+#if defined(_WIN32)
+    REQUIRE(std::fabs(text_shaper.last_shaped_font_size - 12.0F) < 0.01F);
+#else
+    REQUIRE(std::fabs(text_shaper.last_shaped_font_size - 24.0F) < 0.01F);
+#endif
 }

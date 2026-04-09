@@ -34,10 +34,12 @@ test_renderer = executable('test_renderer',
 )
 test('renderer', test_renderer)
 
-test_wayland_portal_contract = executable('test_wayland_portal_contract',
-    'wayland_portal_contract_test.cpp',
-    '../src/platform/linux/wayland_portal_helpers.cpp',
-    include_directories : include_directories('..'),
-    dependencies : [nk_dep, catch2_test_dep],
-)
-test('wayland_portal_contract', test_wayland_portal_contract)
+if host_machine.system() == 'linux'
+    test_wayland_portal_contract = executable('test_wayland_portal_contract',
+        'wayland_portal_contract_test.cpp',
+        '../src/platform/linux/wayland_portal_helpers.cpp',
+        include_directories : include_directories('..'),
+        dependencies : [nk_dep, catch2_test_dep],
+    )
+    test('wayland_portal_contract', test_wayland_portal_contract)
+endif
