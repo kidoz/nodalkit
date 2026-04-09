@@ -48,7 +48,7 @@ struct PrimitiveCommand {
     float radius = 0.0F;
     float thickness = 0.0F;
     uint32_t kind = 0;
-    std::array<ClipRegion, 2> clips{};
+    std::array<ClipRegion, 3> clips{};
     uint32_t clip_count = 0;
 };
 
@@ -58,14 +58,14 @@ struct ImageCommand {
     int src_width = 0;
     int src_height = 0;
     ScaleMode scale_mode = ScaleMode::NearestNeighbor;
-    std::array<ClipRegion, 2> clips{};
+    std::array<ClipRegion, 3> clips{};
     uint32_t clip_count = 0;
 };
 
 struct TextCommand {
     Rect rect{};
     std::shared_ptr<ShapedText> shaped_text;
-    std::array<ClipRegion, 2> clips{};
+    std::array<ClipRegion, 3> clips{};
     uint32_t clip_count = 0;
 };
 
@@ -83,13 +83,13 @@ struct DrawCommand {
 struct DrawPushConstants {
     float rect[4]{};
     float color[4]{};
-    float clip_rects[8]{};
+    float clip_rects[12]{};
     float clip_radii[4]{};
     float params0[4]{};
     float viewport[4]{};
 };
 
-static_assert(sizeof(DrawPushConstants) == 112);
+static_assert(sizeof(DrawPushConstants) == 128);
 
 struct TextKey {
     std::string text;
@@ -180,7 +180,7 @@ struct TextTextureCacheKeyHash {
     }
 };
 
-constexpr std::size_t kMaxClipDepth = 2;
+constexpr std::size_t kMaxClipDepth = 3;
 constexpr uint64_t kTextureCacheMaxAgeFrames = 120;
 constexpr std::size_t kImageTextureCacheMaxEntries = 128;
 constexpr std::size_t kTextTextureCacheMaxEntries = 256;

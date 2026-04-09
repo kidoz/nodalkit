@@ -5,7 +5,7 @@ layout(set = 0, binding = 0) uniform sampler2D u_texture;
 layout(push_constant) uniform DrawPushConstants {
     vec4 rect;
     vec4 color;
-    vec4 clip_rects[2];
+    vec4 clip_rects[3];
     vec4 clip_radii;
     vec4 params0;
     vec4 viewport;
