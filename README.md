@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 [![Meson](https://img.shields.io/badge/Build-Meson-blueviolet.svg)](https://mesonbuild.com/)
-[![Platform: Linux Wayland primary | macOS secondary](https://img.shields.io/badge/Platform-Linux%20Wayland%20primary%20%7C%20macOS%20secondary-lightgrey.svg)]()
+[![Platform: Linux Wayland | macOS | Windows](https://img.shields.io/badge/Platform-Linux%20Wayland%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
 
 A C++-first GUI toolkit for modern desktop applications.
 
@@ -24,8 +24,9 @@ rapidly changing toolkit rather than a compatibility promise.
 The current 0.x support policy is:
 
 - Linux Wayland is the primary release target.
-- macOS is a secondary target only while CI stays green.
-- X11 and Windows are not release targets yet.
+- macOS is a secondary target while CI stays green.
+- Windows is a secondary target (Win32, D3D11, DirectWrite/GDI).
+- X11 is not a release target yet.
 
 ## Quick Start
 
@@ -73,7 +74,7 @@ For public best practices on building real applications with NodalKit, read
 | **foundation** | Types, Result, Signal/Slot, Property, Logging |
 | **runtime** | Event loop, timers, task posting |
 | **platform** | Application, Window, input events |
-| **render** | Render node tree, software renderer, experimental Metal-backed presentation on macOS |
+| **render** | Render node tree, software renderer, D3D11 on Windows, Metal on macOS, experimental Vulkan on Linux and Windows |
 | **ui_core** | Widget base, tree, focus, state flags |
 | **controllers** | Pointer, Keyboard, Focus controllers |
 | **layout** | Measure/allocate pipeline, BoxLayout |
