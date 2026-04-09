@@ -92,6 +92,9 @@ std::optional<FrameRequestReason> parse_frame_request_reason_name(std::string_vi
     if (value == "resize") {
         return FrameRequestReason::Resize;
     }
+    if (value == "scale-factor-changed") {
+        return FrameRequestReason::ScaleFactorChanged;
+    }
     if (value == "expose") {
         return FrameRequestReason::Expose;
     }
@@ -449,12 +452,16 @@ void append_render_hotspot_counters_json(std::ostringstream& out,
         << ",\"text_shape_cache_hit_count\":" << counters.text_shape_cache_hit_count
         << ",\"text_bitmap_pixel_count\":" << counters.text_bitmap_pixel_count
         << ",\"text_texture_upload_count\":" << counters.text_texture_upload_count
+        << ",\"text_texture_cache_hit_count\":" << counters.text_texture_cache_hit_count
         << ",\"image_node_count\":" << counters.image_node_count
         << ",\"image_source_pixel_count\":" << counters.image_source_pixel_count
         << ",\"image_dest_pixel_count\":" << counters.image_dest_pixel_count
         << ",\"image_texture_upload_count\":" << counters.image_texture_upload_count
+        << ",\"image_texture_cache_hit_count\":" << counters.image_texture_cache_hit_count
         << ",\"damage_region_count\":" << counters.damage_region_count
         << ",\"gpu_draw_call_count\":" << counters.gpu_draw_call_count
+        << ",\"gpu_replayed_command_count\":" << counters.gpu_replayed_command_count
+        << ",\"gpu_skipped_command_count\":" << counters.gpu_skipped_command_count
         << ",\"gpu_present_region_count\":" << counters.gpu_present_region_count
         << ",\"gpu_swapchain_copy_count\":" << counters.gpu_swapchain_copy_count
         << ",\"gpu_viewport_pixel_count\":" << counters.gpu_viewport_pixel_count
@@ -2462,6 +2469,8 @@ private:
                     counters.text_bitmap_pixel_count = *value;
                 } else if (*key == "text_texture_upload_count") {
                     counters.text_texture_upload_count = *value;
+                } else if (*key == "text_texture_cache_hit_count") {
+                    counters.text_texture_cache_hit_count = *value;
                 } else if (*key == "image_node_count") {
                     counters.image_node_count = *value;
                 } else if (*key == "image_source_pixel_count") {
@@ -2470,10 +2479,16 @@ private:
                     counters.image_dest_pixel_count = *value;
                 } else if (*key == "image_texture_upload_count") {
                     counters.image_texture_upload_count = *value;
+                } else if (*key == "image_texture_cache_hit_count") {
+                    counters.image_texture_cache_hit_count = *value;
                 } else if (*key == "damage_region_count") {
                     counters.damage_region_count = *value;
                 } else if (*key == "gpu_draw_call_count") {
                     counters.gpu_draw_call_count = *value;
+                } else if (*key == "gpu_replayed_command_count") {
+                    counters.gpu_replayed_command_count = *value;
+                } else if (*key == "gpu_skipped_command_count") {
+                    counters.gpu_skipped_command_count = *value;
                 } else if (*key == "gpu_present_region_count") {
                     counters.gpu_present_region_count = *value;
                 } else if (*key == "gpu_swapchain_copy_count") {
@@ -3244,6 +3259,8 @@ std::string_view frame_request_reason_name(FrameRequestReason reason) noexcept {
         return "present";
     case FrameRequestReason::Resize:
         return "resize";
+    case FrameRequestReason::ScaleFactorChanged:
+        return "scale-factor-changed";
     case FrameRequestReason::Expose:
         return "expose";
     case FrameRequestReason::ChildChanged:

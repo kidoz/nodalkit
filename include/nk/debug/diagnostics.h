@@ -55,6 +55,7 @@ enum class FrameRequestReason : uint8_t {
     Manual,
     Present,
     Resize,
+    ScaleFactorChanged,
     Expose,
     ChildChanged,
     OverlayChanged,
@@ -94,12 +95,16 @@ struct RenderHotspotCounters {
     std::size_t text_shape_cache_hit_count = 0;
     std::size_t text_bitmap_pixel_count = 0;
     std::size_t text_texture_upload_count = 0;
+    std::size_t text_texture_cache_hit_count = 0;
     std::size_t image_node_count = 0;
     std::size_t image_source_pixel_count = 0;
     std::size_t image_dest_pixel_count = 0;
     std::size_t image_texture_upload_count = 0;
+    std::size_t image_texture_cache_hit_count = 0;
     std::size_t damage_region_count = 0;
     std::size_t gpu_draw_call_count = 0;
+    std::size_t gpu_replayed_command_count = 0;
+    std::size_t gpu_skipped_command_count = 0;
     std::size_t gpu_present_region_count = 0;
     std::size_t gpu_swapchain_copy_count = 0;
     std::size_t gpu_viewport_pixel_count = 0;
