@@ -616,11 +616,15 @@ std::string Widget::debug_snapshot_label() const {
 }
 
 void Widget::snapshot_subtree(SnapshotContext& ctx) const {
-    ++impl_->debug_hotspot_counters.snapshot_count;
-    const auto path = debug_tree_path();
-    ctx.push_debug_source(debug_snapshot_label(), path);
-    snapshot(ctx);
-    ctx.pop_debug_source();
+    if (ctx.debug_annotations_enabled()) {
+        ++impl_->debug_hotspot_counters.snapshot_count;
+        const auto path = debug_tree_path();
+        ctx.push_debug_source(debug_snapshot_label(), path);
+        snapshot(ctx);
+        ctx.pop_debug_source();
+    } else {
+        snapshot(ctx);
+    }
     impl_->debug_pending_redraw = false;
 }
 

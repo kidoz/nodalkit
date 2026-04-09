@@ -5,9 +5,7 @@
 
 #include <nk/text/text_shaper.h>
 
-#include <string>
-
-typedef struct FT_LibraryRec_* FT_Library;
+#include <memory>
 
 namespace nk {
 
@@ -24,11 +22,8 @@ public:
         Color color) const override;
 
 private:
-    FT_Library ft_library_ = nullptr;
-
-    /// Resolve a FontDescriptor to a file path via fontconfig.
-    [[nodiscard]] std::string resolve_font_path(
-        FontDescriptor const& desc) const;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace nk

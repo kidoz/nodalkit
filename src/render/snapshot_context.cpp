@@ -22,6 +22,7 @@ struct SnapshotContext::Impl {
     /// `root` for the bottom-most entry).
     std::stack<RenderNode*> container_stack;
     std::vector<DebugSourceScope> debug_source_stack;
+    bool debug_annotations_enabled = true;
 };
 
 SnapshotContext::SnapshotContext() : impl_(std::make_unique<Impl>()) {
@@ -78,12 +79,26 @@ void SnapshotContext::push_container(Rect bounds) {
     impl_->container_stack.push(raw);
 }
 
+void SnapshotContext::set_debug_annotations_enabled(bool enabled) {
+    impl_->debug_annotations_enabled = enabled;
+}
+
+bool SnapshotContext::debug_annotations_enabled() const {
+    return impl_->debug_annotations_enabled;
+}
+
 void SnapshotContext::push_debug_source(std::string label, std::span<const std::size_t> path) {
+    if (!impl_->debug_annotations_enabled) {
+        return;
+    }
     impl_->debug_source_stack.push_back(
         {std::move(label), std::vector<std::size_t>(path.begin(), path.end())});
 }
 
 void SnapshotContext::pop_debug_source() {
+    if (!impl_->debug_annotations_enabled) {
+        return;
+    }
     assert(!impl_->debug_source_stack.empty() && "Cannot pop an empty debug source stack");
     impl_->debug_source_stack.pop_back();
 }

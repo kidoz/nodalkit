@@ -12,10 +12,90 @@
 
 #include <algorithm>
 #include <cmath>
+#include <list>
+#include <unordered_map>
 
 namespace nk {
 
 namespace {
+
+// ---------------------------------------------------------------------------
+// Font path cache — avoids repeated fontconfig matching.
+// ---------------------------------------------------------------------------
+
+struct FontPathKey {
+    std::string family;
+    FontWeight weight = FontWeight::Regular;
+    FontStyle style = FontStyle::Normal;
+
+    bool operator==(const FontPathKey&) const = default;
+};
+
+struct FontPathKeyHash {
+    std::size_t operator()(const FontPathKey& key) const noexcept {
+        std::size_t h = std::hash<std::string>{}(key.family);
+        h ^= std::hash<uint16_t>{}(static_cast<uint16_t>(key.weight)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.style)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Face cache — keeps FT_Face objects alive across calls.
+// ---------------------------------------------------------------------------
+
+struct FaceKey {
+    std::string path;
+    unsigned int pixel_size = 0;
+
+    bool operator==(const FaceKey&) const = default;
+};
+
+struct FaceKeyHash {
+    std::size_t operator()(const FaceKey& key) const noexcept {
+        std::size_t h = std::hash<std::string>{}(key.path);
+        h ^= std::hash<unsigned int>{}(key.pixel_size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+struct FaceCacheEntry {
+    FT_Face face = nullptr;
+    hb_font_t* hb_font = nullptr;
+};
+
+constexpr std::size_t kFaceCacheMaxEntries = 8;
+
+// ---------------------------------------------------------------------------
+// Measurement cache — avoids re-shaping text that hasn't changed.
+// ---------------------------------------------------------------------------
+
+struct MeasureCacheKey {
+    std::string text;
+    std::string family;
+    float size = 0.0F;
+    FontWeight weight = FontWeight::Regular;
+    FontStyle style = FontStyle::Normal;
+
+    bool operator==(const MeasureCacheKey&) const = default;
+};
+
+struct MeasureCacheKeyHash {
+    std::size_t operator()(const MeasureCacheKey& key) const noexcept {
+        std::size_t h = std::hash<std::string>{}(key.text);
+        h ^= std::hash<std::string>{}(key.family) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(key.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<uint16_t>{}(static_cast<uint16_t>(key.weight)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.style)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+
+constexpr std::size_t kMeasureCacheMaxEntries = 512;
+
+// ---------------------------------------------------------------------------
+// Text run helpers
+// ---------------------------------------------------------------------------
 
 struct TextRunBounds {
     int left = 0;
@@ -33,49 +113,6 @@ int to_pixel_floor(hb_position_t value) {
 int to_pixel_ceil(hb_position_t value) {
     return static_cast<int>(
         std::ceil(static_cast<double>(value) / 64.0));
-}
-
-FT_Face create_face(
-    FT_Library library,
-    std::string const& path,
-    FontDescriptor const& font) {
-    FT_Face face = nullptr;
-    if (FT_New_Face(library, path.c_str(), 0, &face) != 0) {
-        return nullptr;
-    }
-
-    auto const px = static_cast<FT_UInt>(
-        std::round(static_cast<double>(font.size) * 96.0 / 72.0));
-    FT_Set_Pixel_Sizes(face, 0, px);
-    return face;
-}
-
-bool shape_run(
-    FT_Face face,
-    std::string_view text,
-    hb_font_t*& hb_font,
-    hb_buffer_t*& hb_buffer,
-    hb_glyph_info_t*& glyph_infos,
-    hb_glyph_position_t*& glyph_positions,
-    unsigned int& glyph_count) {
-    hb_font = hb_ft_font_create_referenced(face);
-    hb_buffer = hb_buffer_create();
-    if (hb_font == nullptr || hb_buffer == nullptr) {
-        return false;
-    }
-
-    hb_buffer_add_utf8(
-        hb_buffer,
-        text.data(),
-        static_cast<int>(text.size()),
-        0,
-        static_cast<int>(text.size()));
-    hb_buffer_guess_segment_properties(hb_buffer);
-    hb_shape(hb_font, hb_buffer, nullptr, 0);
-
-    glyph_infos = hb_buffer_get_glyph_infos(hb_buffer, &glyph_count);
-    glyph_positions = hb_buffer_get_glyph_positions(hb_buffer, &glyph_count);
-    return glyph_infos != nullptr && glyph_positions != nullptr;
 }
 
 TextRunBounds compute_text_run_bounds(
@@ -176,122 +213,239 @@ void blend_alpha_mask(
 
 } // namespace
 
-FreeTypeShaper::FreeTypeShaper() {
-    if (FT_Init_FreeType(&ft_library_) != 0) {
-        NK_LOG_ERROR("FreeType", "Failed to initialize FreeType library");
-        ft_library_ = nullptr;
-    }
-}
+// ---------------------------------------------------------------------------
+// FreeTypeShaper::Impl — holds all caches.
+// ---------------------------------------------------------------------------
 
-FreeTypeShaper::~FreeTypeShaper() {
-    if (ft_library_) {
-        FT_Done_FreeType(ft_library_);
-    }
-}
+struct FreeTypeShaper::Impl {
+    FT_Library ft_library = nullptr;
 
-std::string FreeTypeShaper::resolve_font_path(
-    FontDescriptor const& desc) const {
+    // Font path cache: (family, weight, style) → file path.
+    std::unordered_map<FontPathKey, std::string, FontPathKeyHash> font_path_cache;
 
-    FcPattern* pattern = FcPatternCreate();
-    if (!pattern) {
-        return {};
-    }
+    // Face cache with LRU eviction: (path, pixel_size) → (FT_Face, hb_font).
+    std::list<std::pair<FaceKey, FaceCacheEntry>> face_lru;
+    std::unordered_map<FaceKey, decltype(face_lru)::iterator, FaceKeyHash> face_map;
 
-    char const* family = desc.family.c_str();
-    if (desc.family.empty() || desc.family == "System") {
-        family = "sans-serif";
-    }
-    FcPatternAddString(pattern, FC_FAMILY,
-                       reinterpret_cast<FcChar8 const*>(family));
-    FcPatternAddDouble(pattern, FC_SIZE, static_cast<double>(desc.size));
+    // Measurement cache with LRU eviction.
+    std::list<std::pair<MeasureCacheKey, Size>> measure_lru;
+    std::unordered_map<MeasureCacheKey, decltype(measure_lru)::iterator, MeasureCacheKeyHash> measure_map;
 
-    // Map nk::FontWeight → fontconfig weight constant.
-    int fc_weight = FC_WEIGHT_REGULAR;
-    switch (desc.weight) {
-    case FontWeight::Thin:      fc_weight = FC_WEIGHT_THIN; break;
-    case FontWeight::Light:     fc_weight = FC_WEIGHT_LIGHT; break;
-    case FontWeight::Regular:   fc_weight = FC_WEIGHT_REGULAR; break;
-    case FontWeight::Medium:    fc_weight = FC_WEIGHT_MEDIUM; break;
-    case FontWeight::SemiBold:  fc_weight = FC_WEIGHT_SEMIBOLD; break;
-    case FontWeight::Bold:      fc_weight = FC_WEIGHT_BOLD; break;
-    case FontWeight::ExtraBold: fc_weight = FC_WEIGHT_EXTRABOLD; break;
-    case FontWeight::Black:     fc_weight = FC_WEIGHT_BLACK; break;
-    }
-    FcPatternAddInteger(pattern, FC_WEIGHT, fc_weight);
-
-    int fc_slant = FC_SLANT_ROMAN;
-    switch (desc.style) {
-    case FontStyle::Normal:  fc_slant = FC_SLANT_ROMAN; break;
-    case FontStyle::Italic:  fc_slant = FC_SLANT_ITALIC; break;
-    case FontStyle::Oblique: fc_slant = FC_SLANT_OBLIQUE; break;
-    }
-    FcPatternAddInteger(pattern, FC_SLANT, fc_slant);
-
-    FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
-    FcDefaultSubstitute(pattern);
-
-    FcResult result = FcResultNoMatch;
-    FcPattern* match = FcFontMatch(nullptr, pattern, &result);
-
-    std::string path;
-    if (match) {
-        FcChar8* file = nullptr;
-        if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch &&
-            file) {
-            path = reinterpret_cast<char const*>(file);
+    ~Impl() {
+        for (auto& entry : face_lru) {
+            if (entry.second.hb_font != nullptr) {
+                hb_font_destroy(entry.second.hb_font);
+            }
+            if (entry.second.face != nullptr) {
+                FT_Done_Face(entry.second.face);
+            }
         }
-        FcPatternDestroy(match);
+        if (ft_library != nullptr) {
+            FT_Done_FreeType(ft_library);
+        }
     }
 
-    FcPatternDestroy(pattern);
-    return path;
+    std::string const& resolve_font_path(FontDescriptor const& desc) {
+        FontPathKey key{
+            desc.family.empty() || desc.family == "System" ? "sans-serif" : desc.family,
+            desc.weight,
+            desc.style,
+        };
+
+        auto it = font_path_cache.find(key);
+        if (it != font_path_cache.end()) {
+            return it->second;
+        }
+
+        std::string path = lookup_font_path(key);
+        auto [inserted, _] = font_path_cache.emplace(std::move(key), std::move(path));
+        return inserted->second;
+    }
+
+    FaceCacheEntry* get_face(std::string const& path, FontDescriptor const& font) {
+        auto const px = static_cast<unsigned int>(
+            std::round(static_cast<double>(font.size) * 96.0 / 72.0));
+        FaceKey key{path, px};
+
+        auto it = face_map.find(key);
+        if (it != face_map.end()) {
+            // Move to front of LRU.
+            face_lru.splice(face_lru.begin(), face_lru, it->second);
+            return &it->second->second;
+        }
+
+        // Create new face.
+        FT_Face face = nullptr;
+        if (FT_New_Face(ft_library, path.c_str(), 0, &face) != 0) {
+            return nullptr;
+        }
+        FT_Set_Pixel_Sizes(face, 0, px);
+
+        hb_font_t* hb_font = hb_ft_font_create_referenced(face);
+        if (hb_font == nullptr) {
+            FT_Done_Face(face);
+            return nullptr;
+        }
+
+        // Evict oldest if at capacity.
+        if (face_lru.size() >= kFaceCacheMaxEntries) {
+            auto& back = face_lru.back();
+            if (back.second.hb_font != nullptr) {
+                hb_font_destroy(back.second.hb_font);
+            }
+            FT_Done_Face(back.second.face);
+            face_map.erase(back.first);
+            face_lru.pop_back();
+        }
+
+        face_lru.emplace_front(std::move(key), FaceCacheEntry{face, hb_font});
+        face_map[face_lru.front().first] = face_lru.begin();
+        return &face_lru.front().second;
+    }
+
+    Size* find_cached_measure(std::string_view text, FontDescriptor const& font) {
+        MeasureCacheKey key{
+            std::string(text),
+            font.family,
+            font.size,
+            font.weight,
+            font.style,
+        };
+        auto it = measure_map.find(key);
+        if (it != measure_map.end()) {
+            measure_lru.splice(measure_lru.begin(), measure_lru, it->second);
+            return &it->second->second;
+        }
+        return nullptr;
+    }
+
+    void insert_measure(std::string_view text, FontDescriptor const& font, Size size) {
+        MeasureCacheKey key{
+            std::string(text),
+            font.family,
+            font.size,
+            font.weight,
+            font.style,
+        };
+        if (measure_lru.size() >= kMeasureCacheMaxEntries) {
+            measure_map.erase(measure_lru.back().first);
+            measure_lru.pop_back();
+        }
+        measure_lru.emplace_front(std::move(key), size);
+        measure_map[measure_lru.front().first] = measure_lru.begin();
+    }
+
+private:
+    static std::string lookup_font_path(FontPathKey const& key) {
+        FcPattern* pattern = FcPatternCreate();
+        if (pattern == nullptr) {
+            return {};
+        }
+
+        FcPatternAddString(pattern, FC_FAMILY,
+                           reinterpret_cast<FcChar8 const*>(key.family.c_str()));
+
+        int fc_weight = FC_WEIGHT_REGULAR;
+        switch (key.weight) {
+        case FontWeight::Thin:      fc_weight = FC_WEIGHT_THIN; break;
+        case FontWeight::Light:     fc_weight = FC_WEIGHT_LIGHT; break;
+        case FontWeight::Regular:   fc_weight = FC_WEIGHT_REGULAR; break;
+        case FontWeight::Medium:    fc_weight = FC_WEIGHT_MEDIUM; break;
+        case FontWeight::SemiBold:  fc_weight = FC_WEIGHT_SEMIBOLD; break;
+        case FontWeight::Bold:      fc_weight = FC_WEIGHT_BOLD; break;
+        case FontWeight::ExtraBold: fc_weight = FC_WEIGHT_EXTRABOLD; break;
+        case FontWeight::Black:     fc_weight = FC_WEIGHT_BLACK; break;
+        }
+        FcPatternAddInteger(pattern, FC_WEIGHT, fc_weight);
+
+        int fc_slant = FC_SLANT_ROMAN;
+        switch (key.style) {
+        case FontStyle::Normal:  fc_slant = FC_SLANT_ROMAN; break;
+        case FontStyle::Italic:  fc_slant = FC_SLANT_ITALIC; break;
+        case FontStyle::Oblique: fc_slant = FC_SLANT_OBLIQUE; break;
+        }
+        FcPatternAddInteger(pattern, FC_SLANT, fc_slant);
+
+        FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
+        FcDefaultSubstitute(pattern);
+
+        FcResult result = FcResultNoMatch;
+        FcPattern* match = FcFontMatch(nullptr, pattern, &result);
+
+        std::string path;
+        if (match != nullptr) {
+            FcChar8* file = nullptr;
+            if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch &&
+                file != nullptr) {
+                path = reinterpret_cast<char const*>(file);
+            }
+            FcPatternDestroy(match);
+        }
+
+        FcPatternDestroy(pattern);
+        return path;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// FreeTypeShaper
+// ---------------------------------------------------------------------------
+
+FreeTypeShaper::FreeTypeShaper() : impl_(std::make_unique<Impl>()) {
+    if (FT_Init_FreeType(&impl_->ft_library) != 0) {
+        NK_LOG_ERROR("FreeType", "Failed to initialize FreeType library");
+        impl_->ft_library = nullptr;
+    }
 }
+
+FreeTypeShaper::~FreeTypeShaper() = default;
 
 Size FreeTypeShaper::measure(std::string_view text,
                              FontDescriptor const& font) const {
-    if (!ft_library_ || text.empty()) {
+    if (impl_->ft_library == nullptr || text.empty()) {
         return {0, 0};
     }
 
-    std::string const path = resolve_font_path(font);
+    // Check measurement cache first.
+    if (auto* cached = impl_->find_cached_measure(text, font)) {
+        return *cached;
+    }
+
+    auto const& path = impl_->resolve_font_path(font);
     if (path.empty()) {
         return {0, 0};
     }
 
-    FT_Face face = create_face(ft_library_, path, font);
-    if (face == nullptr) {
+    auto* entry = impl_->get_face(path, font);
+    if (entry == nullptr) {
         return {0, 0};
     }
 
-    hb_font_t* hb_font = nullptr;
-    hb_buffer_t* hb_buffer = nullptr;
-    hb_glyph_info_t* glyph_infos = nullptr;
-    hb_glyph_position_t* glyph_positions = nullptr;
+    hb_buffer_t* hb_buffer = hb_buffer_create();
+    if (hb_buffer == nullptr) {
+        return {0, 0};
+    }
+
+    hb_buffer_add_utf8(hb_buffer, text.data(),
+                       static_cast<int>(text.size()),
+                       0, static_cast<int>(text.size()));
+    hb_buffer_guess_segment_properties(hb_buffer);
+    hb_shape(entry->hb_font, hb_buffer, nullptr, 0);
+
     unsigned int glyph_count = 0;
-    if (!shape_run(
-            face,
-            text,
-            hb_font,
-            hb_buffer,
-            glyph_infos,
-            glyph_positions,
-            glyph_count)) {
-        if (hb_buffer != nullptr) {
-            hb_buffer_destroy(hb_buffer);
-        }
-        if (hb_font != nullptr) {
-            hb_font_destroy(hb_font);
-        }
-        FT_Done_Face(face);
-        return {0, 0};
+    auto* glyph_infos = hb_buffer_get_glyph_infos(hb_buffer, &glyph_count);
+    auto* glyph_positions = hb_buffer_get_glyph_positions(hb_buffer, &glyph_count);
+
+    Size result{0, 0};
+    if (glyph_infos != nullptr && glyph_positions != nullptr) {
+        auto const bounds =
+            compute_text_run_bounds(entry->face, glyph_infos, glyph_positions, glyph_count);
+        result = {static_cast<float>(bounds.width), static_cast<float>(bounds.height)};
     }
 
-    auto const bounds =
-        compute_text_run_bounds(face, glyph_infos, glyph_positions, glyph_count);
     hb_buffer_destroy(hb_buffer);
-    hb_font_destroy(hb_font);
-    FT_Done_Face(face);
-    return {static_cast<float>(bounds.width), static_cast<float>(bounds.height)};
+    impl_->insert_measure(text, font, result);
+    return result;
 }
 
 ShapedText FreeTypeShaper::shape(std::string_view text,
@@ -299,55 +453,50 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
                                  Color color) const {
     ShapedText result;
 
-    if (!ft_library_ || text.empty()) {
+    if (impl_->ft_library == nullptr || text.empty()) {
         return result;
     }
 
-    std::string const path = resolve_font_path(font);
+    auto const& path = impl_->resolve_font_path(font);
     if (path.empty()) {
         NK_LOG_WARN("FreeType", "Could not resolve font path");
         return result;
     }
 
-    FT_Face face = create_face(ft_library_, path, font);
-    if (face == nullptr) {
+    auto* entry = impl_->get_face(path, font);
+    if (entry == nullptr) {
         NK_LOG_WARN("FreeType", "Failed to load font face");
         return result;
     }
 
-    hb_font_t* hb_font = nullptr;
-    hb_buffer_t* hb_buffer = nullptr;
-    hb_glyph_info_t* glyph_infos = nullptr;
-    hb_glyph_position_t* glyph_positions = nullptr;
+    hb_buffer_t* hb_buffer = hb_buffer_create();
+    if (hb_buffer == nullptr) {
+        return result;
+    }
+
+    hb_buffer_add_utf8(hb_buffer, text.data(),
+                       static_cast<int>(text.size()),
+                       0, static_cast<int>(text.size()));
+    hb_buffer_guess_segment_properties(hb_buffer);
+    hb_shape(entry->hb_font, hb_buffer, nullptr, 0);
+
     unsigned int glyph_count = 0;
-    if (!shape_run(
-            face,
-            text,
-            hb_font,
-            hb_buffer,
-            glyph_infos,
-            glyph_positions,
-            glyph_count)) {
-        if (hb_buffer != nullptr) {
-            hb_buffer_destroy(hb_buffer);
-        }
-        if (hb_font != nullptr) {
-            hb_font_destroy(hb_font);
-        }
-        FT_Done_Face(face);
+    auto* glyph_infos = hb_buffer_get_glyph_infos(hb_buffer, &glyph_count);
+    auto* glyph_positions = hb_buffer_get_glyph_positions(hb_buffer, &glyph_count);
+
+    if (glyph_infos == nullptr || glyph_positions == nullptr) {
+        hb_buffer_destroy(hb_buffer);
         return result;
     }
 
     auto const bounds =
-        compute_text_run_bounds(face, glyph_infos, glyph_positions, glyph_count);
+        compute_text_run_bounds(entry->face, glyph_infos, glyph_positions, glyph_count);
     result.set_text_size(
         {static_cast<float>(bounds.width), static_cast<float>(bounds.height)});
     result.set_baseline(static_cast<float>(bounds.baseline));
 
     if (bounds.width <= 0 || bounds.height <= 0) {
         hb_buffer_destroy(hb_buffer);
-        hb_font_destroy(hb_font);
-        FT_Done_Face(face);
         return result;
     }
 
@@ -364,14 +513,14 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
     hb_position_t pen_x = 0;
     for (unsigned int i = 0; i < glyph_count; ++i) {
         if (FT_Load_Glyph(
-                face,
+                entry->face,
                 glyph_infos[i].codepoint,
                 FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) {
             pen_x += glyph_positions[i].x_advance;
             continue;
         }
 
-        auto const* glyph = face->glyph;
+        auto const* glyph = entry->face->glyph;
         int const gx =
             to_pixel_floor(pen_x + glyph_positions[i].x_offset)
             + glyph->bitmap_left - bounds.left;
@@ -395,8 +544,6 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
     }
 
     hb_buffer_destroy(hb_buffer);
-    hb_font_destroy(hb_font);
-    FT_Done_Face(face);
     result.set_bitmap(std::move(bitmap), bounds.width, bounds.height);
     return result;
 }

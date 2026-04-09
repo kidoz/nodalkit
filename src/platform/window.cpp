@@ -1794,6 +1794,8 @@ std::unique_ptr<RenderNode> Window::build_window_debug_render_tree(Size viewport
     }
 
     SnapshotContext snap_ctx;
+    snap_ctx.set_debug_annotations_enabled(
+        impl_->debug_overlay_flags != DebugOverlayFlags::None);
     impl_->child->snapshot_subtree(snap_ctx);
     for (auto& overlay : impl_->overlays) {
         if (overlay.widget != nullptr && overlay.widget->is_visible()) {
@@ -2200,17 +2202,19 @@ void Window::request_frame(FrameRequestReason reason) {
             frame.layout_request_count = impl_->layout_request_count;
             frame.dirty_widget_count = impl_->dirty_widgets.size();
             frame.request_reasons = impl_->pending_frame_reasons;
-            frame.widget_count = count_widgets_recursive(impl_->child.get());
-            for (const auto& overlay : impl_->overlays) {
-                if (overlay.widget != nullptr) {
-                    frame.widget_count += count_widgets_recursive(overlay.widget.get());
+            if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
+                frame.widget_count = count_widgets_recursive(impl_->child.get());
+                for (const auto& overlay : impl_->overlays) {
+                    if (overlay.widget != nullptr) {
+                        frame.widget_count += count_widgets_recursive(overlay.widget.get());
+                    }
                 }
-            }
 
-            impl_->child->reset_debug_hotspot_counters_recursive();
-            for (auto& overlay : impl_->overlays) {
-                if (overlay.widget != nullptr) {
-                    overlay.widget->reset_debug_hotspot_counters_recursive();
+                impl_->child->reset_debug_hotspot_counters_recursive();
+                for (auto& overlay : impl_->overlays) {
+                    if (overlay.widget != nullptr) {
+                        overlay.widget->reset_debug_hotspot_counters_recursive();
+                    }
                 }
             }
 
@@ -2225,19 +2229,22 @@ void Window::request_frame(FrameRequestReason reason) {
             const auto snapshot_start = Clock::now();
             auto root_node = build_window_debug_render_tree(sz, content_area);
             frame.snapshot_ms = elapsed_ms(snapshot_start, Clock::now());
-            frame.widget_hotspot_totals = collect_widget_hotspot_totals(impl_->child.get());
-            for (const auto& overlay : impl_->overlays) {
-                if (overlay.widget != nullptr) {
-                    accumulate_widget_hotspot_counters(
-                        frame.widget_hotspot_totals,
-                        collect_widget_hotspot_totals(overlay.widget.get()));
+            if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
+                frame.widget_hotspot_totals =
+                    collect_widget_hotspot_totals(impl_->child.get());
+                for (const auto& overlay : impl_->overlays) {
+                    if (overlay.widget != nullptr) {
+                        accumulate_widget_hotspot_counters(
+                            frame.widget_hotspot_totals,
+                            collect_widget_hotspot_totals(overlay.widget.get()));
+                    }
                 }
-            }
-            frame.render_node_count = count_render_nodes_recursive(root_node.get());
-            if (root_node) {
-                frame.render_snapshot = build_render_snapshot(*root_node);
-                frame.render_snapshot_node_count =
-                    count_render_snapshot_nodes(frame.render_snapshot);
+                frame.render_node_count = count_render_nodes_recursive(root_node.get());
+                if (root_node) {
+                    frame.render_snapshot = build_render_snapshot(*root_node);
+                    frame.render_snapshot_node_count =
+                        count_render_snapshot_nodes(frame.render_snapshot);
+                }
             }
 
             auto damage_regions = collect_frame_damage_regions(
@@ -2285,6 +2292,7 @@ void Window::request_frame(FrameRequestReason reason) {
             frame.total_ms = elapsed_ms(frame_start, Clock::now());
             frame.performance_marker = classify_frame_time(frame.total_ms);
             frame.budget_overrun_ms = std::max(0.0, frame.total_ms - frame_budget_ms());
+
             impl_->last_frame_diagnostics = frame;
             const uint64_t previous_selected_frame_id = impl_->debug_selected_frame_id;
             const uint64_t previous_latest_frame_id =

@@ -47,6 +47,12 @@ public:
     /// Push a child container (for grouping/clipping).
     void push_container(Rect bounds);
 
+    /// Enable or disable debug source annotation on render nodes.
+    /// When disabled, push_debug_source/pop_debug_source become no-ops
+    /// and snapshot_subtree skips expensive tree-path computation.
+    void set_debug_annotations_enabled(bool enabled);
+    [[nodiscard]] bool debug_annotations_enabled() const;
+
     /// Associate subsequently added render nodes with a source widget.
     void push_debug_source(std::string label, std::span<const std::size_t> path);
     void pop_debug_source();
