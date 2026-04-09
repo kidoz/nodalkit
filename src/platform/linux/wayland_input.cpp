@@ -376,6 +376,9 @@ static constexpr struct zwp_text_input_v3_listener text_input_listener = {
     .commit_string = WaylandInput::text_input_commit_string,
     .delete_surrounding_text = WaylandInput::text_input_delete_surrounding_text,
     .done = WaylandInput::text_input_done,
+    .action = nullptr,
+    .language = nullptr,
+    .preedit_hint = nullptr,
 };
 
 static constexpr const char* PrimarySelectionMimeTextUtf8 = "text/plain;charset=utf-8";

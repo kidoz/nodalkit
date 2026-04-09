@@ -15,6 +15,7 @@
 #include <cstring>
 #include <gio/gio.h>
 #include <mutex>
+#include <nk/accessibility/accessible.h>
 #include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/logging.h>
 #include <nk/runtime/event_loop.h>
@@ -23,6 +24,7 @@
 #include <sys/eventfd.h>
 #include <thread>
 #include <unistd.h>
+#include <nk/ui_core/widget.h>
 #include <unordered_map>
 #include <wayland-client.h>
 
@@ -924,6 +926,7 @@ const GDBusInterfaceVTable* atspi_subtree_dispatch(GDBusConnection* /*connection
         .method_call = atspi_method_call,
         .get_property = atspi_get_property,
         .set_property = nullptr,
+        .padding = {},
     };
 
     if (std::string_view(interface_name) != AtspiAccessibleInterface &&
@@ -942,6 +945,7 @@ const GDBusSubtreeVTable atspi_subtree_vtable = {
     .enumerate = atspi_subtree_enumerate,
     .introspect = atspi_subtree_introspect,
     .dispatch = atspi_subtree_dispatch,
+    .padding = {},
 };
 
 } // namespace
