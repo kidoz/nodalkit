@@ -6,6 +6,7 @@
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/list_view.h>
+#include <set>
 
 namespace nk {
 
@@ -35,6 +36,8 @@ struct ListView::Impl {
     ScopedConnection model_reset;
     ScopedConnection selection_changed;
     ScopedConnection current_changed;
+    std::set<std::size_t> last_selected_rows;
+    std::size_t last_current_row = static_cast<std::size_t>(-1);
 };
 
 Rect list_body_rect(const ListView& view) {
@@ -57,6 +60,36 @@ Rect list_inner_rect(const ListView& view) {
         body.y + 1.0F,
         std::max(0.0F, body.width - 2.0F),
         std::max(0.0F, body.height - 2.0F),
+    };
+}
+
+Rect intersect_rect(Rect lhs, Rect rhs) {
+    const float left = std::max(lhs.x, rhs.x);
+    const float top = std::max(lhs.y, rhs.y);
+    const float right = std::min(lhs.right(), rhs.right());
+    const float bottom = std::min(lhs.bottom(), rhs.bottom());
+    if (right <= left || bottom <= top) {
+        return {};
+    }
+    return {left, top, right - left, bottom - top};
+}
+
+Rect list_content_rect(const ListView& view,
+                       const AbstractListModel* model,
+                       float row_height) {
+    const auto inner = list_inner_rect(view);
+    if (!model) {
+        return inner;
+    }
+
+    const float total_height = static_cast<float>(model->row_count()) * row_height;
+    const bool show_scrollbar = total_height > inner.height;
+    const float scrollbar_width = show_scrollbar ? 11.0F : 0.0F;
+    return {
+        inner.x,
+        inner.y,
+        std::max(0.0F, inner.width - scrollbar_width - (show_scrollbar ? 12.0F : 0.0F)),
+        inner.height,
     };
 }
 
@@ -146,6 +179,9 @@ void ListView::set_model(std::shared_ptr<AbstractListModel> model) {
     }
     clamp_scroll_offset(
         impl_->scroll_offset, impl_->model.get(), impl_->row_height, list_inner_rect(*this).height);
+    impl_->last_selected_rows =
+        impl_->selection ? impl_->selection->selected_rows() : std::set<std::size_t>{};
+    impl_->last_current_row = current_row_index(impl_->selection.get());
     queue_layout();
     queue_redraw();
 }
@@ -160,10 +196,13 @@ void ListView::set_selection_model(std::shared_ptr<SelectionModel> model) {
     impl_->current_changed.disconnect();
     if (impl_->selection) {
         impl_->selection_changed = ScopedConnection(
-            impl_->selection->on_selection_changed().connect([this] { queue_redraw(); }));
+            impl_->selection->on_selection_changed().connect([this] { queue_selection_redraw(); }));
         impl_->current_changed = ScopedConnection(impl_->selection->on_current_changed().connect(
-            [this](std::size_t) { queue_redraw(); }));
+            [this](std::size_t) { queue_selection_redraw(); }));
     }
+    impl_->last_selected_rows =
+        impl_->selection ? impl_->selection->selected_rows() : std::set<std::size_t>{};
+    impl_->last_current_row = current_row_index(impl_->selection.get());
     queue_redraw();
 }
 
@@ -221,7 +260,6 @@ bool ListView::handle_mouse_event(const MouseEvent& event) {
                 const auto row_index = static_cast<std::size_t>(row);
                 impl_->selection->set_current_row(row_index);
                 impl_->selection->select(row_index);
-                queue_redraw();
                 return true;
             }
         }
@@ -256,6 +294,7 @@ bool ListView::handle_key_event(const KeyEvent& event) {
         if (!impl_->selection) {
             return;
         }
+        const float previous_scroll_offset = impl_->scroll_offset;
         impl_->selection->set_current_row(row);
         impl_->selection->select(row);
 
@@ -270,7 +309,9 @@ bool ListView::handle_key_event(const KeyEvent& event) {
         clamp_scroll_offset(
             impl_->scroll_offset, impl_->model.get(), impl_->row_height, inner.height);
         sync_visible_items();
-        queue_redraw();
+        if (std::abs(impl_->scroll_offset - previous_scroll_offset) > 0.01F) {
+            queue_redraw();
+        }
     };
 
     const auto row_count = impl_->model->row_count();
@@ -507,6 +548,61 @@ void ListView::sync_visible_items() {
 
     impl_->visible_items = std::move(next_visible_items);
     note_model_view_sync_for_diagnostics(materialized_rows, reused_rows, disposed_rows);
+}
+
+Rect ListView::local_row_damage_rect(std::size_t row) const {
+    if (!impl_->model || row >= impl_->model->row_count() || impl_->row_height <= 0.0F) {
+        return {};
+    }
+
+    const auto content_rect = list_content_rect(*this, impl_->model.get(), impl_->row_height);
+    if (content_rect.width <= 0.0F || content_rect.height <= 0.0F) {
+        return {};
+    }
+
+    const Rect absolute_row_rect = {
+        content_rect.x,
+        content_rect.y + (static_cast<float>(row) * impl_->row_height) - impl_->scroll_offset,
+        content_rect.width,
+        impl_->row_height,
+    };
+    const auto clipped = intersect_rect(absolute_row_rect, content_rect);
+    if (clipped.width <= 0.0F || clipped.height <= 0.0F) {
+        return {};
+    }
+
+    const auto a = allocation();
+    return {clipped.x - a.x, clipped.y - a.y, clipped.width, clipped.height};
+}
+
+void ListView::queue_row_redraw(std::size_t row) {
+    const auto damage = local_row_damage_rect(row);
+    if (damage.width > 0.0F && damage.height > 0.0F) {
+        queue_redraw(damage);
+    }
+}
+
+void ListView::queue_selection_redraw() {
+    std::set<std::size_t> affected_rows = impl_->last_selected_rows;
+    if (impl_->selection) {
+        const auto& selected_rows = impl_->selection->selected_rows();
+        affected_rows.insert(selected_rows.begin(), selected_rows.end());
+    }
+    if (impl_->last_current_row != invalid_row()) {
+        affected_rows.insert(impl_->last_current_row);
+    }
+    const auto current_row = current_row_index(impl_->selection.get());
+    if (current_row != invalid_row()) {
+        affected_rows.insert(current_row);
+    }
+
+    for (const auto row : affected_rows) {
+        queue_row_redraw(row);
+    }
+
+    impl_->last_selected_rows =
+        impl_->selection ? impl_->selection->selected_rows() : std::set<std::size_t>{};
+    impl_->last_current_row = current_row;
 }
 
 } // namespace nk

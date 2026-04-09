@@ -5,6 +5,36 @@
 
 namespace nk {
 
+namespace {
+
+FontDescriptor label_font(const Label& label) {
+    FontDescriptor font;
+    font.size = label.has_style_class("heading") ? 18.0F : 13.5F;
+    font.weight = label.has_style_class("heading") ? FontWeight::Medium : FontWeight::Regular;
+    return font;
+}
+
+bool rect_is_empty(Rect rect) {
+    return rect.width <= 0.0F || rect.height <= 0.0F;
+}
+
+Rect union_rect(Rect lhs, Rect rhs) {
+    if (rect_is_empty(lhs)) {
+        return rhs;
+    }
+    if (rect_is_empty(rhs)) {
+        return lhs;
+    }
+
+    const float x0 = std::min(lhs.x, rhs.x);
+    const float y0 = std::min(lhs.y, rhs.y);
+    const float x1 = std::max(lhs.right(), rhs.right());
+    const float y1 = std::max(lhs.bottom(), rhs.bottom());
+    return {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+}
+
+} // namespace
+
 struct Label::Impl {
     std::string text;
     HAlign h_align = HAlign::Start;
@@ -31,10 +61,46 @@ std::string_view Label::text() const {
 
 void Label::set_text(std::string text) {
     if (impl_->text != text) {
+        const auto previous_text = impl_->text;
         impl_->text = std::move(text);
         ensure_accessible().set_name(impl_->text);
         queue_layout();
-        queue_redraw();
+
+        const auto a = allocation();
+        if (a.width <= 0.0F || a.height <= 0.0F) {
+            queue_redraw();
+            return;
+        }
+
+        const auto font = label_font(*this);
+        auto text_damage_bounds = [&](std::string_view content) {
+            const auto measured = measure_text(content, font);
+
+            float text_x = a.x;
+            if (impl_->h_align == HAlign::Center) {
+                text_x = a.x + std::max(0.0F, (a.width - measured.width) * 0.5F);
+            } else if (impl_->h_align == HAlign::End) {
+                text_x = a.right() - measured.width;
+            }
+
+            float available_height = a.height;
+            if (has_style_class("heading")) {
+                available_height -= 6.0F;
+            }
+            const float text_y = a.y + std::max(0.0F, (available_height - measured.height) * 0.5F);
+            const float damage_width =
+                has_style_class("heading") ? std::max(measured.width, 24.0F) : measured.width;
+            const float damage_height =
+                has_style_class("heading") ? measured.height + 5.0F : measured.height;
+            return Rect{text_x - a.x, text_y - a.y, damage_width, damage_height};
+        };
+
+        const auto damage = union_rect(text_damage_bounds(previous_text), text_damage_bounds(impl_->text));
+        if (rect_is_empty(damage)) {
+            queue_redraw();
+        } else {
+            queue_redraw(damage);
+        }
     }
 }
 
@@ -47,9 +113,7 @@ void Label::set_h_align(HAlign align) {
 }
 
 SizeRequest Label::measure(const Constraints& /*constraints*/) const {
-    FontDescriptor font;
-    font.size = has_style_class("heading") ? 18.0F : 13.5F;
-    font.weight = has_style_class("heading") ? FontWeight::Medium : FontWeight::Regular;
+    const auto font = label_font(*this);
     const auto measured = measure_text(impl_->text, font);
     const float w = measured.width;
     const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
@@ -60,9 +124,7 @@ SizeRequest Label::measure(const Constraints& /*constraints*/) const {
 void Label::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    FontDescriptor font;
-    font.size = has_style_class("heading") ? 18.0F : 13.5F;
-    font.weight = has_style_class("heading") ? FontWeight::Medium : FontWeight::Regular;
+    const auto font = label_font(*this);
     const auto measured = measure_text(impl_->text, font);
 
     float text_x = a.x;

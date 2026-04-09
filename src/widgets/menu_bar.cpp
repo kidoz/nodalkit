@@ -19,15 +19,6 @@ FontDescriptor menu_font() {
     };
 }
 
-Size approximate_text_size(std::string_view text, const FontDescriptor& font) {
-    if (text.empty()) {
-        return {};
-    }
-
-    const auto length = static_cast<float>(text.size());
-    return {length * font.size * 0.55F, font.size * 1.35F};
-}
-
 struct PopupGeometry {
     Rect bounds;
     float item_height = 28.0F;
@@ -35,8 +26,45 @@ struct PopupGeometry {
 
 using MenuPath = std::vector<int>;
 
-void invalidate_popup_frame(Widget& widget) {
-    widget.queue_redraw();
+Rect union_rect(Rect lhs, Rect rhs) {
+    if (lhs.width <= 0.0F || lhs.height <= 0.0F) {
+        return rhs;
+    }
+    if (rhs.width <= 0.0F || rhs.height <= 0.0F) {
+        return lhs;
+    }
+    const float left = std::min(lhs.x, rhs.x);
+    const float top = std::min(lhs.y, rhs.y);
+    const float right = std::max(lhs.right(), rhs.right());
+    const float bottom = std::max(lhs.bottom(), rhs.bottom());
+    return {left, top, right - left, bottom - top};
+}
+
+Rect to_local_rect(Rect rect, Rect allocation) {
+    return {rect.x - allocation.x, rect.y - allocation.y, rect.width, rect.height};
+}
+
+Rect title_damage_rect(const std::vector<Rect>& rects, Rect allocation, int menu_index) {
+    if (menu_index < 0 || menu_index >= static_cast<int>(rects.size())) {
+        return {};
+    }
+    return to_local_rect(rects[static_cast<std::size_t>(menu_index)], allocation);
+}
+
+Rect title_damage_rect(const std::vector<Rect>& rects,
+                       Rect allocation,
+                       int first_menu,
+                       int second_menu) {
+    return union_rect(title_damage_rect(rects, allocation, first_menu),
+                      title_damage_rect(rects, allocation, second_menu));
+}
+
+void invalidate_popup_frame(Widget& widget, Rect local_damage) {
+    if (local_damage.width <= 0.0F || local_damage.height <= 0.0F) {
+        widget.queue_redraw();
+        return;
+    }
+    widget.queue_redraw(local_damage);
 }
 
 Rect popup_item_rect(const PopupGeometry& geometry, int index) {
@@ -92,25 +120,25 @@ Signal<std::string_view>& MenuBar::on_action() {
 
 namespace {
 
-std::vector<Rect> menu_title_rects(const MenuBar& bar, const std::vector<Menu>& menus) {
+template <typename MeasureTextFn>
+std::vector<Rect> menu_title_rects(Rect bar_rect,
+                                   const std::vector<Menu>& menus,
+                                   MeasureTextFn&& measure_text_fn) {
     std::vector<Rect> rects;
     rects.reserve(menus.size());
 
-    const auto a = bar.allocation();
     float x_offset = 18.0F;
-    const auto font = menu_font();
     for (const auto& menu : menus) {
-        const auto measured = approximate_text_size(menu.title, font);
+        const auto measured = measure_text_fn(menu.title);
         const float width = measured.width + 22.0F;
-        rects.push_back({a.x + x_offset - 8.0F, a.y, width, a.height});
+        rects.push_back({bar_rect.x + x_offset - 8.0F, bar_rect.y, width, bar_rect.height});
         x_offset += measured.width + 22.0F;
     }
 
     return rects;
 }
 
-int menu_at_point(const MenuBar& bar, const std::vector<Menu>& menus, Point point) {
-    const auto rects = menu_title_rects(bar, menus);
+int menu_at_point(const std::vector<Rect>& rects, Point point) {
     for (std::size_t index = 0; index < rects.size(); ++index) {
         if (rects[index].contains(point)) {
             return static_cast<int>(index);
@@ -119,33 +147,35 @@ int menu_at_point(const MenuBar& bar, const std::vector<Menu>& menus, Point poin
     return -1;
 }
 
-float popup_width(const MenuBar& bar, const std::vector<MenuItem>& items) {
-    const auto font = menu_font();
+template <typename MeasureTextFn>
+float popup_width(const std::vector<MenuItem>& items, MeasureTextFn&& measure_text_fn) {
     float width = 160.0F;
-    (void)bar;
     for (const auto& item : items) {
         if (item.separator) {
             continue;
         }
-        const auto measured = approximate_text_size(item.label, font);
+        const auto measured = measure_text_fn(item.label);
         width = std::max(width, measured.width + (item.children.empty() ? 28.0F : 44.0F));
     }
     return width;
 }
 
+template <typename MeasureTextFn>
 PopupGeometry
-popup_geometry(const MenuBar& bar, Rect anchor, const std::vector<MenuItem>& items, bool submenu) {
+popup_geometry(Rect anchor,
+               const std::vector<MenuItem>& items,
+               bool submenu,
+               MeasureTextFn&& measure_text_fn) {
     PopupGeometry geometry;
-    (void)bar;
     geometry.item_height = 28.0F;
     geometry.bounds = submenu
                           ? Rect{anchor.right() + 4.0F,
                                  anchor.y - 4.0F,
-                                 popup_width(bar, items),
+                                 popup_width(items, measure_text_fn),
                                  static_cast<float>(items.size()) * geometry.item_height + 2.0F}
                           : Rect{anchor.x,
                                  anchor.bottom() + 4.0F,
-                                 popup_width(bar, items),
+                                 popup_width(items, measure_text_fn),
                                  static_cast<float>(items.size()) * geometry.item_height + 2.0F};
     return geometry;
 }
@@ -202,14 +232,14 @@ MenuPath submenu_chain_for_path(const Menu& menu, const MenuPath& path) {
     return chain;
 }
 
-std::optional<MenuPath> popup_path_at(const MenuBar& bar,
-                                      const std::vector<Menu>& menus,
+template <typename MeasureTextFn>
+std::optional<MenuPath> popup_path_at(const std::vector<Rect>& title_rects,
                                       const Menu& menu,
                                       int menu_index,
                                       const MenuPath& open_path,
-                                      Point point) {
-    const auto all_title_rects = menu_title_rects(bar, menus);
-    if (menu_index < 0 || menu_index >= static_cast<int>(all_title_rects.size())) {
+                                      Point point,
+                                      MeasureTextFn&& measure_text_fn) {
+    if (menu_index < 0 || menu_index >= static_cast<int>(title_rects.size())) {
         return std::nullopt;
     }
 
@@ -221,7 +251,7 @@ std::optional<MenuPath> popup_path_at(const MenuBar& bar,
                   bool submenu,
                   std::size_t depth,
                   MenuPath prefix) -> std::optional<MenuPath> {
-        const auto geometry = popup_geometry(bar, anchor, items, submenu);
+        const auto geometry = popup_geometry(anchor, items, submenu, measure_text_fn);
         const int index = popup_index_at(geometry, items, point);
         if (index >= 0) {
             auto path = prefix;
@@ -256,16 +286,16 @@ std::optional<MenuPath> popup_path_at(const MenuBar& bar,
         return std::nullopt;
     };
 
-    return recurse(menu.items, all_title_rects[static_cast<std::size_t>(menu_index)], false, 0, {});
+    return recurse(menu.items, title_rects[static_cast<std::size_t>(menu_index)], false, 0, {});
 }
 
-bool popup_contains_point(const MenuBar& bar,
-                          const std::vector<Menu>& menus,
+template <typename MeasureTextFn>
+bool popup_contains_point(const std::vector<Rect>& title_rects,
                           const Menu& menu,
                           int menu_index,
                           const MenuPath& open_path,
-                          Point point) {
-    const auto title_rects = menu_title_rects(bar, menus);
+                          Point point,
+                          MeasureTextFn&& measure_text_fn) {
     if (menu_index < 0 || menu_index >= static_cast<int>(title_rects.size())) {
         return false;
     }
@@ -275,7 +305,7 @@ bool popup_contains_point(const MenuBar& bar,
                   Rect anchor,
                   bool submenu,
                   std::size_t depth) -> bool {
-        const auto geometry = popup_geometry(bar, anchor, items, submenu);
+        const auto geometry = popup_geometry(anchor, items, submenu, measure_text_fn);
         if (geometry.bounds.contains(point)) {
             return true;
         }
@@ -296,21 +326,22 @@ bool popup_contains_point(const MenuBar& bar,
     return recurse(menu.items, title_rects[static_cast<std::size_t>(menu_index)], false, 0);
 }
 
-std::vector<Rect> popup_damage_regions(const MenuBar& bar,
-                                       const std::vector<Menu>& menus,
+template <typename MeasureTextFn>
+std::vector<Rect> popup_damage_regions(Rect /*bar_rect*/,
+                                       const std::vector<Rect>& title_rects,
+                                       const Menu& menu,
                                        int menu_index,
-                                       const MenuPath& open_path) {
-    std::vector<Rect> regions{bar.allocation()};
-    const auto title_rects = menu_title_rects(bar, menus);
+                                       const MenuPath& open_path,
+                                       MeasureTextFn&& measure_text_fn) {
+    std::vector<Rect> regions;
     if (menu_index < 0 || menu_index >= static_cast<int>(title_rects.size())) {
         return regions;
     }
 
-    const auto& menu = menus[static_cast<std::size_t>(menu_index)];
     std::function<void(const std::vector<MenuItem>&, Rect, bool, std::size_t)> recurse;
     recurse =
         [&](const std::vector<MenuItem>& items, Rect anchor, bool submenu, std::size_t depth) {
-            const auto geometry = popup_geometry(bar, anchor, items, submenu);
+            const auto geometry = popup_geometry(anchor, items, submenu, measure_text_fn);
             regions.push_back(geometry.bounds);
             if (depth >= open_path.size()) {
                 return;
@@ -343,24 +374,29 @@ SizeRequest MenuBar::measure(const Constraints& constraints) const {
 
 bool MenuBar::handle_mouse_event(const MouseEvent& event) {
     const auto point = Point{event.x, event.y};
-    const int hovered_menu = menu_at_point(*this, impl_->menus, point);
+    const auto font = menu_font();
+    const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
+    const auto title_rects = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+    const int hovered_menu = menu_at_point(title_rects, point);
     const bool popup_hit =
         impl_->open_menu >= 0 &&
-        popup_contains_point(*this,
-                             impl_->menus,
+        popup_contains_point(title_rects,
                              impl_->menus[static_cast<std::size_t>(impl_->open_menu)],
                              impl_->open_menu,
                              impl_->open_path,
-                             point);
+                             point,
+                             measure_menu_text);
 
-    auto close_popups = [this] {
+    auto close_popups = [this, &title_rects] {
+        const int previous_open_menu = impl_->open_menu;
         preserve_damage_regions_for_next_redraw();
         impl_->open_menu = -1;
         impl_->armed_menu = -1;
         impl_->open_path.clear();
         impl_->highlighted_path.clear();
         impl_->armed_path.clear();
-        invalidate_popup_frame(*this);
+        invalidate_popup_frame(*this,
+                               title_damage_rect(title_rects, allocation(), previous_open_menu));
     };
 
     if (event.button != 1 && event.type != MouseEvent::Type::Move &&
@@ -373,12 +409,12 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
         impl_->armed_menu = hovered_menu;
         impl_->armed_path.clear();
         if (impl_->open_menu >= 0 && popup_hit) {
-            if (auto path = popup_path_at(*this,
-                                          impl_->menus,
+            if (auto path = popup_path_at(title_rects,
                                           impl_->menus[static_cast<std::size_t>(impl_->open_menu)],
                                           impl_->open_menu,
                                           impl_->open_path,
-                                          point)) {
+                                          point,
+                                          measure_menu_text)) {
                 impl_->armed_path = *path;
             }
         }
@@ -388,24 +424,27 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
             if (impl_->open_menu == hovered_menu) {
                 close_popups();
             } else {
+                const int previous_open_menu = impl_->open_menu;
                 preserve_damage_regions_for_next_redraw();
                 impl_->open_menu = hovered_menu;
                 impl_->open_path.clear();
                 impl_->highlighted_path.clear();
                 impl_->armed_menu = -1;
-                invalidate_popup_frame(*this);
+                invalidate_popup_frame(
+                    *this,
+                    title_damage_rect(title_rects, allocation(), previous_open_menu, hovered_menu));
             }
             return true;
         }
 
         if (impl_->open_menu >= 0 && !impl_->armed_path.empty()) {
             auto released_path =
-                popup_path_at(*this,
-                              impl_->menus,
+                popup_path_at(title_rects,
                               impl_->menus[static_cast<std::size_t>(impl_->open_menu)],
                               impl_->open_menu,
                               impl_->open_path,
-                              point);
+                              point,
+                              measure_menu_text);
             if (released_path && *released_path == impl_->armed_path) {
                 const auto& menu = impl_->menus[static_cast<std::size_t>(impl_->open_menu)];
                 if (auto* item = item_at_path(menu, *released_path)) {
@@ -416,7 +455,9 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                         preserve_damage_regions_for_next_redraw();
                         impl_->open_path = *released_path;
                         impl_->highlighted_path = *released_path;
-                        invalidate_popup_frame(*this);
+                        invalidate_popup_frame(
+                            *this,
+                            title_damage_rect(title_rects, allocation(), impl_->open_menu));
                         return true;
                     }
                     if (!item->action_name.empty()) {
@@ -437,22 +478,25 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Move:
         if (impl_->open_menu >= 0) {
             if (hovered_menu >= 0 && hovered_menu != impl_->open_menu) {
+                const int previous_open_menu = impl_->open_menu;
                 preserve_damage_regions_for_next_redraw();
                 impl_->open_menu = hovered_menu;
                 impl_->open_path.clear();
                 impl_->highlighted_path.clear();
-                invalidate_popup_frame(*this);
+                invalidate_popup_frame(
+                    *this,
+                    title_damage_rect(title_rects, allocation(), previous_open_menu, hovered_menu));
                 return true;
             }
 
             if (popup_hit) {
                 if (auto path =
-                        popup_path_at(*this,
-                                      impl_->menus,
+                        popup_path_at(title_rects,
                                       impl_->menus[static_cast<std::size_t>(impl_->open_menu)],
                                       impl_->open_menu,
                                       impl_->open_path,
-                                      point)) {
+                                      point,
+                                      measure_menu_text)) {
                     const auto next_open_path = submenu_chain_for_path(
                         impl_->menus[static_cast<std::size_t>(impl_->open_menu)], *path);
                     if (impl_->highlighted_path != *path || impl_->open_path != next_open_path) {
@@ -461,7 +505,9 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                         }
                         impl_->highlighted_path = *path;
                         impl_->open_path = next_open_path;
-                        invalidate_popup_frame(*this);
+                        invalidate_popup_frame(
+                            *this,
+                            title_damage_rect(title_rects, allocation(), impl_->open_menu));
                     }
                     return true;
                 }
@@ -485,17 +531,26 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
     }
 
     auto close_popups = [this] {
+        const auto font = menu_font();
+        const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
+        const auto title_rects = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+        const int previous_open_menu = impl_->open_menu;
         preserve_damage_regions_for_next_redraw();
         impl_->open_menu = -1;
         impl_->open_path.clear();
         impl_->highlighted_path.clear();
-        invalidate_popup_frame(*this);
+        invalidate_popup_frame(*this,
+                               title_damage_rect(title_rects, allocation(), previous_open_menu));
     };
 
     auto select_next_menu = [this](int delta) {
         if (impl_->menus.empty()) {
             return;
         }
+        const auto font = menu_font();
+        const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
+        const auto title_rects = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+        const int previous_open_menu = impl_->open_menu;
         preserve_damage_regions_for_next_redraw();
         if (impl_->open_menu < 0) {
             impl_->open_menu = delta >= 0 ? 0 : static_cast<int>(impl_->menus.size()) - 1;
@@ -505,7 +560,9 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
         }
         impl_->open_path.clear();
         impl_->highlighted_path.clear();
-        invalidate_popup_frame(*this);
+        invalidate_popup_frame(
+            *this,
+            title_damage_rect(title_rects, allocation(), previous_open_menu, impl_->open_menu));
     };
 
     if (impl_->open_menu < 0) {
@@ -553,7 +610,15 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
                 impl_->highlighted_path = next_path;
                 preserve_damage_regions_for_next_redraw();
                 impl_->open_path = submenu_chain_for_path(menu, next_path);
-                invalidate_popup_frame(*this);
+                const auto font = menu_font();
+                const auto measure_menu_text = [&](std::string_view text) {
+                    return measure_text(text, font);
+                };
+                const auto title_rects =
+                    menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+                invalidate_popup_frame(
+                    *this,
+                    title_damage_rect(title_rects, allocation(), impl_->open_menu));
                 break;
             }
             if (next_index == current_index) {
@@ -571,7 +636,11 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
             preserve_damage_regions_for_next_redraw();
             impl_->open_path.pop_back();
             impl_->highlighted_path = impl_->open_path;
-            invalidate_popup_frame(*this);
+            const auto font = menu_font();
+            const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
+            const auto title_rects = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+            invalidate_popup_frame(*this,
+                                   title_damage_rect(title_rects, allocation(), impl_->open_menu));
             return true;
         }
         select_next_menu(-1);
@@ -582,7 +651,15 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
                 item != nullptr && !item->children.empty()) {
                 preserve_damage_regions_for_next_redraw();
                 impl_->open_path = impl_->highlighted_path;
-                invalidate_popup_frame(*this);
+                const auto font = menu_font();
+                const auto measure_menu_text = [&](std::string_view text) {
+                    return measure_text(text, font);
+                };
+                const auto title_rects =
+                    menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+                invalidate_popup_frame(
+                    *this,
+                    title_damage_rect(title_rects, allocation(), impl_->open_menu));
                 return true;
             }
         }
@@ -604,7 +681,15 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
             if (!item->children.empty()) {
                 preserve_damage_regions_for_next_redraw();
                 impl_->open_path = impl_->highlighted_path;
-                invalidate_popup_frame(*this);
+                const auto font = menu_font();
+                const auto measure_menu_text = [&](std::string_view text) {
+                    return measure_text(text, font);
+                };
+                const auto title_rects =
+                    menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+                invalidate_popup_frame(
+                    *this,
+                    title_damage_rect(title_rects, allocation(), impl_->open_menu));
                 return true;
             }
             if (item->enabled && !item->separator && !item->action_name.empty()) {
@@ -628,19 +713,33 @@ bool MenuBar::hit_test(Point point) const {
         return false;
     }
 
-    return popup_contains_point(*this,
-                                impl_->menus,
+    const auto font = menu_font();
+    const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
+    const auto title_rects = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+    return popup_contains_point(title_rects,
                                 impl_->menus[static_cast<std::size_t>(impl_->open_menu)],
                                 impl_->open_menu,
                                 impl_->open_path,
-                                point);
+                                point,
+                                measure_menu_text);
 }
 
 std::vector<Rect> MenuBar::damage_regions() const {
+    auto regions = Widget::damage_regions();
     if (impl_->open_menu < 0) {
-        return {allocation()};
+        return regions;
     }
-    return popup_damage_regions(*this, impl_->menus, impl_->open_menu, impl_->open_path);
+    const auto font = menu_font();
+    const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
+    const auto title_rects = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+    auto popup_regions = popup_damage_regions(allocation(),
+                                              title_rects,
+                                              impl_->menus[static_cast<std::size_t>(impl_->open_menu)],
+                                              impl_->open_menu,
+                                              impl_->open_path,
+                                              measure_menu_text);
+    regions.insert(regions.end(), popup_regions.begin(), popup_regions.end());
+    return regions;
 }
 
 CursorShape MenuBar::cursor_shape() const {
@@ -652,13 +751,18 @@ void MenuBar::on_focus_changed(bool focused) {
         return;
     }
 
+    const auto font = menu_font();
+    const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
+    const auto title_rects = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+    const int previous_open_menu = impl_->open_menu;
     preserve_damage_regions_for_next_redraw();
     impl_->open_menu = -1;
     impl_->armed_menu = -1;
     impl_->open_path.clear();
     impl_->highlighted_path.clear();
     impl_->armed_path.clear();
-    invalidate_popup_frame(*this);
+    invalidate_popup_frame(*this,
+                           title_damage_rect(title_rects, allocation(), previous_open_menu));
 }
 
 void MenuBar::snapshot(SnapshotContext& ctx) const {
@@ -669,7 +773,8 @@ void MenuBar::snapshot(SnapshotContext& ctx) const {
 
     const auto text_color = theme_color("text-color", Color{0.15F, 0.15F, 0.15F, 1.0F});
     const auto font = menu_font();
-    const auto title_rects = menu_title_rects(*this, impl_->menus);
+    const auto title_rects =
+        menu_title_rects(a, impl_->menus, [&](std::string_view text) { return measure_text(text, font); });
     for (std::size_t index = 0; index < impl_->menus.size(); ++index) {
         const auto& menu = impl_->menus[index];
         const auto measured = measure_text(menu.title, font);
@@ -711,7 +816,10 @@ void MenuBar::snapshot(SnapshotContext& ctx) const {
             return;
         }
 
-        const auto geometry = popup_geometry(*this, anchor, items, submenu);
+        const auto geometry =
+            popup_geometry(anchor, items, submenu, [&](std::string_view text) {
+                return measure_text(text, font);
+            });
         ctx.push_overlay_container(geometry.bounds);
         ctx.add_rounded_rect({geometry.bounds.x,
                               geometry.bounds.y + 1.0F,

@@ -538,7 +538,7 @@ void TextField::set_text(std::string text) {
         sync_primary_selection_ownership();
         reset_history();
         impl_->text_changed.emit(impl_->text);
-        queue_redraw();
+        queue_text_redraw();
     }
 }
 
@@ -550,7 +550,7 @@ void TextField::set_placeholder(std::string placeholder) {
     impl_->placeholder = std::move(placeholder);
     ensure_accessible().set_description(impl_->placeholder);
     ensure_accessible().set_name(default_text_field_accessible_name(impl_->placeholder));
-    queue_redraw();
+    queue_text_redraw();
 }
 
 bool TextField::is_editable() const {
@@ -562,7 +562,7 @@ void TextField::set_editable(bool editable) {
         return;
     }
     impl_->editable = editable;
-    queue_redraw();
+    queue_text_redraw();
 }
 
 std::size_t TextField::cursor_position() const {
@@ -588,7 +588,7 @@ void TextField::select_all() {
     impl_->cursor = impl_->text.size();
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    queue_redraw();
+    queue_text_redraw();
 }
 
 Signal<std::string_view>& TextField::on_text_changed() {
@@ -637,7 +637,7 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             impl_->cursor = impl_->text.size();
             sync_primary_selection_ownership();
             ensure_caret_visible();
-            queue_redraw();
+            queue_text_redraw();
             return true;
         }
         if (event.click_count >= 2) {
@@ -650,7 +650,7 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             impl_->cursor = end;
             sync_primary_selection_ownership();
             ensure_caret_visible();
-            queue_redraw();
+            queue_text_redraw();
             return true;
         }
         impl_->selecting_with_mouse = true;
@@ -665,7 +665,7 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             impl_->cursor = impl_->text.size();
             sync_primary_selection_ownership();
             ensure_caret_visible();
-            queue_redraw();
+            queue_text_redraw();
             return true;
         }
         if (impl_->selecting_word_with_mouse) {
@@ -679,7 +679,7 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             }
             sync_primary_selection_ownership();
             ensure_caret_visible();
-            queue_redraw();
+            queue_text_redraw();
             return true;
         }
         move_cursor(hit_test_cursor(point), true);
@@ -695,7 +695,7 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             impl_->selecting_line_with_mouse = false;
             sync_primary_selection_ownership();
             ensure_caret_visible();
-            queue_redraw();
+            queue_text_redraw();
             return true;
         }
         if (impl_->selecting_word_with_mouse) {
@@ -711,7 +711,7 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             impl_->selecting_word_with_mouse = false;
             sync_primary_selection_ownership();
             ensure_caret_visible();
-            queue_redraw();
+            queue_text_redraw();
             return true;
         }
         impl_->selecting_with_mouse = false;
@@ -848,7 +848,7 @@ bool TextField::handle_text_input_event(const TextInputEvent& event) {
             std::min(event.selection_start, impl_->preedit_text.size());
         impl_->preedit_selection_end = std::min(event.selection_end, impl_->preedit_text.size());
         ensure_caret_visible();
-        queue_redraw();
+        queue_text_redraw();
         return true;
     case TextInputEvent::Type::Commit:
         clear_preedit();
@@ -991,6 +991,30 @@ Rect TextField::text_rect() const {
             std::max(0.0F, body.height - 8.0F)};
 }
 
+Rect TextField::local_text_damage_rect() const {
+    const auto a = allocation();
+    const auto text_bounds = text_rect();
+    if (a.width <= 0.0F || a.height <= 0.0F || text_bounds.width <= 0.0F || text_bounds.height <= 0.0F) {
+        return {};
+    }
+
+    const float margin = 2.0F;
+    const float x = std::max(0.0F, (text_bounds.x - a.x) - margin);
+    const float y = std::max(0.0F, (text_bounds.y - a.y) - margin);
+    const float right = std::min(a.width, (text_bounds.right() - a.x) + margin);
+    const float bottom = std::min(a.height, (text_bounds.bottom() - a.y) + margin);
+    return {x, y, std::max(0.0F, right - x), std::max(0.0F, bottom - y)};
+}
+
+void TextField::queue_text_redraw() {
+    const auto damage = local_text_damage_rect();
+    if (damage.width <= 0.0F || damage.height <= 0.0F) {
+        queue_redraw();
+    } else {
+        queue_redraw(damage);
+    }
+}
+
 std::size_t TextField::hit_test_cursor(Point point) const {
     const auto bounds = text_rect();
     const auto font = text_field_font();
@@ -1018,7 +1042,7 @@ void TextField::move_cursor(std::size_t position, bool extend_selection) {
     }
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    queue_redraw();
+    queue_text_redraw();
 }
 
 void TextField::replace_selection(std::string_view text,
@@ -1071,7 +1095,7 @@ void TextField::replace_selection(std::string_view text,
     }
     sync_primary_selection_ownership();
     impl_->text_changed.emit(impl_->text);
-    queue_redraw();
+    queue_text_redraw();
 }
 
 void TextField::ensure_caret_visible() {
@@ -1144,7 +1168,7 @@ bool TextField::undo() {
     sync_primary_selection_ownership();
     ensure_caret_visible();
     impl_->text_changed.emit(impl_->text);
-    queue_redraw();
+    queue_text_redraw();
     return true;
 }
 
@@ -1163,7 +1187,7 @@ bool TextField::redo() {
     sync_primary_selection_ownership();
     ensure_caret_visible();
     impl_->text_changed.emit(impl_->text);
-    queue_redraw();
+    queue_text_redraw();
     return true;
 }
 
@@ -1307,7 +1331,7 @@ void TextField::clear_preedit() {
     impl_->preedit_text.clear();
     impl_->preedit_selection_start = 0;
     impl_->preedit_selection_end = 0;
-    queue_redraw();
+    queue_text_redraw();
 }
 
 void TextField::reset_mouse_selection_state() {
@@ -1337,7 +1361,7 @@ bool TextField::delete_surrounding_text(std::size_t before_length, std::size_t a
     impl_->selection_anchor = start;
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    queue_redraw();
+    queue_text_redraw();
     impl_->text_changed.emit(impl_->text);
     return true;
 }

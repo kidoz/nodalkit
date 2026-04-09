@@ -69,7 +69,9 @@ protected:
 private:
     [[nodiscard]] Rect inner_body_rect() const;
     [[nodiscard]] Rect text_rect() const;
+    [[nodiscard]] Rect local_text_damage_rect() const;
     [[nodiscard]] std::size_t hit_test_cursor(Point point) const;
+    void queue_text_redraw();
     void move_cursor(std::size_t position, bool extend_selection);
     void replace_selection(std::string_view text, bool record_history, bool coalesce_history);
     void ensure_caret_visible();

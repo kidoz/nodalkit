@@ -24,6 +24,41 @@ Rect fit_rect(Rect bounds, int src_width, int src_height, bool preserve_aspect_r
     };
 }
 
+bool rect_is_empty(Rect rect) {
+    return rect.width <= 0.0F || rect.height <= 0.0F;
+}
+
+Rect union_rect(Rect lhs, Rect rhs) {
+    if (rect_is_empty(lhs)) {
+        return rhs;
+    }
+    if (rect_is_empty(rhs)) {
+        return lhs;
+    }
+
+    const float x0 = std::min(lhs.x, rhs.x);
+    const float y0 = std::min(lhs.y, rhs.y);
+    const float x1 = std::max(lhs.right(), rhs.right());
+    const float y1 = std::max(lhs.bottom(), rhs.bottom());
+    return {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+}
+
+Rect local_image_content_rect(Rect allocation,
+                              int src_width,
+                              int src_height,
+                              bool preserve_aspect_ratio) {
+    const Rect inner = {
+        1.0F,
+        1.0F,
+        std::max(0.0F, allocation.width - 2.0F),
+        std::max(0.0F, allocation.height - 2.0F),
+    };
+    if (rect_is_empty(inner) || src_width <= 0 || src_height <= 0) {
+        return {};
+    }
+    return fit_rect(inner, src_width, src_height, preserve_aspect_ratio);
+}
+
 } // namespace
 
 struct ImageView::Impl {
@@ -47,18 +82,35 @@ ImageView::ImageView() : impl_(std::make_unique<Impl>()) {
 ImageView::~ImageView() = default;
 
 void ImageView::update_pixel_buffer(const uint32_t* data, int width, int height) {
+    const auto a = allocation();
+    Rect damage{};
     std::lock_guard lock(impl_->mutex);
+    const auto previous_damage =
+        local_image_content_rect(a, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
     const auto count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
     impl_->pixels.assign(data, data + count);
     impl_->src_width = width;
     impl_->src_height = height;
-    queue_redraw();
+    damage = union_rect(previous_damage,
+                        local_image_content_rect(a, impl_->src_width, impl_->src_height,
+                                                 impl_->preserve_aspect_ratio));
+    if (rect_is_empty(damage)) {
+        queue_redraw();
+    } else {
+        queue_redraw(damage);
+    }
 }
 
 void ImageView::set_scale_mode(ScaleMode mode) {
     if (impl_->scale_mode != mode) {
         impl_->scale_mode = mode;
-        queue_redraw();
+        const auto damage = local_image_content_rect(
+            allocation(), source_width(), source_height(), impl_->preserve_aspect_ratio);
+        if (rect_is_empty(damage)) {
+            queue_redraw();
+        } else {
+            queue_redraw(damage);
+        }
     }
 }
 
@@ -68,9 +120,18 @@ ScaleMode ImageView::scale_mode() const {
 
 void ImageView::set_preserve_aspect_ratio(bool preserve) {
     if (impl_->preserve_aspect_ratio != preserve) {
+        const auto previous_damage =
+            local_image_content_rect(allocation(), source_width(), source_height(), impl_->preserve_aspect_ratio);
         impl_->preserve_aspect_ratio = preserve;
         queue_layout();
-        queue_redraw();
+        const auto damage = union_rect(
+            previous_damage,
+            local_image_content_rect(allocation(), source_width(), source_height(), impl_->preserve_aspect_ratio));
+        if (rect_is_empty(damage)) {
+            queue_redraw();
+        } else {
+            queue_redraw(damage);
+        }
     }
 }
 

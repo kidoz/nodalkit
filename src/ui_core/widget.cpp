@@ -33,6 +33,23 @@ const StyleValue* resolve_style_value(const Theme& theme,
     return value;
 }
 
+[[nodiscard]] bool rect_is_empty(Rect rect) {
+    return rect.width <= 0.0F || rect.height <= 0.0F;
+}
+
+[[nodiscard]] bool rects_overlap_or_touch(Rect lhs, Rect rhs) {
+    return lhs.x <= rhs.right() && rhs.x <= lhs.right() && lhs.y <= rhs.bottom() &&
+           rhs.y <= lhs.bottom();
+}
+
+[[nodiscard]] Rect union_rect(Rect lhs, Rect rhs) {
+    const float x0 = std::min(lhs.x, rhs.x);
+    const float y0 = std::min(lhs.y, rhs.y);
+    const float x1 = std::max(lhs.right(), rhs.right());
+    const float y1 = std::max(lhs.bottom(), rhs.bottom());
+    return {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+}
+
 } // namespace
 
 struct Widget::Impl {
@@ -65,6 +82,7 @@ struct Widget::Impl {
     bool debug_has_last_measure = false;
     Constraints debug_last_measure_constraints{};
     SizeRequest debug_last_size_request{};
+    std::vector<Rect> queued_redraw_regions;
     std::vector<Rect> preserved_damage_regions;
 
     Signal<> on_map;
@@ -396,6 +414,30 @@ Rect Widget::debug_previous_allocation() const {
 
 void Widget::queue_redraw() {
     impl_->debug_pending_redraw = true;
+    impl_->queued_redraw_regions.clear();
+    if (impl_->host_window) {
+        impl_->host_window->note_widget_redraw_request(*this);
+    }
+}
+
+void Widget::queue_redraw(Rect damage) {
+    if (rect_is_empty(damage)) {
+        return;
+    }
+
+    bool merged = false;
+    for (auto& existing : impl_->queued_redraw_regions) {
+        if (rects_overlap_or_touch(existing, damage)) {
+            existing = union_rect(existing, damage);
+            merged = true;
+            break;
+        }
+    }
+    if (!merged) {
+        impl_->queued_redraw_regions.push_back(damage);
+    }
+
+    impl_->debug_pending_redraw = true;
     if (impl_->host_window) {
         impl_->host_window->note_widget_redraw_request(*this);
     }
@@ -641,6 +683,10 @@ void Widget::clear_preserved_damage_regions() {
     impl_->preserved_damage_regions.clear();
 }
 
+void Widget::clear_queued_redraw_regions() {
+    impl_->queued_redraw_regions.clear();
+}
+
 bool Widget::handle_mouse_event(const MouseEvent& /*event*/) {
     return false;
 }
@@ -658,6 +704,19 @@ bool Widget::hit_test(Point point) const {
 }
 
 std::vector<Rect> Widget::damage_regions() const {
+    if (!impl_->queued_redraw_regions.empty()) {
+        std::vector<Rect> regions;
+        regions.reserve(impl_->queued_redraw_regions.size());
+        for (const auto& region : impl_->queued_redraw_regions) {
+            regions.push_back({
+                allocation().x + region.x,
+                allocation().y + region.y,
+                region.width,
+                region.height,
+            });
+        }
+        return regions;
+    }
     return {allocation()};
 }
 

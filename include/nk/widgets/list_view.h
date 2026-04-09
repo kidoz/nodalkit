@@ -54,6 +54,9 @@ protected:
 private:
     [[nodiscard]] std::size_t clear_visible_items();
     void sync_visible_items();
+    [[nodiscard]] Rect local_row_damage_rect(std::size_t row) const;
+    void queue_row_redraw(std::size_t row);
+    void queue_selection_redraw();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

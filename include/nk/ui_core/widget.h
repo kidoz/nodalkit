@@ -159,6 +159,9 @@ public:
     // --- Invalidation ---
 
     void queue_redraw();
+    /// Queue redraw of a widget-local damage rect in logical coordinates
+    /// relative to the widget allocation origin.
+    void queue_redraw(Rect damage);
     void queue_layout();
 
     // --- Controllers ---
@@ -255,6 +258,7 @@ private:
     void dispatch_pointer_controllers(const MouseEvent& event);
     void dispatch_keyboard_controllers(const KeyEvent& event);
     void dispatch_focus_controllers(bool focused);
+    void clear_queued_redraw_regions();
     void clear_preserved_damage_regions();
     void sync_accessible_state();
 

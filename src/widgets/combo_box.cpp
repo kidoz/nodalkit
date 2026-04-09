@@ -53,6 +53,26 @@ void invalidate_popup_frame(Widget& widget) {
     widget.queue_redraw();
 }
 
+Rect field_damage_rect(const ComboBox& combo_box) {
+    const auto a = combo_box.allocation();
+    if (a.width <= 0.0F || a.height <= 0.0F) {
+        return {};
+    }
+
+    auto body = a;
+    if (has_flag(combo_box.state_flags(), StateFlags::Focused)) {
+        body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
+    }
+
+    const Rect inner = {
+        body.x + 1.0F,
+        body.y + 1.0F,
+        std::max(0.0F, body.width - 2.0F),
+        std::max(0.0F, body.height - 2.0F),
+    };
+    return {inner.x - a.x, inner.y - a.y, inner.width, inner.height};
+}
+
 } // namespace
 
 struct ComboBox::Impl {
@@ -108,7 +128,12 @@ void ComboBox::set_selected_index(int index) {
     if (impl_->selected_index != index) {
         impl_->selected_index = index;
         ensure_accessible().set_name(std::string(selected_text()));
-        queue_redraw();
+        const auto damage = field_damage_rect(*this);
+        if (damage.width <= 0.0F || damage.height <= 0.0F) {
+            queue_redraw();
+        } else {
+            queue_redraw(damage);
+        }
         impl_->selection_changed.emit(index);
     }
 }
@@ -237,7 +262,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             impl_->highlighted_index = -1;
             invalidate_popup_frame(*this);
             return true;
-        case KeyCode::Up:
+        case KeyCode::Up: {
             if (impl_->highlighted_index < 0) {
                 impl_->highlighted_index = std::max(0, impl_->selected_index);
             } else if (impl_->highlighted_index > 0) {
@@ -245,7 +270,8 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             }
             invalidate_popup_frame(*this);
             return true;
-        case KeyCode::Down:
+        }
+        case KeyCode::Down: {
             if (impl_->highlighted_index < 0) {
                 impl_->highlighted_index = std::max(0, impl_->selected_index);
             } else if (impl_->highlighted_index < last_index) {
@@ -253,8 +279,9 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             }
             invalidate_popup_frame(*this);
             return true;
+        }
         case KeyCode::Return:
-        case KeyCode::Space:
+        case KeyCode::Space: {
             if (impl_->highlighted_index >= 0) {
                 set_selected_index(impl_->highlighted_index);
             }
@@ -263,6 +290,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             impl_->highlighted_index = -1;
             invalidate_popup_frame(*this);
             return true;
+        }
         default:
             return false;
         }
@@ -312,11 +340,11 @@ bool ComboBox::hit_test(Point point) const {
 }
 
 std::vector<Rect> ComboBox::damage_regions() const {
-    auto regions = std::vector<Rect>{allocation()};
     if (!impl_->popup_open || impl_->items.empty()) {
-        return regions;
+        return Widget::damage_regions();
     }
 
+    auto regions = std::vector<Rect>{allocation()};
     const auto popup =
         popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
     if (popup.visible_count > 0) {
