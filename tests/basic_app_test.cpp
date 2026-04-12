@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <fstream>
 #include <nk/accessibility/atspi_bridge.h>
+#include <nk/animation/easing.h>
+#include <nk/animation/timed_animation.h>
 #include <nk/controllers/event_controller.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/layout/box_layout.h>
@@ -22,6 +24,8 @@
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/style/style_class.h>
+#include <nk/style/theme.h>
 #include <nk/text/font.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
@@ -125,6 +129,15 @@ public:
 
     [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
         return {width_, height_, width_, height_};
+    }
+
+    /// Expose theme_color for testing style cascade.
+    [[nodiscard]] nk::Color test_theme_color(std::string_view name, nk::Color fallback) const {
+        return theme_color(name, fallback);
+    }
+
+    [[nodiscard]] float test_theme_number(std::string_view name, float fallback) const {
+        return theme_number(name, fallback);
     }
 
 protected:
@@ -1426,7 +1439,7 @@ TEST_CASE("Window close requests are notification-only and hide the window", "[a
     nk::Window window({.title = "Close test", .width = 320, .height = 240});
 
     bool close_requested = false;
-    auto conn = window.on_close_request().connect([&close_requested] { close_requested = true; });
+    auto conn = window.on_close_requested().connect([&close_requested] { close_requested = true; });
     (void)conn;
 
     window.present();
@@ -3713,6 +3726,136 @@ TEST_CASE("BoxLayout passes constraints and distributes extra space by stretch",
     container->allocate({0.0F, 0.0F, 100.0F, 160.0F});
     REQUIRE(expand_a->allocation().height == Catch::Approx(68.0F));
     REQUIRE(expand_b->allocation().height == Catch::Approx(44.0F));
+}
+
+TEST_CASE("Widget margin insets child allocation inside BoxLayout", "[app][layout]") {
+    auto container = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    container->set_layout_manager(std::move(layout));
+
+    auto child = FixedWidget::create(60.0F, 30.0F);
+    child->set_margin(nk::Insets{10.0F, 5.0F, 8.0F, 5.0F}); // top, right, bottom, left
+    // Expanding so the child fills the available cross-axis width minus margins.
+    child->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+
+    container->append(child);
+    container->allocate({0.0F, 0.0F, 100.0F, 100.0F});
+
+    // x = 0 + 5 (left margin), y = 0 + 10 (top margin)
+    // width = 100 - 5 - 5 = 90 (Expanding fills the margin-adjusted width)
+    // main-axis slot = 30 + 10 + 8 = 48 (natural + margins);
+    // height = 48 - 10 - 8 = 30 (natural height).
+    REQUIRE(child->allocation().x == Catch::Approx(5.0F));
+    REQUIRE(child->allocation().y == Catch::Approx(10.0F));
+    REQUIRE(child->allocation().width == Catch::Approx(90.0F));
+    REQUIRE(child->allocation().height == Catch::Approx(30.0F));
+}
+
+TEST_CASE("Widget padding defines content_rect inside the allocation", "[app][layout]") {
+    auto widget = FixedWidget::create(100.0F, 60.0F);
+    widget->set_padding(nk::Insets{8.0F, 12.0F, 8.0F, 12.0F});
+    widget->allocate({10.0F, 20.0F, 100.0F, 60.0F});
+
+    const auto content = widget->content_rect();
+    REQUIRE(content.x == Catch::Approx(22.0F));   // 10 + 12 left padding
+    REQUIRE(content.y == Catch::Approx(28.0F));   // 20 + 8 top padding
+    REQUIRE(content.width == Catch::Approx(76.0F));  // 100 - 12 - 12
+    REQUIRE(content.height == Catch::Approx(44.0F)); // 60 - 8 - 8
+}
+
+TEST_CASE("Widget margin increases container natural size in BoxLayout measure", "[app][layout]") {
+    auto container = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    container->set_layout_manager(std::move(layout));
+
+    auto child = FixedWidget::create(40.0F, 20.0F);
+    child->set_margin(nk::Insets::uniform(6.0F));
+    container->append(child);
+
+    const auto request = container->measure(nk::Constraints::unbounded());
+    // Natural width = 40 + 6 + 6 = 52, natural height = 20 + 6 + 6 = 32
+    REQUIRE(request.natural_width == Catch::Approx(52.0F));
+    REQUIRE(request.natural_height == Catch::Approx(32.0F));
+}
+
+TEST_CASE("Inheritable text-color cascades from parent to child widget", "[app][style]") {
+    auto theme = nk::Theme::make_light();
+    // Add a rule: widgets with class "accent-container" get blue text.
+    nk::StyleRule accent_rule{};
+    accent_rule.selector.classes.push_back("accent-container");
+    accent_rule.properties["text-color"] = nk::Color{0.0F, 0.0F, 1.0F, 1.0F};
+    theme->add_rule(accent_rule);
+    nk::Theme::set_active(std::move(theme));
+
+    auto container = TestContainer::create();
+    container->add_style_class("accent-container");
+
+    auto child = FixedWidget::create(40.0F, 20.0F);
+    container->append(child);
+
+    // The child has no "text-color" rule of its own — it should inherit
+    // the blue text-color from its parent's "accent-container" class.
+    const auto color = child->test_theme_color("text-color", nk::Color{1, 1, 1, 1});
+    REQUIRE(color.r == Catch::Approx(0.0F));
+    REQUIRE(color.g == Catch::Approx(0.0F));
+    REQUIRE(color.b == Catch::Approx(1.0F));
+    REQUIRE(color.a == Catch::Approx(1.0F));
+
+    // Non-inheritable property should NOT cascade — should return the fallback.
+    const auto bg = child->test_theme_color("background", nk::Color{0.5F, 0.5F, 0.5F, 1.0F});
+    REQUIRE(bg.r == Catch::Approx(0.5F));
+    REQUIRE(bg.g == Catch::Approx(0.5F));
+
+    // Restore default theme.
+    nk::Theme::set_active(nullptr);
+}
+
+TEST_CASE("Easing functions produce expected boundary values", "[animation]") {
+    REQUIRE(nk::easing::linear(0.0F) == Catch::Approx(0.0F));
+    REQUIRE(nk::easing::linear(1.0F) == Catch::Approx(1.0F));
+    REQUIRE(nk::easing::linear(0.5F) == Catch::Approx(0.5F));
+
+    REQUIRE(nk::easing::ease_in(0.0F) == Catch::Approx(0.0F));
+    REQUIRE(nk::easing::ease_in(1.0F) == Catch::Approx(1.0F));
+    REQUIRE(nk::easing::ease_in(0.5F) < 0.5F); // slower at start
+
+    REQUIRE(nk::easing::ease_out(0.0F) == Catch::Approx(0.0F));
+    REQUIRE(nk::easing::ease_out(1.0F) == Catch::Approx(1.0F));
+    REQUIRE(nk::easing::ease_out(0.5F) > 0.5F); // faster at start
+
+    REQUIRE(nk::easing::ease_in_out(0.0F) == Catch::Approx(0.0F));
+    REQUIRE(nk::easing::ease_in_out(1.0F) == Catch::Approx(1.0F));
+    REQUIRE(nk::easing::ease_in_out(0.5F) == Catch::Approx(0.5F));
+}
+
+TEST_CASE("TimedAnimation progresses from 0 to 1 over its duration", "[animation]") {
+    nk::TimedAnimation anim(std::chrono::milliseconds(200), nk::easing::linear);
+
+    REQUIRE_FALSE(anim.is_running());
+    REQUIRE(anim.value() == Catch::Approx(0.0F));
+
+    anim.start();
+    REQUIRE(anim.is_running());
+    REQUIRE_FALSE(anim.is_finished());
+
+    // Immediately after start, value should be near 0.
+    const auto start = std::chrono::steady_clock::now();
+    REQUIRE(anim.value_at(start) >= 0.0F);
+    REQUIRE(anim.value_at(start) < 0.1F);
+
+    // Midpoint: ~0.5.
+    REQUIRE(anim.value_at(start + std::chrono::milliseconds(100)) == Catch::Approx(0.5F).margin(0.05));
+
+    // Past duration: 1.0 and finished.
+    REQUIRE(anim.value_at(start + std::chrono::milliseconds(300)) == Catch::Approx(1.0F));
+    REQUIRE(anim.is_finished());
+}
+
+TEST_CASE("TimedAnimation with zero duration completes immediately", "[animation]") {
+    nk::TimedAnimation anim(std::chrono::milliseconds(0));
+    anim.start();
+    REQUIRE(anim.value() == Catch::Approx(1.0F));
+    REQUIRE(anim.is_finished());
 }
 
 TEST_CASE("StackLayout overlays visible children in the same allocation", "[app][layout]") {

@@ -31,6 +31,48 @@ Good high-level split:
 Avoid putting business logic directly into widget callbacks if that logic needs
 to be reused or tested independently.
 
+## Consuming the Installed SDK
+
+NodalKit 0.x ships a single distribution surface: a `pkg-config` file named
+`nodalkit.pc` installed alongside the library and headers. There is no CMake
+package config module in 0.x — if you need CMake integration, invoke
+`pkg-config` from your `CMakeLists.txt`.
+
+After `meson install`, point `PKG_CONFIG_PATH` at the install prefix and use
+pkg-config like any other dependency:
+
+```bash
+export PKG_CONFIG_PATH="/your/prefix/lib/pkgconfig"
+pkg-config --cflags --libs nodalkit
+# -I/your/prefix/include -L/your/prefix/lib -lNodalKit
+```
+
+For Meson consumers, `dependency('nodalkit')` resolves through the same file:
+
+```meson
+nodalkit_dep = dependency('nodalkit', method : 'pkg-config')
+
+executable('my_app', 'main.cpp', dependencies : nodalkit_dep)
+```
+
+### Platform notes
+
+- **Linux Wayland (primary target):** NodalKit installs as `libNodalKit.so`.
+  Your application must also have the runtime dependencies available at link
+  time: `wayland-client`, `xkbcommon`, `freetype2`, `fontconfig`, `harfbuzz`,
+  `gio-2.0`. On most distributions these come in the matching `-dev` packages.
+- **macOS (secondary target):** NodalKit installs as `libNodalKit.dylib` and
+  links against the Cocoa, CoreGraphics, CoreText, Metal, QuartzCore, and
+  UniformTypeIdentifiers Apple frameworks. Downstream applications pick these
+  up automatically through the dylib.
+- **Windows (experimental):** NodalKit currently builds as a **static** library
+  (`NodalKit.lib`), not a DLL. Consumers must link statically and must also
+  link the same Win32 system libraries NodalKit depends on (`user32`, `gdi32`,
+  `comdlg32`, `advapi32`, `dwmapi`, `shcore`, `dwrite`, `d3d11`, `d3dcompiler`,
+  `dxgi`). This is a deliberate choice for the experimental phase — the
+  static/shared decision on Windows will be revisited before Windows graduates
+  from experimental status.
+
 ## Minimal Application Skeleton
 
 ```cpp

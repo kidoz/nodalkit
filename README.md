@@ -25,7 +25,7 @@ The current 0.x support policy is:
 
 - Linux Wayland is the primary release target.
 - macOS is a secondary target while CI stays green.
-- Windows is a secondary target (Win32, D3D11, DirectWrite/GDI).
+- Windows is experimental (Win32, D3D11, DirectWrite/GDI) — actively developed, not a release gate.
 - X11 is not a release target yet.
 
 ## Quick Start

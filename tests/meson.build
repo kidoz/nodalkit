@@ -34,6 +34,16 @@ test_renderer = executable('test_renderer',
 )
 test('renderer', test_renderer)
 
+# Public API link audit: references every public symbol declared in
+# include/nk/**/*.h and fails the build if any symbol has no implementation
+# in libNodalKit (Shortcut-class bugs). Intentionally headless — catches
+# no runtime issues, only link-time gaps.
+test_public_api_audit = executable('test_public_api_audit',
+    'public_api_audit/main.cpp',
+    dependencies : [nk_dep],
+)
+test('public_api_audit', test_public_api_audit)
+
 if host_machine.system() == 'linux'
     test_wayland_portal_contract = executable('test_wayland_portal_contract',
         'wayland_portal_contract_test.cpp',

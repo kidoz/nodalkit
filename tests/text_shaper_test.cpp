@@ -52,7 +52,7 @@ std::optional<std::size_t> first_covered_pixel_index(nk::ShapedText const& shape
     return std::nullopt;
 }
 
-std::optional<int> first_covered_row(nk::ShapedText const& shaped) {
+[[maybe_unused]] std::optional<int> first_covered_row(nk::ShapedText const& shaped) {
     auto const* bitmap = shaped.bitmap_data();
     int const width = shaped.bitmap_width();
     int const height = shaped.bitmap_height();

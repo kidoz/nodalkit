@@ -241,3 +241,171 @@ TEST_CASE("SoftwareRenderer forwards logical font sizes to text shaping on Windo
     REQUIRE(std::fabs(text_shaper.last_shaped_font_size - 24.0F) < 0.01F);
 #endif
 }
+
+namespace {
+
+const nk::RenderNode* find_text_node(const nk::RenderNode& node) {
+    if (node.kind() == nk::RenderNodeKind::Text) {
+        return &node;
+    }
+    for (const auto& child : node.children()) {
+        if (const auto* found = find_text_node(*child)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("ShadowNode renders a blurred outset shadow in software", "[renderer][shadow]") {
+    nk::SnapshotContext snapshot;
+    // Black shadow with 4px blur, no offset, behind a 10×10 rect centered at (10,10).
+    snapshot.add_shadow({10.0F, 10.0F, 10.0F, 10.0F},
+                        nk::Color{0.0F, 0.0F, 0.0F, 1.0F},
+                        0.0F, 0.0F, 4.0F);
+    auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({30.0F, 30.0F}, 1.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+
+    // Inside the shadow rect core: should be dark (blended black onto white).
+    const auto inside = pixel_at(renderer, 14, 14);
+    REQUIRE(inside.r < 30);
+    REQUIRE(inside.g < 30);
+    REQUIRE(inside.b < 30);
+
+    // At the blur edge (4px outside the shadow rect): should be partially faded.
+    const auto edge = pixel_at(renderer, 7, 14);
+    REQUIRE(edge.r > 100);
+    REQUIRE(edge.r < 255);
+
+    // Far outside: untouched white background.
+    const auto outside = pixel_at(renderer, 2, 2);
+    REQUIRE(outside.r == 255);
+    REQUIRE(outside.g == 255);
+    REQUIRE(outside.b == 255);
+}
+
+TEST_CASE("LinearGradientNode renders a vertical color ramp in software", "[renderer][gradient]") {
+    nk::SnapshotContext snapshot;
+    // Red at top → blue at bottom, 20×20 rect.
+    snapshot.add_linear_gradient({0.0F, 0.0F, 20.0F, 20.0F},
+                                 nk::Color{1.0F, 0.0F, 0.0F, 1.0F},
+                                 nk::Color{0.0F, 0.0F, 1.0F, 1.0F},
+                                 nk::Orientation::Vertical);
+    auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 20.0F}, 1.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+
+    // Top row: mostly red.
+    const auto top = pixel_at(renderer, 10, 1);
+    REQUIRE(top.r > 200);
+    REQUIRE(top.b < 55);
+
+    // Bottom row: mostly blue.
+    const auto bottom = pixel_at(renderer, 10, 18);
+    REQUIRE(bottom.r < 55);
+    REQUIRE(bottom.b > 200);
+
+    // Middle: roughly equal red and blue (~127 each).
+    const auto mid = pixel_at(renderer, 10, 10);
+    REQUIRE(mid.r >= 100);
+    REQUIRE(mid.r <= 155);
+    REQUIRE(mid.b >= 100);
+    REQUIRE(mid.b <= 155);
+}
+
+TEST_CASE("SnapshotContext::add_text measures text bounds when a shaper is provided",
+          "[renderer][text-bounds]") {
+    RecordingTextShaper shaper;
+    nk::SnapshotContext snapshot{&shaper};
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 18.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    snapshot.add_text({5.0F, 7.0F}, "Hello", nk::Color::from_rgb(0, 0, 0), font);
+
+    auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+    const auto* text_node = find_text_node(*root);
+    REQUIRE(text_node != nullptr);
+
+    // RecordingTextShaper::measure returns {font.size, font.size}, so with
+    // a 18pt font we expect bounds {5, 7, 18, 18}.
+    const auto& bounds = text_node->bounds();
+    REQUIRE(bounds.x == 5.0F);
+    REQUIRE(bounds.y == 7.0F);
+    REQUIRE(bounds.width == 18.0F);
+    REQUIRE(bounds.height == 18.0F);
+}
+
+TEST_CASE("OpacityNode multiplies child alpha in software rendering", "[renderer][opacity]") {
+    nk::SnapshotContext snapshot;
+    snapshot.push_opacity({0.0F, 0.0F, 20.0F, 20.0F}, 0.5F);
+    snapshot.add_color_rect({2.0F, 2.0F, 4.0F, 4.0F}, nk::Color{1.0F, 0.0F, 0.0F, 1.0F});
+    snapshot.pop_container();
+
+    auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 20.0F}, 1.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+
+    // The red rect at (2,2)-(6,6) should be blended at 50% opacity onto
+    // the white background. Expected: R = 255*0.5 + 255*0.5 = 255,
+    // G = 0*0.5 + 255*0.5 = 127, B = same as G. Actually with premultiplied
+    // alpha blending: dst = src*alpha + dst*(1-alpha).
+    // src = (1,0,0,0.5), dst = (1,1,1,1) → result = (1, 0.5, 0.5, 1)
+    // → (255, 127, 127, 255)
+    const auto inside = pixel_at(renderer, 3, 3);
+    REQUIRE(inside.r == 255);
+    REQUIRE(inside.g >= 126);
+    REQUIRE(inside.g <= 128);
+    REQUIRE(inside.b >= 126);
+    REQUIRE(inside.b <= 128);
+    REQUIRE(inside.a == 255);
+
+    // Outside the opacity rect, the background is untouched.
+    const auto outside = pixel_at(renderer, 10, 10);
+    REQUIRE(outside.r == 255);
+    REQUIRE(outside.g == 255);
+    REQUIRE(outside.b == 255);
+}
+
+TEST_CASE("SnapshotContext::add_text falls back to zero-size bounds without a shaper",
+          "[renderer][text-bounds]") {
+    nk::SnapshotContext snapshot;  // no shaper
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 14.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    snapshot.add_text({2.0F, 3.0F}, "Unmeasured", nk::Color::from_rgb(0, 0, 0), font);
+
+    auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+    const auto* text_node = find_text_node(*root);
+    REQUIRE(text_node != nullptr);
+
+    // Without a shaper, bounds preserve the origin but have zero size —
+    // the documented fallback behavior. Callers that rely on text bounds
+    // for hit testing or clipping must provide a shaper.
+    const auto& bounds = text_node->bounds();
+    REQUIRE(bounds.x == 2.0F);
+    REQUIRE(bounds.y == 3.0F);
+    REQUIRE(bounds.width == 0.0F);
+    REQUIRE(bounds.height == 0.0F);
+}
