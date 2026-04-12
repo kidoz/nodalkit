@@ -409,3 +409,216 @@ TEST_CASE("SnapshotContext::add_text falls back to zero-size bounds without a sh
     REQUIRE(bounds.width == 0.0F);
     REQUIRE(bounds.height == 0.0F);
 }
+
+// --- Damage tracking edge case tests ---
+
+TEST_CASE("SoftwareRenderer handles multiple disjoint damage regions", "[renderer]") {
+    nk::SnapshotContext first_snap;
+    first_snap.add_color_rect({0.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 0, 0));
+    first_snap.add_color_rect({10.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 255, 0));
+    first_snap.add_color_rect({20.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 0, 255));
+    auto first = first_snap.take_root();
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({30.0F, 10.0F}, 1.0F);
+    renderer.render(*first);
+    renderer.end_frame();
+
+    // Frame 2: damage left and right bands, change colors.
+    nk::SnapshotContext second_snap;
+    second_snap.add_color_rect({0.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 255, 0));
+    second_snap.add_color_rect({10.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 255, 0));
+    second_snap.add_color_rect({20.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 255, 255));
+    auto second = second_snap.take_root();
+
+    renderer.begin_frame({30.0F, 10.0F}, 1.0F);
+    const std::array<nk::Rect, 2> damage = {
+        nk::Rect{0.0F, 0.0F, 10.0F, 10.0F},
+        nk::Rect{20.0F, 0.0F, 10.0F, 10.0F},
+    };
+    renderer.set_damage_regions(damage);
+    renderer.render(*second);
+    renderer.end_frame();
+
+    const auto left = pixel_at(renderer, 5, 5);
+    const auto mid = pixel_at(renderer, 15, 5);
+    const auto right = pixel_at(renderer, 25, 5);
+    REQUIRE(left.r == 255);
+    REQUIRE(left.g == 255);
+    REQUIRE(left.b == 0);
+    REQUIRE(mid.r == 0);
+    REQUIRE(mid.g == 255);
+    REQUIRE(mid.b == 0);
+    REQUIRE(right.r == 0);
+    REQUIRE(right.g == 255);
+    REQUIRE(right.b == 255);
+    REQUIRE(renderer.last_hotspot_counters().damage_region_count == 2);
+}
+
+TEST_CASE("SoftwareRenderer merges overlapping damage regions", "[renderer]") {
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({30.0F, 10.0F}, 1.0F);
+    const std::array<nk::Rect, 2> damage = {
+        nk::Rect{0.0F, 0.0F, 15.0F, 10.0F},
+        nk::Rect{10.0F, 0.0F, 15.0F, 10.0F},
+    };
+    renderer.set_damage_regions(damage);
+    REQUIRE(renderer.last_hotspot_counters().damage_region_count == 1);
+}
+
+TEST_CASE("SoftwareRenderer treats zero-size damage as full redraw", "[renderer]") {
+    nk::SnapshotContext snap;
+    snap.add_color_rect({0.0F, 0.0F, 20.0F, 10.0F}, nk::Color::from_rgb(255, 0, 0));
+    auto root = snap.take_root();
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 10.0F}, 1.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+
+    renderer.begin_frame({20.0F, 10.0F}, 1.0F);
+    const std::array<nk::Rect, 1> damage = {nk::Rect{5.0F, 5.0F, 0.0F, 0.0F}};
+    renderer.set_damage_regions(damage);
+    REQUIRE(renderer.last_hotspot_counters().damage_region_count == 0);
+}
+
+TEST_CASE("SoftwareRenderer falls back to full redraw with empty damage list", "[renderer]") {
+    nk::SnapshotContext snap;
+    snap.add_color_rect({0.0F, 0.0F, 20.0F, 10.0F}, nk::Color::from_rgb(128, 0, 0));
+    auto root = snap.take_root();
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 10.0F}, 1.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+
+    // Frame 2: empty damage = full redraw.
+    nk::SnapshotContext snap2;
+    snap2.add_color_rect({0.0F, 0.0F, 20.0F, 10.0F}, nk::Color::from_rgb(0, 128, 0));
+    auto root2 = snap2.take_root();
+
+    renderer.begin_frame({20.0F, 10.0F}, 1.0F);
+    renderer.set_damage_regions({});
+    renderer.render(*root2);
+    renderer.end_frame();
+
+    REQUIRE(renderer.last_hotspot_counters().damage_region_count == 0);
+    const auto px = pixel_at(renderer, 10, 5);
+    REQUIRE(px.r == 0);
+    REQUIRE(px.g == 128);
+}
+
+TEST_CASE("SoftwareRenderer forces full redraw on viewport resize", "[renderer]") {
+    nk::SnapshotContext snap;
+    snap.add_color_rect({0.0F, 0.0F, 20.0F, 10.0F}, nk::Color::from_rgb(200, 0, 0));
+    auto root = snap.take_root();
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 10.0F}, 1.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+    REQUIRE(renderer.pixel_width() == 20);
+
+    // Frame 2: resize viewport. Even with damage hint, full redraw should happen.
+    nk::SnapshotContext snap2;
+    snap2.add_color_rect({0.0F, 0.0F, 30.0F, 10.0F}, nk::Color::from_rgb(0, 200, 0));
+    auto root2 = snap2.take_root();
+
+    renderer.begin_frame({30.0F, 10.0F}, 1.0F);
+    const std::array<nk::Rect, 1> damage = {nk::Rect{0.0F, 0.0F, 10.0F, 10.0F}};
+    renderer.set_damage_regions(damage);
+    renderer.render(*root2);
+    renderer.end_frame();
+
+    REQUIRE(renderer.pixel_width() == 30);
+    // Pixel at x=25 should be green (full redraw happened despite small damage hint).
+    const auto px = pixel_at(renderer, 25, 5);
+    REQUIRE(px.g == 200);
+}
+
+TEST_CASE("SoftwareRenderer clamps damage region to viewport bounds", "[renderer]") {
+    nk::SnapshotContext snap;
+    snap.add_color_rect({0.0F, 0.0F, 20.0F, 10.0F}, nk::Color::from_rgb(100, 100, 100));
+    auto root = snap.take_root();
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 10.0F}, 1.0F);
+    renderer.render(*root);
+    renderer.end_frame();
+
+    // Frame 2: damage extends well beyond viewport.
+    nk::SnapshotContext snap2;
+    snap2.add_color_rect({0.0F, 0.0F, 20.0F, 10.0F}, nk::Color::from_rgb(50, 50, 50));
+    auto root2 = snap2.take_root();
+
+    renderer.begin_frame({20.0F, 10.0F}, 1.0F);
+    const std::array<nk::Rect, 1> damage = {nk::Rect{-5.0F, -5.0F, 30.0F, 20.0F}};
+    renderer.set_damage_regions(damage);
+    renderer.render(*root2);
+    renderer.end_frame();
+
+    // Should not crash and should still render correctly.
+    REQUIRE(renderer.last_hotspot_counters().damage_region_count == 1);
+    const auto px = pixel_at(renderer, 10, 5);
+    REQUIRE(px.r == 50);
+}
+
+TEST_CASE("SoftwareRenderer preserves undamaged quadrants across consecutive partial redraws",
+          "[renderer]") {
+    // Frame 1: 4 quadrants with distinct colors.
+    nk::SnapshotContext snap1;
+    snap1.add_color_rect({0.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 0, 0));     // TL red
+    snap1.add_color_rect({10.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 255, 0));     // TR green
+    snap1.add_color_rect({0.0F, 10.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 0, 255));     // BL blue
+    snap1.add_color_rect({10.0F, 10.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 255, 255)); // BR white
+    auto root1 = snap1.take_root();
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 20.0F}, 1.0F);
+    renderer.render(*root1);
+    renderer.end_frame();
+
+    // Verify initial state.
+    REQUIRE(pixel_at(renderer, 5, 5).r == 255);    // TL red
+    REQUIRE(pixel_at(renderer, 15, 5).g == 255);    // TR green
+    REQUIRE(pixel_at(renderer, 5, 15).b == 255);    // BL blue
+    REQUIRE(pixel_at(renderer, 15, 15).r == 255);   // BR white
+
+    // Frame 2: damage only TL quadrant, change to yellow.
+    nk::SnapshotContext snap2;
+    snap2.add_color_rect({0.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 255, 0));
+    auto root2 = snap2.take_root();
+
+    renderer.begin_frame({20.0F, 20.0F}, 1.0F);
+    const std::array<nk::Rect, 1> damage2 = {nk::Rect{0.0F, 0.0F, 10.0F, 10.0F}};
+    renderer.set_damage_regions(damage2);
+    renderer.render(*root2);
+    renderer.end_frame();
+
+    REQUIRE(pixel_at(renderer, 5, 5).r == 255);     // TL now yellow
+    REQUIRE(pixel_at(renderer, 5, 5).g == 255);
+    REQUIRE(pixel_at(renderer, 5, 5).b == 0);
+    REQUIRE(pixel_at(renderer, 15, 5).g == 255);     // TR still green
+    REQUIRE(pixel_at(renderer, 5, 15).b == 255);     // BL still blue
+    REQUIRE(pixel_at(renderer, 15, 15).r == 255);    // BR still white
+
+    // Frame 3: damage only BR quadrant, change to cyan.
+    nk::SnapshotContext snap3;
+    snap3.add_color_rect({10.0F, 10.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 255, 255));
+    auto root3 = snap3.take_root();
+
+    renderer.begin_frame({20.0F, 20.0F}, 1.0F);
+    const std::array<nk::Rect, 1> damage3 = {nk::Rect{10.0F, 10.0F, 10.0F, 10.0F}};
+    renderer.set_damage_regions(damage3);
+    renderer.render(*root3);
+    renderer.end_frame();
+
+    REQUIRE(pixel_at(renderer, 5, 5).r == 255);      // TL still yellow (from frame 2)
+    REQUIRE(pixel_at(renderer, 5, 5).g == 255);
+    REQUIRE(pixel_at(renderer, 15, 5).g == 255);      // TR still green (never touched)
+    REQUIRE(pixel_at(renderer, 5, 15).b == 255);      // BL still blue (never touched)
+    REQUIRE(pixel_at(renderer, 15, 15).r == 0);       // BR now cyan
+    REQUIRE(pixel_at(renderer, 15, 15).g == 255);
+    REQUIRE(pixel_at(renderer, 15, 15).b == 255);
+    REQUIRE(renderer.last_hotspot_counters().damage_region_count == 1);
+}
