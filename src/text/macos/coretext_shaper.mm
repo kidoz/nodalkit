@@ -148,4 +148,127 @@ ShapedText CoreTextShaper::shape(
     }
 }
 
+Size CoreTextShaper::measure_wrapped(
+    std::string_view text, FontDescriptor const& font,
+    float max_width) const {
+    @autoreleasepool {
+        CTFontRef ct_font = create_ct_font(font);
+        CFAttributedStringRef attr_str =
+            create_attributed_string(text, ct_font, {0, 0, 0, 1});
+
+        CTFramesetterRef framesetter =
+            CTFramesetterCreateWithAttributedString(attr_str);
+
+        CFRange fit_range{};
+        CGSize constraints = CGSizeMake(
+            static_cast<CGFloat>(max_width), CGFLOAT_MAX);
+        CGSize frame_size =
+            CTFramesetterSuggestFrameSizeWithConstraints(
+                framesetter, CFRangeMake(0, 0), nullptr,
+                constraints, &fit_range);
+
+        CFRelease(framesetter);
+        CFRelease(attr_str);
+        CFRelease(ct_font);
+
+        return {static_cast<float>(std::ceil(frame_size.width)),
+                static_cast<float>(std::ceil(frame_size.height))};
+    }
+}
+
+ShapedText CoreTextShaper::shape_wrapped(
+    std::string_view text, FontDescriptor const& font,
+    Color color, float max_width) const {
+    @autoreleasepool {
+        CTFontRef ct_font = create_ct_font(font);
+        CFAttributedStringRef attr_str =
+            create_attributed_string(text, ct_font, color);
+
+        CTFramesetterRef framesetter =
+            CTFramesetterCreateWithAttributedString(attr_str);
+
+        // Measure to determine bitmap size.
+        CFRange fit_range{};
+        CGSize constraints = CGSizeMake(
+            static_cast<CGFloat>(max_width), CGFLOAT_MAX);
+        CGSize frame_size =
+            CTFramesetterSuggestFrameSizeWithConstraints(
+                framesetter, CFRangeMake(0, 0), nullptr,
+                constraints, &fit_range);
+
+        int const w = static_cast<int>(std::ceil(frame_size.width));
+        int const h = static_cast<int>(std::ceil(frame_size.height));
+
+        ShapedText result;
+        result.set_text_size(
+            {static_cast<float>(w), static_cast<float>(h)});
+
+        // Baseline of the first line.
+        CGMutablePathRef path = CGPathCreateMutable();
+        CGPathAddRect(path, nullptr,
+                      CGRectMake(0, 0, frame_size.width,
+                                 frame_size.height));
+        CTFrameRef frame = CTFramesetterCreateFrame(
+            framesetter, CFRangeMake(0, 0), path, nullptr);
+
+        CFArrayRef lines = CTFrameGetLines(frame);
+        CFIndex line_count = CFArrayGetCount(lines);
+        if (line_count > 0) {
+            auto* first_line = static_cast<CTLineRef>(
+                CFArrayGetValueAtIndex(lines, 0));
+            CGFloat ascent = 0;
+            CTLineGetTypographicBounds(first_line, &ascent, nullptr,
+                                       nullptr);
+            result.set_baseline(static_cast<float>(ascent));
+        }
+
+        if (w > 0 && h > 0) {
+            auto const stride = static_cast<std::size_t>(w * 4);
+            std::vector<uint8_t> bitmap(
+                stride * static_cast<std::size_t>(h), 0);
+
+            CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+            CGContextRef ctx = CGBitmapContextCreate(
+                bitmap.data(), static_cast<size_t>(w),
+                static_cast<size_t>(h), 8, stride, cs,
+                kCGImageAlphaPremultipliedLast |
+                    static_cast<CGBitmapInfo>(
+                        kCGBitmapByteOrder32Big));
+            CGColorSpaceRelease(cs);
+
+            if (ctx) {
+                CGContextSetTextMatrix(ctx,
+                                       CGAffineTransformIdentity);
+                // Draw each line manually with correct top-down
+                // positioning. CoreText origins are bottom-up, but
+                // the bitmap context has (0,0) at bottom-left.
+                std::vector<CGPoint> origins(
+                    static_cast<std::size_t>(line_count));
+                CTFrameGetLineOrigins(
+                    frame, CFRangeMake(0, 0), origins.data());
+
+                for (CFIndex i = 0; i < line_count; ++i) {
+                    auto* line_ref = static_cast<CTLineRef>(
+                        CFArrayGetValueAtIndex(lines, i));
+                    CGContextSetTextPosition(
+                        ctx, origins[static_cast<std::size_t>(i)].x,
+                        origins[static_cast<std::size_t>(i)].y);
+                    CTLineDraw(line_ref, ctx);
+                }
+                CGContextRelease(ctx);
+            }
+
+            result.set_bitmap(std::move(bitmap), w, h);
+        }
+
+        CFRelease(frame);
+        CGPathRelease(path);
+        CFRelease(framesetter);
+        CFRelease(attr_str);
+        CFRelease(ct_font);
+
+        return result;
+    }
+}
+
 } // namespace nk

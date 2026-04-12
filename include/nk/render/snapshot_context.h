@@ -44,6 +44,10 @@ public:
     /// Convenience: add a text node.
     void add_text(Point origin, std::string text, Color color, FontDescriptor font = {});
 
+    /// Convenience: add a word-wrapped text node.
+    void add_wrapped_text(Point origin, std::string text, Color color, FontDescriptor font,
+                          float max_width);
+
     /// Convenience: add an image node.
     void add_image(Rect dest,
                    const uint32_t* data,

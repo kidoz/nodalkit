@@ -21,6 +21,17 @@ public:
         std::string_view text,
         FontDescriptor const& font,
         Color color) const override;
+
+    [[nodiscard]] Size measure_wrapped(
+        std::string_view text,
+        FontDescriptor const& font,
+        float max_width) const override;
+
+    [[nodiscard]] ShapedText shape_wrapped(
+        std::string_view text,
+        FontDescriptor const& font,
+        Color color,
+        float max_width) const override;
 };
 
 } // namespace nk

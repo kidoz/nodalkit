@@ -28,6 +28,10 @@ public:
     [[nodiscard]] HAlign h_align() const;
     void set_h_align(HAlign align);
 
+    /// Whether text wraps at the widget's width.
+    [[nodiscard]] bool wrapping() const;
+    void set_wrapping(bool enabled);
+
     // --- Widget overrides ---
     [[nodiscard]] SizeRequest measure(
         Constraints const& constraints) const override;

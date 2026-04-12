@@ -38,6 +38,7 @@ Rect union_rect(Rect lhs, Rect rhs) {
 struct Label::Impl {
     std::string text;
     HAlign h_align = HAlign::Start;
+    bool wrapping = false;
 };
 
 std::shared_ptr<Label> Label::create(std::string text) {
@@ -112,8 +113,29 @@ void Label::set_h_align(HAlign align) {
     impl_->h_align = align;
 }
 
-SizeRequest Label::measure(const Constraints& /*constraints*/) const {
+bool Label::wrapping() const {
+    return impl_->wrapping;
+}
+
+void Label::set_wrapping(bool enabled) {
+    if (impl_->wrapping != enabled) {
+        impl_->wrapping = enabled;
+        queue_layout();
+        queue_redraw();
+    }
+}
+
+SizeRequest Label::measure(const Constraints& constraints) const {
     const auto font = label_font(*this);
+    if (impl_->wrapping && constraints.max_width > 0.0F &&
+        constraints.max_width < 1e6F) {
+        const auto measured =
+            measure_text_wrapped(impl_->text, font, constraints.max_width);
+        const float h = std::max(
+            measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
+            has_style_class("heading") ? 28.0F : 20.0F);
+        return {0, h, measured.width, h};
+    }
     const auto measured = measure_text(impl_->text, font);
     const float w = measured.width;
     const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
@@ -139,7 +161,11 @@ void Label::snapshot(SnapshotContext& ctx) const {
         available_height -= 6.0F;
     }
     const float text_y = a.y + std::max(0.0F, (available_height - measured.height) * 0.5F);
-    ctx.add_text({text_x, text_y}, std::string(impl_->text), text_color, font);
+    if (impl_->wrapping && a.width > 0.0F) {
+        ctx.add_wrapped_text({text_x, text_y}, std::string(impl_->text), text_color, font, a.width);
+    } else {
+        ctx.add_text({text_x, text_y}, std::string(impl_->text), text_color, font);
+    }
 
     if (has_style_class("heading")) {
         const float line_y = text_y + measured.height + 3.0F;

@@ -101,11 +101,13 @@ float RoundedClipNode::corner_radius() const {
 
 // --- TextNode ---
 
-TextNode::TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font)
+TextNode::TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font,
+                   float max_width)
     : RenderNode(RenderNodeKind::Text)
     , text_(std::move(text))
     , color_(color)
-    , font_(std::move(font)) {
+    , font_(std::move(font))
+    , max_width_(max_width) {
     set_bounds({origin.x, origin.y, size.width, size.height});
 }
 
@@ -119,6 +121,10 @@ Color TextNode::text_color() const {
 
 const FontDescriptor& TextNode::font() const {
     return font_;
+}
+
+float TextNode::max_width() const {
+    return max_width_;
 }
 
 // --- OpacityNode ---

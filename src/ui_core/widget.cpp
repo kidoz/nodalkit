@@ -831,6 +831,20 @@ Size Widget::measure_text(std::string_view text, const FontDescriptor& font) con
     return {length * font.size * 0.55F, font.size * 1.35F};
 }
 
+Size Widget::measure_text_wrapped(std::string_view text,
+                                   const FontDescriptor& font,
+                                   float max_width) const {
+    if (text.empty()) {
+        return {};
+    }
+    note_text_measure_for_diagnostics();
+    if (impl_->host_window != nullptr && impl_->host_window->text_shaper() != nullptr) {
+        return impl_->host_window->text_shaper()->measure_wrapped(text, font, max_width);
+    }
+    const auto length = static_cast<float>(text.size());
+    return {std::min(max_width, length * font.size * 0.55F), font.size * 1.35F * 2.0F};
+}
+
 void Widget::note_text_measure_for_diagnostics() const {
     ++impl_->debug_hotspot_counters.text_measure_count;
 }

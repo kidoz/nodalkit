@@ -11,6 +11,17 @@
 
 namespace nk {
 
+Size TextShaper::measure_wrapped(
+    std::string_view text, FontDescriptor const& font, float /*max_width*/) const {
+    return measure(text, font);
+}
+
+ShapedText TextShaper::shape_wrapped(
+    std::string_view text, FontDescriptor const& font,
+    Color color, float /*max_width*/) const {
+    return shape(text, font, color);
+}
+
 std::unique_ptr<TextShaper> TextShaper::create() {
 #ifdef __APPLE__
     return std::make_unique<CoreTextShaper>();

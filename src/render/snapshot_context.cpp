@@ -75,6 +75,16 @@ void SnapshotContext::add_text(Point origin, std::string text, Color color, Font
     add_node(std::make_unique<TextNode>(origin, measured, std::move(text), color, std::move(font)));
 }
 
+void SnapshotContext::add_wrapped_text(Point origin, std::string text, Color color,
+                                        FontDescriptor font, float max_width) {
+    Size measured{};
+    if (impl_->text_shaper != nullptr) {
+        measured = impl_->text_shaper->measure_wrapped(text, font, max_width);
+    }
+    add_node(std::make_unique<TextNode>(origin, measured, std::move(text), color,
+                                         std::move(font), max_width));
+}
+
 void SnapshotContext::add_image(Rect dest, const uint32_t* data, int w, int h, ScaleMode scale) {
     add_node(std::make_unique<ImageNode>(dest, data, w, h, scale));
 }

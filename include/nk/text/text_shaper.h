@@ -31,6 +31,16 @@ public:
         std::string_view text, FontDescriptor const& font,
         Color color) const = 0;
 
+    /// Measure text with word wrapping within max_width.
+    [[nodiscard]] virtual Size measure_wrapped(
+        std::string_view text, FontDescriptor const& font,
+        float max_width) const;
+
+    /// Shape and rasterize text with word wrapping within max_width.
+    [[nodiscard]] virtual ShapedText shape_wrapped(
+        std::string_view text, FontDescriptor const& font,
+        Color color, float max_width) const;
+
     /// Create the platform-appropriate text shaper.
     [[nodiscard]] static std::unique_ptr<TextShaper> create();
 

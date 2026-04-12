@@ -111,16 +111,20 @@ private:
 /// but hit testing and clipping will not work correctly for those nodes.
 class TextNode : public RenderNode {
 public:
-    TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font = {});
+    TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font = {},
+             float max_width = 0.0F);
 
     [[nodiscard]] const std::string& text() const;
     [[nodiscard]] Color text_color() const;
     [[nodiscard]] const FontDescriptor& font() const;
+    /// When > 0, text should be word-wrapped to this width.
+    [[nodiscard]] float max_width() const;
 
 private:
     std::string text_;
     Color color_;
     FontDescriptor font_;
+    float max_width_ = 0.0F;
 };
 
 /// An opacity container node. Multiplies the effective alpha of all
