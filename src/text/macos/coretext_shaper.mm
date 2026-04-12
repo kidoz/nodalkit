@@ -4,6 +4,12 @@
 #import <CoreText/CoreText.h>
 #import <Foundation/Foundation.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 namespace nk {
 
 CoreTextShaper::CoreTextShaper() = default;
@@ -68,6 +74,29 @@ CFAttributedStringRef create_attributed_string(
             nullptr, (CFStringRef)str, (CFDictionaryRef)attrs);
         CGColorRelease(cg_color);
         return result;
+    }
+}
+
+void convert_premultiplied_to_straight_rgba(std::vector<uint8_t>& bitmap) {
+    for (std::size_t index = 0; index + 3 < bitmap.size(); index += 4) {
+        const auto alpha = bitmap[index + 3];
+        if (alpha == 0) {
+            bitmap[index + 0] = 0;
+            bitmap[index + 1] = 0;
+            bitmap[index + 2] = 0;
+            continue;
+        }
+        if (alpha == 255) {
+            continue;
+        }
+
+        const float scale = 255.0F / static_cast<float>(alpha);
+        bitmap[index + 0] = static_cast<uint8_t>(
+            std::clamp(std::lround(static_cast<float>(bitmap[index + 0]) * scale), 0L, 255L));
+        bitmap[index + 1] = static_cast<uint8_t>(
+            std::clamp(std::lround(static_cast<float>(bitmap[index + 1]) * scale), 0L, 255L));
+        bitmap[index + 2] = static_cast<uint8_t>(
+            std::clamp(std::lround(static_cast<float>(bitmap[index + 2]) * scale), 0L, 255L));
     }
 }
 
@@ -137,6 +166,7 @@ ShapedText CoreTextShaper::shape(
                 CGContextRelease(ctx);
             }
 
+            convert_premultiplied_to_straight_rgba(bitmap);
             result.set_bitmap(std::move(bitmap), w, h);
         }
 
@@ -258,6 +288,7 @@ ShapedText CoreTextShaper::shape_wrapped(
                 CGContextRelease(ctx);
             }
 
+            convert_premultiplied_to_straight_rgba(bitmap);
             result.set_bitmap(std::move(bitmap), w, h);
         }
 
