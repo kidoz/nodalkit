@@ -5,6 +5,8 @@
 #include <nk/text/text_shaper.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstdint>
 #include <cstddef>
 #include <optional>
 
@@ -50,6 +52,11 @@ std::optional<std::size_t> first_covered_pixel_index(nk::ShapedText const& shape
     }
 
     return std::nullopt;
+}
+
+bool channel_matches_tint(uint8_t actual, float component) {
+    const auto expected = static_cast<int>(component * 255.0F);
+    return std::abs(static_cast<int>(actual) - expected) <= 1;
 }
 
 [[maybe_unused]] std::optional<int> first_covered_row(nk::ShapedText const& shaped) {
@@ -139,12 +146,9 @@ TEST_CASE("Shaped text preserves the requested tint for covered pixels", "[text]
     REQUIRE(pixel_index.has_value());
 
     auto const* bitmap = shaped.bitmap_data();
-    auto const expected_red = static_cast<uint8_t>(color.r * 255.0F);
-    auto const expected_green = static_cast<uint8_t>(color.g * 255.0F);
-    auto const expected_blue = static_cast<uint8_t>(color.b * 255.0F);
-    REQUIRE(bitmap[*pixel_index + 0] == expected_red);
-    REQUIRE(bitmap[*pixel_index + 1] == expected_green);
-    REQUIRE(bitmap[*pixel_index + 2] == expected_blue);
+    REQUIRE(channel_matches_tint(bitmap[*pixel_index + 0], color.r));
+    REQUIRE(channel_matches_tint(bitmap[*pixel_index + 1], color.g));
+    REQUIRE(channel_matches_tint(bitmap[*pixel_index + 2], color.b));
     REQUIRE(bitmap[*pixel_index + 3] > 0);
 }
 

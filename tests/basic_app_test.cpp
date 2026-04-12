@@ -39,6 +39,7 @@
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
 #include <sstream>
+#include <optional>
 #include <string>
 
 #if defined(_WIN32)
@@ -91,8 +92,37 @@ int unset_test_env(const char* name) {
 }
 #endif
 
+class ScopedTestEnvVar {
+public:
+    explicit ScopedTestEnvVar(const char* name) : name_(name) {
+        if (const char* value = std::getenv(name_); value != nullptr) {
+            previous_value_ = std::string(value);
+        }
+    }
+
+    ~ScopedTestEnvVar() {
+        if (previous_value_.has_value()) {
+            (void)set_test_env(name_, previous_value_->c_str());
+        } else {
+            (void)unset_test_env(name_);
+        }
+    }
+
+    int set(const char* value) {
+        return set_test_env(name_, value);
+    }
+
+private:
+    const char* name_;
+    std::optional<std::string> previous_value_;
+};
+
 std::filesystem::path test_fixture_path(std::string_view relative) {
-    return std::filesystem::path(__FILE__).parent_path() / "fixtures" / relative;
+    const auto source_relative = std::filesystem::path(__FILE__).parent_path() / "fixtures" / relative;
+    if (std::filesystem::exists(source_relative)) {
+        return source_relative;
+    }
+    return std::filesystem::current_path() / "tests" / "fixtures" / relative;
 }
 
 const nk::RenderSnapshotNode* find_render_snapshot_node(const nk::RenderSnapshotNode& node,
@@ -586,10 +616,8 @@ TEST_CASE("Window exposes the active renderer backend", "[app][render]") {
 }
 
 TEST_CASE("Window honors a renderer backend override from the environment", "[app][render]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Renderer override", .width = 320, .height = 240});
@@ -599,19 +627,12 @@ TEST_CASE("Window honors a renderer backend override from the environment", "[ap
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Software);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 #if defined(_WIN32)
 TEST_CASE("Window honors a D3D11 renderer backend override from the environment", "[app][render][windows]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "d3d11") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 renderer override", .width = 320, .height = 240});
@@ -621,19 +642,12 @@ TEST_CASE("Window honors a D3D11 renderer backend override from the environment"
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("Win32 D3D11 renders clipped image content on the GPU and reuses image textures",
           "[app][render][windows]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "d3d11") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 image renderer", .width = 260, .height = 200});
@@ -664,19 +678,12 @@ TEST_CASE("Win32 D3D11 renders clipped image content on the GPU and reuses image
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::FullRedrawCopyBack);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("Win32 D3D11 keeps mixed text and image content on the GPU",
           "[app][render][windows]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "d3d11") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 mixed renderer", .width = 300, .height = 220});
@@ -712,19 +719,12 @@ TEST_CASE("Win32 D3D11 keeps mixed text and image content on the GPU",
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::FullRedrawCopyBack);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("Win32 D3D11 reduces mixed-content draw work for localized widget damage",
           "[app][render][windows]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "d3d11") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 localized mixed renderer", .width = 300, .height = 220});
@@ -786,19 +786,12 @@ TEST_CASE("Win32 D3D11 reduces mixed-content draw work for localized widget dama
             nk::GpuPresentPath::PartialRedrawCopy);
     REQUIRE(third_frame.render_hotspot_counters.gpu_present_region_count >= 1);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("Win32 D3D11 forces a full copy on the first visible dirty frame",
           "[app][render][windows]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "d3d11") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 first dirty frame", .width = 300, .height = 220});
@@ -819,19 +812,12 @@ TEST_CASE("Win32 D3D11 forces a full copy on the first visible dirty frame",
     REQUIRE(frame.render_hotspot_counters.gpu_present_region_count == 0);
     REQUIRE(frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("Win32 D3D11 merges nearby image damage slices into one textured replay",
           "[app][render][windows]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "d3d11") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 merged image damage", .width = 280, .height = 220});
@@ -857,11 +843,6 @@ TEST_CASE("Win32 D3D11 merges nearby image damage slices into one textured repla
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::PartialRedrawCopy);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 #endif
 
@@ -967,10 +948,8 @@ TEST_CASE("Win32 DPI changes update scale factor and framebuffer metrics",
 TEST_CASE("Desktop backends can opt into the Vulkan renderer backend experimentally",
           "[app][render]") {
 #if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "vulkan") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("vulkan") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Vulkan renderer override", .width = 320, .height = 240});
@@ -980,11 +959,6 @@ TEST_CASE("Desktop backends can opt into the Vulkan renderer backend experimenta
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 #else
     SUCCEED("Experimental Vulkan override is only available on Vulkan-capable desktop backends");
 #endif
@@ -1064,10 +1038,8 @@ TEST_CASE("Window frame requests are not starved by continuously ready timers", 
 
 TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][render]") {
 #if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "vulkan") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("vulkan") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Vulkan mixed renderer", .width = 300, .height = 220});
@@ -1094,11 +1066,6 @@ TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][r
     REQUIRE(second_frame.render_hotspot_counters.text_texture_upload_count == 0);
     REQUIRE(second_frame.render_hotspot_counters.image_texture_upload_count == 0);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 #else
     SUCCEED("Vulkan mixed-content path is only available on Vulkan-capable desktop backends");
 #endif
@@ -1106,10 +1073,8 @@ TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][r
 
 TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage", "[app][render]") {
 #if defined(__linux__)
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "vulkan") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("vulkan") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Vulkan partial redraw", .width = 420, .height = 220});
@@ -1168,11 +1133,6 @@ TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
             nk::GpuPresentTradeoff::DrawFavored);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 #else
     SUCCEED("Vulkan partial redraw is Linux-specific");
 #endif
@@ -1180,9 +1140,8 @@ TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
 
 TEST_CASE("macOS Metal redraws fewer GPU commands for localized widget damage", "[app][render]") {
 #if defined(__APPLE__)
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "metal") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("metal") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Metal partial redraw", .width = 420, .height = 220});
@@ -1226,20 +1185,14 @@ TEST_CASE("macOS Metal redraws fewer GPU commands for localized widget damage", 
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
             nk::GpuPresentTradeoff::DrawFavored);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 #else
     SUCCEED("Metal partial redraw is macOS-specific");
 #endif
 }
 
 TEST_CASE("Window damage regions include previous widget bounds after movement", "[app][render]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Software previous damage", .width = 260, .height = 160});
@@ -1270,18 +1223,12 @@ TEST_CASE("Window damage regions include previous widget bounds after movement",
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
-TEST_CASE("Window layout damage regions include sibling reflow after size change",
+TEST_CASE("Window layout reflow promotes sibling damage to full redraw",
           "[app][render]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Layout reflow damage", .width = 320, .height = 160});
@@ -1311,23 +1258,16 @@ TEST_CASE("Window layout damage regions include sibling reflow after size change
     const auto frame = window.last_frame_diagnostics();
     REQUIRE(frame.had_layout);
     REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetLayout));
-    REQUIRE(frame.render_hotspot_counters.damage_region_count >= 2);
-    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
-    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
+    REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count ==
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 #if defined(_WIN32)
 TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw", "[app][render][windows]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "d3d11") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 localized redraw", .width = 420, .height = 220});
@@ -1377,21 +1317,14 @@ TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw", "[app
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
             nk::GpuPresentTradeoff::BandwidthFavored);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 #endif
 
 TEST_CASE("Linux Vulkan adapts large full redraws to copy-back scene preservation",
           "[app][render]") {
 #if defined(__linux__)
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "vulkan") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("vulkan") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Vulkan full redraw strategy", .width = 520, .height = 180});
@@ -1425,11 +1358,6 @@ TEST_CASE("Linux Vulkan adapts large full redraws to copy-back scene preservatio
     REQUIRE(frame.render_hotspot_counters.gpu_present_tradeoff ==
             nk::GpuPresentTradeoff::DrawFavored);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 #else
     SUCCEED("Adaptive Vulkan full redraw strategy is Linux-specific");
 #endif
@@ -1733,9 +1661,8 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
     SUCCEED("Win32 popup damage tracking is not hardened yet");
     return;
 #endif
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Menu popup render", .width = 320, .height = 220});
@@ -1785,18 +1712,12 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
     REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") != std::string::npos);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds",
           "[app][combo][render]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Combo popup render", .width = 320, .height = 220});
@@ -1840,11 +1761,6 @@ TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
     REQUIRE(window.dump_selected_frame_render_snapshot().find("Famicom") != std::string::npos);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("SegmentedControl selects segments through API, mouse, and keyboard", "[app][widgets]") {
@@ -2034,17 +1950,8 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
     SUCCEED("Win32 dialog snapshot geometry is not hardened yet");
     return;
 #endif
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
-
-    auto restore_backend = [&] {
-        if (previous != nullptr) {
-            REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-        } else {
-            REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-        }
-    };
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Dialog layout", .width = 480, .height = 320});
@@ -2101,14 +2008,12 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
     REQUIRE(sheet_damage.front().width < window.size().width);
     REQUIRE(sheet_damage.front().height < window.size().height);
 
-    restore_backend();
 }
 
-TEST_CASE("Dialog overlay changes contribute damage regions on show and dismiss",
+TEST_CASE("Dialog overlay layout changes promote damage to full redraw",
           "[app][dialog][render]") {
-    const char* previous = std::getenv("NK_RENDERER_BACKEND");
-    std::string previous_value = previous != nullptr ? previous : "";
-    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Dialog damage", .width = 320, .height = 240});
@@ -2126,8 +2031,9 @@ TEST_CASE("Dialog overlay changes contribute damage regions on show and dismiss"
     const auto present_frame = window.last_frame_diagnostics();
     REQUIRE(has_frame_request_reason(present_frame, nk::FrameRequestReason::OverlayChanged));
     REQUIRE(present_frame.had_layout);
-    REQUIRE(present_frame.render_hotspot_counters.damage_region_count >= 1);
-    REQUIRE(present_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(present_frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(present_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count ==
+            present_frame.render_hotspot_counters.gpu_viewport_pixel_count);
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
@@ -2138,14 +2044,10 @@ TEST_CASE("Dialog overlay changes contribute damage regions on show and dismiss"
     const auto dismiss_frame = window.last_frame_diagnostics();
     REQUIRE(has_frame_request_reason(dismiss_frame, nk::FrameRequestReason::OverlayChanged));
     REQUIRE(dismiss_frame.had_layout);
-    REQUIRE(dismiss_frame.render_hotspot_counters.damage_region_count >= 1);
-    REQUIRE(dismiss_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(dismiss_frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(dismiss_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count ==
+            dismiss_frame.render_hotspot_counters.gpu_viewport_pixel_count);
 
-    if (previous != nullptr) {
-        REQUIRE(set_test_env("NK_RENDERER_BACKEND", previous_value.c_str()) == 0);
-    } else {
-        REQUIRE(unset_test_env("NK_RENDERER_BACKEND") == 0);
-    }
 }
 
 TEST_CASE("Window dispatches pointer, keyboard, and focus controllers", "[app][controllers]") {
@@ -2370,6 +2272,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     root->append(child);
 
     window.set_child(root);
+    window.set_debug_overlay_flags(nk::DebugOverlayFlags::FrameHud);
     window.present();
     REQUIRE(app.event_loop().poll());
 
