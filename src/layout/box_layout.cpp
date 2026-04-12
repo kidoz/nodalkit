@@ -17,6 +17,10 @@ struct BoxChild {
     SizePolicy main_policy = SizePolicy::Preferred;
     SizePolicy cross_policy = SizePolicy::Preferred;
     uint8_t stretch = 0;
+    float margin_before = 0.0F; // top for vertical, left for horizontal
+    float margin_after = 0.0F;  // bottom for vertical, right for horizontal
+    float margin_cross_start = 0.0F; // left for vertical, top for horizontal
+    float margin_cross_end = 0.0F;   // right for vertical, bottom for horizontal
 };
 
 bool participates_in_layout(const Widget& widget) {
@@ -53,17 +57,24 @@ collect_box_children(const Widget& widget, const Constraints& constraints, bool 
         }
 
         const auto request = child->measure_for_diagnostics(measure_constraints);
+        const auto m = child->margin();
+        const float margin_main = vertical ? (m.top + m.bottom) : (m.left + m.right);
+        const float margin_cross = vertical ? (m.left + m.right) : (m.top + m.bottom);
         children.push_back({
             .widget = child,
             .request = request,
-            .minimum_main = vertical ? request.minimum_height : request.minimum_width,
-            .natural_main = vertical ? request.natural_height : request.natural_width,
-            .natural_cross = vertical ? request.natural_width : request.natural_height,
+            .minimum_main = (vertical ? request.minimum_height : request.minimum_width) + margin_main,
+            .natural_main = (vertical ? request.natural_height : request.natural_width) + margin_main,
+            .natural_cross = (vertical ? request.natural_width : request.natural_height) + margin_cross,
             .main_policy =
                 vertical ? child->vertical_size_policy() : child->horizontal_size_policy(),
             .cross_policy =
                 vertical ? child->horizontal_size_policy() : child->vertical_size_policy(),
             .stretch = vertical ? child->vertical_stretch() : child->horizontal_stretch(),
+            .margin_before = vertical ? m.top : m.left,
+            .margin_after = vertical ? m.bottom : m.right,
+            .margin_cross_start = vertical ? m.left : m.top,
+            .margin_cross_end = vertical ? m.right : m.bottom,
         });
     }
 
@@ -162,17 +173,16 @@ SizeRequest BoxLayout::measure(const Widget& widget, const Constraints& constrai
         children.empty() ? 0.0F : spacing_ * static_cast<float>(children.size() - 1);
 
     for (const auto& child : children) {
-        const auto& child_req = child.request;
         if (vertical) {
-            result.minimum_width = std::max(result.minimum_width, child_req.minimum_width);
-            result.natural_width = std::max(result.natural_width, child_req.natural_width);
-            result.minimum_height += child_req.minimum_height;
-            result.natural_height += child_req.natural_height;
+            result.minimum_width = std::max(result.minimum_width, child.natural_cross);
+            result.natural_width = std::max(result.natural_width, child.natural_cross);
+            result.minimum_height += child.minimum_main;
+            result.natural_height += child.natural_main;
         } else {
-            result.minimum_height = std::max(result.minimum_height, child_req.minimum_height);
-            result.natural_height = std::max(result.natural_height, child_req.natural_height);
-            result.minimum_width += child_req.minimum_width;
-            result.natural_width += child_req.natural_width;
+            result.minimum_height = std::max(result.minimum_height, child.natural_cross);
+            result.natural_height = std::max(result.natural_height, child.natural_cross);
+            result.minimum_width += child.minimum_main;
+            result.natural_width += child.natural_main;
         }
     }
 
@@ -216,17 +226,25 @@ void BoxLayout::allocate(Widget& widget, const Rect& allocation) {
     for (std::size_t index = 0; index < children.size(); ++index) {
         const auto& child = children[index];
         const float main_size = std::max(0.0F, main_sizes[index]);
-        const float cross_size = clamp_cross_size(vertical ? allocation.width : allocation.height,
-                                                  child.natural_cross,
-                                                  child.cross_policy);
+        const float available_cross = vertical ? allocation.width : allocation.height;
+        const float cross_margin = child.margin_cross_start + child.margin_cross_end;
+        const float cross_size = clamp_cross_size(
+            std::max(0.0F, available_cross - cross_margin), child.natural_cross - cross_margin,
+            child.cross_policy);
 
+        // Inset the child rect by margins so the widget receives the
+        // content area, not the full margin-inclusive slot.
         Rect child_rect{};
         if (vertical) {
-            child_rect = {
-                allocation.x, allocation.y + offset, std::max(0.0F, cross_size), main_size};
+            child_rect = {allocation.x + child.margin_cross_start,
+                          allocation.y + offset + child.margin_before,
+                          std::max(0.0F, cross_size),
+                          std::max(0.0F, main_size - child.margin_before - child.margin_after)};
         } else {
-            child_rect = {
-                allocation.x + offset, allocation.y, main_size, std::max(0.0F, cross_size)};
+            child_rect = {allocation.x + offset + child.margin_before,
+                          allocation.y + child.margin_cross_start,
+                          std::max(0.0F, main_size - child.margin_before - child.margin_after),
+                          std::max(0.0F, cross_size)};
         }
 
         child.widget->allocate(child_rect);

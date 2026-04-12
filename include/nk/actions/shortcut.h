@@ -5,7 +5,6 @@
 
 #include <cstdint>
 #include <string>
-#include <string_view>
 
 namespace nk {
 
@@ -32,12 +31,6 @@ constexpr Modifiers operator&(Modifiers a, Modifiers b) {
 struct Shortcut {
     int key_code = 0;
     Modifiers modifiers = Modifiers::None;
-
-    /// Parse a human-readable shortcut string like "<Ctrl>S".
-    static Shortcut parse(std::string_view str);
-
-    /// Format as a human-readable string.
-    [[nodiscard]] std::string to_string() const;
 };
 
 /// Binds a shortcut to an action name.

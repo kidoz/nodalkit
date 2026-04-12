@@ -495,7 +495,8 @@ void SoftwareRenderer::render(const RenderNode& root) {
                            int c_x0,
                            int c_y0,
                            int c_x1,
-                           int c_y1) -> void {
+                           int c_y1,
+                           float opacity = 1.0F) -> void {
         if (c_x1 <= c_x0 || c_y1 <= c_y0) {
             return;
         }
@@ -528,16 +529,100 @@ void SoftwareRenderer::render(const RenderNode& root) {
             int next_y1 = std::min(c_y1, static_cast<int>(std::ceil(scaled_bounds.bottom())));
 
             for (const auto& child : node.children()) {
-                self(self, *child, clips, next_x0, next_y0, next_x1, next_y1);
+                self(self, *child, clips, next_x0, next_y0, next_x1, next_y1, opacity);
             }
             clips.pop_back();
             return;
         }
 
+        if (node.kind() == RenderNodeKind::Opacity) {
+            const auto& opacity_node = static_cast<const OpacityNode&>(node);
+            const float child_opacity = opacity * opacity_node.opacity();
+            for (const auto& child : node.children()) {
+                self(self, *child, clips, c_x0, c_y0, c_x1, c_y1, child_opacity);
+            }
+            return;
+        }
+
+        if (node.kind() == RenderNodeKind::LinearGradient) {
+            const auto& grad = static_cast<const LinearGradientNode&>(node);
+            const auto b = scale_rect(grad.bounds(), impl_->scale_factor);
+            const auto sc = grad.start_color();
+            const auto ec = grad.end_color();
+            const bool vertical = (grad.direction() == Orientation::Vertical);
+            const float span = vertical ? b.height : b.width;
+
+            const int x0 = std::max(c_x0, static_cast<int>(std::floor(b.x)));
+            const int y0 = std::max(c_y0, static_cast<int>(std::floor(b.y)));
+            const int x1 = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
+            const int y1 = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
+
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) {
+                    const float pos = vertical ? (static_cast<float>(y) + 0.5F - b.y)
+                                               : (static_cast<float>(x) + 0.5F - b.x);
+                    const float t = (span > 0.0F) ? clamp01(pos / span) : 0.0F;
+                    Color c{
+                        sc.r + (ec.r - sc.r) * t,
+                        sc.g + (ec.g - sc.g) * t,
+                        sc.b + (ec.b - sc.b) * t,
+                        (sc.a + (ec.a - sc.a) * t) * opacity,
+                    };
+                    const float coverage = clip_coverage(x, y, clips);
+                    if (coverage > 0.0F) {
+                        blend_pixel(impl_->pixels, impl_->width, x, y, c, coverage);
+                    }
+                }
+            }
+        }
+
+        if (node.kind() == RenderNodeKind::Shadow) {
+            const auto& shadow = static_cast<const ShadowNode&>(node);
+            const float sf = impl_->scale_factor;
+            const float blur = shadow.blur_radius() * sf;
+            const float cr = shadow.corner_radius() * sf;
+            // The shadow rect is the element rect shifted by offset and grown by spread.
+            // We need the original element rect from the node's stored bounds (which
+            // were expanded by blur+spread in the constructor).
+            const auto full = scale_rect(shadow.bounds(), sf);
+            const Rect shadow_rect{
+                full.x + blur, full.y + blur,
+                std::max(0.0F, full.width - blur * 2.0F),
+                std::max(0.0F, full.height - blur * 2.0F)};
+            auto sc = shadow.color();
+            sc.a *= opacity;
+
+            const int x0 = std::max(c_x0, static_cast<int>(std::floor(full.x)));
+            const int y0 = std::max(c_y0, static_cast<int>(std::floor(full.y)));
+            const int x1 = std::min(c_x1, static_cast<int>(std::ceil(full.right())));
+            const int y1 = std::min(c_y1, static_cast<int>(std::ceil(full.bottom())));
+
+            for (int y = y0; y < y1; ++y) {
+                for (int x = x0; x < x1; ++x) {
+                    const float px = static_cast<float>(x) + 0.5F;
+                    const float py = static_cast<float>(y) + 0.5F;
+                    const float dist =
+                        signed_distance_to_rounded_rect(px, py, shadow_rect, cr);
+                    if (dist >= blur) {
+                        continue;
+                    }
+                    // Smooth falloff: full alpha inside, linear fade to zero at blur edge.
+                    const float shadow_alpha =
+                        blur > 0.0F ? clamp01(1.0F - std::max(0.0F, dist) / blur) : (dist < 0.0F ? 1.0F : 0.0F);
+                    const float coverage = clip_coverage(x, y, clips);
+                    if (coverage > 0.0F && shadow_alpha > 0.0F) {
+                        Color pixel_color{sc.r, sc.g, sc.b, sc.a * shadow_alpha};
+                        blend_pixel(impl_->pixels, impl_->width, x, y, pixel_color, coverage);
+                    }
+                }
+            }
+        }
+
         if (node.kind() == RenderNodeKind::ColorRect) {
             const auto& color_node = static_cast<const ColorRectNode&>(node);
             const auto b = scale_rect(color_node.bounds(), impl_->scale_factor);
-            const auto c = color_node.color();
+            auto c = color_node.color();
+            c.a *= opacity;
 
             const int x0 = std::max(c_x0, static_cast<int>(std::floor(b.x)));
             const int y0 = std::max(c_y0, static_cast<int>(std::floor(b.y)));
@@ -557,7 +642,8 @@ void SoftwareRenderer::render(const RenderNode& root) {
         if (node.kind() == RenderNodeKind::RoundedRect) {
             const auto& rounded_node = static_cast<const RoundedRectNode&>(node);
             const auto b = scale_rect(rounded_node.bounds(), impl_->scale_factor);
-            const auto c = rounded_node.color();
+            auto c = rounded_node.color();
+            c.a *= opacity;
             const float radius = rounded_node.corner_radius() * impl_->scale_factor;
 
             const int x0 = std::max(c_x0, static_cast<int>(std::floor(b.x)));
@@ -580,7 +666,8 @@ void SoftwareRenderer::render(const RenderNode& root) {
         if (node.kind() == RenderNodeKind::Border) {
             const auto& border_node = static_cast<const BorderNode&>(node);
             const auto b = scale_rect(border_node.bounds(), impl_->scale_factor);
-            const auto c = border_node.color();
+            auto c = border_node.color();
+            c.a *= opacity;
             const float thickness = std::max(0.0F, border_node.thickness() * impl_->scale_factor);
             const float radius = border_node.corner_radius() * impl_->scale_factor;
             if (thickness > 0.0F && b.width > 0.0F && b.height > 0.0F) {
@@ -691,7 +778,7 @@ void SoftwareRenderer::render(const RenderNode& root) {
                                             sr / 255.0F,
                                             sg / 255.0F,
                                             sb / 255.0F,
-                                            sa / 255.0F,
+                                            (sa / 255.0F) * opacity,
                                         },
                                         coverage);
                         }
@@ -745,7 +832,7 @@ void SoftwareRenderer::render(const RenderNode& root) {
                                             ((pixel >> 16) & 0xFF) / 255.0F,
                                             ((pixel >> 8) & 0xFF) / 255.0F,
                                             (pixel & 0xFF) / 255.0F,
-                                            ((pixel >> 24) & 0xFF) / 255.0F,
+                                            (((pixel >> 24) & 0xFF) / 255.0F) * opacity,
                                         },
                                         coverage);
                         }
@@ -755,7 +842,7 @@ void SoftwareRenderer::render(const RenderNode& root) {
         }
 
         for (const auto& child : node.children()) {
-            self(self, *child, clips, c_x0, c_y0, c_x1, c_y1);
+            self(self, *child, clips, c_x0, c_y0, c_x1, c_y1, opacity);
         }
     };
 

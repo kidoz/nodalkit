@@ -13,15 +13,12 @@ namespace nk {
 
 namespace {
 
-const StyleValue* resolve_style_value(const Theme& theme,
+/// Try widget-level rule resolution only (no global token fallback).
+const StyleValue* resolve_widget_rule(const Theme& theme,
                                       const std::vector<std::string>& classes,
                                       StateFlags state,
                                       std::string_view property_name) {
-
     const auto* value = theme.resolve({}, classes, state, property_name);
-    if (value == nullptr) {
-        value = theme.token(property_name);
-    }
 
     // Allow properties to alias semantic tokens by string name.
     int depth = 0;
@@ -31,6 +28,15 @@ const StyleValue* resolve_style_value(const Theme& theme,
     }
 
     return value;
+}
+
+/// Properties that cascade from parent to child when the child has no
+/// explicit value set by a style rule. Modeled after CSS inherited
+/// properties — text-related properties inherit; box/visual properties
+/// (background, border, corner-radius) do not.
+bool is_inheritable_property(std::string_view name) {
+    return name == "text-color" || name == "font-family" || name == "font-size" ||
+           name == "font-weight";
 }
 
 [[nodiscard]] bool rect_is_empty(Rect rect) {
@@ -70,6 +76,8 @@ struct Widget::Impl {
     bool has_allocation = false;
     bool has_previous_allocation = false;
     bool retain_size_when_hidden = false;
+    Insets margin{};
+    Insets padding{};
     SizePolicy horizontal_size_policy = SizePolicy::Preferred;
     SizePolicy vertical_size_policy = SizePolicy::Preferred;
     uint8_t horizontal_stretch = 0;
@@ -313,6 +321,44 @@ void Widget::set_retain_size_when_hidden(bool retain) {
     }
     impl_->retain_size_when_hidden = retain;
     queue_layout();
+}
+
+// --- Margin and padding ---
+
+Insets Widget::margin() const {
+    return impl_->margin;
+}
+
+void Widget::set_margin(Insets margin) {
+    if (impl_->margin == margin) {
+        return;
+    }
+    impl_->margin = margin;
+    queue_layout();
+}
+
+Insets Widget::padding() const {
+    return impl_->padding;
+}
+
+void Widget::set_padding(Insets padding) {
+    if (impl_->padding == padding) {
+        return;
+    }
+    impl_->padding = padding;
+    queue_layout();
+    queue_redraw();
+}
+
+Rect Widget::content_rect() const {
+    const auto& a = impl_->allocation;
+    const auto& p = impl_->padding;
+    return {
+        a.x + p.left,
+        a.y + p.top,
+        std::max(0.0F, a.width - p.left - p.right),
+        std::max(0.0F, a.height - p.top - p.bottom),
+    };
 }
 
 // --- Focus ---
@@ -602,12 +648,34 @@ Color Widget::theme_color(std::string_view property_name, Color fallback) const 
         return fallback;
     }
 
+    // 1. Try this widget's own rules.
     const auto* value =
-        resolve_style_value(*theme, impl_->style_classes, impl_->state, property_name);
+        resolve_widget_rule(*theme, impl_->style_classes, impl_->state, property_name);
+
+    // 2. Inheritable properties cascade from parent to child.
+    if (value == nullptr && is_inheritable_property(property_name)) {
+        for (const Widget* p = parent(); p != nullptr; p = p->parent()) {
+            value = resolve_widget_rule(
+                *theme, p->impl_->style_classes, p->impl_->state, property_name);
+            if (value != nullptr) {
+                break;
+            }
+        }
+    }
+
+    // 3. Global token fallback.
+    if (value == nullptr) {
+        value = theme->token(property_name);
+        int depth = 0;
+        while (value != nullptr && std::holds_alternative<std::string>(*value) && depth < 4) {
+            value = theme->token(std::get<std::string>(*value));
+            ++depth;
+        }
+    }
+
     if (value != nullptr && std::holds_alternative<Color>(*value)) {
         return std::get<Color>(*value);
     }
-
     return fallback;
 }
 
@@ -617,12 +685,34 @@ float Widget::theme_number(std::string_view property_name, float fallback) const
         return fallback;
     }
 
+    // 1. Try this widget's own rules.
     const auto* value =
-        resolve_style_value(*theme, impl_->style_classes, impl_->state, property_name);
+        resolve_widget_rule(*theme, impl_->style_classes, impl_->state, property_name);
+
+    // 2. Inheritable properties cascade from parent to child.
+    if (value == nullptr && is_inheritable_property(property_name)) {
+        for (const Widget* p = parent(); p != nullptr; p = p->parent()) {
+            value = resolve_widget_rule(
+                *theme, p->impl_->style_classes, p->impl_->state, property_name);
+            if (value != nullptr) {
+                break;
+            }
+        }
+    }
+
+    // 3. Global token fallback.
+    if (value == nullptr) {
+        value = theme->token(property_name);
+        int depth = 0;
+        while (value != nullptr && std::holds_alternative<std::string>(*value) && depth < 4) {
+            value = theme->token(std::get<std::string>(*value));
+            ++depth;
+        }
+    }
+
     if (value != nullptr && std::holds_alternative<float>(*value)) {
         return std::get<float>(*value);
     }
-
     return fallback;
 }
 

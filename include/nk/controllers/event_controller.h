@@ -11,11 +11,14 @@ namespace nk {
 class Widget;
 
 /// Base class for event controllers. Controllers are attached to widgets
-/// and receive input events. This follows the GTK4 pattern of separating
-/// event handling from widget subclassing.
+/// via Widget::add_controller() and receive input events dispatched by the
+/// window during the normal mouse/keyboard/focus routing pipeline. This
+/// follows the GTK4 pattern of separating event handling from widget
+/// subclassing, so applications can observe input on any widget without
+/// needing to subclass it.
 ///
 /// Built-in controllers: PointerController, KeyboardController,
-/// FocusController, ShortcutController, GestureController.
+/// FocusController.
 class EventController {
 public:
     virtual ~EventController();

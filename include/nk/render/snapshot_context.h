@@ -14,12 +14,19 @@
 
 namespace nk {
 
+class TextShaper;
+
 /// Context passed to Widget::snapshot() for building render node trees.
 /// Widgets append render nodes to the context; the Window collects
 /// the root node after the snapshot pass.
+///
+/// The optional `text_shaper` argument, when non-null, enables `add_text()`
+/// to measure each text node so its bounds rect spans the rendered glyphs.
+/// Without a shaper, text nodes are emitted with zero-width bounds, which
+/// breaks hit testing and clipping for any caller that relies on them.
 class SnapshotContext {
 public:
-    SnapshotContext();
+    explicit SnapshotContext(TextShaper* text_shaper = nullptr);
     ~SnapshotContext();
 
     /// Add a render node to the current container.
@@ -60,6 +67,19 @@ public:
     /// Push a rounded clip node. Children rendered inside it are masked to the
     /// provided rounded rectangle.
     void push_rounded_clip(Rect bounds, float corner_radius);
+
+    /// Convenience: add a linear gradient rectangle.
+    void add_linear_gradient(Rect bounds, Color start_color, Color end_color,
+                             Orientation direction = Orientation::Vertical);
+
+    /// Convenience: add an outset box shadow behind the given rect.
+    void add_shadow(Rect rect, Color color, float offset_x, float offset_y, float blur_radius,
+                    float spread = 0.0F, float corner_radius = 0.0F);
+
+    /// Push an opacity container. Children rendered inside it have their
+    /// effective alpha multiplied by `opacity` [0, 1]. Pop with
+    /// pop_container() when done.
+    void push_opacity(Rect bounds, float opacity);
 
     /// Push a container into the overlay layer, rendered after normal
     /// content. Useful for popups and transient surfaces.

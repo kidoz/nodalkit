@@ -3163,6 +3163,12 @@ std::string render_node_kind_name(RenderNodeKind kind) {
         return "Border";
     case RenderNodeKind::RoundedClip:
         return "RoundedClip";
+    case RenderNodeKind::Opacity:
+        return "Opacity";
+    case RenderNodeKind::LinearGradient:
+        return "LinearGradient";
+    case RenderNodeKind::Shadow:
+        return "Shadow";
     }
     return "Unknown";
 }
@@ -3237,6 +3243,9 @@ RenderSnapshotNode build_render_snapshot_node(const RenderNode& node) {
         break;
     }
     case RenderNodeKind::Container:
+    case RenderNodeKind::Opacity:
+    case RenderNodeKind::LinearGradient:
+    case RenderNodeKind::Shadow:
         break;
     }
 

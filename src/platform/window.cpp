@@ -78,7 +78,7 @@ struct Window::Impl {
     bool needs_layout = true;
     bool frame_pending = false;
 
-    Signal<> close_request;
+    Signal<> close_requested;
     Signal<int, int> resize_signal;
     Signal<float> scale_factor_signal;
 };
@@ -1781,7 +1781,7 @@ void Window::hide() {
 }
 
 void Window::close() {
-    impl_->close_request.emit();
+    impl_->close_requested.emit();
     hide();
 }
 
@@ -1824,7 +1824,7 @@ std::unique_ptr<RenderNode> Window::build_window_debug_render_tree(Size viewport
         return nullptr;
     }
 
-    SnapshotContext snap_ctx;
+    SnapshotContext snap_ctx(impl_->text_shaper.get());
     snap_ctx.set_debug_annotations_enabled(
         impl_->debug_overlay_flags != DebugOverlayFlags::None);
     impl_->child->snapshot_subtree(snap_ctx);
@@ -3733,8 +3733,8 @@ void Window::dismiss_overlay(Widget& overlay) {
     }
 }
 
-Signal<>& Window::on_close_request() {
-    return impl_->close_request;
+Signal<>& Window::on_close_requested() {
+    return impl_->close_requested;
 }
 
 Signal<int, int>& Window::on_resize() {

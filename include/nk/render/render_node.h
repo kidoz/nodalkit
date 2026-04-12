@@ -21,6 +21,9 @@ enum class RenderNodeKind {
     Image,       ///< Raster image.
     Border,      ///< Border stroke around a rectangle.
     RoundedClip, ///< Rounded-rectangle clip region.
+    Opacity,        ///< Multiplies children's alpha by a factor.
+    LinearGradient, ///< Linear gradient fill.
+    Shadow,         ///< Box shadow (outset).
 };
 
 /// A node in the retained render tree. Widgets produce render nodes
@@ -101,10 +104,14 @@ private:
     float corner_radius_ = 0.0F;
 };
 
-/// A text render node.
+/// A text render node. The `size` argument supplies the text's pre-measured
+/// logical pixel dimensions so the node's `bounds()` rect spans the rendered
+/// text; `{origin.x, origin.y, size.width, size.height}`. Callers that do not
+/// have a measured size may pass `{}` and will receive zero-width bounds,
+/// but hit testing and clipping will not work correctly for those nodes.
 class TextNode : public RenderNode {
 public:
-    TextNode(Point origin, std::string text, Color color, FontDescriptor font = {});
+    TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font = {});
 
     [[nodiscard]] const std::string& text() const;
     [[nodiscard]] Color text_color() const;
@@ -114,6 +121,65 @@ private:
     std::string text_;
     Color color_;
     FontDescriptor font_;
+};
+
+/// An opacity container node. Multiplies the effective alpha of all
+/// descendant draw calls by its opacity factor [0, 1]. Used for disabled
+/// states, fade effects, and any case where a subtree needs uniform
+/// transparency. This is a simple per-draw-call alpha multiplier, not a
+/// composited group — overlapping siblings within the node may show
+/// through each other at low opacity values.
+class OpacityNode : public RenderNode {
+public:
+    OpacityNode(Rect bounds, float opacity);
+
+    [[nodiscard]] float opacity() const;
+
+private:
+    float opacity_ = 1.0F;
+};
+
+/// A linear gradient fill render node. Interpolates between `start_color`
+/// and `end_color` along the specified orientation across the bounds rect.
+class LinearGradientNode : public RenderNode {
+public:
+    LinearGradientNode(Rect bounds, Color start_color, Color end_color,
+                       Orientation direction = Orientation::Vertical);
+
+    [[nodiscard]] Color start_color() const;
+    [[nodiscard]] Color end_color() const;
+    [[nodiscard]] Orientation direction() const;
+
+private:
+    Color start_color_;
+    Color end_color_;
+    Orientation direction_ = Orientation::Vertical;
+};
+
+/// An outset box shadow render node. Draws a shadow behind a rectangle
+/// with the given offset, blur radius, spread, corner radius, and color.
+/// The blur is approximated by a distance-based alpha falloff from the
+/// shadow rect boundary — not a true Gaussian convolution — which is
+/// sufficient for elevation cues and card surfaces at typical blur radii.
+class ShadowNode : public RenderNode {
+public:
+    ShadowNode(Rect rect, Color color, float offset_x, float offset_y, float blur_radius,
+               float spread = 0.0F, float corner_radius = 0.0F);
+
+    [[nodiscard]] Color color() const;
+    [[nodiscard]] float offset_x() const;
+    [[nodiscard]] float offset_y() const;
+    [[nodiscard]] float blur_radius() const;
+    [[nodiscard]] float spread() const;
+    [[nodiscard]] float corner_radius() const;
+
+private:
+    Color color_;
+    float offset_x_ = 0.0F;
+    float offset_y_ = 0.0F;
+    float blur_radius_ = 0.0F;
+    float spread_ = 0.0F;
+    float corner_radius_ = 0.0F;
 };
 
 } // namespace nk

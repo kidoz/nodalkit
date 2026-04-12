@@ -1368,6 +1368,16 @@ private:
                 {.kind = DrawCommandKind::Text, .command_index = text_commands_.size() - 1});
             return true;
         }
+        case RenderNodeKind::Opacity:
+        case RenderNodeKind::LinearGradient:
+        case RenderNodeKind::Shadow:
+            // GPU-level opacity and gradient rendering not yet implemented on Metal.
+            for (const auto& child : node.children()) {
+                if (child != nullptr && !collect_draw_commands(*child)) {
+                    return false;
+                }
+            }
+            return true;
         }
         return false;
     }

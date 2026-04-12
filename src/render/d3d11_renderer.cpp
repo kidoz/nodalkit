@@ -942,6 +942,16 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
             {.kind = DrawCommandKind::Text, .command_index = text_commands_.size() - 1});
         return true;
     }
+    case RenderNodeKind::Opacity:
+    case RenderNodeKind::LinearGradient:
+    case RenderNodeKind::Shadow:
+        // GPU-level opacity and gradient rendering not yet implemented on D3D11.
+        for (const auto& child : node.children()) {
+            if (child != nullptr && !collect_draw_commands(*child)) {
+                return false;
+            }
+        }
+        return true;
     default:
         primitive_commands_.clear();
         image_commands_.clear();

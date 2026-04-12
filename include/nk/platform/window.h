@@ -222,9 +222,14 @@ public:
 
     // --- Signals ---
 
-    /// Emitted when the window receives a close request.
-    /// This is notification-only; connected slots cannot veto the close.
-    Signal<>& on_close_request();
+    /// Emitted just before the window hides. Notification-only — slots
+    /// cannot veto the close; the window hides unconditionally after all
+    /// slots return. Fires both when the application calls Window::close()
+    /// and when the platform window manager initiates a close (e.g. title
+    /// bar close button). Typical use: call Application::quit() or save
+    /// state. For a "confirm before close" flow, intercept earlier — this
+    /// signal cannot cancel a close that has already been requested.
+    Signal<>& on_close_requested();
 
     /// Emitted when the window is resized.
     Signal<int, int>& on_resize();

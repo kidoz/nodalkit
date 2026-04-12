@@ -279,10 +279,12 @@ void GridLayout::allocate(Widget& widget, const Rect& allocation) {
         }
         height += row_spacing_ * static_cast<float>(std::max(0, child.placement.row_span - 1));
 
-        child.widget->allocate({column_offsets[static_cast<std::size_t>(child.placement.column)],
-                                row_offsets[static_cast<std::size_t>(child.placement.row)],
-                                width,
-                                height});
+        const auto m = child.widget->margin();
+        child.widget->allocate(
+            {column_offsets[static_cast<std::size_t>(child.placement.column)] + m.left,
+             row_offsets[static_cast<std::size_t>(child.placement.row)] + m.top,
+             std::max(0.0F, width - m.left - m.right),
+             std::max(0.0F, height - m.top - m.bottom)});
     }
 }
 

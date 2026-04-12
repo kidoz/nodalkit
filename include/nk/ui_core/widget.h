@@ -128,6 +128,24 @@ public:
     [[nodiscard]] bool retain_size_when_hidden() const;
     void set_retain_size_when_hidden(bool retain);
 
+    // --- Margin and padding ---
+
+    /// Outer spacing reserved by layout managers around this widget.
+    /// Layout managers subtract the child's margin from the available
+    /// space before computing the child's allocation rect.
+    [[nodiscard]] Insets margin() const;
+    void set_margin(Insets margin);
+
+    /// Inner spacing between the widget's allocation edge and its
+    /// content area. Widgets that use padding should draw and lay out
+    /// their content inside content_rect() rather than allocation().
+    [[nodiscard]] Insets padding() const;
+    void set_padding(Insets padding);
+
+    /// The content rect: allocation() inset by padding(). This is where
+    /// a widget should place its text, children, or other content.
+    [[nodiscard]] Rect content_rect() const;
+
     // --- Focus ---
 
     [[nodiscard]] bool is_focusable() const;

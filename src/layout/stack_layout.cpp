@@ -29,7 +29,11 @@ void StackLayout::allocate(Widget& widget, const Rect& allocation) {
         if (child == nullptr || (!child->is_visible() && !child->retain_size_when_hidden())) {
             continue;
         }
-        child->allocate(allocation);
+        const auto m = child->margin();
+        child->allocate({allocation.x + m.left,
+                         allocation.y + m.top,
+                         std::max(0.0F, allocation.width - m.left - m.right),
+                         std::max(0.0F, allocation.height - m.top - m.bottom)});
     }
 }
 

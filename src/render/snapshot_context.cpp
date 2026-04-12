@@ -1,5 +1,6 @@
 #include <cassert>
 #include <nk/render/snapshot_context.h>
+#include <nk/text/text_shaper.h>
 #include <stack>
 #include <utility>
 
@@ -23,9 +24,12 @@ struct SnapshotContext::Impl {
     std::stack<RenderNode*> container_stack;
     std::vector<DebugSourceScope> debug_source_stack;
     bool debug_annotations_enabled = true;
+    TextShaper* text_shaper = nullptr;
 };
 
-SnapshotContext::SnapshotContext() : impl_(std::make_unique<Impl>()) {
+SnapshotContext::SnapshotContext(TextShaper* text_shaper) : impl_(std::make_unique<Impl>()) {
+    impl_->text_shaper = text_shaper;
+
     // Create the implicit root container.
     impl_->root = std::make_unique<RenderNode>(RenderNodeKind::Container);
 
@@ -64,7 +68,11 @@ void SnapshotContext::add_border(Rect rect, Color color, float thickness, float 
 }
 
 void SnapshotContext::add_text(Point origin, std::string text, Color color, FontDescriptor font) {
-    add_node(std::make_unique<TextNode>(origin, std::move(text), color, std::move(font)));
+    Size measured{};
+    if (impl_->text_shaper != nullptr) {
+        measured = impl_->text_shaper->measure(text, font);
+    }
+    add_node(std::make_unique<TextNode>(origin, measured, std::move(text), color, std::move(font)));
 }
 
 void SnapshotContext::add_image(Rect dest, const uint32_t* data, int w, int h, ScaleMode scale) {
@@ -107,6 +115,24 @@ void SnapshotContext::push_rounded_clip(Rect bounds, float corner_radius) {
     auto clip = std::make_unique<RoundedClipNode>(bounds, corner_radius);
     auto* raw = clip.get();
     add_node(std::move(clip));
+    impl_->container_stack.push(raw);
+}
+
+void SnapshotContext::add_linear_gradient(Rect bounds, Color start_color, Color end_color,
+                                          Orientation direction) {
+    add_node(std::make_unique<LinearGradientNode>(bounds, start_color, end_color, direction));
+}
+
+void SnapshotContext::add_shadow(Rect rect, Color color, float offset_x, float offset_y,
+                                 float blur_radius, float spread, float corner_radius) {
+    add_node(std::make_unique<ShadowNode>(rect, color, offset_x, offset_y, blur_radius, spread,
+                                          corner_radius));
+}
+
+void SnapshotContext::push_opacity(Rect bounds, float opacity) {
+    auto node = std::make_unique<OpacityNode>(bounds, opacity);
+    auto* raw = node.get();
+    add_node(std::move(node));
     impl_->container_stack.push(raw);
 }
 

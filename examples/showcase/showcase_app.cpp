@@ -535,7 +535,7 @@ int run_showcase(int argc, char** argv) {
         preview_canvas->update_pixel_buffer(frame.data(), kImageWidth, kImageHeight);
     });
 
-    (void)window.on_close_request().connect([&] { app.quit(0); });
+    (void)window.on_close_requested().connect([&] { app.quit(0); });
 
     window.present();
     return app.run();

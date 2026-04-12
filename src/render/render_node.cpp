@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <nk/render/render_node.h>
 
 namespace nk {
@@ -100,13 +101,12 @@ float RoundedClipNode::corner_radius() const {
 
 // --- TextNode ---
 
-TextNode::TextNode(Point origin, std::string text, Color color, FontDescriptor font)
+TextNode::TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font)
     : RenderNode(RenderNodeKind::Text)
     , text_(std::move(text))
     , color_(color)
     , font_(std::move(font)) {
-    // Approximate bounds; real implementation needs text metrics.
-    set_bounds({origin.x, origin.y, 0, 0});
+    set_bounds({origin.x, origin.y, size.width, size.height});
 }
 
 const std::string& TextNode::text() const {
@@ -120,5 +120,65 @@ Color TextNode::text_color() const {
 const FontDescriptor& TextNode::font() const {
     return font_;
 }
+
+// --- OpacityNode ---
+
+OpacityNode::OpacityNode(Rect bounds, float opacity)
+    : RenderNode(RenderNodeKind::Opacity), opacity_(std::clamp(opacity, 0.0F, 1.0F)) {
+    set_bounds(bounds);
+}
+
+float OpacityNode::opacity() const {
+    return opacity_;
+}
+
+// --- LinearGradientNode ---
+
+LinearGradientNode::LinearGradientNode(Rect bounds, Color start_color, Color end_color,
+                                       Orientation direction)
+    : RenderNode(RenderNodeKind::LinearGradient)
+    , start_color_(start_color)
+    , end_color_(end_color)
+    , direction_(direction) {
+    set_bounds(bounds);
+}
+
+Color LinearGradientNode::start_color() const {
+    return start_color_;
+}
+
+Color LinearGradientNode::end_color() const {
+    return end_color_;
+}
+
+Orientation LinearGradientNode::direction() const {
+    return direction_;
+}
+
+// --- ShadowNode ---
+
+ShadowNode::ShadowNode(Rect rect, Color color, float offset_x, float offset_y, float blur_radius,
+                       float spread, float corner_radius)
+    : RenderNode(RenderNodeKind::Shadow)
+    , color_(color)
+    , offset_x_(offset_x)
+    , offset_y_(offset_y)
+    , blur_radius_(std::max(0.0F, blur_radius))
+    , spread_(spread)
+    , corner_radius_(std::max(0.0F, corner_radius)) {
+    // Bounds cover the full shadow extent: the element rect + offset + blur + spread.
+    const float extend = blur_radius_ + spread_;
+    set_bounds({rect.x + offset_x_ - extend,
+                rect.y + offset_y_ - extend,
+                rect.width + extend * 2.0F,
+                rect.height + extend * 2.0F});
+}
+
+Color ShadowNode::color() const { return color_; }
+float ShadowNode::offset_x() const { return offset_x_; }
+float ShadowNode::offset_y() const { return offset_y_; }
+float ShadowNode::blur_radius() const { return blur_radius_; }
+float ShadowNode::spread() const { return spread_; }
+float ShadowNode::corner_radius() const { return corner_radius_; }
 
 } // namespace nk
