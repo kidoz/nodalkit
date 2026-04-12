@@ -83,6 +83,9 @@ public:
     /// Whether the window is currently visible.
     [[nodiscard]] bool is_visible() const;
 
+    /// Whether the window currently has platform focus (is the key/active window).
+    [[nodiscard]] bool is_focused() const;
+
     /// Fullscreen mode.
     void set_fullscreen(bool fullscreen);
     [[nodiscard]] bool is_fullscreen() const;

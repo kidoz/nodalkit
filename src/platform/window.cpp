@@ -75,6 +75,7 @@ struct Window::Impl {
     std::vector<FrameRequestReason> pending_frame_reasons;
 
     bool visible = false;
+    bool window_focused = false;
     bool needs_layout = true;
     bool frame_pending = false;
 
@@ -1787,6 +1788,10 @@ void Window::close() {
 
 bool Window::is_visible() const {
     return impl_->visible;
+}
+
+bool Window::is_focused() const {
+    return impl_->window_focused;
 }
 
 void Window::set_fullscreen(bool fullscreen) {
@@ -3626,9 +3631,14 @@ void Window::dispatch_window_event(const WindowEvent& event) {
         request_frame(FrameRequestReason::Expose);
         break;
     case WindowEvent::Type::FocusIn:
+        impl_->window_focused = true;
+        if (impl_->child) {
+            impl_->child->remove_style_class("window-inactive");
+        }
         if (auto restore = impl_->pending_focus_restore.lock()) {
             focus_widget(restore.get());
         }
+        request_frame(FrameRequestReason::Expose);
         break;
     case WindowEvent::Type::FocusOut:
         set_hovered_widget(nullptr);
@@ -3643,8 +3653,13 @@ void Window::dispatch_window_event(const WindowEvent& event) {
         if (impl_->focused_widget != nullptr) {
             impl_->pending_focus_restore = impl_->focused_widget->shared_from_this();
         }
+        impl_->window_focused = false;
+        if (impl_->child) {
+            impl_->child->add_style_class("window-inactive");
+        }
         impl_->key_state.fill(false);
         focus_widget(nullptr);
+        request_frame(FrameRequestReason::Expose);
         break;
     }
 }
