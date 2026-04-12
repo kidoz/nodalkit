@@ -10,6 +10,8 @@ cpp_compiler = meson.get_compiler('cpp')
 # --- Core sources (platform-agnostic) ---
 
 nk_sources = files(
+    'src/animation/easing.cpp',
+    'src/animation/timed_animation.cpp',
     'src/foundation/signal.cpp',
     'src/foundation/logging.cpp',
     'src/runtime/event_loop.cpp',
@@ -48,6 +50,29 @@ nk_sources = files(
     'src/widgets/status_bar.cpp',
     'src/widgets/combo_box.cpp',
     'src/widgets/segmented_control.cpp',
+    'src/widgets/check_box.cpp',
+    'src/widgets/radio_button.cpp',
+    'src/widgets/switch_widget.cpp',
+    'src/widgets/separator.cpp',
+    'src/widgets/progress_bar.cpp',
+    'src/widgets/tooltip.cpp',
+    'src/widgets/slider.cpp',
+    'src/widgets/spin_button.cpp',
+    'src/widgets/tab_bar.cpp',
+    'src/widgets/toolbar.cpp',
+    'src/widgets/context_menu.cpp',
+    'src/widgets/search_field.cpp',
+    'src/widgets/split_view.cpp',
+    'src/widgets/info_bar.cpp',
+    'src/widgets/expander.cpp',
+    'src/widgets/text_area.cpp',
+    'src/widgets/popover.cpp',
+    'src/widgets/breadcrumb.cpp',
+    'src/widgets/calendar.cpp',
+    'src/widgets/color_well.cpp',
+    'src/widgets/badge.cpp',
+    'src/widgets/avatar.cpp',
+    'src/widgets/spinner.cpp',
 )
 
 nk_deps = []
