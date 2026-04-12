@@ -276,6 +276,42 @@ void install_shared_rules(Theme& theme) {
                  {"content-radius", StyleValue{12.0F}},
                  {"min-height", StyleValue{168.0F}},
              });
+
+    // --- Inactive-window rules: dim text when window loses focus ---
+    add_rule(theme,
+             {"label", "window-inactive"},
+             StateFlags::None,
+             {{"text-color", StyleValue{std::string("text-disabled")}}});
+    add_rule(theme,
+             {"button", "window-inactive"},
+             StateFlags::None,
+             {{"text-color", StyleValue{std::string("text-disabled")}},
+              {"border-color", StyleValue{std::string("border-subtle")}}});
+}
+
+void install_macos_overrides(Theme& theme) {
+    add_rule(theme, {"button"}, StateFlags::None,
+             {{"corner-radius", StyleValue{6.0F}},
+              {"min-height", StyleValue{28.0F}},
+              {"padding-x", StyleValue{12.0F}},
+              {"padding-y", StyleValue{4.0F}}});
+    add_rule(theme, {"text-field"}, StateFlags::None,
+             {{"corner-radius", StyleValue{6.0F}},
+              {"min-height", StyleValue{28.0F}}});
+    add_rule(theme, {"combo-box"}, StateFlags::None,
+             {{"corner-radius", StyleValue{6.0F}},
+              {"popup-radius", StyleValue{10.0F}},
+              {"min-height", StyleValue{28.0F}}});
+    add_rule(theme, {"segmented-control"}, StateFlags::None,
+             {{"corner-radius", StyleValue{8.0F}},
+              {"selection-radius", StyleValue{6.0F}},
+              {"track-padding", StyleValue{2.0F}},
+              {"min-height", StyleValue{28.0F}}});
+    add_rule(theme, {"card"}, StateFlags::None,
+             {{"corner-radius", StyleValue{10.0F}}});
+    add_rule(theme, {"image-view"}, StateFlags::None,
+             {{"corner-radius", StyleValue{10.0F}},
+              {"content-radius", StyleValue{8.0F}}});
 }
 
 std::shared_ptr<Theme>& active_theme_storage() {
@@ -503,8 +539,73 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
 }
 
 std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
-    auto theme = Theme::make_linux_gnome(color_scheme);
+    const bool dark = color_scheme == ColorScheme::Dark;
+    auto theme = std::make_unique<Theme>(dark ? "macOS Dark" : "macOS Light");
     theme->set_token("theme-family", StyleValue{std::string("macos-26")});
+
+    if (dark) {
+        set_color_token(*theme, "window-bg", 30, 30, 30);
+        set_color_token(*theme, "surface-panel", 38, 38, 38);
+        set_color_token(*theme, "surface-card", 44, 44, 44);
+        set_color_token(*theme, "surface-raised", 52, 52, 52);
+        set_color_token(*theme, "surface-hover", 62, 62, 62);
+        set_color_token(*theme, "surface-pressed", 72, 72, 72);
+        set_color_token(*theme, "field-bg", 38, 38, 38);
+        set_color_token(*theme, "field-border", 70, 70, 70);
+        set_color_token(*theme, "border-subtle", 60, 60, 60);
+        set_color_token(*theme, "border-strong", 85, 85, 85);
+        set_color_token(*theme, "text-primary", 255, 255, 255);
+        set_color_token(*theme, "text-secondary", 170, 170, 170);
+        set_color_token(*theme, "text-disabled", 100, 100, 100);
+        set_color_token(*theme, "accent", 10, 132, 255);
+        set_color_token(*theme, "accent-hover", 30, 145, 255);
+        set_color_token(*theme, "accent-pressed", 0, 118, 240);
+        set_color_token(*theme, "accent-soft", 25, 55, 95);
+        set_color_token(*theme, "accent-contrast", 255, 255, 255);
+        set_color_token(*theme, "focus-ring", 10, 132, 255);
+        set_color_token(*theme, "scrollbar-track", 50, 50, 50);
+        set_color_token(*theme, "scrollbar-thumb", 100, 100, 100);
+    } else {
+        set_color_token(*theme, "window-bg", 246, 246, 246);
+        set_color_token(*theme, "surface-panel", 244, 244, 244);
+        set_color_token(*theme, "surface-card", 255, 255, 255);
+        set_color_token(*theme, "surface-raised", 255, 255, 255);
+        set_color_token(*theme, "surface-hover", 232, 232, 232);
+        set_color_token(*theme, "surface-pressed", 220, 220, 220);
+        set_color_token(*theme, "field-bg", 255, 255, 255);
+        set_color_token(*theme, "field-border", 210, 210, 210);
+        set_color_token(*theme, "border-subtle", 218, 218, 218);
+        set_color_token(*theme, "border-strong", 190, 190, 190);
+        set_color_token(*theme, "text-primary", 0, 0, 0);
+        set_color_token(*theme, "text-secondary", 100, 100, 100);
+        set_color_token(*theme, "text-disabled", 160, 160, 160);
+        set_color_token(*theme, "accent", 0, 122, 255);
+        set_color_token(*theme, "accent-hover", 0, 112, 240);
+        set_color_token(*theme, "accent-pressed", 0, 100, 215);
+        set_color_token(*theme, "accent-soft", 215, 233, 255);
+        set_color_token(*theme, "accent-contrast", 255, 255, 255);
+        set_color_token(*theme, "focus-ring", 0, 122, 255);
+        set_color_token(*theme, "scrollbar-track", 230, 230, 230);
+        set_color_token(*theme, "scrollbar-thumb", 170, 170, 170);
+    }
+
+    theme->set_token("accent-source", StyleValue{std::string("theme")});
+    theme->set_token("motion-mode", StyleValue{std::string("normal")});
+    theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
+    theme->set_token("density", StyleValue{std::string("standard")});
+
+    set_metric_token(*theme, "spacing-xs", 4.0F);
+    set_metric_token(*theme, "spacing-sm", 8.0F);
+    set_metric_token(*theme, "spacing-md", 10.0F);
+    set_metric_token(*theme, "spacing-lg", 14.0F);
+    set_metric_token(*theme, "spacing-xl", 20.0F);
+    set_metric_token(*theme, "control-height", 28.0F);
+    set_metric_token(*theme, "menu-height", 28.0F);
+    set_metric_token(*theme, "status-height", 24.0F);
+
+    install_shared_rules(*theme);
+    install_macos_overrides(*theme);
+
     return theme;
 }
 
