@@ -2275,10 +2275,10 @@ void Window::request_frame(FrameRequestReason reason) {
                                                            overlay.widget.get()));
                 }
             }
-            if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
-                frame.render_node_count = count_render_nodes_recursive(root_node.get());
-                if (root_node) {
-                    frame.render_snapshot = build_render_snapshot(*root_node);
+            if (root_node) {
+                frame.render_snapshot = build_render_snapshot(*root_node);
+                if (impl_->debug_overlay_flags != DebugOverlayFlags::None) {
+                    frame.render_node_count = count_render_nodes_recursive(root_node.get());
                     frame.render_snapshot_node_count =
                         count_render_snapshot_nodes(frame.render_snapshot);
                 }
