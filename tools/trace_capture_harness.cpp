@@ -797,7 +797,9 @@ bool validate_backend_expectations(nk::RendererBackend backend,
                 return frame.render_hotspot_counters.damage_region_count > 0 &&
                        frame.render_hotspot_counters.gpu_present_region_count > 0 &&
                        frame.render_hotspot_counters.gpu_present_path ==
-                           nk::GpuPresentPath::SoftwareUpload;
+                           nk::GpuPresentPath::SoftwareUpload &&
+                       frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
+                           frame.render_hotspot_counters.gpu_viewport_pixel_count;
             });
         }
         return true;
