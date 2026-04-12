@@ -732,7 +732,11 @@ void SoftwareRenderer::render(const RenderNode& root) {
                     if (impl_->shaped_text_cache.size() >= 1024) {
                         impl_->shaped_text_cache.clear();
                     }
-                    auto s = impl_->text_shaper->shape(text_node.text(), font, color);
+                    const float mw = text_node.max_width();
+                    auto s = mw > 0.0F
+                        ? impl_->text_shaper->shape_wrapped(text_node.text(), font, color,
+                                                             mw * impl_->scale_factor)
+                        : impl_->text_shaper->shape(text_node.text(), font, color);
                     shaped_ptr = std::make_shared<ShapedText>(std::move(s));
                     impl_->shaped_text_cache[key] = shaped_ptr;
                     ++impl_->last_hotspot_counters.text_shape_count;

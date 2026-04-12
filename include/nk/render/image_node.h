@@ -10,7 +10,7 @@
 namespace nk {
 
 /// Scaling mode for image rendering.
-enum class ScaleMode { NearestNeighbor, Bilinear };
+enum class ScaleMode { NearestNeighbor, Bilinear, IntegerNearest };
 
 /// Render node that blits a raw pixel buffer.
 class ImageNode : public RenderNode {

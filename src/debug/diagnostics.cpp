@@ -3238,7 +3238,9 @@ RenderSnapshotNode build_render_snapshot_node(const RenderNode& node) {
         const auto& image_node = static_cast<const ImageNode&>(node);
         std::ostringstream detail;
         detail << image_node.src_width() << "x" << image_node.src_height() << " "
-               << (image_node.scale_mode() == ScaleMode::NearestNeighbor ? "nearest" : "bilinear");
+               << (image_node.scale_mode() == ScaleMode::Bilinear      ? "bilinear"
+                   : image_node.scale_mode() == ScaleMode::IntegerNearest ? "integer-nearest"
+                                                                          : "nearest");
         snapshot.detail = detail.str();
         break;
     }

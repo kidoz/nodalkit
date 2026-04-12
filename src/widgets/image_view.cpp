@@ -1,3 +1,4 @@
+#include <cmath>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/image_view.h>
 #include <vector>
@@ -19,6 +20,23 @@ Rect fit_rect(Rect bounds, int src_width, int src_height, bool preserve_aspect_r
     return {
         bounds.x + ((bounds.width - fitted_width) * 0.5F),
         bounds.y + ((bounds.height - fitted_height) * 0.5F),
+        fitted_width,
+        fitted_height,
+    };
+}
+
+Rect integer_fit_rect(Rect bounds, int src_width, int src_height) {
+    if (src_width <= 0 || src_height <= 0 || bounds.width <= 0.0F || bounds.height <= 0.0F) {
+        return bounds;
+    }
+    const int scale_x = static_cast<int>(bounds.width) / src_width;
+    const int scale_y = static_cast<int>(bounds.height) / src_height;
+    const int scale = std::max(1, std::min(scale_x, scale_y));
+    const float fitted_width = static_cast<float>(src_width * scale);
+    const float fitted_height = static_cast<float>(src_height * scale);
+    return {
+        std::floor(bounds.x + (bounds.width - fitted_width) * 0.5F),
+        std::floor(bounds.y + (bounds.height - fitted_height) * 0.5F),
         fitted_width,
         fitted_height,
     };
@@ -180,14 +198,17 @@ void ImageView::snapshot(SnapshotContext& ctx) const {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->pixels.empty() && impl_->src_width > 0 && impl_->src_height > 0) {
         note_image_snapshot_for_diagnostics();
-        const auto image_bounds =
-            fit_rect(inner, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
+        const bool use_integer = impl_->scale_mode == ScaleMode::IntegerNearest;
+        const auto image_bounds = use_integer
+            ? integer_fit_rect(inner, impl_->src_width, impl_->src_height)
+            : fit_rect(inner, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
+        const auto effective_mode = use_integer ? ScaleMode::NearestNeighbor : impl_->scale_mode;
         ctx.push_rounded_clip(inner, content_radius);
         ctx.add_image(image_bounds,
                       impl_->pixels.data(),
                       impl_->src_width,
                       impl_->src_height,
-                      impl_->scale_mode);
+                      effective_mode);
         ctx.pop_container();
     }
 }
