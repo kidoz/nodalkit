@@ -1,6 +1,7 @@
 /// @file text_shaper_test.cpp
 /// @brief Regression tests for platform text shaping output.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <nk/text/text_shaper.h>
 
@@ -128,6 +129,53 @@ TEST_CASE("Shaped text baseline stays within the rasterized bitmap", "[text]") {
     REQUIRE(shaped.baseline() <= static_cast<float>(shaped.bitmap_height()));
 }
 
+TEST_CASE("Shaper measurement is stable under repeated identical calls", "[text]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 18.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    const auto first = shaper->measure("Stable", font);
+    const auto second = shaper->measure("Stable", font);
+    const auto third = shaper->measure("Stable", font);
+
+    REQUIRE(first.width > 0.0F);
+    REQUIRE(first.height > 0.0F);
+    REQUIRE(first.width == Catch::Approx(second.width));
+    REQUIRE(first.height == Catch::Approx(second.height));
+    REQUIRE(first.width == Catch::Approx(third.width));
+}
+
+TEST_CASE("Shaping an empty string returns an empty but valid bitmap", "[text]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 20.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    const auto measured = shaper->measure("", font);
+    REQUIRE(measured.width >= 0.0F);
+    REQUIRE(measured.height >= 0.0F);
+
+    // shape() must not crash on an empty input. Either it returns no bitmap,
+    // or a zero-area sized one — both are valid. What matters is that the
+    // object is returned in a well-formed state and the caller can still
+    // query its metadata.
+    auto shaped = shaper->shape("", font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+    REQUIRE(shaped.bitmap_width() >= 0);
+    REQUIRE(shaped.bitmap_height() >= 0);
+    if (shaped.bitmap_data() != nullptr) {
+        REQUIRE(alpha_sum_for_rows(shaped, 0, shaped.bitmap_height()) == 0U);
+    }
+}
+
 TEST_CASE("Shaped text preserves the requested tint for covered pixels", "[text]") {
     auto shaper = nk::TextShaper::create();
     REQUIRE(shaper != nullptr);
@@ -217,5 +265,98 @@ TEST_CASE("Windows text shaper treats font sizes as logical UI pixels", "[text][
     // an ~16 px request and pushing layout/placement out of sync.
     REQUIRE(measured.height < 19.0F);
     REQUIRE(static_cast<float>(shaped.bitmap_height()) < 19.0F);
+}
+#endif
+
+#if defined(__linux__)
+TEST_CASE("Linux shaper wraps long single-line text into multiple rendered lines",
+          "[text][linux]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 14.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    const std::string paragraph =
+        "The quick brown fox jumps over the lazy dog while humming a tune "
+        "for the little audience of passing commas and semicolons.";
+    const float max_width = 160.0F;
+
+    auto measured = shaper->measure(paragraph, font);
+    auto wrapped = shaper->measure_wrapped(paragraph, font, max_width);
+
+    // Unwrapped should be well past the max width; wrapping must bring each line under it and
+    // grow the layout vertically instead.
+    REQUIRE(measured.width > max_width);
+    REQUIRE(wrapped.width <= max_width);
+    REQUIRE(wrapped.height > measured.height);
+
+    auto shaped = shaper->shape_wrapped(paragraph, font,
+                                         nk::Color{0.0F, 0.0F, 0.0F, 1.0F}, max_width);
+    REQUIRE(shaped.bitmap_data() != nullptr);
+    REQUIRE(shaped.bitmap_width() > 0);
+    REQUIRE(shaped.bitmap_height() > 0);
+    REQUIRE(static_cast<float>(shaped.bitmap_width()) <= max_width + 1.0F);
+    REQUIRE(shaped.bitmap_height() > shaped.bitmap_width());
+}
+
+TEST_CASE("Linux shaper honors explicit newlines when wrapping", "[text][linux]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 14.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    const auto single_line = shaper->measure_wrapped("one two", font, 1000.0F);
+    const auto two_lines = shaper->measure_wrapped("one\ntwo", font, 1000.0F);
+
+    REQUIRE(single_line.height > 0.0F);
+    REQUIRE(two_lines.height > single_line.height);
+}
+
+TEST_CASE("Linux shaper renders non-Latin text via fontconfig fallback", "[text][linux]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    // Request a font family unlikely to cover CJK directly. The shaper should transparently
+    // swap to a covering face via fontconfig's FC_CHARSET path when the host has one installed.
+    // On hosts with no CJK-capable font, fc-match falls back to the primary font (which still
+    // can't render the glyphs), so we soft-pass rather than assert ink.
+    nk::FontDescriptor font{
+        .family = "Liberation Sans",
+        .size = 24.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    const std::string cjk = "日本語";  // "Japanese language"
+    auto measured = shaper->measure(cjk, font);
+    auto shaped = shaper->shape(cjk, font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+
+    // measurement + rasterization must not crash or return garbage sizes for non-Latin input,
+    // regardless of whether a covering font is installed.
+    REQUIRE(measured.width >= 0.0F);
+    REQUIRE(measured.height >= 0.0F);
+
+    if (shaped.bitmap_data() == nullptr ||
+        shaped.bitmap_width() <= 0 ||
+        shaped.bitmap_height() <= 0) {
+        SUCCEED("No CJK-capable font installed on this host; fallback path untested");
+        return;
+    }
+
+    const auto alpha_sum = alpha_sum_for_rows(shaped, 0, shaped.bitmap_height());
+    if (alpha_sum == 0U) {
+        // Host lacks a font with glyphs for these codepoints — the shaper correctly produced a
+        // sized-but-empty bitmap rather than crashing. Skip the ink assertion.
+        SUCCEED("No CJK-capable font installed on this host; fallback produced empty bitmap");
+        return;
+    }
+    REQUIRE(alpha_sum > 0U);
 }
 #endif

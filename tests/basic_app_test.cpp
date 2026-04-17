@@ -1036,6 +1036,32 @@ TEST_CASE("Window frame requests are not starved by continuously ready timers", 
                                          nk::FrameRequestReason::WidgetRedraw));
 }
 
+TEST_CASE("Window reacts to system preference changes", "[app][prefs]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
+
+    nk::Application app(0, nullptr);
+    // Observation uses a native GSettings/portal path; turn it off so the test drives the signal
+    // deterministically and doesn't race with the real desktop preferences.
+    app.set_system_preferences_observation_enabled(false);
+
+    nk::Window window({.title = "Prefs reactive", .width = 240, .height = 120});
+    window.set_child(nk::Label::create("prefs"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto baseline_frame_id = window.last_frame_diagnostics().frame_id;
+
+    nk::SystemPreferences next = app.system_preferences();
+    next.color_scheme = (next.color_scheme == nk::ColorScheme::Dark) ? nk::ColorScheme::Light
+                                                                     : nk::ColorScheme::Dark;
+    app.on_system_preferences_changed().emit(next);
+
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.last_frame_diagnostics().frame_id > baseline_frame_id);
+    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+                                         nk::FrameRequestReason::SystemPreferencesChanged));
+}
+
 TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][render]") {
 #if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
@@ -1763,6 +1789,77 @@ TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds
 
 }
 
+TEST_CASE("ComboBox popup scrolls to keep the highlighted item visible with many items",
+          "[app][combo]") {
+    auto combo = nk::ComboBox::create();
+    std::vector<std::string> items;
+    for (int i = 0; i < 20; ++i) {
+        items.push_back("Option " + std::to_string(i));
+    }
+    combo->set_items(items);
+    combo->allocate({0.0F, 0.0F, 200.0F, 36.0F});
+
+    // Opening via Down selects index 0 and scrolls to the top.
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+
+    // Paging all the way down with End must keep the highlight reachable even though only the
+    // first 6 items were visible before the scroll. Without the scroll-offset fix, the popup
+    // rendered indices 0–5 only and index 19 was unselectable.
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End});
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    REQUIRE(combo->selected_index() == 19);
+
+    // And Home + Return should pick index 0.
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home});
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    REQUIRE(combo->selected_index() == 0);
+}
+
+TEST_CASE("ComboBox resets popup state when the item list is replaced", "[app][combo]") {
+    auto combo = nk::ComboBox::create();
+    combo->set_items({"Alpha", "Beta", "Gamma"});
+    combo->allocate({0.0F, 0.0F, 200.0F, 36.0F});
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+
+    // Replacing the item list while the popup is open must also clear the selection and not
+    // leave a stale highlighted_index pointing into the old list.
+    combo->set_items({"One", "Two"});
+    REQUIRE(combo->selected_index() == -1);
+
+    // Re-opening and pressing Down once should now highlight index 0 against the new list.
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    REQUIRE(combo->selected_index() == 0);
+}
+
+TEST_CASE("ImageView measure clamps the natural size to parent constraints", "[app][image]") {
+    auto image = nk::ImageView::create();
+    std::vector<uint32_t> pixels(800U * 600U, 0xFFAABBCCU);
+    image->update_pixel_buffer(pixels.data(), 800, 600);
+    REQUIRE(image->source_width() == 800);
+    REQUIRE(image->source_height() == 600);
+
+    const auto unbounded = image->measure({});
+    REQUIRE(unbounded.natural_width == Catch::Approx(800.0F));
+    REQUIRE(unbounded.natural_height == Catch::Approx(600.0F));
+
+    nk::Constraints tight;
+    tight.max_width = 240.0F;
+    tight.max_height = 180.0F;
+    const auto clamped = image->measure(tight);
+    REQUIRE(clamped.natural_width == Catch::Approx(240.0F));
+    REQUIRE(clamped.natural_height == Catch::Approx(180.0F));
+}
+
+TEST_CASE("StatusBar advertises the accessible status role", "[app][status]") {
+    auto status = nk::StatusBar::create();
+    status->set_segments({"Ready", "Saved"});
+    REQUIRE(status->ensure_accessible().role() == nk::AccessibleRole::Status);
+    REQUIRE(status->segment_count() == 2);
+    REQUIRE(status->segment(1) == "Saved");
+}
+
 TEST_CASE("SegmentedControl selects segments through API, mouse, and keyboard", "[app][widgets]") {
     auto control = nk::SegmentedControl::create();
     control->set_segments({"Input", "Video", "Audio"});
@@ -2440,6 +2537,16 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     std::filesystem::remove(frame_summary_path, remove_frame_summary_error);
 
     {
+        // Force the bundle_window onto the software backend so the test does not spin up a second
+        // VkInstance alongside the main window's Vulkan renderer. Some drivers (observed on
+        // NVIDIA 595.58.03) crash in vkAcquireNextImageKHR on the first VkInstance after a
+        // sibling VkInstance is created, presented, and destroyed in the same process. The main
+        // window keeps its normal (Vulkan-capable) backend, and the screenshot path in
+        // save_debug_screenshot_ppm_file already uses a software renderer internally regardless.
+        // Tracked by task #19 for a long-term shared-instance fix.
+        ScopedTestEnvVar bundle_renderer_backend("NK_RENDERER_BACKEND");
+        REQUIRE(bundle_renderer_backend.set("software") == 0);
+
         nk::Window bundle_window({.title = "Bundle export", .width = 320, .height = 180});
         auto bundle_root = TestContainer::create();
         auto bundle_child = FixedWidget::create(120.0F, 48.0F);
@@ -3851,4 +3958,238 @@ TEST_CASE("SelectionModel single mode deselects previous rows", "[app]") {
     sel.select(5);
     REQUIRE(sel.is_selected(5));
     REQUIRE_FALSE(sel.is_selected(2));
+}
+
+TEST_CASE("Tab forward and Shift+Tab backward cycle the focus chain", "[app][focus]") {
+    nk::Window window({.title = "Focus chain", .width = 240, .height = 160});
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    layout->set_spacing(4.0F);
+    root->set_layout_manager(std::move(layout));
+
+    auto a = FocusProbeWidget::create(120.0F, 24.0F);
+    auto b = FocusProbeWidget::create(120.0F, 24.0F);
+    auto c = FocusProbeWidget::create(120.0F, 24.0F);
+    root->append(a);
+    root->append(b);
+    root->append(c);
+    window.set_child(root);
+    root->allocate({0.0F, 0.0F, 220.0F, 120.0F});
+
+    const auto is_focused = [](const std::shared_ptr<nk::Widget>& w) {
+        return nk::has_flag(w->state_flags(), nk::StateFlags::Focused);
+    };
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused(a));
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused(b));
+    REQUIRE_FALSE(is_focused(a));
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused(c));
+
+    // Wrap past the last focusable widget back to the first.
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused(a));
+
+    // Reverse direction: Shift+Tab walks backward and wraps at the start.
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press,
+                               .key = nk::KeyCode::Tab,
+                               .modifiers = nk::Modifiers::Shift});
+    REQUIRE(is_focused(c));
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press,
+                               .key = nk::KeyCode::Tab,
+                               .modifiers = nk::Modifiers::Shift});
+    REQUIRE(is_focused(b));
+}
+
+TEST_CASE("Focus navigation skips invisible and disabled widgets", "[app][focus]") {
+    nk::Window window({.title = "Focus skip", .width = 240, .height = 160});
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    layout->set_spacing(4.0F);
+    root->set_layout_manager(std::move(layout));
+
+    auto a = FocusProbeWidget::create(120.0F, 24.0F);
+    auto hidden = FocusProbeWidget::create(120.0F, 24.0F);
+    auto disabled = FocusProbeWidget::create(120.0F, 24.0F);
+    auto d = FocusProbeWidget::create(120.0F, 24.0F);
+    hidden->set_visible(false);
+    disabled->set_sensitive(false);
+
+    root->append(a);
+    root->append(hidden);
+    root->append(disabled);
+    root->append(d);
+    window.set_child(root);
+    root->allocate({0.0F, 0.0F, 220.0F, 120.0F});
+
+    const auto is_focused = [](const std::shared_ptr<nk::Widget>& w) {
+        return nk::has_flag(w->state_flags(), nk::StateFlags::Focused);
+    };
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused(a));
+
+    // Tab must jump over both hidden and disabled siblings to reach `d`.
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused(d));
+    REQUIRE_FALSE(is_focused(hidden));
+    REQUIRE_FALSE(is_focused(disabled));
+}
+
+TEST_CASE("Focus clears when the focused widget becomes hidden or disabled",
+          "[app][focus]") {
+    nk::Window window({.title = "Focus clear", .width = 240, .height = 160});
+    auto root = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    root->set_layout_manager(std::move(layout));
+
+    auto probe = FocusProbeWidget::create(120.0F, 24.0F);
+    root->append(probe);
+    window.set_child(root);
+    root->allocate({0.0F, 0.0F, 220.0F, 60.0F});
+
+    const auto is_focused = [&]() {
+        return nk::has_flag(probe->state_flags(), nk::StateFlags::Focused);
+    };
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused());
+
+    probe->set_visible(false);
+    REQUIRE_FALSE(is_focused());
+
+    // Bring it back and re-focus, then flip the sensitivity bit instead.
+    probe->set_visible(true);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(is_focused());
+
+    probe->set_sensitive(false);
+    REQUIRE_FALSE(is_focused());
+}
+
+TEST_CASE("BoxLayout ignores invisible children for measure and allocate",
+          "[app][layout]") {
+    auto container = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    layout->set_spacing(4.0F);
+    container->set_layout_manager(std::move(layout));
+
+    auto visible_a = FixedWidget::create(40.0F, 20.0F);
+    auto invisible = FixedWidget::create(40.0F, 200.0F);
+    auto visible_b = FixedWidget::create(40.0F, 20.0F);
+    invisible->set_visible(false);
+
+    container->append(visible_a);
+    container->append(invisible);
+    container->append(visible_b);
+
+    // Natural size must not include the invisible child's 200 px height and
+    // must drop the spacing slot that would otherwise sit next to it.
+    const auto request = container->measure(nk::Constraints::unbounded());
+    REQUIRE(request.natural_height == Catch::Approx(44.0F));  // 20 + 4 + 20
+
+    container->allocate({0.0F, 0.0F, 100.0F, 44.0F});
+    REQUIRE(visible_a->allocation().y == Catch::Approx(0.0F));
+    REQUIRE(visible_b->allocation().y == Catch::Approx(24.0F));
+    // Invisible widgets keep their previous (zero) allocation.
+    REQUIRE(invisible->allocation().width == Catch::Approx(0.0F));
+    REQUIRE(invisible->allocation().height == Catch::Approx(0.0F));
+}
+
+TEST_CASE("Horizontal BoxLayout distributes extra width by stretch", "[app][layout]") {
+    auto container = TestContainer::create();
+    container->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal));
+
+    auto expand_a = FixedWidget::create(20.0F, 30.0F);
+    auto expand_b = FixedWidget::create(20.0F, 30.0F);
+    expand_a->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+    expand_a->set_horizontal_stretch(3);
+    expand_b->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+    expand_b->set_horizontal_stretch(1);
+
+    container->append(expand_a);
+    container->append(expand_b);
+    // 200 px wide layout - 40 px natural (2 * 20) = 160 px extra.
+    // With stretch weights 3:1 → expand_a gets +120 (140 total), expand_b +40 (60 total).
+    container->allocate({0.0F, 0.0F, 200.0F, 30.0F});
+
+    REQUIRE(expand_a->allocation().width == Catch::Approx(140.0F));
+    REQUIRE(expand_b->allocation().width == Catch::Approx(60.0F));
+    REQUIRE(expand_a->allocation().x == Catch::Approx(0.0F));
+    REQUIRE(expand_b->allocation().x == Catch::Approx(140.0F));
+}
+
+TEST_CASE("WindowEvent::Resize updates size, fires signal, and requests a Resize frame",
+          "[app][platform]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Resize event", .width = 240, .height = 160});
+    window.set_child(nk::Label::create("resize"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    int resize_events = 0;
+    int resize_width = 0;
+    int resize_height = 0;
+    auto resize_conn = window.on_resize().connect([&](int w, int h) {
+        ++resize_events;
+        resize_width = w;
+        resize_height = h;
+    });
+    (void)resize_conn;
+
+    const auto baseline_frame = window.last_frame_diagnostics().frame_id;
+    window.dispatch_window_event({.type = nk::WindowEvent::Type::Resize,
+                                  .width = 300,
+                                  .height = 220});
+    REQUIRE(app.event_loop().poll());
+
+    REQUIRE(resize_events == 1);
+    REQUIRE(resize_width == 300);
+    REQUIRE(resize_height == 220);
+    // Note: Window::size() reads from the live platform surface once present()
+    // has been called, so its value reflects the compositor-reported size
+    // rather than the event width/height. The resize signal payload is the
+    // authoritative observable for the Resize event contract.
+    REQUIRE(window.last_frame_diagnostics().frame_id > baseline_frame);
+    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+                                         nk::FrameRequestReason::Resize));
+}
+
+TEST_CASE("WindowEvent::ScaleFactorChanged fires signal and requests a ScaleFactorChanged frame",
+          "[app][platform]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Scale event", .width = 240, .height = 160});
+    window.set_child(nk::Label::create("scale"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    float observed_scale = 0.0F;
+    int scale_events = 0;
+    auto scale_conn = window.on_scale_factor_changed().connect([&](float s) {
+        ++scale_events;
+        observed_scale = s;
+    });
+    (void)scale_conn;
+
+    const auto baseline_frame = window.last_frame_diagnostics().frame_id;
+    window.dispatch_window_event({.type = nk::WindowEvent::Type::ScaleFactorChanged,
+                                  .scale_factor = 2.0F});
+    REQUIRE(app.event_loop().poll());
+
+    REQUIRE(scale_events == 1);
+    REQUIRE(observed_scale == Catch::Approx(2.0F));
+    REQUIRE(window.last_frame_diagnostics().frame_id > baseline_frame);
+    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+                                         nk::FrameRequestReason::ScaleFactorChanged));
 }
