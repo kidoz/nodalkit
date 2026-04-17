@@ -118,6 +118,11 @@ elif host_system == 'linux'
     xdg_shell_xml = wl_protocol_dir / 'stable' / 'xdg-shell' / 'xdg-shell.xml'
     text_input_v3_xml = wl_protocol_dir / 'unstable' / 'text-input' / 'text-input-unstable-v3.xml'
     primary_selection_v1_xml = wl_protocol_dir / 'unstable' / 'primary-selection' / 'primary-selection-unstable-v1.xml'
+    cursor_shape_v1_xml = wl_protocol_dir / 'staging' / 'cursor-shape' / 'cursor-shape-v1.xml'
+    # tablet-v2 is referenced by cursor-shape-v1's wp_cursor_shape_manager_v1.get_tablet_tool_v2
+    # request. We don't bind tablet ourselves, but the linker needs the zwp_tablet_tool_v2
+    # interface descriptor that the cursor-shape private-code references.
+    tablet_v2_xml = wl_protocol_dir / 'stable' / 'tablet' / 'tablet-v2.xml'
 
     xdg_shell_header = custom_target('xdg-shell-client-header',
         input : xdg_shell_xml,
@@ -149,6 +154,21 @@ elif host_system == 'linux'
         output : 'primary-selection-unstable-v1-protocol.c',
         command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
+    cursor_shape_v1_header = custom_target('cursor-shape-v1-client-header',
+        input : cursor_shape_v1_xml,
+        output : 'cursor-shape-v1-client-protocol.h',
+        command : [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+    cursor_shape_v1_code = custom_target('cursor-shape-v1-private-code',
+        input : cursor_shape_v1_xml,
+        output : 'cursor-shape-v1-protocol.c',
+        command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
+    tablet_v2_code = custom_target('tablet-v2-private-code',
+        input : tablet_v2_xml,
+        output : 'tablet-v2-protocol.c',
+        command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
     nk_sources += files(
         'src/platform/linux/wayland_backend.cpp',
         'src/platform/linux/wayland_portal_helpers.cpp',
@@ -163,6 +183,9 @@ elif host_system == 'linux'
         text_input_v3_code,
         primary_selection_v1_header,
         primary_selection_v1_code,
+        cursor_shape_v1_header,
+        cursor_shape_v1_code,
+        tablet_v2_code,
     ]
 
     nk_deps += [wayland_client_dep, xkbcommon_dep, freetype_dep, fontconfig_dep, harfbuzz_dep, gio_dep]

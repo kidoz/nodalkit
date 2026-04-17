@@ -152,6 +152,9 @@ std::string atspi_role_name(std::string_view accessible_role) {
     if (accessible_role == "spinbutton") {
         return "spin button";
     }
+    if (accessible_role == "status") {
+        return "status bar";
+    }
     if (accessible_role == "tab") {
         return "page tab";
     }

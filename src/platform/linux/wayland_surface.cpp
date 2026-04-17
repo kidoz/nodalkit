@@ -4,8 +4,10 @@
 #include "wayland_surface.h"
 
 #include "wayland_backend.h"
+#include "wayland_input.h"
 #include "xdg-shell-client-protocol.h"
 
+#include <algorithm>
 #include <cstring>
 #include <nk/foundation/logging.h>
 #include <nk/platform/events.h>
@@ -78,6 +80,36 @@ static constexpr struct wl_buffer_listener buffer_listener = {
 };
 
 // ---------------------------------------------------------------------------
+// wl_surface listener (HiDPI enter/leave tracking)
+// ---------------------------------------------------------------------------
+
+static void wl_surface_handle_enter(void* data, struct wl_surface* /*surface*/, wl_output* output) {
+    static_cast<WaylandSurface*>(data)->handle_output_enter(output);
+}
+
+static void wl_surface_handle_leave(void* data, struct wl_surface* /*surface*/, wl_output* output) {
+    static_cast<WaylandSurface*>(data)->handle_output_leave(output);
+}
+
+static void wl_surface_handle_preferred_buffer_scale(void* /*data*/,
+                                                     struct wl_surface* /*surface*/,
+                                                     int32_t /*factor*/) {
+    // wl_surface v6 optional event — we derive the effective scale from enter/leave across the
+    // outputs we know about. Ignore the compositor hint for now.
+}
+
+static void wl_surface_handle_preferred_buffer_transform(void* /*data*/,
+                                                         struct wl_surface* /*surface*/,
+                                                         uint32_t /*transform*/) {}
+
+static constexpr struct wl_surface_listener wl_surface_listener = {
+    .enter = wl_surface_handle_enter,
+    .leave = wl_surface_handle_leave,
+    .preferred_buffer_scale = wl_surface_handle_preferred_buffer_scale,
+    .preferred_buffer_transform = wl_surface_handle_preferred_buffer_transform,
+};
+
+// ---------------------------------------------------------------------------
 // Shared memory helper
 // ---------------------------------------------------------------------------
 
@@ -101,6 +133,7 @@ WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& conf
     : backend_(backend), owner_(owner), width_(config.width), height_(config.height) {
 
     surface_ = wl_compositor_create_surface(backend_.compositor());
+    wl_surface_add_listener(surface_, &wl_surface_listener, this);
 
     xdg_surface_ = xdg_wm_base_get_xdg_surface(backend_.wm_base(), surface_);
     xdg_surface_add_listener(xdg_surface_, &xdg_surface_listener, this);
@@ -225,7 +258,39 @@ Size WaylandSurface::size() const {
 }
 
 float WaylandSurface::scale_factor() const {
-    return 1.0F;
+    return static_cast<float>(buffer_scale_);
+}
+
+void WaylandSurface::handle_output_enter(wl_output* output) {
+    entered_outputs_.insert(output);
+    recompute_scale_factor();
+}
+
+void WaylandSurface::handle_output_leave(wl_output* output) {
+    entered_outputs_.erase(output);
+    recompute_scale_factor();
+}
+
+void WaylandSurface::recompute_scale_factor() {
+    int best = 1;
+    for (wl_output* output : entered_outputs_) {
+        best = std::max(best, backend_.output_scale(output));
+    }
+    if (best == buffer_scale_) {
+        return;
+    }
+    buffer_scale_ = best;
+    if (surface_ != nullptr) {
+        wl_surface_set_buffer_scale(surface_, buffer_scale_);
+        // A commit is needed for the compositor to latch the new scale. The next frame produced
+        // by the window will re-attach a correctly-sized buffer; an explicit commit here makes
+        // the scale-change observable immediately even if the next render is deferred.
+        wl_surface_commit(surface_);
+    }
+    WindowEvent event{};
+    event.type = WindowEvent::Type::ScaleFactorChanged;
+    event.scale_factor = static_cast<float>(buffer_scale_);
+    owner_.dispatch_window_event(event);
 }
 
 RendererBackendSupport WaylandSurface::renderer_backend_support() const {
@@ -345,9 +410,10 @@ NativeWindowHandle WaylandSurface::native_display_handle() const {
     return static_cast<NativeWindowHandle>(backend_.display());
 }
 
-void WaylandSurface::set_cursor_shape(CursorShape /*shape*/) {
-    // Window/runtime cursor routing is in place; Wayland-specific cursor
-    // surface integration still needs backend protocol work.
+void WaylandSurface::set_cursor_shape(CursorShape shape) {
+    if (auto* input = backend_.input(); input != nullptr) {
+        input->set_cursor_shape(shape);
+    }
 }
 
 // ---------------------------------------------------------------------------

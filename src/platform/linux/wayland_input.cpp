@@ -3,6 +3,7 @@
 
 #include "wayland_input.h"
 
+#include "cursor-shape-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
 #include "wayland_backend.h"
@@ -501,9 +502,44 @@ WaylandInput::~WaylandInput() {
     if (keyboard_) {
         wl_keyboard_destroy(keyboard_);
     }
+    if (cursor_shape_device_ != nullptr) {
+        wp_cursor_shape_device_v1_destroy(cursor_shape_device_);
+        cursor_shape_device_ = nullptr;
+    }
     if (pointer_) {
         wl_pointer_destroy(pointer_);
     }
+}
+
+namespace {
+
+uint32_t wp_cursor_shape_for(CursorShape shape) noexcept {
+    switch (shape) {
+    case CursorShape::Default:
+        return WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
+    case CursorShape::IBeam:
+        return WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT;
+    case CursorShape::PointingHand:
+        return WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER;
+    case CursorShape::ResizeLeftRight:
+        return WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_EW_RESIZE;
+    case CursorShape::ResizeUpDown:
+        return WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NS_RESIZE;
+    }
+    return WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT;
+}
+
+} // namespace
+
+void WaylandInput::set_cursor_shape(CursorShape shape) {
+    last_applied_cursor_shape_ = shape;
+    if (cursor_shape_device_ == nullptr || pointer_enter_serial_ == 0) {
+        // Either the compositor doesn't expose wp_cursor_shape_v1 or the pointer is not currently
+        // over any of our surfaces. The shape is cached and will be reapplied on the next enter.
+        return;
+    }
+    wp_cursor_shape_device_v1_set_shape(cursor_shape_device_, pointer_enter_serial_,
+                                        wp_cursor_shape_for(shape));
 }
 
 bool WaylandInput::can_repeat_key(uint32_t key) const {
@@ -953,9 +989,19 @@ void WaylandInput::seat_capabilities(void* data, wl_seat* /*seat*/, uint32_t cap
     if (has_pointer && !self->pointer_) {
         self->pointer_ = wl_seat_get_pointer(self->seat_);
         wl_pointer_add_listener(self->pointer_, &pointer_listener, self);
+        if (auto* shape_manager = self->backend_.cursor_shape_manager(); shape_manager != nullptr) {
+            self->cursor_shape_device_ =
+                wp_cursor_shape_manager_v1_get_pointer(shape_manager, self->pointer_);
+        }
     } else if (!has_pointer && self->pointer_) {
+        if (self->cursor_shape_device_ != nullptr) {
+            wp_cursor_shape_device_v1_destroy(self->cursor_shape_device_);
+            self->cursor_shape_device_ = nullptr;
+        }
         wl_pointer_destroy(self->pointer_);
         self->pointer_ = nullptr;
+        self->pointer_enter_serial_ = 0;
+        self->last_applied_cursor_shape_ = CursorShape::Default;
     }
 
     if (has_keyboard && !self->keyboard_) {
@@ -978,7 +1024,7 @@ void WaylandInput::seat_name(void* /*data*/, wl_seat* /*seat*/, const char* /*na
 
 void WaylandInput::pointer_enter(void* data,
                                  wl_pointer* /*pointer*/,
-                                 uint32_t /*serial*/,
+                                 uint32_t serial,
                                  wl_surface* surface,
                                  wl_fixed_t x,
                                  wl_fixed_t y) {
@@ -986,6 +1032,11 @@ void WaylandInput::pointer_enter(void* data,
     self->pointer_focus_ = self->backend_.find_surface(surface);
     self->pointer_x_ = static_cast<float>(wl_fixed_to_double(x));
     self->pointer_y_ = static_cast<float>(wl_fixed_to_double(y));
+    self->pointer_enter_serial_ = serial;
+
+    // Reapply the last cursor shape so the compositor doesn't fall back to its default cursor on
+    // surface re-entry. Setting the shape requires a fresh enter serial.
+    self->set_cursor_shape(self->last_applied_cursor_shape_);
 
     if (self->pointer_focus_) {
         MouseEvent me{};
@@ -1009,6 +1060,7 @@ void WaylandInput::pointer_leave(void* data,
         self->pointer_focus_->owner().dispatch_mouse_event(me);
     }
     self->pointer_focus_ = nullptr;
+    self->pointer_enter_serial_ = 0;
 }
 
 void WaylandInput::pointer_motion(

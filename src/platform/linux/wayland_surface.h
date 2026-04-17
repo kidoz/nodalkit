@@ -6,10 +6,12 @@
 #include <cstdint>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
+#include <unordered_set>
 #include <vector>
 
 struct wl_surface;
 struct wl_buffer;
+struct wl_output;
 struct xdg_surface;
 struct xdg_toplevel;
 
@@ -46,6 +48,12 @@ public:
     void handle_configure(int width, int height);
     void handle_close();
 
+    // Called from the wl_surface enter/leave callbacks and from the wl_output.done handler in
+    // the backend when an output's advertised scale changes.
+    void handle_output_enter(wl_output* output);
+    void handle_output_leave(wl_output* output);
+    void recompute_scale_factor();
+
 private:
     struct ShmBuffer {
         wl_buffer* buffer = nullptr;
@@ -74,6 +82,8 @@ private:
     int height_;
     bool fullscreen_ = false;
     bool configured_ = false;
+    int buffer_scale_ = 1;
+    std::unordered_set<wl_output*> entered_outputs_;
 };
 
 } // namespace nk

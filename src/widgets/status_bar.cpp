@@ -96,7 +96,7 @@ std::shared_ptr<StatusBar> StatusBar::create() {
 StatusBar::StatusBar() : impl_(std::make_unique<Impl>()) {
     add_style_class("status-bar");
     auto& accessible = ensure_accessible();
-    accessible.set_role(AccessibleRole::Label);
+    accessible.set_role(AccessibleRole::Status);
     accessible.set_name("status bar");
 }
 

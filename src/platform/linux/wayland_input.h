@@ -20,10 +20,12 @@ struct zwp_text_input_v3;
 struct zwp_primary_selection_device_v1;
 struct zwp_primary_selection_source_v1;
 struct zwp_primary_selection_offer_v1;
+struct wp_cursor_shape_device_v1;
 
 #include <chrono>
 #include <cstdint>
 #include <nk/runtime/event_loop.h>
+#include <nk/ui_core/cursor_shape.h>
 #include <string>
 #include <vector>
 
@@ -48,6 +50,8 @@ public:
     void set_primary_selection_text(std::string text);
     [[nodiscard]] std::string clipboard_text() const;
     void set_clipboard_text(std::string text);
+
+    void set_cursor_shape(CursorShape shape);
 
     // --- Wayland listener callbacks (public so listener structs can reference them) ---
 
@@ -176,6 +180,7 @@ private:
     zwp_primary_selection_device_v1* primary_selection_device_ = nullptr;
     zwp_primary_selection_source_v1* primary_selection_source_ = nullptr;
     zwp_primary_selection_offer_v1* primary_selection_offer_ = nullptr;
+    wp_cursor_shape_device_v1* cursor_shape_device_ = nullptr;
 
     xkb_context* xkb_ctx_ = nullptr;
     xkb_keymap* xkb_keymap_ = nullptr;
@@ -189,6 +194,8 @@ private:
     float pointer_x_ = 0;
     float pointer_y_ = 0;
     uint32_t last_input_serial_ = 0;
+    uint32_t pointer_enter_serial_ = 0;
+    CursorShape last_applied_cursor_shape_ = CursorShape::Default;
     CallbackHandle key_repeat_handle_{};
     uint32_t repeating_key_ = 0;
     std::chrono::milliseconds key_repeat_delay_{400};

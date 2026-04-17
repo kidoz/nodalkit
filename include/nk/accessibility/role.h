@@ -30,6 +30,7 @@ enum class AccessibleRole : uint8_t {
     Separator,
     Slider,
     SpinButton,
+    Status,
     Tab,
     TabList,
     TabPanel,

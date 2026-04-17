@@ -14,13 +14,16 @@ struct wl_compositor;
 struct wl_shm;
 struct wl_seat;
 struct wl_surface;
+struct wl_output;
 struct wl_data_device_manager;
 struct xdg_wm_base;
 struct zwp_text_input_manager_v3;
 struct zwp_primary_selection_device_manager_v1;
+struct wp_cursor_shape_manager_v1;
 
 namespace nk {
 
+class WaylandInput;
 class WaylandSurface;
 
 class WaylandBackend : public PlatformBackend {
@@ -61,6 +64,13 @@ public:
     [[nodiscard]] wl_data_device_manager* data_device_manager() const;
     [[nodiscard]] zwp_text_input_manager_v3* text_input_manager() const;
     [[nodiscard]] zwp_primary_selection_device_manager_v1* primary_selection_manager() const;
+    [[nodiscard]] wp_cursor_shape_manager_v1* cursor_shape_manager() const;
+    [[nodiscard]] WaylandInput* input() const;
+
+    // Returns the compositor-advertised integer scale for the given wl_output, or 1 when the
+    // output is unknown or never advertised a scale. Fractional scales are not yet supported;
+    // they require wp_fractional_scale_v1 + wp_viewporter and are tracked separately.
+    [[nodiscard]] int output_scale(wl_output* output) const;
 
     // Surface registration for input event routing.
     void register_surface(wl_surface* wl_surf, WaylandSurface* surface);
@@ -71,6 +81,10 @@ public:
     struct Impl;
 
 private:
+    void start_accessibility_thread();
+    void stop_accessibility_thread();
+    void schedule_accessibility_sync();
+
     std::unique_ptr<Impl> impl_;
 };
 

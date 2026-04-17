@@ -3,6 +3,7 @@
 
 #include "wayland_backend.h"
 
+#include "cursor-shape-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
 #include "wayland_input.h"
@@ -11,6 +12,7 @@
 #include "xdg-shell-client-protocol.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <gio/gio.h>
@@ -26,6 +28,7 @@
 #include <unistd.h>
 #include <nk/ui_core/widget.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <wayland-client.h>
 
 namespace nk {
@@ -36,6 +39,8 @@ constexpr const char* PortalBusName = "org.freedesktop.portal.Desktop";
 constexpr const char* PortalObjectPath = "/org/freedesktop/portal/desktop";
 constexpr const char* PortalFileChooserInterface = "org.freedesktop.portal.FileChooser";
 constexpr const char* PortalRequestInterface = "org.freedesktop.portal.Request";
+constexpr const char* PortalSettingsInterface = "org.freedesktop.portal.Settings";
+constexpr const char* PortalAppearanceNamespace = "org.freedesktop.appearance";
 constexpr const char* DbusBusName = "org.freedesktop.DBus";
 constexpr const char* DbusObjectPath = "/org/freedesktop/DBus";
 constexpr const char* DbusInterface = "org.freedesktop.DBus";
@@ -43,6 +48,11 @@ constexpr const char* AtspiBusName = "org.a11y.Bus";
 constexpr const char* AtspiBusObjectPath = "/org/a11y/bus";
 constexpr const char* AtspiBusInterface = "org.a11y.Bus";
 constexpr const char* AtspiObjectRootPath = "/org/a11y/atspi/accessible";
+// AT-SPI clients (Orca, GTK's at-spi2-atk, Qt's QAccessible2) look for the per-application root
+// accessible at the `/root` child of the subtree. Expose our Application node there so standard
+// tools can find us without a custom handshake.
+constexpr const char* AtspiApplicationRootPath = "/org/a11y/atspi/accessible/root";
+constexpr const char* AtspiApplicationRootName = "root";
 constexpr const char* AtspiAccessibleInterface = "org.a11y.atspi.Accessible";
 constexpr const char* AtspiApplicationInterface = "org.a11y.atspi.Application";
 constexpr const char* AtspiComponentInterface = "org.a11y.atspi.Component";
@@ -320,6 +330,40 @@ static constexpr struct xdg_wm_base_listener wm_base_listener = {
     .ping = wm_base_ping,
 };
 
+// --- wl_output listener: track per-monitor scale for the HiDPI surface path ---
+
+void output_geometry(void* /*data*/,
+                     wl_output* /*output*/,
+                     int32_t /*x*/,
+                     int32_t /*y*/,
+                     int32_t /*physical_width*/,
+                     int32_t /*physical_height*/,
+                     int32_t /*subpixel*/,
+                     const char* /*make*/,
+                     const char* /*model*/,
+                     int32_t /*transform*/) {}
+
+void output_mode(void* /*data*/,
+                 wl_output* /*output*/,
+                 uint32_t /*flags*/,
+                 int32_t /*width*/,
+                 int32_t /*height*/,
+                 int32_t /*refresh*/) {}
+
+void output_scale(void* data, wl_output* output, int32_t scale);
+void output_done(void* data, wl_output* output);
+void output_name(void* /*data*/, wl_output* /*output*/, const char* /*name*/) {}
+void output_description(void* /*data*/, wl_output* /*output*/, const char* /*description*/) {}
+
+constexpr struct wl_output_listener output_listener = {
+    .geometry = output_geometry,
+    .mode = output_mode,
+    .done = output_done,
+    .scale = output_scale,
+    .name = output_name,
+    .description = output_description,
+};
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -352,6 +396,11 @@ struct WaylandBackend::Impl {
     wl_data_device_manager* data_device_manager = nullptr;
     zwp_text_input_manager_v3* text_input_manager = nullptr;
     zwp_primary_selection_device_manager_v1* primary_selection_manager = nullptr;
+    wp_cursor_shape_manager_v1* cursor_shape_manager = nullptr;
+    std::unordered_map<wl_output*, int> output_scales;
+    // Scales staged by a wl_output are latched on the wl_output.done event. We therefore keep a
+    // side-map of "pending" values until the atomic done arrives, matching the wayland protocol.
+    std::unordered_map<wl_output*, int> pending_output_scales;
 
     std::unique_ptr<WaylandInput> input;
     std::string clipboard_text_cache;
@@ -373,11 +422,49 @@ struct WaylandBackend::Impl {
     GSettings* a11y_interface_settings = nullptr;
     bool system_preferences_stop_requested = false;
 
+    mutable std::mutex accessibility_mutex;
+    std::thread accessibility_thread;
+    GMainContext* accessibility_context = nullptr;
+    GMainLoop* accessibility_loop = nullptr;
     GDBusConnection* accessibility_connection = nullptr;
     guint accessibility_subtree_id = 0;
+    // Direct object registrations keep GDBus from filtering out /accessible and /accessible/root
+    // calls that the subtree dispatch path silently rejects on some GDBus versions. Keyed by
+    // object path so we can diff against a freshly-built snapshot on widget-tree change.
+    std::unordered_map<std::string, std::vector<guint>> accessibility_objects_by_path;
+    // Cached AT-SPI snapshot built on the main thread (widgets aren't thread-safe) and read by
+    // the a11y thread's method handlers. Protected by `accessibility_mutex`.
+    AtspiSnapshotState cached_accessibility_snapshot;
+    bool accessibility_stop_requested = false;
 };
 
 namespace {
+
+void output_scale(void* data, wl_output* output, int32_t scale) {
+    auto* impl = static_cast<WaylandBackend::Impl*>(data);
+    if (scale <= 0) {
+        scale = 1;
+    }
+    impl->pending_output_scales[output] = scale;
+}
+
+void output_done(void* data, wl_output* output) {
+    auto* impl = static_cast<WaylandBackend::Impl*>(data);
+    const auto pending_it = impl->pending_output_scales.find(output);
+    if (pending_it == impl->pending_output_scales.end()) {
+        // The compositor didn't advertise a scale before done (protocol implies default 1).
+        impl->output_scales[output] = 1;
+    } else {
+        impl->output_scales[output] = pending_it->second;
+        impl->pending_output_scales.erase(pending_it);
+    }
+    // Scale may have changed for every surface currently on this output. Let each surface recompute.
+    for (const auto& [wl_surf, surface] : impl->surfaces) {
+        if (surface != nullptr) {
+            surface->recompute_scale_factor();
+        }
+    }
+}
 
 DesktopEnvironment detect_desktop_environment(const char* value) {
     if (value == nullptr) {
@@ -473,6 +560,106 @@ std::optional<Color> gnome_accent_color(std::string_view accent_name) {
     return std::nullopt;
 }
 
+// Calls org.freedesktop.portal.Settings.Read(namespace, key). The returned variant unwraps the
+// inner `v` nested inside the `(v)` reply. Returns nullptr (with transferred ownership) when the
+// key is unavailable or the call fails — callers should treat that as "no-preference" and leave
+// the matching SystemPreferences field alone.
+GVariant* read_portal_setting(GDBusConnection* connection,
+                              const char* namespace_name,
+                              const char* key) {
+    GError* error = nullptr;
+    GVariant* reply = g_dbus_connection_call_sync(connection,
+                                                  PortalBusName,
+                                                  PortalObjectPath,
+                                                  PortalSettingsInterface,
+                                                  "Read",
+                                                  g_variant_new("(ss)", namespace_name, key),
+                                                  G_VARIANT_TYPE("(v)"),
+                                                  G_DBUS_CALL_FLAGS_NONE,
+                                                  500,
+                                                  nullptr,
+                                                  &error);
+    if (reply == nullptr) {
+        if (error != nullptr) {
+            g_error_free(error);
+        }
+        return nullptr;
+    }
+    GVariant* inner = nullptr;
+    g_variant_get(reply, "(v)", &inner);
+    g_variant_unref(reply);
+    return inner;
+}
+
+// Decodes an org.freedesktop.appearance.accent-color variant. The portal spec publishes this as a
+// (ddd) or (dddd) tuple of normalized sRGB doubles; be lenient about optional alpha.
+std::optional<Color> parse_portal_accent_color(GVariant* value) {
+    if (value == nullptr) {
+        return std::nullopt;
+    }
+    const GVariantType* type = g_variant_get_type(value);
+    double r = 0;
+    double g = 0;
+    double b = 0;
+    double a = 1.0;
+    if (g_variant_type_equal(type, G_VARIANT_TYPE("(ddd)"))) {
+        g_variant_get(value, "(ddd)", &r, &g, &b);
+    } else if (g_variant_type_equal(type, G_VARIANT_TYPE("(dddd)"))) {
+        g_variant_get(value, "(dddd)", &r, &g, &b, &a);
+    } else {
+        return std::nullopt;
+    }
+    auto clamp_to_byte = [](double v) {
+        v = std::max(0.0, std::min(1.0, v));
+        return static_cast<uint8_t>(v * 255.0 + 0.5);
+    };
+    (void)a;
+    return Color::from_rgb(clamp_to_byte(r), clamp_to_byte(g), clamp_to_byte(b));
+}
+
+// Overlays portal org.freedesktop.appearance values onto preferences already seeded by GSettings.
+// Portal values "win" where reported; "no-preference" leaves the GSettings value intact.
+void apply_portal_appearance_overrides(SystemPreferences& preferences, GDBusConnection* connection) {
+    if (connection == nullptr) {
+        return;
+    }
+
+    if (GVariant* value = read_portal_setting(connection, PortalAppearanceNamespace, "color-scheme");
+        value != nullptr) {
+        if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32)) {
+            const uint32_t scheme = g_variant_get_uint32(value);
+            if (scheme == 1) {
+                preferences.color_scheme = ColorScheme::Dark;
+            } else if (scheme == 2) {
+                preferences.color_scheme = ColorScheme::Light;
+            }
+            // 0 = no-preference: leave whatever GSettings/fallback set.
+        }
+        g_variant_unref(value);
+    }
+
+    if (GVariant* value = read_portal_setting(connection, PortalAppearanceNamespace, "contrast");
+        value != nullptr) {
+        if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32)) {
+            const uint32_t contrast = g_variant_get_uint32(value);
+            if (contrast == 1) {
+                preferences.contrast = ContrastPreference::High;
+            } else if (contrast == 0) {
+                preferences.contrast = ContrastPreference::Normal;
+            }
+        }
+        g_variant_unref(value);
+    }
+
+    if (GVariant* value = read_portal_setting(connection, PortalAppearanceNamespace, "accent-color");
+        value != nullptr) {
+        if (auto color = parse_portal_accent_color(value)) {
+            preferences.accent_color = *color;
+        }
+        g_variant_unref(value);
+    }
+}
+
 SystemPreferences linux_preferences_from_gsettings(GSettings* interface_settings,
                                                    GSettings* a11y_settings,
                                                    DesktopEnvironment desktop_environment) {
@@ -536,30 +723,152 @@ SystemPreferences fallback_linux_preferences() {
 
 SystemPreferences query_linux_preferences() {
     const auto desktop_environment = detect_linux_desktop_environment();
-    if (desktop_environment != DesktopEnvironment::Gnome ||
-        !has_gsettings_schema("org.gnome.desktop.interface")) {
-        return fallback_linux_preferences();
+
+    // Seed from GSettings when we have a GNOME schema — this path covers text-scale and
+    // reduce-motion, which the portal's org.freedesktop.appearance namespace does not expose.
+    // Otherwise start from the env-var fallback.
+    SystemPreferences preferences;
+    if (desktop_environment == DesktopEnvironment::Gnome &&
+        has_gsettings_schema("org.gnome.desktop.interface")) {
+        GSettings* interface_settings = create_settings_for_schema("org.gnome.desktop.interface");
+        GSettings* a11y_settings = create_settings_for_schema("org.gnome.desktop.a11y.interface");
+        preferences =
+            linux_preferences_from_gsettings(interface_settings, a11y_settings, desktop_environment);
+        if (interface_settings != nullptr) {
+            g_object_unref(interface_settings);
+        }
+        if (a11y_settings != nullptr) {
+            g_object_unref(a11y_settings);
+        }
+    } else {
+        preferences = fallback_linux_preferences();
     }
 
-    GSettings* interface_settings = create_settings_for_schema("org.gnome.desktop.interface");
-    GSettings* a11y_settings = create_settings_for_schema("org.gnome.desktop.a11y.interface");
-
-    auto preferences =
-        linux_preferences_from_gsettings(interface_settings, a11y_settings, desktop_environment);
-
-    if (interface_settings != nullptr) {
-        g_object_unref(interface_settings);
-    }
-    if (a11y_settings != nullptr) {
-        g_object_unref(a11y_settings);
+    // Prefer portal values for color-scheme, contrast, and accent-color. Portal is desktop-agnostic
+    // and reflects the desktop's declared cross-toolkit intent, while GSettings is GNOME-specific.
+    if (GDBusConnection* portal = portal_session_bus_connection(); portal != nullptr) {
+        if (session_bus_name_has_owner(portal, PortalBusName)) {
+            apply_portal_appearance_overrides(preferences, portal);
+        }
+        g_object_unref(portal);
     }
 
     return preferences;
 }
 
 SystemPreferences observed_linux_preferences(const WaylandBackend::Impl& impl) {
-    return linux_preferences_from_gsettings(
-        impl.interface_settings, impl.a11y_interface_settings, detect_linux_desktop_environment());
+    // Always re-run the full query so portal overlays are applied consistently; `impl` keeps the
+    // live GSettings handles alive for the duration of observation, so the GSettings reads are
+    // still cheap. The portal Read calls add a couple of sub-millisecond D-Bus roundtrips, which
+    // is negligible at the cadence of system-preference changes.
+    (void)impl;
+    return query_linux_preferences();
+}
+
+// Forward declarations — defined later alongside the subtree dispatch vtable.
+void atspi_method_call(GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*,
+                       GVariant*, GDBusMethodInvocation*, gpointer);
+GVariant* atspi_get_property(GDBusConnection*, const gchar*, const gchar*, const gchar*,
+                             const gchar*, GError**, gpointer);
+AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl);
+
+// Returns a thread-safe copy of the cached accessibility snapshot. Built on the main thread via
+// refresh_accessibility_snapshot; the a11y worker reads it via this helper under the mutex. The
+// widget tree is not thread-safe, so the worker MUST NOT call build_atspi_snapshot_state itself.
+AtspiSnapshotState copy_cached_accessibility_snapshot(WaylandBackend::Impl* impl) {
+    std::lock_guard lock(impl->accessibility_mutex);
+    return impl->cached_accessibility_snapshot;
+}
+
+// Registers explicit GDBus object handlers at `object_path` for all three AT-SPI interfaces we
+// advertise on window/widget nodes. Returns the registration IDs so they can be unregistered on
+// teardown or snapshot diff. Must run on the thread that owns `connection`.
+std::vector<guint> register_atspi_object_at(GDBusConnection* connection,
+                                            const std::string& object_path,
+                                            WaylandBackend::Impl* impl) {
+    if (g_variant_is_object_path(object_path.c_str()) == 0) {
+        return {};
+    }
+    static const GDBusInterfaceVTable vtable = {
+        .method_call = atspi_method_call,
+        .get_property = atspi_get_property,
+        .set_property = nullptr,
+        .padding = {},
+    };
+    std::vector<guint> ids;
+    static constexpr const char* kInterfaces[] = {
+        AtspiAccessibleInterface,
+        AtspiApplicationInterface,
+        AtspiComponentInterface,
+        AtspiActionInterface,
+        AtspiTextInterface,
+    };
+    for (const char* iface : kInterfaces) {
+        GDBusInterfaceInfo* info = lookup_atspi_interface_info(iface);
+        if (info == nullptr) {
+            continue;
+        }
+        GError* error = nullptr;
+        const guint id = g_dbus_connection_register_object(
+            connection, object_path.c_str(), info, &vtable, impl, nullptr, &error);
+        if (id == 0U) {
+            if (error != nullptr) {
+                NK_LOG_ERROR("WaylandA11y", error->message);
+                g_error_free(error);
+            }
+            continue;
+        }
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+// Ensures that every node currently present in the snapshot has an explicit GDBus object
+// registration. Called from the a11y thread (directly or via g_main_context_invoke) whenever
+// the widget tree may have changed. Paths that dropped out of the snapshot are unregistered.
+void sync_accessibility_objects(WaylandBackend::Impl* impl) {
+    if (impl->accessibility_connection == nullptr) {
+        return;
+    }
+    const auto snapshot = copy_cached_accessibility_snapshot(impl);
+
+    std::unordered_set<std::string> live_paths;
+    if (!snapshot.application.object_path.empty()) {
+        live_paths.insert(snapshot.application.object_path);
+    }
+    for (const auto& node : snapshot.nodes) {
+        if (!node.object_path.empty()) {
+            live_paths.insert(node.object_path);
+        }
+    }
+
+    // Unregister paths no longer present.
+    for (auto it = impl->accessibility_objects_by_path.begin();
+         it != impl->accessibility_objects_by_path.end();) {
+        if (!live_paths.contains(it->first)) {
+            for (const guint id : it->second) {
+                g_dbus_connection_unregister_object(impl->accessibility_connection, id);
+            }
+            it = impl->accessibility_objects_by_path.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Register new paths.
+    for (const auto& path : live_paths) {
+        if (impl->accessibility_objects_by_path.contains(path)) {
+            continue;
+        }
+        impl->accessibility_objects_by_path[path] =
+            register_atspi_object_at(impl->accessibility_connection, path, impl);
+    }
+}
+
+// Trampoline for g_main_context_invoke. Calls sync_accessibility_objects on the a11y thread.
+gboolean sync_accessibility_objects_trampoline(gpointer user_data) {
+    sync_accessibility_objects(static_cast<WaylandBackend::Impl*>(user_data));
+    return G_SOURCE_REMOVE;
 }
 
 void emit_linux_system_preferences_change(WaylandBackend::Impl& impl) {
@@ -582,6 +891,29 @@ void on_a11y_setting_changed(GSettings* /*settings*/, gchar* /*key*/, gpointer u
     emit_linux_system_preferences_change(*static_cast<WaylandBackend::Impl*>(user_data));
 }
 
+void on_portal_setting_changed(GDBusConnection* /*connection*/,
+                               const gchar* /*sender_name*/,
+                               const gchar* /*object_path*/,
+                               const gchar* /*interface_name*/,
+                               const gchar* /*signal_name*/,
+                               GVariant* parameters,
+                               gpointer user_data) {
+    const gchar* namespace_name = nullptr;
+    const gchar* key = nullptr;
+    GVariant* value = nullptr;
+    g_variant_get(parameters, "(&s&sv)", &namespace_name, &key, &value);
+    // Only re-emit for namespaces we actually observe; the portal's SettingChanged signal is a
+    // broadcast and fires for any key that changed (including ones unrelated to appearance).
+    const bool appearance = namespace_name != nullptr &&
+                            std::strcmp(namespace_name, PortalAppearanceNamespace) == 0;
+    if (value != nullptr) {
+        g_variant_unref(value);
+    }
+    if (appearance) {
+        emit_linux_system_preferences_change(*static_cast<WaylandBackend::Impl*>(user_data));
+    }
+}
+
 gboolean quit_system_preferences_loop(gpointer user_data) {
     g_main_loop_quit(static_cast<GMainLoop*>(user_data));
     return G_SOURCE_REMOVE;
@@ -589,7 +921,8 @@ gboolean quit_system_preferences_loop(gpointer user_data) {
 
 AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl) {
     AtspiSnapshotState snapshot;
-    snapshot.application.object_path = AtspiObjectRootPath;
+    snapshot.application.object_path = AtspiApplicationRootPath;
+    snapshot.application.object_name = AtspiApplicationRootName;
     snapshot.application.parent_path = "/";
     snapshot.application.role_name = "application";
     snapshot.application.name = "NodalKit";
@@ -615,7 +948,7 @@ AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl) 
         }
 
         auto window_snapshot =
-            build_atspi_window_snapshot(AtspiObjectRootPath,
+            build_atspi_window_snapshot(AtspiApplicationRootPath,
                                         "window" + std::to_string(window_index++),
                                         title,
                                         {0.0F, 0.0F, size.width, size.height},
@@ -641,7 +974,16 @@ const AtspiAccessibleNode* find_atspi_node(const AtspiSnapshotState& snapshot,
     if (object_path == snapshot.application.object_path) {
         return &snapshot.application;
     }
-    return find_atspi_accessible_node({snapshot.nodes}, object_path);
+    // NOTE: do NOT construct a temporary AtspiAccessibleSnapshot here — the previous version
+    // passed `{snapshot.nodes}` which created a brace-initialized temporary; the returned
+    // pointer dangled as soon as this function returned, and dereferencing it from a11y method
+    // handlers produced garbage (and crashes on `GetChildren` with non-empty child_paths).
+    for (const auto& node : snapshot.nodes) {
+        if (node.object_path == object_path) {
+            return &node;
+        }
+    }
+    return nullptr;
 }
 
 Widget* resolve_widget_by_tree_path(Window& window, std::span<const std::size_t> tree_path) {
@@ -676,7 +1018,7 @@ Widget* find_live_atspi_widget(WaylandBackend::Impl& impl, std::string_view obje
             title = "Window";
         }
         const auto size = surface->size();
-        const auto snapshot = build_atspi_window_snapshot(AtspiObjectRootPath,
+        const auto snapshot = build_atspi_window_snapshot(AtspiApplicationRootPath,
                                                           "window" + std::to_string(window_index++),
                                                           title,
                                                           {0.0F, 0.0F, size.width, size.height},
@@ -704,10 +1046,21 @@ gchar** atspi_subtree_enumerate(GDBusConnection* /*connection*/,
         return g_new0(gchar*, 1);
     }
 
-    const auto snapshot = build_atspi_snapshot_state(*impl);
-    gchar** children = g_new0(gchar*, snapshot.nodes.size() + 1);
+    const auto snapshot = copy_cached_accessibility_snapshot(impl);
+    // GDBus expects the names of direct children of the subtree root. The application node is
+    // at "/root" under the subtree; the per-widget nodes live deeper, so they would not normally
+    // be enumerated as direct children. We return the flat list (including the application and
+    // all descendants) because the subtree is registered with G_DBUS_SUBTREE_FLAGS_NONE — any
+    // path that isn't enumerated + introspected is rejected, and AT-SPI clients walk from `root`
+    // deeper via object paths obtained from GetChildren responses. Enumerating everything flat
+    // is a pragmatic way to keep GDBus from filtering out legitimate traversals.
+    gchar** children = g_new0(gchar*, snapshot.nodes.size() + 2);
+    std::size_t out = 0;
+    if (!snapshot.application.object_name.empty()) {
+        children[out++] = g_strdup(snapshot.application.object_name.c_str());
+    }
     for (std::size_t index = 0; index < snapshot.nodes.size(); ++index) {
-        children[index] = g_strdup(snapshot.nodes[index].object_name.c_str());
+        children[out++] = g_strdup(snapshot.nodes[index].object_name.c_str());
     }
     return children;
 }
@@ -718,7 +1071,7 @@ GDBusInterfaceInfo** atspi_subtree_introspect(GDBusConnection* /*connection*/,
                                               const gchar* node,
                                               gpointer user_data) {
     auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
-    const auto snapshot = build_atspi_snapshot_state(*impl);
+    const auto snapshot = copy_cached_accessibility_snapshot(impl);
     if (find_atspi_node(snapshot, subtree_lookup_path(object_path, node)) == nullptr) {
         return nullptr;
     }
@@ -749,7 +1102,7 @@ void atspi_method_call(GDBusConnection* connection,
                        GDBusMethodInvocation* invocation,
                        gpointer user_data) {
     auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
-    const auto snapshot = build_atspi_snapshot_state(*impl);
+    const auto snapshot = copy_cached_accessibility_snapshot(impl);
     const auto* node = find_atspi_node(snapshot, object_path);
     if (node == nullptr) {
         g_dbus_method_invocation_return_dbus_error(
@@ -783,6 +1136,10 @@ void atspi_method_call(GDBusConnection* connection,
             g_variant_builder_init(&builder, G_VARIANT_TYPE("a(so)"));
             const char* bus_name = g_dbus_connection_get_unique_name(connection);
             for (const auto& child_path : node->child_paths) {
+                // `g_variant_new("(so)", ...)` aborts the process on invalid object paths.
+                if (g_variant_is_object_path(child_path.c_str()) == 0) {
+                    continue;
+                }
                 g_variant_builder_add(&builder, "(so)", bus_name, child_path.c_str());
             }
             g_dbus_method_invocation_return_value(invocation, g_variant_new("(a(so))", &builder));
@@ -876,7 +1233,7 @@ GVariant* atspi_get_property(GDBusConnection* /*connection*/,
                              GError** error,
                              gpointer user_data) {
     auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
-    const auto snapshot = build_atspi_snapshot_state(*impl);
+    const auto snapshot = copy_cached_accessibility_snapshot(impl);
     const auto* node = find_atspi_node(snapshot, object_path);
     if (node == nullptr) {
         g_set_error(error,
@@ -887,12 +1244,18 @@ GVariant* atspi_get_property(GDBusConnection* /*connection*/,
         return nullptr;
     }
 
+    auto safe_utf8_variant = [](const std::string& value) -> GVariant* {
+        if (g_utf8_validate(value.c_str(), static_cast<gssize>(value.size()), nullptr) == 0) {
+            return g_variant_new_string("");
+        }
+        return g_variant_new_string(value.c_str());
+    };
     if (std::string_view(interface_name) == AtspiAccessibleInterface) {
         if (std::string_view(property_name) == "Name") {
-            return g_variant_new_string(node->name.c_str());
+            return safe_utf8_variant(node->name);
         }
         if (std::string_view(property_name) == "Description") {
-            return g_variant_new_string(node->description.c_str());
+            return safe_utf8_variant(node->description);
         }
         if (std::string_view(property_name) == "Parent") {
             return g_variant_new_object_path(node->parent_path.empty() ? "/"
@@ -962,8 +1325,11 @@ static void registry_global(void* data,
     auto* impl = static_cast<WaylandBackend::Impl*>(data);
 
     if (std::strcmp(interface, wl_compositor_interface.name) == 0) {
+        // wl_compositor v6 enables wl_surface.preferred_buffer_scale / preferred_buffer_transform
+        // events, which lets the compositor hint the ideal buffer scale even before the surface
+        // enters any output. We still work on v4 compositors via the older enter/leave path.
         impl->compositor = static_cast<wl_compositor*>(
-            wl_registry_bind(registry, name, &wl_compositor_interface, std::min(version, 4u)));
+            wl_registry_bind(registry, name, &wl_compositor_interface, std::min(version, 6u)));
     } else if (std::strcmp(interface, wl_shm_interface.name) == 0) {
         impl->shm = static_cast<wl_shm*>(
             wl_registry_bind(registry, name, &wl_shm_interface, std::min(version, 1u)));
@@ -987,6 +1353,17 @@ static void registry_global(void* data,
                              name,
                              &zwp_primary_selection_device_manager_v1_interface,
                              std::min(version, 1u)));
+    } else if (std::strcmp(interface, wp_cursor_shape_manager_v1_interface.name) == 0) {
+        impl->cursor_shape_manager = static_cast<wp_cursor_shape_manager_v1*>(wl_registry_bind(
+            registry, name, &wp_cursor_shape_manager_v1_interface, std::min(version, 1u)));
+        NK_LOG_INFO("Wayland", "Bound wp_cursor_shape_manager_v1");
+    } else if (std::strcmp(interface, wl_output_interface.name) == 0) {
+        // wl_output version 2 adds the `scale` event (the one we need); 3 adds release, 4 adds
+        // name/description. We bind at up to 4 but gracefully handle older compositors.
+        auto* output = static_cast<wl_output*>(
+            wl_registry_bind(registry, name, &wl_output_interface, std::min(version, 4u)));
+        impl->output_scales[output] = 1;
+        wl_output_add_listener(output, &output_listener, impl);
     }
 }
 
@@ -1039,49 +1416,131 @@ Result<void> WaylandBackend::initialize() {
         wl_display_roundtrip(impl_->display);
     }
 
-    impl_->accessibility_connection = atspi_bus_connection();
-    if (impl_->accessibility_connection != nullptr) {
-        GError* error = nullptr;
-        impl_->accessibility_subtree_id =
-            g_dbus_connection_register_subtree(impl_->accessibility_connection,
-                                               AtspiObjectRootPath,
-                                               &atspi_subtree_vtable,
-                                               G_DBUS_SUBTREE_FLAGS_NONE,
-                                               impl_.get(),
-                                               nullptr,
-                                               &error);
-        if (impl_->accessibility_subtree_id == 0U) {
-            if (error != nullptr) {
-                NK_LOG_ERROR("WaylandA11y", error->message);
-                g_error_free(error);
-            }
-            g_object_unref(impl_->accessibility_connection);
-            impl_->accessibility_connection = nullptr;
-        } else {
-            NK_LOG_INFO("WaylandA11y",
-                        "Registered initial AT-SPI accessibility subtree on the accessibility bus");
-        }
-    }
+    start_accessibility_thread();
 
     NK_LOG_INFO("Wayland", "Connected to Wayland display");
     return {};
 }
 
+void WaylandBackend::start_accessibility_thread() {
+    {
+        std::lock_guard lock(impl_->accessibility_mutex);
+        impl_->accessibility_stop_requested = false;
+    }
+    impl_->accessibility_thread = std::thread([impl = impl_.get()] {
+        // Own GMainContext + thread-default so the a11y GDBusConnection dispatches all incoming
+        // method calls (Accessible.GetRoleName, etc.) on this thread's mainloop. Without the
+        // pushed thread-default, GDBus attaches the connection to the global NULL context, and
+        // because the main thread never runs a GMainLoop, callbacks queue up but never fire.
+        GMainContext* context = g_main_context_new();
+        g_main_context_push_thread_default(context);
+        GMainLoop* loop = g_main_loop_new(context, FALSE);
+
+        GDBusConnection* connection = atspi_bus_connection();
+        guint subtree_id = 0;
+        if (connection != nullptr) {
+            GError* error = nullptr;
+            // Register the subtree at /org/a11y/atspi/accessible. Uses DISPATCH_TO_UNENUMERATED_NODES
+            // so deeper widget paths (e.g. /accessible/root/window0/0_0) reach the dispatch handler
+            // even though our enumerate function couldn't represent them as single-segment names.
+            // Registration is done on this thread so messages dispatch on its GMainContext — GDBus
+            // binds the subtree to whatever thread-default context is current at registration time.
+            subtree_id = g_dbus_connection_register_subtree(
+                connection,
+                AtspiObjectRootPath,
+                &atspi_subtree_vtable,
+                G_DBUS_SUBTREE_FLAGS_DISPATCH_TO_UNENUMERATED_NODES,
+                impl,
+                nullptr,
+                &error);
+            if (subtree_id == 0U) {
+                if (error != nullptr) {
+                    NK_LOG_ERROR("WaylandA11y", error->message);
+                    g_error_free(error);
+                }
+                g_object_unref(connection);
+                connection = nullptr;
+            } else {
+                NK_LOG_INFO(
+                    "WaylandA11y",
+                    "Registered AT-SPI accessibility subtree on the accessibility bus thread");
+            }
+
+        }
+
+        bool stop_requested = false;
+        {
+            std::lock_guard lock(impl->accessibility_mutex);
+            impl->accessibility_context = context;
+            impl->accessibility_loop = loop;
+            impl->accessibility_connection = connection;
+            impl->accessibility_subtree_id = subtree_id;
+            stop_requested = impl->accessibility_stop_requested;
+        }
+
+        if (!stop_requested && connection != nullptr) {
+            // Register the application root and any surfaces that already exist.
+            sync_accessibility_objects(impl);
+            g_main_loop_run(loop);
+        }
+
+        // Teardown on this thread: unregister subtree and drop the connection so the final
+        // unref happens on the same context that owns the GDBusConnection worker.
+        if (connection != nullptr) {
+            for (auto& [path, ids] : impl->accessibility_objects_by_path) {
+                for (const guint id : ids) {
+                    g_dbus_connection_unregister_object(connection, id);
+                }
+            }
+        }
+        impl->accessibility_objects_by_path.clear();
+        if (connection != nullptr && subtree_id != 0U) {
+            g_dbus_connection_unregister_subtree(connection, subtree_id);
+        }
+        if (connection != nullptr) {
+            g_object_unref(connection);
+        }
+
+        g_main_context_pop_thread_default(context);
+
+        {
+            std::lock_guard lock(impl->accessibility_mutex);
+            impl->accessibility_connection = nullptr;
+            impl->accessibility_subtree_id = 0;
+            impl->accessibility_loop = nullptr;
+            impl->accessibility_context = nullptr;
+        }
+
+        g_main_loop_unref(loop);
+        g_main_context_unref(context);
+    });
+}
+
+void WaylandBackend::stop_accessibility_thread() {
+    GMainContext* context = nullptr;
+    GMainLoop* loop = nullptr;
+    {
+        std::lock_guard lock(impl_->accessibility_mutex);
+        impl_->accessibility_stop_requested = true;
+        context = impl_->accessibility_context;
+        loop = impl_->accessibility_loop;
+    }
+
+    if (context != nullptr && loop != nullptr) {
+        g_main_context_invoke(context, quit_system_preferences_loop, loop);
+    }
+
+    if (impl_->accessibility_thread.joinable()) {
+        impl_->accessibility_thread.join();
+    }
+}
+
 void WaylandBackend::shutdown() {
+    stop_accessibility_thread();
     stop_system_preferences_observation();
     impl_->input.reset();
     impl_->clipboard_text_cache.clear();
     impl_->primary_selection_text_cache.clear();
-
-    if (impl_->accessibility_connection != nullptr) {
-        if (impl_->accessibility_subtree_id != 0U) {
-            g_dbus_connection_unregister_subtree(impl_->accessibility_connection,
-                                                 impl_->accessibility_subtree_id);
-            impl_->accessibility_subtree_id = 0;
-        }
-        g_object_unref(impl_->accessibility_connection);
-        impl_->accessibility_connection = nullptr;
-    }
 
     if (impl_->wake_fd >= 0) {
         close(impl_->wake_fd);
@@ -1103,6 +1562,23 @@ void WaylandBackend::shutdown() {
         zwp_primary_selection_device_manager_v1_destroy(impl_->primary_selection_manager);
         impl_->primary_selection_manager = nullptr;
     }
+    if (impl_->cursor_shape_manager) {
+        wp_cursor_shape_manager_v1_destroy(impl_->cursor_shape_manager);
+        impl_->cursor_shape_manager = nullptr;
+    }
+    for (auto& [output, scale] : impl_->output_scales) {
+        if (output != nullptr) {
+            const uint32_t output_version = wl_proxy_get_version(
+                reinterpret_cast<wl_proxy*>(output));
+            if (output_version >= 3u) {
+                wl_output_release(output);
+            } else {
+                wl_output_destroy(output);
+            }
+        }
+    }
+    impl_->output_scales.clear();
+    impl_->pending_output_scales.clear();
     if (impl_->text_input_manager) {
         zwp_text_input_manager_v3_destroy(impl_->text_input_manager);
         impl_->text_input_manager = nullptr;
@@ -1354,8 +1830,19 @@ SystemPreferences WaylandBackend::system_preferences() const {
 }
 
 bool WaylandBackend::supports_system_preferences_observation() const {
-    return detect_linux_desktop_environment() == DesktopEnvironment::Gnome &&
-           has_gsettings_schema("org.gnome.desktop.interface");
+    // GSettings-backed observation is GNOME-only; portal Settings observation works on any
+    // compositor that exposes xdg-desktop-portal. Either source is enough for live updates.
+    if (detect_linux_desktop_environment() == DesktopEnvironment::Gnome &&
+        has_gsettings_schema("org.gnome.desktop.interface")) {
+        return true;
+    }
+    GDBusConnection* connection = portal_session_bus_connection();
+    if (connection == nullptr) {
+        return false;
+    }
+    const bool portal_available = session_bus_name_has_owner(connection, PortalBusName);
+    g_object_unref(connection);
+    return portal_available;
 }
 
 void WaylandBackend::start_system_preferences_observation(SystemPreferencesObserver observer) {
@@ -1376,6 +1863,31 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
         GMainLoop* loop = g_main_loop_new(context, FALSE);
         GSettings* interface_settings = create_settings_for_schema("org.gnome.desktop.interface");
         GSettings* a11y_settings = create_settings_for_schema("org.gnome.desktop.a11y.interface");
+
+        // Per-thread portal connection so the SettingChanged signal dispatches to THIS thread's
+        // GMainContext. portal_session_bus_connection() uses g_bus_get_sync() which returns the
+        // shared session bus; the subscription's callbacks run on whatever context is default for
+        // the calling thread at subscribe time (which is why we push the thread-default above).
+        GDBusConnection* portal_connection = portal_session_bus_connection();
+        guint portal_subscription = 0;
+        if (portal_connection != nullptr) {
+            if (session_bus_name_has_owner(portal_connection, PortalBusName)) {
+                portal_subscription =
+                    g_dbus_connection_signal_subscribe(portal_connection,
+                                                       PortalBusName,
+                                                       PortalSettingsInterface,
+                                                       "SettingChanged",
+                                                       PortalObjectPath,
+                                                       nullptr,
+                                                       G_DBUS_SIGNAL_FLAGS_NONE,
+                                                       on_portal_setting_changed,
+                                                       impl,
+                                                       nullptr);
+            } else {
+                g_object_unref(portal_connection);
+                portal_connection = nullptr;
+            }
+        }
 
         {
             std::lock_guard lock(impl->system_preferences_mutex);
@@ -1399,10 +1911,18 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
             stop_requested = impl->system_preferences_stop_requested;
         }
 
-        if (!stop_requested && (interface_settings != nullptr || a11y_settings != nullptr)) {
+        const bool any_source = (interface_settings != nullptr || a11y_settings != nullptr ||
+                                 portal_subscription != 0);
+        if (!stop_requested && any_source) {
             g_main_loop_run(loop);
         }
 
+        if (portal_subscription != 0 && portal_connection != nullptr) {
+            g_dbus_connection_signal_unsubscribe(portal_connection, portal_subscription);
+        }
+        if (portal_connection != nullptr) {
+            g_object_unref(portal_connection);
+        }
         if (interface_settings != nullptr) {
             g_signal_handlers_disconnect_by_data(interface_settings, impl);
             g_object_unref(interface_settings);
@@ -1480,12 +2000,42 @@ zwp_primary_selection_device_manager_v1* WaylandBackend::primary_selection_manag
     return impl_->primary_selection_manager;
 }
 
+wp_cursor_shape_manager_v1* WaylandBackend::cursor_shape_manager() const {
+    return impl_->cursor_shape_manager;
+}
+
+WaylandInput* WaylandBackend::input() const {
+    return impl_->input.get();
+}
+
+int WaylandBackend::output_scale(wl_output* output) const {
+    const auto it = impl_->output_scales.find(output);
+    return (it != impl_->output_scales.end()) ? std::max(1, it->second) : 1;
+}
+
 void WaylandBackend::register_surface(wl_surface* wl_surf, WaylandSurface* surface) {
     impl_->surfaces[wl_surf] = surface;
+    schedule_accessibility_sync();
 }
 
 void WaylandBackend::unregister_surface(wl_surface* wl_surf) {
     impl_->surfaces.erase(wl_surf);
+    schedule_accessibility_sync();
+}
+
+void WaylandBackend::schedule_accessibility_sync() {
+    // Build the snapshot here (main thread) because widgets aren't thread-safe. Then hand the
+    // immutable copy to the a11y worker via the cache, and ask it to re-register objects.
+    auto snapshot = build_atspi_snapshot_state(*impl_);
+    GMainContext* context = nullptr;
+    {
+        std::lock_guard lock(impl_->accessibility_mutex);
+        impl_->cached_accessibility_snapshot = std::move(snapshot);
+        context = impl_->accessibility_context;
+    }
+    if (context != nullptr) {
+        g_main_context_invoke(context, sync_accessibility_objects_trampoline, impl_.get());
+    }
 }
 
 WaylandSurface* WaylandBackend::find_surface(wl_surface* wl_surf) const {
