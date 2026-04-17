@@ -122,6 +122,9 @@ std::optional<FrameRequestReason> parse_frame_request_reason_name(std::string_vi
     if (value == "debug-picker") {
         return FrameRequestReason::PickerChanged;
     }
+    if (value == "system-preferences") {
+        return FrameRequestReason::SystemPreferencesChanged;
+    }
     return std::nullopt;
 }
 
@@ -3290,6 +3293,8 @@ std::string_view frame_request_reason_name(FrameRequestReason reason) noexcept {
         return "debug-selection";
     case FrameRequestReason::PickerChanged:
         return "debug-picker";
+    case FrameRequestReason::SystemPreferencesChanged:
+        return "system-preferences";
     }
     return "unknown";
 }

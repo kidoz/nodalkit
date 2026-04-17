@@ -82,6 +82,7 @@ struct Window::Impl {
     Signal<> close_requested;
     Signal<int, int> resize_signal;
     Signal<float> scale_factor_signal;
+    ScopedConnection system_preferences_subscription;
 };
 
 namespace {
@@ -592,6 +593,8 @@ std::string_view accessible_role_name(AccessibleRole role) {
         return "slider";
     case AccessibleRole::SpinButton:
         return "spinbutton";
+    case AccessibleRole::Status:
+        return "status";
     case AccessibleRole::Tab:
         return "tab";
     case AccessibleRole::TabList:
@@ -1658,6 +1661,18 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
     impl_->text_shaper = TextShaper::create();
     if (impl_->renderer != nullptr && impl_->text_shaper) {
         impl_->renderer->set_text_shaper(impl_->text_shaper.get());
+    }
+    if (auto* app = Application::instance(); app != nullptr) {
+        // System preferences (color-scheme, contrast, motion, accent color, text scale) can change
+        // at any time. The Application already re-resolves Theme::active() before emitting this
+        // signal; the Window's job is to force a layout pass (text scale may shift metrics) and a
+        // full redraw so every widget reads from the new theme.
+        impl_->system_preferences_subscription =
+            ScopedConnection(app->on_system_preferences_changed().connect(
+                [this](const SystemPreferences& /*prefs*/) {
+                    impl_->needs_layout = true;
+                    request_frame(FrameRequestReason::SystemPreferencesChanged);
+                }));
     }
     NK_LOG_DEBUG("Window", "Window created");
 }

@@ -65,6 +65,7 @@ enum class FrameRequestReason : uint8_t {
     DebugOverlayChanged,
     DebugSelectionChanged,
     PickerChanged,
+    SystemPreferencesChanged,
 };
 
 enum class GpuPresentPath : uint8_t {
