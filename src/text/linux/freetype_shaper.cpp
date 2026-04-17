@@ -12,8 +12,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <list>
 #include <unordered_map>
+#include <vector>
 
 namespace nk {
 
@@ -92,6 +94,68 @@ struct MeasureCacheKeyHash {
 };
 
 constexpr std::size_t kMeasureCacheMaxEntries = 512;
+
+// ---------------------------------------------------------------------------
+// Unicode helpers
+// ---------------------------------------------------------------------------
+
+// Minimal UTF-8 decoder. Advances `cursor` past one codepoint and returns it (or U+FFFD on bad
+// input). Suitable for iterating a UTF-8 string without pulling in a dedicated ICU/libunibreak
+// dependency; the real shaping pass still goes through HarfBuzz which handles malformed runs.
+uint32_t decode_utf8_codepoint(std::string_view text, std::size_t& cursor) {
+    if (cursor >= text.size()) {
+        return 0U;
+    }
+    const auto b0 = static_cast<unsigned char>(text[cursor]);
+    if (b0 < 0x80U) {
+        ++cursor;
+        return b0;
+    }
+    unsigned int extra = 0;
+    uint32_t cp = 0;
+    if ((b0 & 0xE0U) == 0xC0U) { cp = b0 & 0x1FU; extra = 1; }
+    else if ((b0 & 0xF0U) == 0xE0U) { cp = b0 & 0x0FU; extra = 2; }
+    else if ((b0 & 0xF8U) == 0xF0U) { cp = b0 & 0x07U; extra = 3; }
+    else { ++cursor; return 0xFFFDU; }
+
+    if (cursor + 1U + extra > text.size()) {
+        cursor = text.size();
+        return 0xFFFDU;
+    }
+    for (unsigned int i = 1U; i <= extra; ++i) {
+        const auto bi = static_cast<unsigned char>(text[cursor + i]);
+        if ((bi & 0xC0U) != 0x80U) {
+            ++cursor;
+            return 0xFFFDU;
+        }
+        cp = (cp << 6U) | (bi & 0x3FU);
+    }
+    cursor += 1U + extra;
+    return cp;
+}
+
+// Returns true when `face` has a glyph for every non-whitespace codepoint in `text`. Whitespace
+// is excluded because any sensible font covers it, and renderers fall back to pen advance on
+// missing spaces — so including spaces in the coverage check would force fallbacks for trivia.
+bool face_covers_codepoints(FT_Face face, std::string_view text) {
+    if (face == nullptr) {
+        return false;
+    }
+    std::size_t cursor = 0;
+    while (cursor < text.size()) {
+        const uint32_t cp = decode_utf8_codepoint(text, cursor);
+        if (cp == 0U || cp == 0xFFFDU) {
+            continue;
+        }
+        if (cp == 0x20U || cp == 0x09U || cp == 0x0AU || cp == 0x0DU) {
+            continue;
+        }
+        if (FT_Get_Char_Index(face, cp) == 0U) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Text run helpers
@@ -262,6 +326,32 @@ struct FreeTypeShaper::Impl {
         return inserted->second;
     }
 
+    // Resolves a face that can render `text` given `desc` as the preferred style. If the primary
+    // family's face covers every non-whitespace codepoint in the text, returns that face.
+    // Otherwise queries fontconfig for a face matching the text's charset with the same
+    // weight/slant as `desc`, so non-Latin strings render with real glyphs instead of .notdef
+    // boxes. Runs through the face cache for both candidates.
+    FaceCacheEntry* resolve_face_for_text(FontDescriptor const& desc, std::string_view text) {
+        auto const& primary_path = resolve_font_path(desc);
+        if (primary_path.empty()) {
+            return nullptr;
+        }
+        auto* primary = get_face(primary_path, desc);
+        if (primary == nullptr || text.empty() || face_covers_codepoints(primary->face, text)) {
+            return primary;
+        }
+
+        std::string const& fallback_path = resolve_fallback_font_path(desc, text);
+        if (fallback_path.empty() || fallback_path == primary_path) {
+            return primary;
+        }
+        auto* fallback = get_face(fallback_path, desc);
+        if (fallback == nullptr || !face_covers_codepoints(fallback->face, text)) {
+            return primary;
+        }
+        return fallback;
+    }
+
     FaceCacheEntry* get_face(std::string const& path, FontDescriptor const& font) {
         auto const px = static_cast<unsigned int>(
             std::round(static_cast<double>(font.size) * 96.0 / 72.0));
@@ -335,7 +425,129 @@ struct FreeTypeShaper::Impl {
         measure_map[measure_lru.front().first] = measure_lru.begin();
     }
 
+    // Look up a font that covers a specific codepoint set. Keyed by the (weight, style) pair and
+    // the sorted set of covered codepoints so repeated calls for the same text don't hammer
+    // fontconfig. Falls back to the primary font path when fontconfig can't find a cover.
+    std::string const& resolve_fallback_font_path(FontDescriptor const& desc,
+                                                   std::string_view text) {
+        FallbackKey key{desc.weight, desc.style, codepoint_fingerprint(text)};
+        auto it = fallback_path_cache.find(key);
+        if (it != fallback_path_cache.end()) {
+            return it->second;
+        }
+        std::string path = lookup_fallback_font_path(desc, text);
+        auto [inserted, _] = fallback_path_cache.emplace(std::move(key), std::move(path));
+        return inserted->second;
+    }
+
 private:
+    // Compact, order-independent fingerprint of a text's codepoint coverage: sorted unique list
+    // of codepoints joined with commas. Good enough for caching; collisions across texts with
+    // the same coverage share the same fallback which is what we want anyway.
+    static std::string codepoint_fingerprint(std::string_view text) {
+        std::vector<uint32_t> codepoints;
+        codepoints.reserve(text.size());
+        std::size_t cursor = 0;
+        while (cursor < text.size()) {
+            const uint32_t cp = decode_utf8_codepoint(text, cursor);
+            if (cp == 0U || cp == 0xFFFDU || cp < 0x80U) {
+                continue;  // ASCII is always covered; ignore to collapse common cases
+            }
+            codepoints.push_back(cp);
+        }
+        std::sort(codepoints.begin(), codepoints.end());
+        codepoints.erase(std::unique(codepoints.begin(), codepoints.end()), codepoints.end());
+        std::string out;
+        out.reserve(codepoints.size() * 4);
+        for (const auto cp : codepoints) {
+            out.append(std::to_string(cp));
+            out.push_back(',');
+        }
+        return out;
+    }
+
+    struct FallbackKey {
+        FontWeight weight = FontWeight::Regular;
+        FontStyle style = FontStyle::Normal;
+        std::string fingerprint;
+        bool operator==(const FallbackKey&) const = default;
+    };
+
+    struct FallbackKeyHash {
+        std::size_t operator()(const FallbackKey& key) const noexcept {
+            std::size_t h = std::hash<std::string>{}(key.fingerprint);
+            h ^= std::hash<uint16_t>{}(static_cast<uint16_t>(key.weight)) + 0x9e3779b9 + (h << 6) +
+                 (h >> 2);
+            h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.style)) + 0x9e3779b9 + (h << 6) +
+                 (h >> 2);
+            return h;
+        }
+    };
+
+    std::unordered_map<FallbackKey, std::string, FallbackKeyHash> fallback_path_cache;
+
+    static std::string lookup_fallback_font_path(FontDescriptor const& desc,
+                                                  std::string_view text) {
+        FcCharSet* charset = FcCharSetCreate();
+        if (charset == nullptr) {
+            return {};
+        }
+        std::size_t cursor = 0;
+        while (cursor < text.size()) {
+            const uint32_t cp = decode_utf8_codepoint(text, cursor);
+            if (cp == 0U || cp == 0xFFFDU || cp == 0x20U || cp == 0x09U || cp == 0x0AU ||
+                cp == 0x0DU) {
+                continue;
+            }
+            FcCharSetAddChar(charset, cp);
+        }
+
+        FcPattern* pattern = FcPatternCreate();
+        if (pattern == nullptr) {
+            FcCharSetDestroy(charset);
+            return {};
+        }
+        FcPatternAddCharSet(pattern, FC_CHARSET, charset);
+        int fc_weight = FC_WEIGHT_REGULAR;
+        switch (desc.weight) {
+        case FontWeight::Thin:      fc_weight = FC_WEIGHT_THIN; break;
+        case FontWeight::Light:     fc_weight = FC_WEIGHT_LIGHT; break;
+        case FontWeight::Regular:   fc_weight = FC_WEIGHT_REGULAR; break;
+        case FontWeight::Medium:    fc_weight = FC_WEIGHT_MEDIUM; break;
+        case FontWeight::SemiBold:  fc_weight = FC_WEIGHT_SEMIBOLD; break;
+        case FontWeight::Bold:      fc_weight = FC_WEIGHT_BOLD; break;
+        case FontWeight::ExtraBold: fc_weight = FC_WEIGHT_EXTRABOLD; break;
+        case FontWeight::Black:     fc_weight = FC_WEIGHT_BLACK; break;
+        }
+        FcPatternAddInteger(pattern, FC_WEIGHT, fc_weight);
+
+        int fc_slant = FC_SLANT_ROMAN;
+        switch (desc.style) {
+        case FontStyle::Normal:  fc_slant = FC_SLANT_ROMAN; break;
+        case FontStyle::Italic:  fc_slant = FC_SLANT_ITALIC; break;
+        case FontStyle::Oblique: fc_slant = FC_SLANT_OBLIQUE; break;
+        }
+        FcPatternAddInteger(pattern, FC_SLANT, fc_slant);
+
+        FcConfigSubstitute(nullptr, pattern, FcMatchPattern);
+        FcDefaultSubstitute(pattern);
+        FcResult result = FcResultNoMatch;
+        FcPattern* match = FcFontMatch(nullptr, pattern, &result);
+
+        std::string path;
+        if (match != nullptr) {
+            FcChar8* file = nullptr;
+            if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file != nullptr) {
+                path = reinterpret_cast<char const*>(file);
+            }
+            FcPatternDestroy(match);
+        }
+
+        FcPatternDestroy(pattern);
+        FcCharSetDestroy(charset);
+        return path;
+    }
+
     static std::string lookup_font_path(FontPathKey const& key) {
         FcPattern* pattern = FcPatternCreate();
         if (pattern == nullptr) {
@@ -411,12 +623,7 @@ Size FreeTypeShaper::measure(std::string_view text,
         return *cached;
     }
 
-    auto const& path = impl_->resolve_font_path(font);
-    if (path.empty()) {
-        return {0, 0};
-    }
-
-    auto* entry = impl_->get_face(path, font);
+    auto* entry = impl_->resolve_face_for_text(font, text);
     if (entry == nullptr) {
         return {0, 0};
     }
@@ -457,13 +664,7 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
         return result;
     }
 
-    auto const& path = impl_->resolve_font_path(font);
-    if (path.empty()) {
-        NK_LOG_WARN("FreeType", "Could not resolve font path");
-        return result;
-    }
-
-    auto* entry = impl_->get_face(path, font);
+    auto* entry = impl_->resolve_face_for_text(font, text);
     if (entry == nullptr) {
         NK_LOG_WARN("FreeType", "Failed to load font face");
         return result;
@@ -545,6 +746,206 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
 
     hb_buffer_destroy(hb_buffer);
     result.set_bitmap(std::move(bitmap), bounds.width, bounds.height);
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Word wrapping
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Splits `text` into tokens at ASCII whitespace boundaries while preserving the whitespace with
+// the preceding token. Each token therefore carries its trailing space(s), which keeps inter-word
+// measurement faithful when we reassemble lines. Newlines force hard breaks: the token preceding
+// a '\n' ends the current line, and the newline itself is consumed (not included).
+std::vector<std::string> tokenize_for_wrap(std::string_view text) {
+    std::vector<std::string> tokens;
+    std::string current;
+    bool in_whitespace = false;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char ch = text[i];
+        if (ch == '\n') {
+            if (!current.empty()) {
+                tokens.push_back(std::move(current));
+                current.clear();
+            }
+            tokens.emplace_back("\n");
+            in_whitespace = false;
+            continue;
+        }
+        const bool is_ws = ch == ' ' || ch == '\t';
+        if (is_ws) {
+            if (!in_whitespace && !current.empty()) {
+                // Whitespace attaches to the preceding token, not a new one.
+            }
+            current.push_back(ch);
+            in_whitespace = true;
+        } else {
+            if (in_whitespace) {
+                tokens.push_back(std::move(current));
+                current.clear();
+                in_whitespace = false;
+            }
+            current.push_back(ch);
+        }
+    }
+    if (!current.empty()) {
+        tokens.push_back(std::move(current));
+    }
+    return tokens;
+}
+
+} // namespace
+
+Size FreeTypeShaper::measure_wrapped(std::string_view text,
+                                     FontDescriptor const& font,
+                                     float max_width) const {
+    if (text.empty() || max_width <= 0.0F) {
+        return measure(text, font);
+    }
+
+    const auto tokens = tokenize_for_wrap(text);
+    std::string line;
+    float max_line_width = 0.0F;
+    float total_height = 0.0F;
+    bool has_line_content = false;
+    auto flush_line = [&] {
+        if (line.empty() && !has_line_content) {
+            const auto empty_line_size = measure(" ", font);
+            total_height += empty_line_size.height;
+            return;
+        }
+        // Trim the trailing whitespace so the line width reflects visible content rather than the
+        // soft-break that let us flush here.
+        std::string trimmed = line;
+        while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
+            trimmed.pop_back();
+        }
+        const auto line_size = measure(trimmed.empty() ? std::string(" ") : trimmed, font);
+        max_line_width = std::max(max_line_width, line_size.width);
+        total_height += line_size.height;
+        line.clear();
+        has_line_content = false;
+    };
+
+    for (const auto& token : tokens) {
+        if (token == "\n") {
+            flush_line();
+            continue;
+        }
+        const std::string candidate = line + token;
+        const auto candidate_size = measure(candidate, font);
+        if (candidate_size.width <= max_width || !has_line_content) {
+            line = candidate;
+            has_line_content = true;
+        } else {
+            flush_line();
+            line = token;
+            has_line_content = true;
+        }
+    }
+    flush_line();
+
+    return {max_line_width, total_height};
+}
+
+ShapedText FreeTypeShaper::shape_wrapped(std::string_view text,
+                                         FontDescriptor const& font,
+                                         Color color,
+                                         float max_width) const {
+    if (text.empty() || max_width <= 0.0F) {
+        return shape(text, font, color);
+    }
+
+    // Build the same line decomposition as measure_wrapped so layout and rasterization agree.
+    const auto tokens = tokenize_for_wrap(text);
+    std::vector<std::string> lines;
+    std::string line;
+    bool has_line_content = false;
+    auto flush_line = [&] {
+        std::string trimmed = line;
+        while (!trimmed.empty() && (trimmed.back() == ' ' || trimmed.back() == '\t')) {
+            trimmed.pop_back();
+        }
+        lines.push_back(std::move(trimmed));
+        line.clear();
+        has_line_content = false;
+    };
+    for (const auto& token : tokens) {
+        if (token == "\n") {
+            flush_line();
+            continue;
+        }
+        const std::string candidate = line + token;
+        const auto candidate_size = measure(candidate, font);
+        if (candidate_size.width <= max_width || !has_line_content) {
+            line = candidate;
+            has_line_content = true;
+        } else {
+            flush_line();
+            line = token;
+            has_line_content = true;
+        }
+    }
+    if (!line.empty() || has_line_content) {
+        flush_line();
+    }
+
+    // Shape each line individually, then composite into one stacked bitmap. The per-line height
+    // and baseline come from the primary face's metrics via the first shape() result; subsequent
+    // lines are stacked at full ascent+descent offsets. This is a greedy "all lines share the same
+    // metrics" approach — acceptable for our label widget but not general-purpose typesetting.
+    std::vector<ShapedText> shaped_lines;
+    shaped_lines.reserve(lines.size());
+    float max_width_seen = 0.0F;
+    float total_height = 0.0F;
+    float first_baseline = 0.0F;
+    for (const auto& line_text : lines) {
+        ShapedText shaped = shape(line_text.empty() ? std::string(" ") : line_text, font, color);
+        const auto size = shaped.text_size();
+        max_width_seen = std::max(max_width_seen, size.width);
+        if (shaped_lines.empty()) {
+            first_baseline = shaped.baseline();
+        }
+        total_height += size.height;
+        shaped_lines.push_back(std::move(shaped));
+    }
+
+    ShapedText result;
+    result.set_text_size({max_width_seen, total_height});
+    result.set_baseline(first_baseline);
+
+    const auto total_width_px = static_cast<int>(std::ceil(max_width_seen));
+    const auto total_height_px = static_cast<int>(std::ceil(total_height));
+    if (total_width_px <= 0 || total_height_px <= 0) {
+        return result;
+    }
+
+    std::vector<uint8_t> bitmap(
+        static_cast<std::size_t>(total_width_px) * static_cast<std::size_t>(total_height_px) * 4U,
+        0U);
+    int cursor_y = 0;
+    for (const auto& shaped : shaped_lines) {
+        const auto* src = shaped.bitmap_data();
+        const int src_w = shaped.bitmap_width();
+        const int src_h = shaped.bitmap_height();
+        const int line_advance = static_cast<int>(std::ceil(shaped.text_size().height));
+        if (src != nullptr && src_w > 0 && src_h > 0) {
+            const int copy_w = std::min(src_w, total_width_px);
+            const int copy_h = std::min(src_h, total_height_px - cursor_y);
+            for (int y = 0; y < copy_h; ++y) {
+                const auto src_row = static_cast<std::size_t>(y * src_w) * 4U;
+                const auto dst_row =
+                    (static_cast<std::size_t>((cursor_y + y) * total_width_px)) * 4U;
+                std::memcpy(bitmap.data() + dst_row, src + src_row,
+                            static_cast<std::size_t>(copy_w) * 4U);
+            }
+        }
+        cursor_y += line_advance;
+    }
+
+    result.set_bitmap(std::move(bitmap), total_width_px, total_height_px);
     return result;
 }
 
