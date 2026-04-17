@@ -20,6 +20,8 @@ struct xdg_wm_base;
 struct zwp_text_input_manager_v3;
 struct zwp_primary_selection_device_manager_v1;
 struct wp_cursor_shape_manager_v1;
+struct wp_fractional_scale_manager_v1;
+struct wp_viewporter;
 
 namespace nk {
 
@@ -65,11 +67,13 @@ public:
     [[nodiscard]] zwp_text_input_manager_v3* text_input_manager() const;
     [[nodiscard]] zwp_primary_selection_device_manager_v1* primary_selection_manager() const;
     [[nodiscard]] wp_cursor_shape_manager_v1* cursor_shape_manager() const;
+    [[nodiscard]] wp_fractional_scale_manager_v1* fractional_scale_manager() const;
+    [[nodiscard]] wp_viewporter* viewporter() const;
     [[nodiscard]] WaylandInput* input() const;
 
     // Returns the compositor-advertised integer scale for the given wl_output, or 1 when the
-    // output is unknown or never advertised a scale. Fractional scales are not yet supported;
-    // they require wp_fractional_scale_v1 + wp_viewporter and are tracked separately.
+    // output is unknown or never advertised a scale. Used as a fallback for surfaces on
+    // compositors that don't implement wp_fractional_scale_v1.
     [[nodiscard]] int output_scale(wl_output* output) const;
 
     // Surface registration for input event routing.

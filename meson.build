@@ -123,6 +123,8 @@ elif host_system == 'linux'
     # request. We don't bind tablet ourselves, but the linker needs the zwp_tablet_tool_v2
     # interface descriptor that the cursor-shape private-code references.
     tablet_v2_xml = wl_protocol_dir / 'stable' / 'tablet' / 'tablet-v2.xml'
+    fractional_scale_v1_xml = wl_protocol_dir / 'staging' / 'fractional-scale' / 'fractional-scale-v1.xml'
+    viewporter_xml = wl_protocol_dir / 'stable' / 'viewporter' / 'viewporter.xml'
 
     xdg_shell_header = custom_target('xdg-shell-client-header',
         input : xdg_shell_xml,
@@ -169,6 +171,26 @@ elif host_system == 'linux'
         output : 'tablet-v2-protocol.c',
         command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
+    fractional_scale_v1_header = custom_target('fractional-scale-v1-client-header',
+        input : fractional_scale_v1_xml,
+        output : 'fractional-scale-v1-client-protocol.h',
+        command : [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+    fractional_scale_v1_code = custom_target('fractional-scale-v1-private-code',
+        input : fractional_scale_v1_xml,
+        output : 'fractional-scale-v1-protocol.c',
+        command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
+    viewporter_header = custom_target('viewporter-client-header',
+        input : viewporter_xml,
+        output : 'viewporter-client-protocol.h',
+        command : [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+    viewporter_code = custom_target('viewporter-private-code',
+        input : viewporter_xml,
+        output : 'viewporter-protocol.c',
+        command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
     nk_sources += files(
         'src/platform/linux/wayland_backend.cpp',
         'src/platform/linux/wayland_portal_helpers.cpp',
@@ -186,6 +208,10 @@ elif host_system == 'linux'
         cursor_shape_v1_header,
         cursor_shape_v1_code,
         tablet_v2_code,
+        fractional_scale_v1_header,
+        fractional_scale_v1_code,
+        viewporter_header,
+        viewporter_code,
     ]
 
     nk_deps += [wayland_client_dep, xkbcommon_dep, freetype_dep, fontconfig_dep, harfbuzz_dep, gio_dep]

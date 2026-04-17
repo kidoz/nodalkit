@@ -4,8 +4,10 @@
 #include "wayland_backend.h"
 
 #include "cursor-shape-v1-client-protocol.h"
+#include "fractional-scale-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
+#include "viewporter-client-protocol.h"
 #include "wayland_input.h"
 #include "wayland_portal_helpers.h"
 #include "wayland_surface.h"
@@ -397,6 +399,8 @@ struct WaylandBackend::Impl {
     zwp_text_input_manager_v3* text_input_manager = nullptr;
     zwp_primary_selection_device_manager_v1* primary_selection_manager = nullptr;
     wp_cursor_shape_manager_v1* cursor_shape_manager = nullptr;
+    wp_fractional_scale_manager_v1* fractional_scale_manager = nullptr;
+    wp_viewporter* viewporter = nullptr;
     std::unordered_map<wl_output*, int> output_scales;
     // Scales staged by a wl_output are latched on the wl_output.done event. We therefore keep a
     // side-map of "pending" values until the atomic done arrives, matching the wayland protocol.
@@ -1357,6 +1361,15 @@ static void registry_global(void* data,
         impl->cursor_shape_manager = static_cast<wp_cursor_shape_manager_v1*>(wl_registry_bind(
             registry, name, &wp_cursor_shape_manager_v1_interface, std::min(version, 1u)));
         NK_LOG_INFO("Wayland", "Bound wp_cursor_shape_manager_v1");
+    } else if (std::strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0) {
+        impl->fractional_scale_manager = static_cast<wp_fractional_scale_manager_v1*>(
+            wl_registry_bind(
+                registry, name, &wp_fractional_scale_manager_v1_interface, std::min(version, 1u)));
+        NK_LOG_INFO("Wayland", "Bound wp_fractional_scale_manager_v1");
+    } else if (std::strcmp(interface, wp_viewporter_interface.name) == 0) {
+        impl->viewporter = static_cast<wp_viewporter*>(
+            wl_registry_bind(registry, name, &wp_viewporter_interface, std::min(version, 1u)));
+        NK_LOG_INFO("Wayland", "Bound wp_viewporter");
     } else if (std::strcmp(interface, wl_output_interface.name) == 0) {
         // wl_output version 2 adds the `scale` event (the one we need); 3 adds release, 4 adds
         // name/description. We bind at up to 4 but gracefully handle older compositors.
@@ -1565,6 +1578,14 @@ void WaylandBackend::shutdown() {
     if (impl_->cursor_shape_manager) {
         wp_cursor_shape_manager_v1_destroy(impl_->cursor_shape_manager);
         impl_->cursor_shape_manager = nullptr;
+    }
+    if (impl_->fractional_scale_manager) {
+        wp_fractional_scale_manager_v1_destroy(impl_->fractional_scale_manager);
+        impl_->fractional_scale_manager = nullptr;
+    }
+    if (impl_->viewporter) {
+        wp_viewporter_destroy(impl_->viewporter);
+        impl_->viewporter = nullptr;
     }
     for (auto& [output, scale] : impl_->output_scales) {
         if (output != nullptr) {
@@ -2002,6 +2023,14 @@ zwp_primary_selection_device_manager_v1* WaylandBackend::primary_selection_manag
 
 wp_cursor_shape_manager_v1* WaylandBackend::cursor_shape_manager() const {
     return impl_->cursor_shape_manager;
+}
+
+wp_fractional_scale_manager_v1* WaylandBackend::fractional_scale_manager() const {
+    return impl_->fractional_scale_manager;
+}
+
+wp_viewporter* WaylandBackend::viewporter() const {
+    return impl_->viewporter;
 }
 
 WaylandInput* WaylandBackend::input() const {

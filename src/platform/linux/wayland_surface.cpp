@@ -3,11 +3,14 @@
 
 #include "wayland_surface.h"
 
+#include "fractional-scale-v1-client-protocol.h"
+#include "viewporter-client-protocol.h"
 #include "wayland_backend.h"
 #include "wayland_input.h"
 #include "xdg-shell-client-protocol.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <nk/foundation/logging.h>
 #include <nk/platform/events.h>
@@ -126,6 +129,20 @@ static int create_shm_fd(size_t size) {
 }
 
 // ---------------------------------------------------------------------------
+// wp_fractional_scale_v1 listener
+// ---------------------------------------------------------------------------
+
+static void fractional_scale_handle_preferred(void* data,
+                                              struct wp_fractional_scale_v1* /*ctrl*/,
+                                              uint32_t scale) {
+    static_cast<WaylandSurface*>(data)->handle_preferred_fractional_scale(scale);
+}
+
+static constexpr struct wp_fractional_scale_v1_listener fractional_scale_listener = {
+    .preferred_scale = fractional_scale_handle_preferred,
+};
+
+// ---------------------------------------------------------------------------
 // WaylandSurface
 // ---------------------------------------------------------------------------
 
@@ -150,6 +167,20 @@ WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& conf
     // Register for input event routing.
     backend_.register_surface(surface_, this);
 
+    // Fractional scale + viewport (optional — both are required together to drive non-integer
+    // scales). If either manager is absent, we fall back to the integer-scale path via
+    // wl_output.scale. The listener stays silent until the compositor sends preferred_scale.
+    if (backend_.fractional_scale_manager() != nullptr && backend_.viewporter() != nullptr) {
+        fractional_scale_ctrl_ = wp_fractional_scale_manager_v1_get_fractional_scale(
+            backend_.fractional_scale_manager(), surface_);
+        wp_fractional_scale_v1_add_listener(
+            fractional_scale_ctrl_, &fractional_scale_listener, this);
+        viewport_ = wp_viewporter_get_viewport(backend_.viewporter(), surface_);
+        // Seed the destination to the logical window size so the compositor has a sensible
+        // default even before the first preferred_scale event arrives.
+        wp_viewport_set_destination(viewport_, width_, height_);
+    }
+
     // Commit the initial surface state to trigger the first configure event.
     wl_surface_commit(surface_);
     wl_display_roundtrip(backend_.display());
@@ -164,6 +195,14 @@ WaylandSurface::~WaylandSurface() {
     destroy_buffer(buffers_[0]);
     destroy_buffer(buffers_[1]);
 
+    if (viewport_) {
+        wp_viewport_destroy(viewport_);
+        viewport_ = nullptr;
+    }
+    if (fractional_scale_ctrl_) {
+        wp_fractional_scale_v1_destroy(fractional_scale_ctrl_);
+        fractional_scale_ctrl_ = nullptr;
+    }
     if (xdg_toplevel_) {
         xdg_toplevel_destroy(xdg_toplevel_);
     }
@@ -251,6 +290,12 @@ void WaylandSurface::set_title(std::string_view title) {
 void WaylandSurface::resize(int width, int height) {
     width_ = width;
     height_ = height;
+    // Keep the viewport destination in sync with the logical size while fractional scale is
+    // active; otherwise the compositor would keep using the stale destination and clip/scale
+    // incorrectly after a toplevel configure.
+    if (viewport_ != nullptr && fractional_scale_ > 0.0F) {
+        wp_viewport_set_destination(viewport_, width_, height_);
+    }
 }
 
 Size WaylandSurface::size() const {
@@ -258,6 +303,9 @@ Size WaylandSurface::size() const {
 }
 
 float WaylandSurface::scale_factor() const {
+    if (fractional_scale_ > 0.0F) {
+        return fractional_scale_;
+    }
     return static_cast<float>(buffer_scale_);
 }
 
@@ -272,6 +320,12 @@ void WaylandSurface::handle_output_leave(wl_output* output) {
 }
 
 void WaylandSurface::recompute_scale_factor() {
+    // When fractional-scale is active, wp_fractional_scale_v1.preferred_scale is authoritative
+    // and we ignore wl_output.scale entirely — mixing them would cause double scaling.
+    if (fractional_scale_ > 0.0F) {
+        return;
+    }
+
     int best = 1;
     for (wl_output* output : entered_outputs_) {
         best = std::max(best, backend_.output_scale(output));
@@ -290,6 +344,42 @@ void WaylandSurface::recompute_scale_factor() {
     WindowEvent event{};
     event.type = WindowEvent::Type::ScaleFactorChanged;
     event.scale_factor = static_cast<float>(buffer_scale_);
+    owner_.dispatch_window_event(event);
+}
+
+void WaylandSurface::handle_preferred_fractional_scale(uint32_t scale_numerator) {
+    // wp_fractional_scale_v1 encodes the scale as a uint32_t numerator with an implicit
+    // denominator of 120. Anything ≤ 0 is a protocol violation; guard against it anyway so a
+    // misbehaving compositor can't drive us into a nonsensical state.
+    if (scale_numerator == 0) {
+        return;
+    }
+    const float next = static_cast<float>(scale_numerator) / 120.0F;
+    if (std::abs(next - fractional_scale_) < 1e-4F) {
+        return;
+    }
+
+    fractional_scale_ = next;
+    // Drop any integer buffer-scale once fractional is active. Keeping them both would cause
+    // the compositor to multiply our oversized buffer a second time.
+    if (buffer_scale_ != 1 && surface_ != nullptr) {
+        wl_surface_set_buffer_scale(surface_, 1);
+    }
+    buffer_scale_ = 1;
+
+    // Tell the compositor the logical surface size. The buffer we attach in present() will be
+    // `logical * fractional_scale_` physical pixels; the viewport destination declares the
+    // logical size so the compositor can composite at the right footprint.
+    if (viewport_ != nullptr) {
+        wp_viewport_set_destination(viewport_, width_, height_);
+    }
+    if (surface_ != nullptr) {
+        wl_surface_commit(surface_);
+    }
+
+    WindowEvent event{};
+    event.type = WindowEvent::Type::ScaleFactorChanged;
+    event.scale_factor = fractional_scale_;
     owner_.dispatch_window_event(event);
 }
 

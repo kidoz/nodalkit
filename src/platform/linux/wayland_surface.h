@@ -14,6 +14,8 @@ struct wl_buffer;
 struct wl_output;
 struct xdg_surface;
 struct xdg_toplevel;
+struct wp_fractional_scale_v1;
+struct wp_viewport;
 
 namespace nk {
 
@@ -54,6 +56,11 @@ public:
     void handle_output_leave(wl_output* output);
     void recompute_scale_factor();
 
+    // Called from the wp_fractional_scale_v1.preferred_scale listener. The value is the
+    // compositor's preferred scale numerator with an implicit denominator of 120 (e.g. 180 =
+    // 1.5x). The surface switches to fractional-scale mode on the first event and stays there.
+    void handle_preferred_fractional_scale(uint32_t scale_numerator);
+
 private:
     struct ShmBuffer {
         wl_buffer* buffer = nullptr;
@@ -84,6 +91,14 @@ private:
     bool configured_ = false;
     int buffer_scale_ = 1;
     std::unordered_set<wl_output*> entered_outputs_;
+
+    // Fractional-scale state. When `fractional_scale_ > 0.0F`, the surface is driven by
+    // wp_fractional_scale_v1.preferred_scale instead of wl_output.scale: `buffer_scale_` stays
+    // at 1, `wl_surface_set_buffer_scale` is not called, and we use wp_viewport.set_destination
+    // to declare the logical surface size to the compositor.
+    wp_fractional_scale_v1* fractional_scale_ctrl_ = nullptr;
+    wp_viewport* viewport_ = nullptr;
+    float fractional_scale_ = 0.0F;
 };
 
 } // namespace nk
