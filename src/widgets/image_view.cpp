@@ -102,16 +102,23 @@ ImageView::~ImageView() = default;
 void ImageView::update_pixel_buffer(const uint32_t* data, int width, int height) {
     const auto a = allocation();
     Rect damage{};
-    std::lock_guard lock(impl_->mutex);
-    const auto previous_damage =
-        local_image_content_rect(a, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
-    const auto count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-    impl_->pixels.assign(data, data + count);
-    impl_->src_width = width;
-    impl_->src_height = height;
-    damage = union_rect(previous_damage,
-                        local_image_content_rect(a, impl_->src_width, impl_->src_height,
-                                                 impl_->preserve_aspect_ratio));
+    {
+        std::lock_guard lock(impl_->mutex);
+        const auto previous_damage = local_image_content_rect(
+            a, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
+        const auto count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+        impl_->pixels.assign(data, data + count);
+        impl_->src_width = width;
+        impl_->src_height = height;
+        damage = union_rect(previous_damage,
+                            local_image_content_rect(a,
+                                                     impl_->src_width,
+                                                     impl_->src_height,
+                                                     impl_->preserve_aspect_ratio));
+    }
+    // queue_redraw can fan out to the Window / damage tracker on the main thread; keeping the
+    // mutex across that call risks lock-order inversions with anything those paths touch. The
+    // damage rect was captured under the lock so the release is safe here.
     if (rect_is_empty(damage)) {
         queue_redraw();
     } else {
@@ -167,11 +174,20 @@ int ImageView::source_height() const {
     return impl_->src_height;
 }
 
-SizeRequest ImageView::measure(const Constraints& /*constraints*/) const {
+SizeRequest ImageView::measure(const Constraints& constraints) const {
     std::lock_guard lock(impl_->mutex);
     const float min_height = theme_number("min-height", 168.0F);
-    const float w = std::max(180.0F, static_cast<float>(impl_->src_width));
-    const float h = std::max(min_height, static_cast<float>(impl_->src_height));
+    float w = std::max(180.0F, static_cast<float>(impl_->src_width));
+    float h = std::max(min_height, static_cast<float>(impl_->src_height));
+    // Clamp the natural size to the available space so parents with fixed widths (toolbars,
+    // status panels) don't end up asking the layout system for a pixel-perfect image size that
+    // overflows. preserve_aspect_ratio is still honored at draw time via fit_rect.
+    if (constraints.max_width > 0.0F) {
+        w = std::min(w, constraints.max_width);
+    }
+    if (constraints.max_height > 0.0F) {
+        h = std::min(h, constraints.max_height);
+    }
     return {0, 0, w, h};
 }
 

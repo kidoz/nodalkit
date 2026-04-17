@@ -17,6 +17,8 @@ FontDescriptor combo_box_font() {
     };
 }
 
+constexpr int kComboPopupMaxVisible = 6;
+
 struct PopupGeometry {
     Rect bounds;
     float item_height = 0.0F;
@@ -26,7 +28,8 @@ struct PopupGeometry {
 PopupGeometry popup_geometry(Rect field_bounds, std::size_t item_count, float item_height) {
     PopupGeometry geometry;
     geometry.item_height = item_height;
-    geometry.visible_count = static_cast<int>(std::min<std::size_t>(6, item_count));
+    geometry.visible_count =
+        static_cast<int>(std::min<std::size_t>(kComboPopupMaxVisible, item_count));
     geometry.bounds = {
         field_bounds.x,
         field_bounds.bottom() + 4.0F,
@@ -36,17 +39,37 @@ PopupGeometry popup_geometry(Rect field_bounds, std::size_t item_count, float it
     return geometry;
 }
 
-int popup_index_at(const PopupGeometry& geometry, Point point) {
+// `popup_index_at` returns the absolute item index under `point`, taking the current scroll
+// offset into account (or -1 if the pointer is outside the popup). Note that `visible_count`
+// clamps the number of rows rendered; `scroll_offset` tracks which item is drawn at row 0.
+int popup_index_at(const PopupGeometry& geometry, Point point, int scroll_offset) {
     if (geometry.visible_count <= 0 || !geometry.bounds.contains(point)) {
         return -1;
     }
 
     const float local_y = point.y - geometry.bounds.y - 1.0F;
-    const auto index = static_cast<int>(local_y / geometry.item_height);
-    if (index < 0 || index >= geometry.visible_count) {
+    const auto row = static_cast<int>(local_y / geometry.item_height);
+    if (row < 0 || row >= geometry.visible_count) {
         return -1;
     }
-    return index;
+    return row + scroll_offset;
+}
+
+// Clamps a scroll offset so the current highlight remains visible within the popup viewport.
+int clamp_scroll_offset(int scroll_offset, int highlight, int item_count, int visible_count) {
+    if (item_count <= visible_count || visible_count <= 0) {
+        return 0;
+    }
+    const int max_offset = item_count - visible_count;
+    int offset = std::clamp(scroll_offset, 0, max_offset);
+    if (highlight >= 0) {
+        if (highlight < offset) {
+            offset = highlight;
+        } else if (highlight >= offset + visible_count) {
+            offset = highlight - visible_count + 1;
+        }
+    }
+    return std::clamp(offset, 0, max_offset);
 }
 
 void invalidate_popup_frame(Widget& widget) {
@@ -83,6 +106,9 @@ struct ComboBox::Impl {
     bool popup_open = false;
     int armed_index = -1;
     int highlighted_index = -1;
+    // Index of the first visible item when the popup can't show them all. Updated together with
+    // highlighted_index so the highlight is always on screen; see clamp_scroll_offset().
+    int popup_scroll_offset = 0;
 };
 
 std::shared_ptr<ComboBox> ComboBox::create() {
@@ -101,6 +127,13 @@ ComboBox::~ComboBox() = default;
 void ComboBox::set_items(std::vector<std::string> items) {
     impl_->items = std::move(items);
     impl_->selected_index = -1;
+    // Any open popup state refers to the previous item list; reset it so the next open rebuilds
+    // from a known baseline and the current highlight can't index past the new end.
+    impl_->popup_open = false;
+    impl_->armed = false;
+    impl_->armed_index = -1;
+    impl_->highlighted_index = -1;
+    impl_->popup_scroll_offset = 0;
     ensure_accessible().set_name({});
     queue_layout();
     queue_redraw();
@@ -164,15 +197,18 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
     const auto popup =
         popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
     const auto point = Point{event.x, event.y};
+    const int item_count = static_cast<int>(impl_->items.size());
 
     switch (event.type) {
     case MouseEvent::Type::Press:
         impl_->armed = allocation().contains(point);
-        impl_->armed_index = impl_->popup_open ? popup_index_at(popup, point) : -1;
+        impl_->armed_index = impl_->popup_open
+            ? popup_index_at(popup, point, impl_->popup_scroll_offset)
+            : -1;
         return impl_->armed || impl_->armed_index >= 0;
     case MouseEvent::Type::Release: {
         const bool release_on_field = allocation().contains(point);
-        const auto release_index = popup_index_at(popup, point);
+        const auto release_index = popup_index_at(popup, point, impl_->popup_scroll_offset);
         bool consumed = false;
 
         if (impl_->armed_index >= 0) {
@@ -185,6 +221,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
             impl_->highlighted_index = -1;
             impl_->armed_index = -1;
             impl_->armed = false;
+            impl_->popup_scroll_offset = 0;
             invalidate_popup_frame(*this);
             return consumed;
         }
@@ -199,12 +236,14 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
         preserve_damage_regions_for_next_redraw();
         impl_->popup_open = !impl_->popup_open;
         impl_->highlighted_index = impl_->popup_open ? std::max(0, impl_->selected_index) : -1;
+        impl_->popup_scroll_offset = clamp_scroll_offset(
+            impl_->popup_scroll_offset, impl_->highlighted_index, item_count, popup.visible_count);
         invalidate_popup_frame(*this);
         return true;
     }
     case MouseEvent::Type::Move:
         if (impl_->popup_open) {
-            const int next_highlight = popup_index_at(popup, point);
+            const int next_highlight = popup_index_at(popup, point, impl_->popup_scroll_offset);
             if (impl_->highlighted_index != next_highlight) {
                 impl_->highlighted_index = next_highlight;
                 invalidate_popup_frame(*this);
@@ -225,12 +264,19 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
         }
         if (event.scroll_dy > 0.0F && impl_->highlighted_index > 0) {
             --impl_->highlighted_index;
+            impl_->popup_scroll_offset = clamp_scroll_offset(impl_->popup_scroll_offset,
+                                                             impl_->highlighted_index,
+                                                             item_count,
+                                                             popup.visible_count);
             invalidate_popup_frame(*this);
             return true;
         }
-        if (event.scroll_dy < 0.0F &&
-            impl_->highlighted_index + 1 < static_cast<int>(impl_->items.size())) {
+        if (event.scroll_dy < 0.0F && impl_->highlighted_index + 1 < item_count) {
             ++impl_->highlighted_index;
+            impl_->popup_scroll_offset = clamp_scroll_offset(impl_->popup_scroll_offset,
+                                                             impl_->highlighted_index,
+                                                             item_count,
+                                                             popup.visible_count);
             invalidate_popup_frame(*this);
             return true;
         }
@@ -246,11 +292,22 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
     }
 
     const auto last_index = static_cast<int>(impl_->items.size()) - 1;
-    auto open_popup = [this](int highlight) {
+    const auto popup_visible_count = popup_geometry(allocation(),
+                                                    impl_->items.size(),
+                                                    theme_number("popup-item-height", 28.0F))
+                                         .visible_count;
+    auto item_count = static_cast<int>(impl_->items.size());
+    auto update_scroll = [&] {
+        impl_->popup_scroll_offset = clamp_scroll_offset(impl_->popup_scroll_offset,
+                                                          impl_->highlighted_index,
+                                                          item_count,
+                                                          popup_visible_count);
+    };
+    auto open_popup = [&, this](int highlight) {
         preserve_damage_regions_for_next_redraw();
         impl_->popup_open = true;
-        impl_->highlighted_index =
-            std::clamp(highlight, 0, static_cast<int>(impl_->items.size()) - 1);
+        impl_->highlighted_index = std::clamp(highlight, 0, last_index);
+        update_scroll();
         invalidate_popup_frame(*this);
     };
 
@@ -260,6 +317,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             preserve_damage_regions_for_next_redraw();
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
+            impl_->popup_scroll_offset = 0;
             invalidate_popup_frame(*this);
             return true;
         case KeyCode::Up: {
@@ -268,6 +326,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             } else if (impl_->highlighted_index > 0) {
                 --impl_->highlighted_index;
             }
+            update_scroll();
             invalidate_popup_frame(*this);
             return true;
         }
@@ -277,9 +336,20 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             } else if (impl_->highlighted_index < last_index) {
                 ++impl_->highlighted_index;
             }
+            update_scroll();
             invalidate_popup_frame(*this);
             return true;
         }
+        case KeyCode::Home:
+            impl_->highlighted_index = 0;
+            update_scroll();
+            invalidate_popup_frame(*this);
+            return true;
+        case KeyCode::End:
+            impl_->highlighted_index = last_index;
+            update_scroll();
+            invalidate_popup_frame(*this);
+            return true;
         case KeyCode::Return:
         case KeyCode::Space: {
             if (impl_->highlighted_index >= 0) {
@@ -288,6 +358,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             preserve_damage_regions_for_next_redraw();
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
+            impl_->popup_scroll_offset = 0;
             invalidate_popup_frame(*this);
             return true;
         }
@@ -364,6 +435,7 @@ void ComboBox::on_focus_changed(bool focused) {
         impl_->armed = false;
         impl_->armed_index = -1;
         impl_->highlighted_index = -1;
+        impl_->popup_scroll_offset = 0;
         invalidate_popup_frame(*this);
     }
 }
@@ -456,7 +528,15 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
         theme_color("popup-selected-background", Color{0.86F, 0.92F, 0.99F, 1.0F});
 
     float row_y = popup_inner.y;
-    for (int index = 0; index < popup.visible_count; ++index) {
+    const int item_count = static_cast<int>(impl_->items.size());
+    const int effective_scroll = clamp_scroll_offset(
+        impl_->popup_scroll_offset, impl_->highlighted_index, item_count, popup.visible_count);
+    for (int row = 0; row < popup.visible_count; ++row) {
+        const int index = row + effective_scroll;
+        if (index < 0 || index >= item_count) {
+            row_y += popup.item_height;
+            continue;
+        }
         const bool selected = index == impl_->selected_index;
         const bool highlighted = index == impl_->highlighted_index;
         Color row_bg = selected ? selected_bg : Color{};
@@ -472,7 +552,7 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
                                  selection_radius);
         }
 
-        const auto item_text = impl_->items[index];
+        const auto item_text = impl_->items[static_cast<std::size_t>(index)];
         const auto item_size = measure_text(item_text, font);
         const float text_y = row_y + std::max(0.0F, (popup.item_height - item_size.height) * 0.5F);
         ctx.add_text({popup_inner.x + 12.0F, text_y}, item_text, text_color, font);

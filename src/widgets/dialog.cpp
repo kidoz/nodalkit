@@ -200,12 +200,15 @@ void Dialog::allocate(const Rect& allocation) {
     constexpr float button_height = 36.0F;
 
     const auto preferred = measure(Constraints::tight(allocation.size()));
-    const float panel_width = std::clamp(preferred.natural_width,
-                                         std::min(preferred.minimum_width, allocation.width),
-                                         std::max(0.0F, allocation.width - (margin * 2.0F)));
-    float panel_height = std::clamp(preferred.natural_height,
-                                    std::min(preferred.minimum_height, allocation.height),
-                                    std::max(0.0F, allocation.height - (margin * 2.0F)));
+    // Honor the dialog's minimum size even when the allocation minus margins would be smaller
+    // (std::clamp requires lo <= hi, and the min-size can legitimately exceed the inset).
+    const float width_lo = std::min(preferred.minimum_width, allocation.width);
+    const float width_hi = std::max(width_lo, std::max(0.0F, allocation.width - (margin * 2.0F)));
+    const float panel_width = std::clamp(preferred.natural_width, width_lo, width_hi);
+    const float height_lo = std::min(preferred.minimum_height, allocation.height);
+    const float height_hi =
+        std::max(height_lo, std::max(0.0F, allocation.height - (margin * 2.0F)));
+    float panel_height = std::clamp(preferred.natural_height, height_lo, height_hi);
 
     const float panel_x = allocation.x + std::max(0.0F, (allocation.width - panel_width) * 0.5F);
     float panel_y = allocation.y + std::max(0.0F, (allocation.height - panel_height) * 0.5F);
