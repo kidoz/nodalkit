@@ -42,6 +42,7 @@ struct Window::Impl {
 
     WindowConfig config;
     std::shared_ptr<Widget> child;
+    std::optional<NativeToolbarConfig> native_toolbar;
     std::vector<OverlayEntry> overlays;
     std::unique_ptr<NativeSurface> surface;
     std::unique_ptr<Renderer> renderer;
@@ -1751,11 +1752,15 @@ Widget* Window::child() const {
 
 void Window::present() {
     // Create native surface if we have a platform backend.
+    const bool surface_was_null = impl_->surface == nullptr;
     if (!impl_->surface) {
         auto* app = Application::instance();
         if (app && app->has_platform_backend()) {
             impl_->surface = app->platform_backend().create_surface(impl_->config, *this);
         }
+    }
+    if (surface_was_null && impl_->surface && impl_->native_toolbar.has_value()) {
+        impl_->surface->set_native_toolbar(&*impl_->native_toolbar);
     }
 
     const auto preferred_backend = select_renderer_backend(impl_->surface.get());
@@ -1834,6 +1839,27 @@ void Window::set_titlebar_style(TitlebarStyle style) {
 
 TitlebarStyle Window::titlebar_style() const {
     return impl_->config.titlebar_style;
+}
+
+void Window::set_native_toolbar(NativeToolbarConfig config) {
+    impl_->native_toolbar = std::move(config);
+    if (impl_->surface) {
+        impl_->surface->set_native_toolbar(&*impl_->native_toolbar);
+    }
+}
+
+void Window::clear_native_toolbar() {
+    if (!impl_->native_toolbar.has_value()) {
+        return;
+    }
+    impl_->native_toolbar.reset();
+    if (impl_->surface) {
+        impl_->surface->set_native_toolbar(nullptr);
+    }
+}
+
+bool Window::has_native_toolbar() const {
+    return impl_->native_toolbar.has_value();
 }
 
 void Window::perform_window_layout(Rect content_area) {

@@ -37,6 +37,7 @@
 #include <nk/platform/file_dialog.h>
 #include <nk/platform/key_codes.h>
 #include <nk/platform/native_menu.h>
+#include <nk/platform/native_toolbar.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/spell_checker.h>
 #include <nk/platform/system_preferences.h>
@@ -267,6 +268,9 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_fullscreen);
     (void)static_cast<void (nk::Window::*)(nk::TitlebarStyle)>(&nk::Window::set_titlebar_style);
     (void)static_cast<nk::TitlebarStyle (nk::Window::*)() const>(&nk::Window::titlebar_style);
+    (void)static_cast<void (nk::Window::*)(nk::NativeToolbarConfig)>(&nk::Window::set_native_toolbar);
+    (void)static_cast<void (nk::Window::*)()>(&nk::Window::clear_native_toolbar);
+    (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::has_native_toolbar);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::request_frame);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::invalidate_layout);
     (void)static_cast<void (nk::Window::*)(const nk::MouseEvent&)>(&nk::Window::dispatch_mouse_event);

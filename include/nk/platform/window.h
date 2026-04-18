@@ -9,6 +9,7 @@
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/native_toolbar.h>
 #include <nk/render/renderer.h>
 #include <nk/ui_core/cursor_shape.h>
 #include <optional>
@@ -113,6 +114,18 @@ public:
     /// Titlebar presentation style. See TitlebarStyle for per-platform behavior.
     void set_titlebar_style(TitlebarStyle style);
     [[nodiscard]] TitlebarStyle titlebar_style() const;
+
+    /// Install a window-attached native toolbar. On macOS this uses NSToolbar
+    /// with autosaved user customization (reorder, show/hide). Platforms
+    /// without a native toolbar ignore the call. The config is retained by
+    /// the window until cleared or replaced.
+    void set_native_toolbar(NativeToolbarConfig config);
+
+    /// Remove any installed native toolbar.
+    void clear_native_toolbar();
+
+    /// Whether a native toolbar is currently installed on this window.
+    [[nodiscard]] bool has_native_toolbar() const;
 
     /// Request a frame to be rendered on the next idle.
     void request_frame();

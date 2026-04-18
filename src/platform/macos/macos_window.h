@@ -14,10 +14,14 @@
 @class NSWindow;
 @class NKView;
 @class NKWindowDelegate;
+@class NSToolbar;
+@class NKToolbarDelegate;
 #else
 using NSWindow = void;
 using NKView = void;
 using NKWindowDelegate = void;
+using NSToolbar = void;
+using NKToolbarDelegate = void;
 #endif
 
 namespace nk {
@@ -41,6 +45,7 @@ public:
     [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
     void set_titlebar_style(TitlebarStyle style) override;
+    void set_native_toolbar(const NativeToolbarConfig* config) override;
 
     /// Access the owning Window for event delivery from Objective-C code.
     Window& owner() { return owner_; }
@@ -59,6 +64,9 @@ private:
     NSWindow* window_ = nullptr;
     NKView* view_ = nullptr;
     NKWindowDelegate* window_delegate_ = nullptr;
+    NSToolbar* toolbar_ = nullptr;
+    NKToolbarDelegate* toolbar_delegate_ = nullptr;
+    std::unique_ptr<NativeToolbarConfig> toolbar_config_;
 
     std::vector<uint8_t> pixel_buffer_;
     int pixel_width_ = 0;

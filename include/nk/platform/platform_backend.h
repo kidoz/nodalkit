@@ -14,6 +14,7 @@
 #include <nk/platform/events.h>
 #include <nk/platform/file_dialog.h>
 #include <nk/platform/native_menu.h>
+#include <nk/platform/native_toolbar.h>
 #include <nk/platform/spell_checker.h>
 #include <nk/platform/system_preferences.h>
 #include <nk/render/renderer.h>
@@ -103,6 +104,10 @@ public:
     /// Apply a titlebar presentation style. Default no-op; macOS implements
     /// full-size content-view and transparent-titlebar variants.
     virtual void set_titlebar_style(TitlebarStyle style) { (void)style; }
+
+    /// Install or replace the window-attached native toolbar. Pass nullptr
+    /// to remove any existing toolbar. Default no-op; macOS uses NSToolbar.
+    virtual void set_native_toolbar(const NativeToolbarConfig* config) { (void)config; }
 };
 
 /// Abstract platform backend. One per Application.

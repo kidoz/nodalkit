@@ -1197,6 +1197,171 @@ static id accessibility_focused_element(NSArray<id>* elements) {
 @end
 
 // ---------------------------------------------------------------------------
+// Native toolbar delegate
+// ---------------------------------------------------------------------------
+
+@interface NKToolbarDelegate : NSObject <NSToolbarDelegate, NSSearchFieldDelegate>
+@property(nonatomic, assign) const nk::NativeToolbarConfig* config;
+- (void)toolbarAction:(NSToolbarItem*)sender;
+@end
+
+@implementation NKToolbarDelegate
+
+- (const nk::NativeToolbarItem*)itemWithIdentifier:(NSString*)identifier {
+    if (!self.config) {
+        return nullptr;
+    }
+    const char* key_utf8 = [identifier UTF8String];
+    std::string key = key_utf8 != nullptr ? key_utf8 : "";
+    for (const auto& item : self.config->items) {
+        if (item.identifier == key) {
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
+- (NSArray<NSToolbarItemIdentifier>*)toolbarDefaultItemIdentifiers:(NSToolbar*)toolbar {
+    (void)toolbar;
+    NSMutableArray<NSToolbarItemIdentifier>* result = [NSMutableArray array];
+    if (!self.config) {
+        return result;
+    }
+    if (!self.config->default_item_identifiers.empty()) {
+        for (const auto& id : self.config->default_item_identifiers) {
+            [result addObject:[NSString stringWithUTF8String:id.c_str()]];
+        }
+    } else {
+        for (const auto& item : self.config->items) {
+            [result addObject:[NSString stringWithUTF8String:item.identifier.c_str()]];
+        }
+    }
+    return result;
+}
+
+- (NSArray<NSToolbarItemIdentifier>*)toolbarAllowedItemIdentifiers:(NSToolbar*)toolbar {
+    (void)toolbar;
+    NSMutableArray<NSToolbarItemIdentifier>* result = [NSMutableArray array];
+    if (!self.config) {
+        return result;
+    }
+    for (const auto& item : self.config->items) {
+        [result addObject:[NSString stringWithUTF8String:item.identifier.c_str()]];
+    }
+    [result addObject:NSToolbarFlexibleSpaceItemIdentifier];
+    [result addObject:NSToolbarSpaceItemIdentifier];
+    if (@available(macOS 11.0, *)) {
+        [result addObject:NSToolbarSidebarTrackingSeparatorItemIdentifier];
+    }
+    return result;
+}
+
+- (NSToolbarItem*)toolbar:(NSToolbar*)toolbar
+        itemForItemIdentifier:(NSToolbarItemIdentifier)itemIdentifier
+    willBeInsertedIntoToolbar:(BOOL)flag {
+    (void)toolbar;
+    (void)flag;
+    const nk::NativeToolbarItem* desc = [self itemWithIdentifier:itemIdentifier];
+    if (desc == nullptr) {
+        return nil;
+    }
+
+    NSString* label = [NSString stringWithUTF8String:desc->label.c_str()];
+    NSString* tooltip = [NSString stringWithUTF8String:desc->tooltip.c_str()];
+
+    switch (desc->kind) {
+    case nk::NativeToolbarItem::Kind::Separator:
+    case nk::NativeToolbarItem::Kind::Space: {
+        NSToolbarItem* item = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
+        [item setLabel:label];
+        return item;
+    }
+    case nk::NativeToolbarItem::Kind::FlexibleSpace: {
+        NSToolbarItem* item = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
+        [item setLabel:label];
+        return item;
+    }
+    case nk::NativeToolbarItem::Kind::SearchField: {
+        if (@available(macOS 11.0, *)) {
+            NSSearchToolbarItem* search =
+                [[NSSearchToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
+            [search setLabel:label];
+            [search setToolTip:tooltip];
+            [[search searchField] setDelegate:self];
+            [[search searchField] setTarget:self];
+            [[search searchField] setAction:@selector(searchFieldSubmit:)];
+            return search;
+        }
+        NSToolbarItem* fallback = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
+        NSSearchField* field =
+            [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 0, 180, 22)];
+        [field setDelegate:self];
+        [field setTarget:self];
+        [field setAction:@selector(searchFieldSubmit:)];
+        [fallback setView:field];
+        [fallback setLabel:label];
+        [fallback setToolTip:tooltip];
+        return fallback;
+    }
+    case nk::NativeToolbarItem::Kind::Button: {
+        NSToolbarItem* item = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
+        [item setLabel:label];
+        [item setPaletteLabel:label];
+        [item setToolTip:tooltip];
+        [item setTarget:self];
+        [item setAction:@selector(toolbarAction:)];
+
+        NSImage* image = nil;
+        if (!desc->symbol_name.empty()) {
+            if (@available(macOS 11.0, *)) {
+                NSString* symbol = [NSString stringWithUTF8String:desc->symbol_name.c_str()];
+                image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:label];
+            }
+        }
+        if (image != nil) {
+            [item setImage:image];
+        }
+        return item;
+    }
+    }
+    return nil;
+}
+
+- (void)toolbarAction:(NSToolbarItem*)sender {
+    if (sender == nil) {
+        return;
+    }
+    const nk::NativeToolbarItem* desc = [self itemWithIdentifier:[sender itemIdentifier]];
+    if (desc != nullptr && desc->on_activate) {
+        desc->on_activate();
+    }
+}
+
+- (void)searchFieldSubmit:(id)sender {
+    NSSearchField* field = nil;
+    if ([sender isKindOfClass:[NSSearchField class]]) {
+        field = static_cast<NSSearchField*>(sender);
+    } else {
+        return;
+    }
+    if (!self.config) {
+        return;
+    }
+    NSString* raw_value = [field stringValue];
+    NSString* value = raw_value != nil ? raw_value : @"";
+    const char* utf8 = [value UTF8String];
+    std::string_view text_view{utf8 != nullptr ? utf8 : ""};
+    for (const auto& item : self.config->items) {
+        if (item.kind == nk::NativeToolbarItem::Kind::SearchField && item.on_search_submit) {
+            item.on_search_submit(text_view);
+            break;
+        }
+    }
+}
+
+@end
+
+// ---------------------------------------------------------------------------
 // MacosSurface implementation
 // ---------------------------------------------------------------------------
 
@@ -1258,6 +1423,16 @@ MacosSurface::MacosSurface(const WindowConfig& config, Window& owner) : owner_(o
 
 MacosSurface::~MacosSurface() {
     @autoreleasepool {
+        if (toolbar_) {
+            [toolbar_ setDelegate:nil];
+            if (window_) {
+                [window_ setToolbar:nil];
+            }
+            toolbar_ = nil;
+        }
+        if (toolbar_delegate_) {
+            toolbar_delegate_ = nil;
+        }
         if (window_) {
             [window_ setDelegate:nil];
             [window_ close];
@@ -1272,6 +1447,7 @@ MacosSurface::~MacosSurface() {
             window_delegate_ = nil;
         }
     }
+    toolbar_config_.reset();
 }
 
 void MacosSurface::show() {
@@ -1426,6 +1602,45 @@ void MacosSurface::set_titlebar_style(TitlebarStyle style) {
     @autoreleasepool {
         if (window_) {
             apply_titlebar_style(window_, style);
+        }
+    }
+}
+
+void MacosSurface::set_native_toolbar(const NativeToolbarConfig* config) {
+    @autoreleasepool {
+        if (config == nullptr) {
+            if (toolbar_ && window_) {
+                [window_ setToolbar:nil];
+            }
+            if (toolbar_) {
+                [toolbar_ setDelegate:nil];
+                toolbar_ = nil;
+            }
+            toolbar_delegate_ = nil;
+            toolbar_config_.reset();
+            return;
+        }
+
+        toolbar_config_ = std::make_unique<NativeToolbarConfig>(*config);
+
+        if (toolbar_delegate_ == nil) {
+            toolbar_delegate_ = [[NKToolbarDelegate alloc] init];
+        }
+        toolbar_delegate_.config = toolbar_config_.get();
+
+        NSString* raw_identifier =
+            [NSString stringWithUTF8String:toolbar_config_->identifier.c_str()];
+        NSString* identifier = raw_identifier != nil ? raw_identifier : @"NodalKitToolbar";
+
+        NSToolbar* new_toolbar = [[NSToolbar alloc] initWithIdentifier:identifier];
+        [new_toolbar setDelegate:toolbar_delegate_];
+        [new_toolbar setAllowsUserCustomization:toolbar_config_->allows_user_customization ? YES : NO];
+        [new_toolbar setAutosavesConfiguration:YES];
+        [new_toolbar setDisplayMode:NSToolbarDisplayModeIconAndLabel];
+
+        toolbar_ = new_toolbar;
+        if (window_) {
+            [window_ setToolbar:toolbar_];
         }
     }
 }
