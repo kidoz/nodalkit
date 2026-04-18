@@ -33,7 +33,14 @@
 
 int run_showcase(int argc, char** argv) {
     nk::Application app(argc, argv);
-    const auto profile = make_showcase_profile(app.system_preferences());
+    auto profile = make_showcase_profile(app.system_preferences());
+    if (profile.flavor == ShowcasePlatformFlavor::MacOS) {
+        // Roomier page padding to match Mac document-window conventions.
+        profile.page_padding_top = 24.0F;
+        profile.page_padding_right = 24.0F;
+        profile.page_padding_bottom = 24.0F;
+        profile.page_padding_left = 24.0F;
+    }
 
     nk::ThemeSelection theme_selection;
     theme_selection.family = profile.theme_family;
@@ -223,13 +230,18 @@ int run_showcase(int argc, char** argv) {
     list_content->append(list_subtitle);
     list_content->append(list_stage);
     list_content->append(list_footer);
-    std::shared_ptr<nk::Widget> list_card = SurfacePanel::card(list_content);
+    std::shared_ptr<nk::Widget> list_card;
     if (is_macos) {
+        // Native-Mac sidebar: edge-to-edge vibrancy with no card chrome so the
+        // material reads as the surface itself, not a floating rounded panel.
+        list_content->set_padding(nk::Insets::uniform(16.0F));
         auto vibrancy =
             nk::VisualEffectView::create(nk::VisualEffectMaterial::Sidebar);
-        vibrancy->set_corner_radius(12.0F);
-        vibrancy->set_child(list_card);
+        vibrancy->set_corner_radius(0.0F);
+        vibrancy->set_child(list_content);
         list_card = vibrancy;
+    } else {
+        list_card = SurfacePanel::card(list_content);
     }
 
     auto preview_title = SectionTitle::create(profile.preview_title);
@@ -484,7 +496,11 @@ int run_showcase(int argc, char** argv) {
     hero_banner->set_height(profile.hero_min_height, profile.hero_natural_height);
 
     auto body_content = Box::vertical(profile.section_spacing);
-    body_content->append(hero_banner);
+    // Mac apps put the window title + toolbar at the top; an inline hero
+    // banner duplicates that chrome, so hide it on macOS.
+    if (!is_macos) {
+        body_content->append(hero_banner);
+    }
     body_content->append(content_row);
     auto page_bottom_spacer = InsetStage::create(Spacer::create(),
                                                  profile.page_bottom_spacer_height,
@@ -550,38 +566,12 @@ int run_showcase(int argc, char** argv) {
     (void)window.on_close_requested().connect([&] { app.quit(0); });
 
     if (is_macos) {
+        // Toolbar carries only window-scope actions (add, search, preferences).
+        // Counter controls (Increment/Decrement/Reset) live with the counter
+        // in the command card where they belong.
         nk::NativeToolbarConfig toolbar;
         toolbar.identifier = "com.nodalkit.showcase.toolbar";
         toolbar.allows_user_customization = true;
-
-        nk::NativeToolbarItem increment;
-        increment.kind = nk::NativeToolbarItem::Kind::Button;
-        increment.identifier = "increment";
-        increment.label = "Increment";
-        increment.tooltip = "Increment the counter";
-        increment.symbol_name = "plus.circle";
-        increment.on_activate = [&] {
-            ++counter;
-            const auto text = "Counter " + std::to_string(counter);
-            counter_label->set_text(text);
-            status_bar->set_segment(2, text);
-            hero_counter_pill->set_text(text);
-        };
-        toolbar.items.push_back(std::move(increment));
-
-        nk::NativeToolbarItem reset;
-        reset.kind = nk::NativeToolbarItem::Kind::Button;
-        reset.identifier = "reset";
-        reset.label = "Reset";
-        reset.tooltip = "Reset the counter to zero";
-        reset.symbol_name = "arrow.counterclockwise";
-        reset.on_activate = [&] {
-            counter = 0;
-            counter_label->set_text("Counter 0");
-            status_bar->set_segment(2, "Counter 0");
-            hero_counter_pill->set_text("Counter 0");
-        };
-        toolbar.items.push_back(std::move(reset));
 
         nk::NativeToolbarItem add_item;
         add_item.kind = nk::NativeToolbarItem::Kind::Button;
