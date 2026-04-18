@@ -13,6 +13,7 @@
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/selection_model.h>
 #include <nk/platform/application.h>
+#include <nk/platform/native_toolbar.h>
 #include <nk/platform/window.h>
 #include <nk/style/theme_selection.h>
 #include <nk/widgets/button.h>
@@ -23,6 +24,7 @@
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/visual_effect_view.h>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -39,10 +41,13 @@ int run_showcase(int argc, char** argv) {
     theme_selection.accent_color_override = profile.accent_color;
     app.set_theme_selection(theme_selection);
 
+    const bool is_macos = profile.flavor == ShowcasePlatformFlavor::MacOS;
+
     nk::Window window({
         .title = profile.window_title,
         .width = static_cast<int>(profile.window_width),
         .height = static_cast<int>(profile.window_height),
+        .titlebar_style = is_macos ? nk::TitlebarStyle::Unified : nk::TitlebarStyle::Regular,
     });
 
     int counter = 0;
@@ -218,7 +223,14 @@ int run_showcase(int argc, char** argv) {
     list_content->append(list_subtitle);
     list_content->append(list_stage);
     list_content->append(list_footer);
-    auto list_card = SurfacePanel::card(list_content);
+    std::shared_ptr<nk::Widget> list_card = SurfacePanel::card(list_content);
+    if (is_macos) {
+        auto vibrancy =
+            nk::VisualEffectView::create(nk::VisualEffectMaterial::Sidebar);
+        vibrancy->set_corner_radius(12.0F);
+        vibrancy->set_child(list_card);
+        list_card = vibrancy;
+    }
 
     auto preview_title = SectionTitle::create(profile.preview_title);
     auto preview_subtitle = SecondaryText::create(profile.preview_subtitle);
@@ -536,6 +548,86 @@ int run_showcase(int argc, char** argv) {
     });
 
     (void)window.on_close_requested().connect([&] { app.quit(0); });
+
+    if (is_macos) {
+        nk::NativeToolbarConfig toolbar;
+        toolbar.identifier = "com.nodalkit.showcase.toolbar";
+        toolbar.allows_user_customization = true;
+
+        nk::NativeToolbarItem increment;
+        increment.kind = nk::NativeToolbarItem::Kind::Button;
+        increment.identifier = "increment";
+        increment.label = "Increment";
+        increment.tooltip = "Increment the counter";
+        increment.symbol_name = "plus.circle";
+        increment.on_activate = [&] {
+            ++counter;
+            const auto text = "Counter " + std::to_string(counter);
+            counter_label->set_text(text);
+            status_bar->set_segment(2, text);
+            hero_counter_pill->set_text(text);
+        };
+        toolbar.items.push_back(std::move(increment));
+
+        nk::NativeToolbarItem reset;
+        reset.kind = nk::NativeToolbarItem::Kind::Button;
+        reset.identifier = "reset";
+        reset.label = "Reset";
+        reset.tooltip = "Reset the counter to zero";
+        reset.symbol_name = "arrow.counterclockwise";
+        reset.on_activate = [&] {
+            counter = 0;
+            counter_label->set_text("Counter 0");
+            status_bar->set_segment(2, "Counter 0");
+            hero_counter_pill->set_text("Counter 0");
+        };
+        toolbar.items.push_back(std::move(reset));
+
+        nk::NativeToolbarItem add_item;
+        add_item.kind = nk::NativeToolbarItem::Kind::Button;
+        add_item.identifier = "add_item";
+        add_item.label = "Add Item";
+        add_item.tooltip = "Append a new item to the list";
+        add_item.symbol_name = "plus";
+        add_item.on_activate = [&] {
+            const auto next = model->row_count() + 1;
+            model->append("Item " + std::to_string(next));
+            const auto count_text = std::to_string(model->row_count()) + " items";
+            list_status->set_text(count_text);
+            status_bar->set_segment(1, count_text);
+            hero_items_pill->set_text(count_text);
+        };
+        toolbar.items.push_back(std::move(add_item));
+
+        nk::NativeToolbarItem flex;
+        flex.kind = nk::NativeToolbarItem::Kind::FlexibleSpace;
+        flex.identifier = "flex";
+        flex.label = "";
+        toolbar.items.push_back(std::move(flex));
+
+        nk::NativeToolbarItem search;
+        search.kind = nk::NativeToolbarItem::Kind::SearchField;
+        search.identifier = "search";
+        search.label = "Search";
+        search.tooltip = "Filter by name";
+        search.on_search_submit = [&](std::string_view query) {
+            const std::string text = query.empty() ? "Search cleared"
+                                                   : "Search: " + std::string(query);
+            status_bar->set_segment(0, text);
+        };
+        toolbar.items.push_back(std::move(search));
+
+        nk::NativeToolbarItem show_sheet;
+        show_sheet.kind = nk::NativeToolbarItem::Kind::Button;
+        show_sheet.identifier = "show_sheet";
+        show_sheet.label = "Preferences";
+        show_sheet.tooltip = "Show the preferences sheet";
+        show_sheet.symbol_name = "gearshape";
+        show_sheet.on_activate = present_preferences_sheet;
+        toolbar.items.push_back(std::move(show_sheet));
+
+        window.set_native_toolbar(std::move(toolbar));
+    }
 
     window.present();
     return app.run();
