@@ -73,6 +73,7 @@ nk_sources = files(
     'src/widgets/badge.cpp',
     'src/widgets/avatar.cpp',
     'src/widgets/spinner.cpp',
+    'src/widgets/visual_effect_view.cpp',
 )
 
 nk_deps = []
