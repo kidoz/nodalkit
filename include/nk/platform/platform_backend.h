@@ -27,6 +27,7 @@ namespace nk {
 class EventLoop;
 class Window;
 struct WindowConfig;
+enum class TitlebarStyle : std::uint8_t;
 
 /// Opaque handle to a platform-native window surface.
 using NativeWindowHandle = void*;
@@ -97,6 +98,10 @@ public:
 
     /// Apply a platform cursor shape for the current pointer location.
     virtual void set_cursor_shape(CursorShape shape) = 0;
+
+    /// Apply a titlebar presentation style. Default no-op; macOS implements
+    /// full-size content-view and transparent-titlebar variants.
+    virtual void set_titlebar_style(TitlebarStyle style) { (void)style; }
 };
 
 /// Abstract platform backend. One per Application.

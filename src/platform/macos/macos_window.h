@@ -40,6 +40,7 @@ public:
     [[nodiscard]] NativeWindowHandle native_handle() const override;
     [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
+    void set_titlebar_style(TitlebarStyle style) override;
 
     /// Access the owning Window for event delivery from Objective-C code.
     Window& owner() { return owner_; }

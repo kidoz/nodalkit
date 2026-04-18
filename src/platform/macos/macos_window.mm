@@ -1202,6 +1202,32 @@ static id accessibility_focused_element(NSArray<id>* elements) {
 
 namespace nk {
 
+namespace {
+
+void apply_titlebar_style(NSWindow* window, TitlebarStyle style) {
+    NSWindowStyleMask mask = [window styleMask];
+    switch (style) {
+    case TitlebarStyle::Regular:
+        mask &= ~NSWindowStyleMaskFullSizeContentView;
+        [window setTitlebarAppearsTransparent:NO];
+        [window setTitleVisibility:NSWindowTitleVisible];
+        break;
+    case TitlebarStyle::Unified:
+        mask |= NSWindowStyleMaskFullSizeContentView;
+        [window setTitlebarAppearsTransparent:YES];
+        [window setTitleVisibility:NSWindowTitleVisible];
+        break;
+    case TitlebarStyle::Hidden:
+        mask |= NSWindowStyleMaskFullSizeContentView;
+        [window setTitlebarAppearsTransparent:YES];
+        [window setTitleVisibility:NSWindowTitleHidden];
+        break;
+    }
+    [window setStyleMask:mask];
+}
+
+} // namespace
+
 MacosSurface::MacosSurface(const WindowConfig& config, Window& owner) : owner_(owner) {
     @autoreleasepool {
         NSUInteger style_mask =
@@ -1225,6 +1251,8 @@ MacosSurface::MacosSurface(const WindowConfig& config, Window& owner) : owner_(o
         window_delegate_ = [[NKWindowDelegate alloc] init];
         window_delegate_.surface = this;
         [window_ setDelegate:window_delegate_];
+
+        apply_titlebar_style(window_, config.titlebar_style);
     }
 }
 
@@ -1390,6 +1418,14 @@ void MacosSurface::set_cursor_shape(CursorShape shape) {
         default:
             [[NSCursor arrowCursor] set];
             break;
+        }
+    }
+}
+
+void MacosSurface::set_titlebar_style(TitlebarStyle style) {
+    @autoreleasepool {
+        if (window_) {
+            apply_titlebar_style(window_, style);
         }
     }
 }

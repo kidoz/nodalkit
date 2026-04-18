@@ -3,6 +3,7 @@
 /// @file window.h
 /// @brief Top-level window abstraction.
 
+#include <cstdint>
 #include <memory>
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/signal.h>
@@ -27,6 +28,24 @@ struct KeyEvent;
 struct TextInputEvent;
 struct WindowEvent;
 
+/// Titlebar presentation style.
+///
+/// macOS honors all variants; Linux/Windows backends currently fall back to
+/// the regular decoration. When the titlebar is transparent (`Unified` or
+/// `Hidden`) on macOS, the content view extends under it, so root layouts
+/// should reserve vertical space for the titlebar area (about 28 points) to
+/// avoid drawing behind the traffic lights.
+enum class TitlebarStyle : std::uint8_t {
+    /// Traditional opaque titlebar; content sits below it.
+    Regular,
+    /// Titlebar becomes transparent and content extends under it; the title
+    /// text remains visible.
+    Unified,
+    /// Titlebar is transparent and the title text is hidden; traffic lights
+    /// remain functional on macOS.
+    Hidden,
+};
+
 /// Configuration for window creation.
 struct WindowConfig {
     std::string title;
@@ -34,6 +53,7 @@ struct WindowConfig {
     int height = 600;
     bool resizable = true;
     bool decorated = true;
+    TitlebarStyle titlebar_style = TitlebarStyle::Regular;
 };
 
 /// Focused text-input state exposed to platform backends for IME integration.
@@ -89,6 +109,10 @@ public:
     /// Fullscreen mode.
     void set_fullscreen(bool fullscreen);
     [[nodiscard]] bool is_fullscreen() const;
+
+    /// Titlebar presentation style. See TitlebarStyle for per-platform behavior.
+    void set_titlebar_style(TitlebarStyle style);
+    [[nodiscard]] TitlebarStyle titlebar_style() const;
 
     /// Request a frame to be rendered on the next idle.
     void request_frame();

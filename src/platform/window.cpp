@@ -1822,6 +1822,20 @@ bool Window::is_fullscreen() const {
     return false;
 }
 
+void Window::set_titlebar_style(TitlebarStyle style) {
+    if (impl_->config.titlebar_style == style) {
+        return;
+    }
+    impl_->config.titlebar_style = style;
+    if (impl_->surface) {
+        impl_->surface->set_titlebar_style(style);
+    }
+}
+
+TitlebarStyle Window::titlebar_style() const {
+    return impl_->config.titlebar_style;
+}
+
 void Window::perform_window_layout(Rect content_area) {
     if (impl_->child == nullptr) {
         return;

@@ -264,6 +264,8 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_visible);
     (void)static_cast<void (nk::Window::*)(bool)>(&nk::Window::set_fullscreen);
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_fullscreen);
+    (void)static_cast<void (nk::Window::*)(nk::TitlebarStyle)>(&nk::Window::set_titlebar_style);
+    (void)static_cast<nk::TitlebarStyle (nk::Window::*)() const>(&nk::Window::titlebar_style);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::request_frame);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::invalidate_layout);
     (void)static_cast<void (nk::Window::*)(const nk::MouseEvent&)>(&nk::Window::dispatch_mouse_event);
