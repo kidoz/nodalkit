@@ -46,6 +46,12 @@ public:
     /// Select the entire current text.
     void select_all();
 
+    /// Enable or disable spell-check underlining. When enabled, the platform
+    /// spell-checker (if available) is consulted on the field's text and
+    /// misspelled ranges are underlined. Defaults to disabled.
+    void set_spell_check_enabled(bool enabled);
+    [[nodiscard]] bool is_spell_check_enabled() const;
+
     /// Signal emitted when the text changes.
     Signal<std::string_view>& on_text_changed();
 

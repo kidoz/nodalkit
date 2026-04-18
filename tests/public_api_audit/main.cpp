@@ -38,6 +38,7 @@
 #include <nk/platform/key_codes.h>
 #include <nk/platform/native_menu.h>
 #include <nk/platform/platform_backend.h>
+#include <nk/platform/spell_checker.h>
 #include <nk/platform/system_preferences.h>
 #include <nk/platform/window.h>
 #include <nk/render/image_node.h>
@@ -620,6 +621,9 @@ void force_symbol_references() {
     (void)static_cast<std::size_t (nk::TextField::*)() const>(&nk::TextField::selection_end);
     (void)static_cast<bool (nk::TextField::*)() const>(&nk::TextField::has_selection);
     (void)static_cast<void (nk::TextField::*)()>(&nk::TextField::select_all);
+    (void)static_cast<void (nk::TextField::*)(bool)>(&nk::TextField::set_spell_check_enabled);
+    (void)static_cast<bool (nk::TextField::*)() const>(&nk::TextField::is_spell_check_enabled);
+    (void)static_cast<nk::SpellChecker* (nk::PlatformBackend::*)()>(&nk::PlatformBackend::spell_checker);
     (void)static_cast<nk::Signal<std::string_view>& (nk::TextField::*)()>(&nk::TextField::on_text_changed);
     (void)static_cast<nk::Signal<>& (nk::TextField::*)()>(&nk::TextField::on_activate);
     (void)static_cast<nk::SizeRequest (nk::TextField::*)(const nk::Constraints&) const>(&nk::TextField::measure);

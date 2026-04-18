@@ -3,6 +3,7 @@
 
 #include "macos_backend.h"
 
+#include "macos_spell_checker.h"
 #include "macos_window.h"
 
 #import <Cocoa/Cocoa.h>
@@ -88,6 +89,7 @@ struct MacosBackend::Impl {
     std::vector<std::unique_ptr<NativeMenuActionTargetState>> native_menu_target_states;
     NSMutableArray* native_menu_targets = nil;
     NSMenu* native_main_menu = nil;
+    MacosSpellChecker spell_checker;
 
     static void emit_preferences_change(Impl& impl);
 };
@@ -426,6 +428,10 @@ void MacosBackend::request_quit(int exit_code) {
     impl_->exit_code = exit_code;
     impl_->quit_requested = true;
     wake_event_loop();
+}
+
+SpellChecker* MacosBackend::spell_checker() {
+    return &impl_->spell_checker;
 }
 
 bool MacosBackend::supports_open_file_dialog() const {

@@ -92,6 +92,7 @@ if host_system == 'darwin'
 
     nk_sources += files(
         'src/platform/macos/macos_backend.mm',
+        'src/platform/macos/macos_spell_checker.mm',
         'src/platform/macos/macos_window.mm',
         'src/render/metal_renderer.mm',
         'src/text/macos/coretext_shaper.mm',

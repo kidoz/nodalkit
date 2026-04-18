@@ -26,6 +26,8 @@ public:
     void wake_event_loop() override;
     void request_quit(int exit_code) override;
 
+    [[nodiscard]] SpellChecker* spell_checker() override;
+
     [[nodiscard]] bool supports_open_file_dialog() const override;
     [[nodiscard]] OpenFileDialogResult
     show_open_file_dialog(std::string_view title, const std::vector<std::string>& filters) override;

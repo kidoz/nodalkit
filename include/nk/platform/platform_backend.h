@@ -14,6 +14,7 @@
 #include <nk/platform/events.h>
 #include <nk/platform/file_dialog.h>
 #include <nk/platform/native_menu.h>
+#include <nk/platform/spell_checker.h>
 #include <nk/platform/system_preferences.h>
 #include <nk/render/renderer.h>
 #include <nk/ui_core/cursor_shape.h>
@@ -168,6 +169,11 @@ public:
 
     /// Stop native system-preference observation.
     virtual void stop_system_preferences_observation() {}
+
+    /// Platform spell-checking service. Returns nullptr on backends that do
+    /// not provide one. The returned pointer is owned by the backend and
+    /// remains valid until shutdown.
+    [[nodiscard]] virtual SpellChecker* spell_checker() { return nullptr; }
 
     /// Whether the backend supports a native application menu.
     [[nodiscard]] virtual bool supports_native_app_menu() const { return false; }

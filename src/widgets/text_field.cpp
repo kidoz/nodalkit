@@ -7,6 +7,8 @@
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/platform_backend.h>
+#include <nk/platform/spell_checker.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/text_field.h>
 #include <optional>
@@ -499,6 +501,10 @@ struct TextField::Impl {
     std::vector<HistoryState> history;
     std::size_t history_index = 0;
     HistoryGroup history_group = HistoryGroup::None;
+    bool spell_check_enabled = false;
+    mutable std::string spell_check_cache_text;
+    mutable bool spell_check_cache_valid = false;
+    mutable std::vector<SpellCheckRange> spell_check_ranges;
     Signal<std::string_view> text_changed;
     Signal<> activate;
 };
@@ -589,6 +595,20 @@ void TextField::select_all() {
     sync_primary_selection_ownership();
     ensure_caret_visible();
     queue_text_redraw();
+}
+
+void TextField::set_spell_check_enabled(bool enabled) {
+    if (impl_->spell_check_enabled == enabled) {
+        return;
+    }
+    impl_->spell_check_enabled = enabled;
+    impl_->spell_check_cache_valid = false;
+    impl_->spell_check_ranges.clear();
+    queue_redraw();
+}
+
+bool TextField::is_spell_check_enabled() const {
+    return impl_->spell_check_enabled;
 }
 
 Signal<std::string_view>& TextField::on_text_changed() {
@@ -946,6 +966,38 @@ void TextField::snapshot(SnapshotContext& ctx) const {
 
         ctx.push_rounded_clip(body, corner_radius);
         ctx.add_text({text_bounds.x - impl_->scroll_x, text_y}, display_text, text_color, font);
+
+        if (impl_->spell_check_enabled && impl_->preedit_text.empty() && !impl_->text.empty()) {
+            if (!impl_->spell_check_cache_valid || impl_->spell_check_cache_text != impl_->text) {
+                impl_->spell_check_ranges.clear();
+                if (auto* app = Application::instance(); app != nullptr) {
+                    if (auto* checker = app->platform_backend().spell_checker();
+                        checker != nullptr) {
+                        impl_->spell_check_ranges = checker->check(impl_->text);
+                    }
+                }
+                impl_->spell_check_cache_text = impl_->text;
+                impl_->spell_check_cache_valid = true;
+            }
+
+            const Color misspelling_color =
+                theme_color("misspelling-underline-color", Color{0.92F, 0.25F, 0.25F, 1.0F});
+            const float underline_y = text_bounds.bottom() - 2.0F;
+            for (const auto& range : impl_->spell_check_ranges) {
+                if (range.length == 0 || range.start + range.length > impl_->text.size()) {
+                    continue;
+                }
+                const float left = measure_text(impl_->text.substr(0, range.start), font).width;
+                const float width =
+                    measure_text(impl_->text.substr(range.start, range.length), font).width;
+                ctx.add_color_rect({text_bounds.x + left - impl_->scroll_x,
+                                    underline_y,
+                                    width,
+                                    1.5F},
+                                   misspelling_color);
+            }
+        }
+
         if (!impl_->preedit_text.empty()) {
             const float preedit_x = text_bounds.x +
                                     measure_text(impl_->text.substr(0, impl_->cursor), font).width -
