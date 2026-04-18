@@ -102,12 +102,23 @@ public:
     /// Access the platform backend.
     [[nodiscard]] PlatformBackend& platform_backend();
 
-    /// Whether open-file dialogs are implemented by the active backend.
+    /// Whether open-file dialogs are natively implemented by the active backend.
+    ///
+    /// On Linux Wayland (the primary target), this returns false until the
+    /// `org.freedesktop.portal.FileChooser` XDG Desktop Portal is fully integrated.
+    /// Applications can use this to fall back to a custom UI if needed.
     [[nodiscard]] bool supports_open_file_dialog() const;
 
     /// Show a native "open file" dialog.
-    /// Returns the selected path or a FileDialogError describing why no path
-    /// was produced.
+    ///
+    /// If the active platform does not implement the dialog (e.g., Wayland before
+    /// XDG Portal support), this function immediately returns
+    /// `FileDialogError::Unsupported`.
+    ///
+    /// \param title   The title of the dialog.
+    /// \param filters Optional file extension filters (e.g., {"*.png", "*.jpg"}).
+    /// \return The selected file path, or a FileDialogError indicating why it failed
+    ///         (such as Cancelled or Unsupported).
     [[nodiscard]] OpenFileDialogResult
     open_file_dialog(std::string_view title = "Open", const std::vector<std::string>& filters = {});
 

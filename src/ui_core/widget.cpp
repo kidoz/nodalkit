@@ -219,6 +219,20 @@ std::string_view Widget::debug_name() const {
 
 // --- Layout ---
 
+bool Widget::has_height_for_width() const {
+    if (impl_->layout_manager) {
+        return impl_->layout_manager->has_height_for_width(*this);
+    }
+    return false;
+}
+
+float Widget::height_for_width(float width) const {
+    if (impl_->layout_manager) {
+        return impl_->layout_manager->height_for_width(*this, width);
+    }
+    return measure(Constraints::unbounded()).natural_height;
+}
+
 SizeRequest Widget::measure(const Constraints& constraints) const {
     if (impl_->layout_manager) {
         return impl_->layout_manager->measure(*this, constraints);

@@ -165,6 +165,71 @@ void BoxLayout::set_homogeneous(bool homogeneous) {
     homogeneous_ = homogeneous;
 }
 
+bool BoxLayout::has_height_for_width(Widget const& widget) const {
+    for (const auto& child : widget.children()) {
+        if (child && participates_in_layout(*child) && child->has_height_for_width()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+float BoxLayout::height_for_width(Widget const& widget, float width) const {
+    if (!has_height_for_width(widget)) {
+        return measure(widget, Constraints::unbounded()).natural_height;
+    }
+
+    if (orientation_ == Orientation::Vertical) {
+        float total_height = 0.0F;
+        int visible_count = 0;
+        for (const auto& child : widget.children()) {
+            if (child && participates_in_layout(*child)) {
+                const auto m = child->margin();
+                const float available_width = std::max(0.0F, width - m.left - m.right);
+                float h = 0.0F;
+                if (child->has_height_for_width()) {
+                    h = child->height_for_width(available_width);
+                } else {
+                    h = child->measure_for_diagnostics(Constraints::unbounded()).natural_height;
+                }
+                total_height += h + m.top + m.bottom;
+                visible_count++;
+            }
+        }
+        if (visible_count > 0) {
+            total_height += spacing_ * static_cast<float>(visible_count - 1);
+        }
+        return total_height;
+    }
+
+    // Horizontal height-for-width
+    float max_height = 0.0F;
+    const auto children = collect_box_children(widget, Constraints{0, 0, width, std::numeric_limits<float>::infinity()}, false);
+    float total_spacing = children.empty() ? 0.0F : spacing_ * static_cast<float>(children.size() - 1);
+    float available_main = std::max(0.0F, width - total_spacing);
+
+    std::vector<float> main_sizes(children.size(), 0.0F);
+    if (homogeneous_) {
+        float h_size = children.empty() ? 0.0F : available_main / static_cast<float>(children.size());
+        std::fill(main_sizes.begin(), main_sizes.end(), h_size);
+    } else {
+        main_sizes = distribute_main_sizes(children, available_main);
+    }
+
+    for (std::size_t index = 0; index < children.size(); ++index) {
+        const auto& child = children[index];
+        float child_width = std::max(0.0F, main_sizes[index] - child.margin_before - child.margin_after);
+        float h = 0.0F;
+        if (child.widget->has_height_for_width()) {
+            h = child.widget->height_for_width(child_width);
+        } else {
+            h = child.request.natural_height;
+        }
+        max_height = std::max(max_height, h + child.margin_cross_start + child.margin_cross_end);
+    }
+    return max_height;
+}
+
 SizeRequest BoxLayout::measure(const Widget& widget, const Constraints& constraints) const {
     SizeRequest result{};
     const bool vertical = (orientation_ == Orientation::Vertical);

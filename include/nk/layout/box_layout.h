@@ -28,6 +28,9 @@ public:
 
     // --- LayoutManager interface ---
 
+    [[nodiscard]] bool has_height_for_width(Widget const& widget) const override;
+    [[nodiscard]] float height_for_width(Widget const& widget, float width) const override;
+
     [[nodiscard]] SizeRequest measure(
         Widget const& widget, Constraints const& constraints) const override;
 

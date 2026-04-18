@@ -26,6 +26,12 @@ public:
     [[nodiscard]] virtual SizeRequest measure(
         Widget const& widget, Constraints const& constraints) const = 0;
 
+    /// Whether this layout depends on width to compute height.
+    [[nodiscard]] virtual bool has_height_for_width(Widget const& widget) const;
+
+    /// Compute the required height for a given width.
+    [[nodiscard]] virtual float height_for_width(Widget const& widget, float width) const;
+
     /// Allocate positions for all children within the given rectangle.
     virtual void allocate(Widget& widget, Rect const& allocation) = 0;
 

@@ -39,6 +39,8 @@ struct Label::Impl {
     std::string text;
     HAlign h_align = HAlign::Start;
     bool wrapping = false;
+    mutable float cached_hfw_width_ = -1.0F;
+    mutable float cached_hfw_height_ = -1.0F;
 };
 
 std::shared_ptr<Label> Label::create(std::string text) {
@@ -123,6 +125,26 @@ void Label::set_wrapping(bool enabled) {
         queue_layout();
         queue_redraw();
     }
+}
+
+bool Label::has_height_for_width() const {
+    return impl_->wrapping;
+}
+
+float Label::height_for_width(float width) const {
+    if (!impl_->wrapping || width <= 0.0F) {
+        return measure(Constraints::unbounded()).natural_height;
+    }
+    if (std::abs(impl_->cached_hfw_width_ - width) < 0.1F) {
+        return impl_->cached_hfw_height_;
+    }
+    const auto font = label_font(*this);
+    const auto measured = measure_text_wrapped(impl_->text, font, width);
+    const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
+                             has_style_class("heading") ? 28.0F : 20.0F);
+    impl_->cached_hfw_width_ = width;
+    impl_->cached_hfw_height_ = h;
+    return h;
 }
 
 SizeRequest Label::measure(const Constraints& constraints) const {

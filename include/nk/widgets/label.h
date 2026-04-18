@@ -33,6 +33,9 @@ public:
     void set_wrapping(bool enabled);
 
     // --- Widget overrides ---
+    [[nodiscard]] bool has_height_for_width() const override;
+    [[nodiscard]] float height_for_width(float width) const override;
+
     [[nodiscard]] SizeRequest measure(
         Constraints const& constraints) const override;
 

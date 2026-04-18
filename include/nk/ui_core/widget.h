@@ -43,6 +43,31 @@ enum class SizePolicy {
 /// Base class for all widgets. Widgets form a tree with unique-pointer
 /// ownership: a parent exclusively owns its children.
 ///
+/// ### Core Contracts
+///
+/// **Focus Ownership:** Focus is tracked per `Window`. A Widget must be sensitive
+/// and mapped to acquire focus. Setting focus on a widget automatically removes it
+/// from the previous owner, triggering appropriate focus out/in controller events.
+///
+/// **Event Dispatch Order:**
+/// 1. **Pointer:** Hit-tested top-down to find the deepest visible, sensitive
+///    target. Controllers on that target evaluate it first, then it bubbles up.
+/// 2. **Keyboard:** Routed directly to the focused widget (or Window root if none),
+///    then bubbles up through the parent chain until handled by a controller.
+///
+/// **Invalidation Rules:**
+/// - `mark_dirty()`: Invalidates the visual region for damage tracking. Safe to call
+///   anytime. Does *not* trigger a relayout.
+/// - `mark_layout_dirty()`: Invalidates geometry. Triggers a `measure`/`allocate`
+///   cycle on the next frame. Always implies `mark_dirty()`.
+///
+/// **Layout Measure/Allocate Expectations:**
+/// - `measure()`: Must be purely functional without side effects. The layout system
+///   may call this multiple times per frame with different constraints (e.g., to
+///   determine flex tracks). Do not mutate widget state here.
+/// - `allocate()`: Finalizes the geometry. This is the only place a widget should
+///   update its internal bounds or explicitly re-layout its own children.
+///
 /// Key responsibilities:
 /// - Tree structure (parent / children)
 /// - Layout (measure / allocate)
@@ -90,6 +115,12 @@ public:
     [[nodiscard]] std::string_view debug_name() const;
 
     // --- Layout ---
+
+    /// Whether this widget's height depends on its allocated width.
+    [[nodiscard]] virtual bool has_height_for_width() const;
+
+    /// The required height for a given width.
+    [[nodiscard]] virtual float height_for_width(float width) const;
 
     /// Measure this widget under the given constraints.
     [[nodiscard]] virtual SizeRequest measure(const Constraints& constraints) const;
