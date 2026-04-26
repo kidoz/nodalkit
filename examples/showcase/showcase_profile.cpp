@@ -174,19 +174,16 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
         profile.accent_color = nk::Color::from_rgb(0, 95, 184);
         profile.window_title = "NodalKit Showcase";
         profile.hero_title = "NodalKit Windows Showcase";
-        profile.hero_subtitle =
-            "A Windows shell for commands, preview, and live runtime status.";
+        profile.hero_subtitle = "A Windows shell for commands, preview, and live runtime status.";
         profile.input_title = "Command Workspace";
         profile.input_subtitle =
             "Primary actions, command entry, and preset controls in a Windows shell.";
         profile.list_title = "List & Selection";
         profile.list_subtitle = "A bounded list viewport keeps keyboard selection visible.";
         profile.preview_title = "Preview Stage";
-        profile.preview_subtitle =
-            "Live raster output with explicit scaling and compact metadata.";
+        profile.preview_subtitle = "Live raster output with explicit scaling and compact metadata.";
         profile.actions_title = "Runtime Actions";
-        profile.actions_subtitle =
-            "Shared runtime hooks for status changes, state, and dialogs.";
+        profile.actions_subtitle = "Shared runtime hooks for status changes, state, and dialogs.";
         profile.platform_pill_text = "Windows";
         profile.ready_segment = "Windows ready";
         profile.preview_layout_mode = ShowcasePreviewLayoutMode::Stacked;

@@ -5,7 +5,6 @@
 
 #include <nk/style/theme_selection.h>
 #include <nk/widgets/menu_bar.h>
-
 #include <string>
 #include <vector>
 
@@ -37,8 +36,7 @@ struct ShowcaseProfile {
     std::string hero_subtitle =
         "A compact workspace for inputs, model/view state, and live raster output.";
     std::string input_title = "Command Workspace";
-    std::string input_subtitle =
-        "Primary actions, short command entry, and accent selection.";
+    std::string input_subtitle = "Primary actions, short command entry, and accent selection.";
     std::string list_title = "List & Selection";
     std::string list_subtitle =
         "A bounded viewport keeps selection and insertion behavior visible.";
@@ -46,8 +44,7 @@ struct ShowcaseProfile {
     std::string preview_subtitle =
         "Live raster output with deliberate surface priority and explicit scaling.";
     std::string actions_title = "Runtime Actions";
-    std::string actions_subtitle =
-        "Status-first runtime hooks for shared state and modal flow.";
+    std::string actions_subtitle = "Status-first runtime hooks for shared state and modal flow.";
     std::string platform_pill_text = "Generic";
     std::string ready_segment = "Ready";
     std::string palette_label = "Accent preset";
@@ -98,9 +95,9 @@ struct ShowcaseProfile {
     float section_spacing = 18.0F;
 };
 
-ShowcasePlatformFlavor detect_showcase_platform_flavor(
-    nk::SystemPreferences const& system_preferences);
+ShowcasePlatformFlavor
+detect_showcase_platform_flavor(const nk::SystemPreferences& system_preferences);
 
-ShowcaseProfile make_showcase_profile(nk::SystemPreferences const& system_preferences);
+ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_preferences);
 
-std::vector<nk::Menu> build_showcase_menus(ShowcaseProfile const& profile);
+std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile);

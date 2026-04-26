@@ -3,4 +3,6 @@
 
 #include "showcase_app.h"
 
-int main(int argc, char** argv) { return run_showcase(argc, argv); }
+int main(int argc, char** argv) {
+    return run_showcase(argc, argv);
+}

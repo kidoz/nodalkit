@@ -7,7 +7,6 @@
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/label.h>
-
 #include <string>
 
 /// A simple container widget that uses a BoxLayout.
@@ -15,16 +14,13 @@ class Box : public nk::Widget {
 public:
     static std::shared_ptr<Box> vertical(float spacing = 8.0F) {
         auto box = std::shared_ptr<Box>(new Box());
-        auto layout = std::make_unique<nk::BoxLayout>(
-            nk::Orientation::Vertical);
+        auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
         layout->set_spacing(spacing);
         box->set_layout_manager(std::move(layout));
         return box;
     }
 
-    void append(std::shared_ptr<nk::Widget> child) {
-        append_child(std::move(child));
-    }
+    void append(std::shared_ptr<nk::Widget> child) { append_child(std::move(child)); }
 
 private:
     Box() = default;

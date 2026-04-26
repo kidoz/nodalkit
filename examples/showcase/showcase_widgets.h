@@ -377,9 +377,7 @@ public:
         queue_layout();
     }
 
-    void set_padding(float padding) {
-        set_padding(padding, padding, padding, padding);
-    }
+    void set_padding(float padding) { set_padding(padding, padding, padding, padding); }
 
     void set_padding(float top, float right, float bottom, float left) {
         padding_top_ = top;

@@ -235,8 +235,7 @@ int run_showcase(int argc, char** argv) {
         // Native-Mac sidebar: edge-to-edge vibrancy with no card chrome so the
         // material reads as the surface itself, not a floating rounded panel.
         list_content->set_padding(nk::Insets::uniform(16.0F));
-        auto vibrancy =
-            nk::VisualEffectView::create(nk::VisualEffectMaterial::Sidebar);
+        auto vibrancy = nk::VisualEffectView::create(nk::VisualEffectMaterial::Sidebar);
         vibrancy->set_corner_radius(0.0F);
         vibrancy->set_child(list_content);
         list_card = vibrancy;
@@ -331,18 +330,17 @@ int run_showcase(int argc, char** argv) {
     auto prop_value_label =
         ValueText::create("Source: 42, Target: " + std::to_string(target_prop.get()));
     auto prop_detail = SecondaryText::create("Shared state updates the footer and live status.");
-    auto prop_btn = nk::Button::create(profile.actions_layout_mode ==
-                                               ShowcaseActionsLayoutMode::Compact
-                                           ? "Sync Source = 99"
-                                           : "Set Source = 99");
+    auto prop_btn = nk::Button::create(
+        profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact ? "Sync Source = 99"
+                                                                          : "Set Source = 99");
     prop_btn->set_horizontal_size_policy(nk::SizePolicy::Preferred);
     auto dialog_label = FieldLabel::create("Sheet dialog");
     auto dialog_detail =
         SecondaryText::create("Open a window-attached sheet with explicit minimum width.");
-    auto dialog_btn = nk::Button::create(profile.actions_layout_mode ==
-                                                 ShowcaseActionsLayoutMode::Compact
-                                             ? "Show Sheet"
-                                             : "Show Preferences Sheet");
+    auto dialog_btn =
+        nk::Button::create(profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact
+                               ? "Show Sheet"
+                               : "Show Preferences Sheet");
     dialog_btn->add_style_class("suggested");
     dialog_btn->set_horizontal_size_policy(nk::SizePolicy::Expanding);
     auto runtime_status = ValueText::create("Waiting for an action.");
@@ -411,10 +409,8 @@ int run_showcase(int argc, char** argv) {
 
     (void)dialog_btn->on_clicked().connect(present_preferences_sheet);
 
-    auto property_group = Box::vertical(profile.actions_layout_mode ==
-                                                ShowcaseActionsLayoutMode::Compact
-                                            ? 6.0F
-                                            : 8.0F);
+    auto property_group = Box::vertical(
+        profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact ? 6.0F : 8.0F);
     property_group->append(prop_label);
     if (profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact) {
         property_group->append(prop_btn);
@@ -428,10 +424,8 @@ int run_showcase(int argc, char** argv) {
                                              profile.runtime_property_natural_height,
                                              profile.runtime_property_padding);
 
-    auto dialog_group = Box::vertical(profile.actions_layout_mode ==
-                                              ShowcaseActionsLayoutMode::Compact
-                                          ? 6.0F
-                                          : 8.0F);
+    auto dialog_group = Box::vertical(
+        profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact ? 6.0F : 8.0F);
     dialog_group->append(dialog_label);
     if (profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact) {
         dialog_group->append(dialog_btn);
@@ -445,10 +439,8 @@ int run_showcase(int argc, char** argv) {
                                            profile.runtime_dialog_padding);
 
     auto status_label = FieldLabel::create("Latest result");
-    auto status_group = Box::vertical(profile.actions_layout_mode ==
-                                              ShowcaseActionsLayoutMode::Compact
-                                          ? 4.0F
-                                          : 8.0F);
+    auto status_group = Box::vertical(
+        profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact ? 4.0F : 8.0F);
     status_group->append(status_label);
     status_group->append(runtime_status);
     status_group->append(runtime_status_detail);
@@ -477,10 +469,8 @@ int run_showcase(int argc, char** argv) {
     right_column->append(preview_card);
     right_column->append(actions_card);
 
-    auto content_row = SplitColumns::create(left_column,
-                                            right_column,
-                                            profile.main_split_ratio,
-                                            profile.main_column_spacing);
+    auto content_row = SplitColumns::create(
+        left_column, right_column, profile.main_split_ratio, profile.main_column_spacing);
     content_row->set_vertical_size_policy(nk::SizePolicy::Preferred);
     content_row->set_vertical_stretch(0);
     std::vector<std::shared_ptr<nk::Widget>> hero_pills = {
@@ -601,8 +591,8 @@ int run_showcase(int argc, char** argv) {
         search.label = "Search";
         search.tooltip = "Filter by name";
         search.on_search_submit = [&](std::string_view query) {
-            const std::string text = query.empty() ? "Search cleared"
-                                                   : "Search: " + std::string(query);
+            const std::string text =
+                query.empty() ? "Search cleared" : "Search: " + std::string(query);
             status_bar->set_segment(0, text);
         };
         toolbar.items.push_back(std::move(search));
