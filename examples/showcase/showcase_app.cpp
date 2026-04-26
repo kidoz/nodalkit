@@ -18,6 +18,7 @@
 #include <nk/style/theme_selection.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
@@ -30,6 +31,28 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+
+namespace {
+
+std::string showcase_table_field(std::string_view row, std::size_t index) {
+    std::size_t start = 0;
+    std::size_t field = 0;
+    while (start <= row.size()) {
+        const auto next = row.find(" | ", start);
+        const auto end = next == std::string_view::npos ? row.size() : next;
+        if (field == index) {
+            return std::string(row.substr(start, end - start));
+        }
+        if (next == std::string_view::npos) {
+            break;
+        }
+        start = next + 3;
+        ++field;
+    }
+    return {};
+}
+
+} // namespace
 
 int run_showcase(int argc, char** argv) {
     nk::Application app(argc, argv);
@@ -225,11 +248,72 @@ int run_showcase(int argc, char** argv) {
     list_footer->append(list_status);
     list_footer->append(add_item_btn);
 
+    auto table_label = FieldLabel::create("Data table");
+    auto table_model = std::make_shared<nk::StringListModel>(std::vector<std::string>{
+        "NK-101 | DataTable | In Progress | High",
+        "NK-108 | TreeView | Planned | Medium",
+        "NK-114 | GridView | Planned | Medium",
+        "NK-120 | ToastOverlay | Backlog | Low",
+        "NK-131 | CommandPalette | Research | High",
+    });
+    auto table_selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    table_selection->select(0);
+    auto data_table = nk::DataTable::create();
+    data_table->set_model(table_model);
+    data_table->set_selection_model(table_selection);
+    data_table->set_min_column_width(72.0F);
+    data_table->set_columns({
+        nk::DataTableColumn{
+            .id = "id",
+            .title = "ID",
+            .width = 84.0F,
+            .sortable = true,
+            .text =
+                [](const nk::AbstractListModel& model, std::size_t row) {
+                    return showcase_table_field(model.display_text(row), 0);
+                },
+        },
+        nk::DataTableColumn{
+            .id = "widget",
+            .title = "Widget",
+            .width = 150.0F,
+            .sortable = true,
+            .text =
+                [](const nk::AbstractListModel& model, std::size_t row) {
+                    return showcase_table_field(model.display_text(row), 1);
+                },
+        },
+        nk::DataTableColumn{
+            .id = "status",
+            .title = "Status",
+            .width = 128.0F,
+            .sortable = true,
+            .text =
+                [](const nk::AbstractListModel& model, std::size_t row) {
+                    return showcase_table_field(model.display_text(row), 2);
+                },
+        },
+        nk::DataTableColumn{
+            .id = "priority",
+            .title = "Priority",
+            .width = 118.0F,
+            .sortable = true,
+            .text =
+                [](const nk::AbstractListModel& model, std::size_t row) {
+                    return showcase_table_field(model.display_text(row), 3);
+                },
+        },
+    });
+    data_table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
+    auto table_stage = InsetStage::create(data_table, 156.0F, 172.0F, profile.list_stage_padding);
+
     auto list_content = Box::vertical(12.0F);
     list_content->append(list_title);
     list_content->append(list_subtitle);
     list_content->append(list_stage);
     list_content->append(list_footer);
+    list_content->append(table_label);
+    list_content->append(table_stage);
     std::shared_ptr<nk::Widget> list_card;
     if (is_macos) {
         // Native-Mac sidebar: edge-to-edge vibrancy with no card chrome so the
