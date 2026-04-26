@@ -21,10 +21,12 @@
 #include <nk/layout/grid_layout.h>
 #include <nk/layout/stack_layout.h>
 #include <nk/model/abstract_list_model.h>
+#include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
 #include <nk/style/theme.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
@@ -99,6 +101,21 @@ void check_model() {
     model.append("delta");
     check(model.row_count() == 4, "StringListModel append");
 
+    auto source =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"gamma", "alpha", "beta"});
+    nk::FilterListModel filtered{source, [](const nk::AbstractListModel& m, std::size_t row) {
+                                     return m.display_text(row).starts_with('a');
+                                 }};
+    check(filtered.row_count() == 1, "FilterListModel row count");
+    check(filtered.display_text(0) == "alpha", "FilterListModel display text");
+
+    nk::SortListModel sorted{source,
+                             [](const nk::AbstractListModel& m, std::size_t lhs, std::size_t rhs) {
+                                 return m.display_text(lhs) < m.display_text(rhs);
+                             }};
+    check(sorted.row_count() == 3, "SortListModel row count");
+    check(sorted.display_text(0) == "alpha", "SortListModel display text");
+
     nk::SelectionModel single{nk::SelectionMode::Single};
     single.select(2);
     check(single.is_selected(2), "SelectionModel single select");
@@ -170,6 +187,20 @@ void check_widgets() {
         std::make_shared<nk::StringListModel>(std::vector<std::string>{"row-0", "row-1"});
     list_view->set_model(list_model);
     check(list_view->model() == list_model.get(), "ListView::set_model");
+
+    auto table = nk::DataTable::create();
+    check(table != nullptr, "DataTable::create");
+    table->set_model(list_model);
+    table->set_columns({nk::DataTableColumn{
+        .id = "name",
+        .title = "Name",
+        .width = 120.0F,
+        .sortable = true,
+    }});
+    table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
+    check(table->model() == list_model.get(), "DataTable::set_model");
+    check(table->columns().size() == 1, "DataTable::set_columns");
+    check(table->sort_column() == 0, "DataTable::sort_by_column");
 
     auto dialog = nk::Dialog::create("Confirm", "Save changes?");
     check(dialog != nullptr, "Dialog::create");

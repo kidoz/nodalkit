@@ -18,6 +18,7 @@
 #include <nk/layout/grid_layout.h>
 #include <nk/layout/stack_layout.h>
 #include <nk/model/abstract_list_model.h>
+#include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
@@ -29,6 +30,7 @@
 #include <nk/text/font.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
@@ -3694,6 +3696,155 @@ TEST_CASE("StringListModel row signals preserve inserted and removed ranges", "[
     model.remove(0);
     REQUIRE(removed_first == 0);
     REQUIRE(removed_count == 1);
+}
+
+TEST_CASE("FilterListModel filters rows and preserves source mapping", "[app][model]") {
+    auto source = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"Alpha", "Beta", "Gamma", "Delta"});
+    nk::FilterListModel filtered{source, [](const nk::AbstractListModel& model, std::size_t row) {
+                                     return model.display_text(row).starts_with('D') ||
+                                            model.display_text(row).starts_with('G');
+                                 }};
+
+    REQUIRE(filtered.source_model() == source.get());
+    REQUIRE(filtered.has_filter());
+    REQUIRE(filtered.row_count() == 2);
+    REQUIRE(filtered.display_text(0) == "Gamma");
+    REQUIRE(filtered.display_text(1) == "Delta");
+    REQUIRE(filtered.map_to_source(0) == 2);
+    REQUIRE(filtered.map_to_source(1) == 3);
+    REQUIRE(filtered.map_from_source(0) == std::nullopt);
+    REQUIRE(filtered.map_from_source(3) == 1);
+}
+
+TEST_CASE("FilterListModel rebuilds when the source changes", "[app][model]") {
+    auto source = std::make_shared<nk::StringListModel>(std::vector<std::string>{"Alpha", "Beta"});
+    nk::FilterListModel filtered{source, [](const nk::AbstractListModel& model, std::size_t row) {
+                                     return model.display_text(row).contains('a') ||
+                                            model.display_text(row).contains('A');
+                                 }};
+
+    int resets = 0;
+    auto reset_conn = filtered.on_model_reset().connect([&] { ++resets; });
+    (void)reset_conn;
+
+    REQUIRE(filtered.row_count() == 2);
+    source->append("Echo");
+    REQUIRE(resets == 1);
+    REQUIRE(filtered.row_count() == 2);
+
+    source->append("Gamma");
+    REQUIRE(resets == 2);
+    REQUIRE(filtered.row_count() == 3);
+    REQUIRE(filtered.display_text(2) == "Gamma");
+}
+
+TEST_CASE("SortListModel sorts rows and preserves source mapping", "[app][model]") {
+    auto source =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});
+    nk::SortListModel sorted{
+        source, [](const nk::AbstractListModel& model, std::size_t lhs, std::size_t rhs) {
+            return model.display_text(lhs) < model.display_text(rhs);
+        }};
+
+    REQUIRE(sorted.source_model() == source.get());
+    REQUIRE(sorted.has_less());
+    REQUIRE(sorted.row_count() == 3);
+    REQUIRE(sorted.display_text(0) == "Alpha");
+    REQUIRE(sorted.display_text(1) == "Beta");
+    REQUIRE(sorted.display_text(2) == "Gamma");
+    REQUIRE(sorted.map_to_source(0) == 1);
+    REQUIRE(sorted.map_to_source(1) == 2);
+    REQUIRE(sorted.map_to_source(2) == 0);
+    REQUIRE(sorted.map_from_source(0) == 2);
+    REQUIRE(sorted.map_from_source(1) == 0);
+}
+
+TEST_CASE("SortListModel rebuilds when the source changes", "[app][model]") {
+    auto source = std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha"});
+    nk::SortListModel sorted{
+        source, [](const nk::AbstractListModel& model, std::size_t lhs, std::size_t rhs) {
+            return model.display_text(lhs) < model.display_text(rhs);
+        }};
+
+    int resets = 0;
+    auto reset_conn = sorted.on_model_reset().connect([&] { ++resets; });
+    (void)reset_conn;
+
+    source->append("Beta");
+    REQUIRE(resets == 1);
+    REQUIRE(sorted.row_count() == 3);
+    REQUIRE(sorted.display_text(0) == "Alpha");
+    REQUIRE(sorted.display_text(1) == "Beta");
+    REQUIRE(sorted.display_text(2) == "Gamma");
+}
+
+TEST_CASE("DataTable sorts by header click and selects source rows", "[app][table]") {
+    auto source =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    table->set_selection_model(selection);
+    table->set_columns({nk::DataTableColumn{
+        .id = "name",
+        .title = "Name",
+        .width = 220.0F,
+        .sortable = true,
+    }});
+    table->allocate({0.0F, 0.0F, 260.0F, 130.0F});
+
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 12.0F, .y = 12.0F, .button = 1}));
+    REQUIRE(table->sort_column() == 0);
+    REQUIRE(table->sort_direction() == nk::DataTableSortDirection::Ascending);
+
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 12.0F, .y = 38.0F, .button = 1}));
+    REQUIRE(selection->current_row() == 1);
+    REQUIRE(selection->is_selected(1));
+
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 12.0F, .y = 12.0F, .button = 1}));
+    REQUIRE(table->sort_direction() == nk::DataTableSortDirection::Descending);
+
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 12.0F, .y = 38.0F, .button = 1}));
+    REQUIRE(selection->current_row() == 0);
+    REQUIRE(selection->is_selected(0));
+}
+
+TEST_CASE("DataTable keyboard navigation and activation use source rows", "[app][table]") {
+    auto source =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    table->set_selection_model(selection);
+    table->set_columns({nk::DataTableColumn{
+        .id = "name",
+        .title = "Name",
+        .width = 220.0F,
+        .sortable = true,
+    }});
+    table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
+    table->allocate({0.0F, 0.0F, 260.0F, 130.0F});
+
+    std::size_t activated = static_cast<std::size_t>(-1);
+    auto activation_conn =
+        table->on_row_activated().connect([&](std::size_t row) { activated = row; });
+    (void)activation_conn;
+
+    REQUIRE(table->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    REQUIRE(selection->current_row() == 1);
+    REQUIRE(table->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    REQUIRE(selection->current_row() == 2);
+    REQUIRE(table->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    REQUIRE(selection->current_row() == 0);
+
+    REQUIRE(
+        table->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(activated == 0);
 }
 
 TEST_CASE("BoxLayout passes constraints and distributes extra space by stretch", "[app][layout]") {

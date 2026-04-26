@@ -31,6 +31,7 @@
 #include <nk/layout/layout_manager.h>
 #include <nk/layout/stack_layout.h>
 #include <nk/model/abstract_list_model.h>
+#include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
@@ -58,6 +59,7 @@
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
@@ -234,6 +236,37 @@ void force_symbol_references() {
     (void)static_cast<void (nk::StringListModel::*)()>(&nk::StringListModel::clear);
     (void)static_cast<const std::string& (nk::StringListModel::*)(std::size_t) const>(
         &nk::StringListModel::at);
+    (void)static_cast<void (nk::FilterListModel::*)(std::shared_ptr<nk::AbstractListModel>)>(
+        &nk::FilterListModel::set_source_model);
+    (void)static_cast<nk::AbstractListModel* (nk::FilterListModel::*)() const>(
+        &nk::FilterListModel::source_model);
+    (void)static_cast<void (nk::FilterListModel::*)(nk::ListModelFilter)>(
+        &nk::FilterListModel::set_filter);
+    (void)static_cast<bool (nk::FilterListModel::*)() const>(&nk::FilterListModel::has_filter);
+    (void)static_cast<std::size_t (nk::FilterListModel::*)() const>(
+        &nk::FilterListModel::row_count);
+    (void)static_cast<std::any (nk::FilterListModel::*)(std::size_t) const>(
+        &nk::FilterListModel::data);
+    (void)static_cast<std::string (nk::FilterListModel::*)(std::size_t) const>(
+        &nk::FilterListModel::display_text);
+    (void)static_cast<std::size_t (nk::FilterListModel::*)(std::size_t) const>(
+        &nk::FilterListModel::map_to_source);
+    (void)static_cast<std::optional<std::size_t> (nk::FilterListModel::*)(std::size_t) const>(
+        &nk::FilterListModel::map_from_source);
+    (void)static_cast<void (nk::SortListModel::*)(std::shared_ptr<nk::AbstractListModel>)>(
+        &nk::SortListModel::set_source_model);
+    (void)static_cast<nk::AbstractListModel* (nk::SortListModel::*)() const>(
+        &nk::SortListModel::source_model);
+    (void)static_cast<void (nk::SortListModel::*)(nk::ListModelLess)>(&nk::SortListModel::set_less);
+    (void)static_cast<bool (nk::SortListModel::*)() const>(&nk::SortListModel::has_less);
+    (void)static_cast<std::size_t (nk::SortListModel::*)() const>(&nk::SortListModel::row_count);
+    (void)static_cast<std::any (nk::SortListModel::*)(std::size_t) const>(&nk::SortListModel::data);
+    (void)static_cast<std::string (nk::SortListModel::*)(std::size_t) const>(
+        &nk::SortListModel::display_text);
+    (void)static_cast<std::size_t (nk::SortListModel::*)(std::size_t) const>(
+        &nk::SortListModel::map_to_source);
+    (void)static_cast<std::optional<std::size_t> (nk::SortListModel::*)(std::size_t) const>(
+        &nk::SortListModel::map_from_source);
     (void)static_cast<nk::SelectionMode (nk::SelectionModel::*)() const>(&nk::SelectionModel::mode);
     (void)static_cast<void (nk::SelectionModel::*)(nk::SelectionMode)>(
         &nk::SelectionModel::set_mode);
@@ -253,6 +286,31 @@ void force_symbol_references() {
         &nk::SelectionModel::on_selection_changed);
     (void)static_cast<nk::Signal<std::size_t>& (nk::SelectionModel::*)()>(
         &nk::SelectionModel::on_current_changed);
+    (void)&nk::DataTable::create;
+    (void)static_cast<void (nk::DataTable::*)(std::shared_ptr<nk::AbstractListModel>)>(
+        &nk::DataTable::set_model);
+    (void)static_cast<nk::AbstractListModel* (nk::DataTable::*)() const>(&nk::DataTable::model);
+    (void)static_cast<void (nk::DataTable::*)(std::shared_ptr<nk::SelectionModel>)>(
+        &nk::DataTable::set_selection_model);
+    (void)static_cast<nk::SelectionModel* (nk::DataTable::*)() const>(
+        &nk::DataTable::selection_model);
+    (void)static_cast<void (nk::DataTable::*)(std::vector<nk::DataTableColumn>)>(
+        &nk::DataTable::set_columns);
+    (void)static_cast<std::span<const nk::DataTableColumn> (nk::DataTable::*)() const>(
+        &nk::DataTable::columns);
+    (void)static_cast<void (nk::DataTable::*)(float)>(&nk::DataTable::set_row_height);
+    (void)static_cast<float (nk::DataTable::*)() const>(&nk::DataTable::row_height);
+    (void)static_cast<void (nk::DataTable::*)(float)>(&nk::DataTable::set_header_height);
+    (void)static_cast<float (nk::DataTable::*)() const>(&nk::DataTable::header_height);
+    (void)static_cast<void (nk::DataTable::*)(std::size_t, nk::DataTableSortDirection)>(
+        &nk::DataTable::sort_by_column);
+    (void)static_cast<void (nk::DataTable::*)()>(&nk::DataTable::clear_sort);
+    (void)static_cast<std::optional<std::size_t> (nk::DataTable::*)() const>(
+        &nk::DataTable::sort_column);
+    (void)static_cast<nk::DataTableSortDirection (nk::DataTable::*)() const>(
+        &nk::DataTable::sort_direction);
+    (void)static_cast<nk::Signal<std::size_t>& (nk::DataTable::*)()>(
+        &nk::DataTable::on_row_activated);
     (void)static_cast<int (nk::Application::*)()>(&nk::Application::run);
     (void)static_cast<void (nk::Application::*)(int)>(&nk::Application::quit);
     (void)static_cast<nk::EventLoop& (nk::Application::*)()>(&nk::Application::event_loop);
