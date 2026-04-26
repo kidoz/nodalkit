@@ -11,24 +11,22 @@ namespace nk {
 /// Multiple flags can be combined. Used by the style engine and
 /// accessibility layer.
 enum class StateFlags : uint32_t {
-    None        = 0,
-    Hovered     = 1u << 0,
-    Pressed     = 1u << 1,
-    Focused     = 1u << 2,
-    Disabled    = 1u << 3,
-    Checked     = 1u << 4,
-    Selected    = 1u << 5,
-    Dragging    = 1u << 6,
+    None = 0,
+    Hovered = 1u << 0,
+    Pressed = 1u << 1,
+    Focused = 1u << 2,
+    Disabled = 1u << 3,
+    Checked = 1u << 4,
+    Selected = 1u << 5,
+    Dragging = 1u << 6,
 };
 
 constexpr StateFlags operator|(StateFlags a, StateFlags b) {
-    return static_cast<StateFlags>(
-        static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    return static_cast<StateFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 }
 
 constexpr StateFlags operator&(StateFlags a, StateFlags b) {
-    return static_cast<StateFlags>(
-        static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+    return static_cast<StateFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 }
 
 constexpr StateFlags operator~(StateFlags a) {

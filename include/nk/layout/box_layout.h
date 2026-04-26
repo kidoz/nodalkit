@@ -28,13 +28,13 @@ public:
 
     // --- LayoutManager interface ---
 
-    [[nodiscard]] bool has_height_for_width(Widget const& widget) const override;
-    [[nodiscard]] float height_for_width(Widget const& widget, float width) const override;
+    [[nodiscard]] bool has_height_for_width(const Widget& widget) const override;
+    [[nodiscard]] float height_for_width(const Widget& widget, float width) const override;
 
-    [[nodiscard]] SizeRequest measure(
-        Widget const& widget, Constraints const& constraints) const override;
+    [[nodiscard]] SizeRequest measure(const Widget& widget,
+                                      const Constraints& constraints) const override;
 
-    void allocate(Widget& widget, Rect const& allocation) override;
+    void allocate(Widget& widget, const Rect& allocation) override;
 
 private:
     Orientation orientation_;

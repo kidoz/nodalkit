@@ -14,7 +14,7 @@ struct Point {
     float x = 0;
     float y = 0;
 
-    constexpr bool operator==(Point const&) const = default;
+    constexpr bool operator==(const Point&) const = default;
 };
 
 /// 2D size.
@@ -22,7 +22,7 @@ struct Size {
     float width = 0;
     float height = 0;
 
-    constexpr bool operator==(Size const&) const = default;
+    constexpr bool operator==(const Size&) const = default;
 };
 
 /// Axis-aligned rectangle in logical coordinates.
@@ -33,14 +33,18 @@ struct Rect {
     float height = 0;
 
     [[nodiscard]] constexpr float right() const { return x + width; }
+
     [[nodiscard]] constexpr float bottom() const { return y + height; }
+
     [[nodiscard]] constexpr Point origin() const { return {x, y}; }
+
     [[nodiscard]] constexpr Size size() const { return {width, height}; }
+
     [[nodiscard]] constexpr bool contains(Point p) const {
         return p.x >= x && p.x < right() && p.y >= y && p.y < bottom();
     }
 
-    constexpr bool operator==(Rect const&) const = default;
+    constexpr bool operator==(const Rect&) const = default;
 };
 
 /// Insets (padding/margin).
@@ -51,11 +55,12 @@ struct Insets {
     float left = 0;
 
     static constexpr Insets uniform(float v) { return {v, v, v, v}; }
+
     static constexpr Insets symmetric(float vertical, float horizontal) {
         return {vertical, horizontal, vertical, horizontal};
     }
 
-    constexpr bool operator==(Insets const&) const = default;
+    constexpr bool operator==(const Insets&) const = default;
 };
 
 /// RGBA color, components in [0, 1].
@@ -69,7 +74,7 @@ struct Color {
         return {r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
     }
 
-    constexpr bool operator==(Color const&) const = default;
+    constexpr bool operator==(const Color&) const = default;
 };
 
 /// Layout orientation.

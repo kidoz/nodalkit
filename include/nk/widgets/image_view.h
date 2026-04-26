@@ -3,12 +3,11 @@
 /// @file image_view.h
 /// @brief Image display widget for raw pixel buffers.
 
-#include <nk/render/image_node.h>
-#include <nk/ui_core/widget.h>
-
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <nk/render/image_node.h>
+#include <nk/ui_core/widget.h>
 
 namespace nk {
 
@@ -21,7 +20,7 @@ public:
 
     /// Update the displayed image. Copies the data internally.
     /// Thread-safe — can be called from the emulation thread.
-    void update_pixel_buffer(uint32_t const* data, int width, int height);
+    void update_pixel_buffer(const uint32_t* data, int width, int height);
 
     /// Set scaling mode (nearest-neighbor or bilinear).
     void set_scale_mode(ScaleMode mode);
@@ -36,8 +35,7 @@ public:
     [[nodiscard]] int source_height() const;
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
 
 protected:
     ImageView();

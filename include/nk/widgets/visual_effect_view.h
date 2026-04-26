@@ -31,8 +31,8 @@ enum class VisualEffectMaterial {
 /// non-opaque presentation path.
 class VisualEffectView : public Widget {
 public:
-    [[nodiscard]] static std::shared_ptr<VisualEffectView> create(
-        VisualEffectMaterial material = VisualEffectMaterial::Sidebar);
+    [[nodiscard]] static std::shared_ptr<VisualEffectView>
+    create(VisualEffectMaterial material = VisualEffectMaterial::Sidebar);
     ~VisualEffectView() override;
 
     void set_child(std::shared_ptr<Widget> child);

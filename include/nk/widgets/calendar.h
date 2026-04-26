@@ -15,7 +15,7 @@ struct Date {
     int month = 1; ///< 1-12
     int day = 1;   ///< 1-31
 
-    constexpr bool operator==(Date const&) const = default;
+    constexpr bool operator==(const Date&) const = default;
 };
 
 /// A month-view calendar for date selection.

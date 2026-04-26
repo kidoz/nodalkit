@@ -3,9 +3,8 @@
 /// @file theme_selection.h
 /// @brief Theme family and selection policy for NodalKit visual resolution.
 
-#include <nk/platform/system_preferences.h>
-
 #include <memory>
+#include <nk/platform/system_preferences.h>
 #include <optional>
 
 namespace nk {
@@ -52,7 +51,7 @@ struct ThemeSelection {
     MotionPolicy motion_policy = MotionPolicy::FollowSystem;
     TransparencyPolicy transparency_policy = TransparencyPolicy::FollowSystem;
 
-    constexpr bool operator==(ThemeSelection const&) const = default;
+    constexpr bool operator==(const ThemeSelection&) const = default;
 };
 
 /// Fully resolved visual policy after system preferences are applied.
@@ -65,22 +64,20 @@ struct ResolvedThemeSelection {
     bool reduced_motion = false;
     bool transparency_allowed = true;
 
-    constexpr bool operator==(ResolvedThemeSelection const&) const = default;
+    constexpr bool operator==(const ResolvedThemeSelection&) const = default;
 };
 
 /// Resolve the final theme family and variant from application policy and
 /// current system preferences.
-[[nodiscard]] ResolvedThemeSelection resolve_theme_selection(
-    ThemeSelection const& selection,
-    SystemPreferences const& system_preferences);
+[[nodiscard]] ResolvedThemeSelection
+resolve_theme_selection(const ThemeSelection& selection,
+                        const SystemPreferences& system_preferences);
 
 /// Build a concrete theme for the resolved selection.
-[[nodiscard]] std::shared_ptr<Theme> make_theme(
-    ResolvedThemeSelection const& selection,
-    SystemPreferences const& system_preferences);
+[[nodiscard]] std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
+                                                const SystemPreferences& system_preferences);
 
 /// Choose the default theme family for the current host platform.
-[[nodiscard]] ThemeFamily default_theme_family_for(
-    SystemPreferences const& system_preferences);
+[[nodiscard]] ThemeFamily default_theme_family_for(const SystemPreferences& system_preferences);
 
 } // namespace nk

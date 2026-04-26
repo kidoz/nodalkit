@@ -13,8 +13,8 @@ namespace nk {
 /// A horizontal or vertical slider for selecting a numeric value.
 class Slider : public Widget {
 public:
-    [[nodiscard]] static std::shared_ptr<Slider> create(
-        Orientation orientation = Orientation::Horizontal);
+    [[nodiscard]] static std::shared_ptr<Slider>
+    create(Orientation orientation = Orientation::Horizontal);
     ~Slider() override;
 
     [[nodiscard]] Orientation orientation() const;

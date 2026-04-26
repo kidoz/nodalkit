@@ -3,9 +3,8 @@
 /// @file status_bar.h
 /// @brief Horizontal status bar widget with text segments.
 
-#include <nk/ui_core/widget.h>
-
 #include <memory>
+#include <nk/ui_core/widget.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,8 +30,7 @@ public:
     [[nodiscard]] std::string_view segment(std::size_t index) const;
 
     // --- Widget overrides ---
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
 
 protected:
     StatusBar();

@@ -3,9 +3,8 @@
 /// @file image_node.h
 /// @brief Render node for blitting raw pixel buffers.
 
-#include <nk/render/render_node.h>
-
 #include <cstdint>
+#include <nk/render/render_node.h>
 
 namespace nk {
 
@@ -20,16 +19,19 @@ public:
     /// @param src_width  Source image width in pixels.
     /// @param src_height Source image height in pixels.
     /// @param scale      Scaling mode.
-    ImageNode(Rect dest, uint32_t const* pixel_data, int src_width,
-              int src_height, ScaleMode scale = ScaleMode::NearestNeighbor);
+    ImageNode(Rect dest,
+              const uint32_t* pixel_data,
+              int src_width,
+              int src_height,
+              ScaleMode scale = ScaleMode::NearestNeighbor);
 
-    [[nodiscard]] uint32_t const* pixel_data() const;
+    [[nodiscard]] const uint32_t* pixel_data() const;
     [[nodiscard]] int src_width() const;
     [[nodiscard]] int src_height() const;
     [[nodiscard]] ScaleMode scale_mode() const;
 
 private:
-    uint32_t const* pixel_data_;
+    const uint32_t* pixel_data_;
     int src_width_;
     int src_height_;
     ScaleMode scale_mode_;

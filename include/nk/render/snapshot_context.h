@@ -45,8 +45,8 @@ public:
     void add_text(Point origin, std::string text, Color color, FontDescriptor font = {});
 
     /// Convenience: add a word-wrapped text node.
-    void add_wrapped_text(Point origin, std::string text, Color color, FontDescriptor font,
-                          float max_width);
+    void add_wrapped_text(
+        Point origin, std::string text, Color color, FontDescriptor font, float max_width);
 
     /// Convenience: add an image node.
     void add_image(Rect dest,
@@ -73,12 +73,19 @@ public:
     void push_rounded_clip(Rect bounds, float corner_radius);
 
     /// Convenience: add a linear gradient rectangle.
-    void add_linear_gradient(Rect bounds, Color start_color, Color end_color,
+    void add_linear_gradient(Rect bounds,
+                             Color start_color,
+                             Color end_color,
                              Orientation direction = Orientation::Vertical);
 
     /// Convenience: add an outset box shadow behind the given rect.
-    void add_shadow(Rect rect, Color color, float offset_x, float offset_y, float blur_radius,
-                    float spread = 0.0F, float corner_radius = 0.0F);
+    void add_shadow(Rect rect,
+                    Color color,
+                    float offset_x,
+                    float offset_y,
+                    float blur_radius,
+                    float spread = 0.0F,
+                    float corner_radius = 0.0F);
 
     /// Push an opacity container. Children rendered inside it have their
     /// effective alpha multiplied by `opacity` [0, 1]. Pop with

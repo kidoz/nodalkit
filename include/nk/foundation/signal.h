@@ -36,8 +36,7 @@ public:
     [[nodiscard]] bool connected() const;
 
 private:
-    template <typename...>
-    friend class Signal;
+    template <typename...> friend class Signal;
 
     explicit Connection(std::shared_ptr<detail::ConnectionState> state);
     std::shared_ptr<detail::ConnectionState> state_;
@@ -53,8 +52,8 @@ public:
     ScopedConnection(ScopedConnection&& other) noexcept;
     ScopedConnection& operator=(ScopedConnection&& other) noexcept;
 
-    ScopedConnection(ScopedConnection const&) = delete;
-    ScopedConnection& operator=(ScopedConnection const&) = delete;
+    ScopedConnection(const ScopedConnection&) = delete;
+    ScopedConnection& operator=(const ScopedConnection&) = delete;
 
     void disconnect();
     [[nodiscard]] Connection release();
@@ -76,16 +75,15 @@ private:
 ///   value_changed.emit(42);
 ///   conn.disconnect();
 /// @endcode
-template <typename... Args>
-class Signal {
+template <typename... Args> class Signal {
 public:
-    using SlotType = std::function<void(Args const&...)>;
+    using SlotType = std::function<void(const Args&...)>;
 
     Signal() = default;
     ~Signal() = default;
 
-    Signal(Signal const&) = delete;
-    Signal& operator=(Signal const&) = delete;
+    Signal(const Signal&) = delete;
+    Signal& operator=(const Signal&) = delete;
 
     Signal(Signal&&) noexcept = default;
     Signal& operator=(Signal&&) noexcept = default;
@@ -99,10 +97,10 @@ public:
     }
 
     /// Emit the signal, invoking all connected slots.
-    void emit(Args const&... args) {
+    void emit(const Args&... args) {
         // Take a snapshot size so newly connected slots during emission
         // are not called in this round.
-        auto const n = slots_.size();
+        const auto n = slots_.size();
         ++emit_depth_;
         for (std::size_t i = 0; i < n; ++i) {
             if (slots_[i].state->connected.load(std::memory_order_relaxed)) {
@@ -117,12 +115,12 @@ public:
     }
 
     /// Convenience: emit via operator().
-    void operator()(Args const&... args) { emit(args...); }
+    void operator()(const Args&... args) { emit(args...); }
 
     /// Number of currently connected slots.
     [[nodiscard]] std::size_t connection_count() const {
         std::size_t count = 0;
-        for (auto const& s : slots_) {
+        for (const auto& s : slots_) {
             if (s.state->connected.load(std::memory_order_relaxed)) {
                 ++count;
             }
@@ -147,7 +145,7 @@ private:
     };
 
     void purge_disconnected() {
-        std::erase_if(slots_, [](Slot const& s) {
+        std::erase_if(slots_, [](const Slot& s) {
             return !s.state->connected.load(std::memory_order_relaxed);
         });
     }

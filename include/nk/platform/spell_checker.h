@@ -32,7 +32,8 @@ public:
     [[nodiscard]] virtual std::vector<SpellCheckRange> check(std::string_view text) = 0;
 
     /// Return replacement suggestions for a misspelled word.
-    [[nodiscard]] virtual std::vector<std::string> suggestions(std::string_view misspelled_word) = 0;
+    [[nodiscard]] virtual std::vector<std::string>
+    suggestions(std::string_view misspelled_word) = 0;
 
 protected:
     SpellChecker() = default;

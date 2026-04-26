@@ -14,13 +14,13 @@ namespace nk {
 
 /// Kind of render node.
 enum class RenderNodeKind {
-    Container,   ///< Groups children; applies a transform/clip.
-    ColorRect,   ///< Solid color rectangle.
-    RoundedRect, ///< Solid rounded rectangle.
-    Text,        ///< Shaped text run.
-    Image,       ///< Raster image.
-    Border,      ///< Border stroke around a rectangle.
-    RoundedClip, ///< Rounded-rectangle clip region.
+    Container,      ///< Groups children; applies a transform/clip.
+    ColorRect,      ///< Solid color rectangle.
+    RoundedRect,    ///< Solid rounded rectangle.
+    Text,           ///< Shaped text run.
+    Image,          ///< Raster image.
+    Border,         ///< Border stroke around a rectangle.
+    RoundedClip,    ///< Rounded-rectangle clip region.
     Opacity,        ///< Multiplies children's alpha by a factor.
     LinearGradient, ///< Linear gradient fill.
     Shadow,         ///< Box shadow (outset).
@@ -111,7 +111,11 @@ private:
 /// but hit testing and clipping will not work correctly for those nodes.
 class TextNode : public RenderNode {
 public:
-    TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font = {},
+    TextNode(Point origin,
+             Size size,
+             std::string text,
+             Color color,
+             FontDescriptor font = {},
              float max_width = 0.0F);
 
     [[nodiscard]] const std::string& text() const;
@@ -147,7 +151,9 @@ private:
 /// and `end_color` along the specified orientation across the bounds rect.
 class LinearGradientNode : public RenderNode {
 public:
-    LinearGradientNode(Rect bounds, Color start_color, Color end_color,
+    LinearGradientNode(Rect bounds,
+                       Color start_color,
+                       Color end_color,
                        Orientation direction = Orientation::Vertical);
 
     [[nodiscard]] Color start_color() const;
@@ -167,8 +173,13 @@ private:
 /// sufficient for elevation cues and card surfaces at typical blur radii.
 class ShadowNode : public RenderNode {
 public:
-    ShadowNode(Rect rect, Color color, float offset_x, float offset_y, float blur_radius,
-               float spread = 0.0F, float corner_radius = 0.0F);
+    ShadowNode(Rect rect,
+               Color color,
+               float offset_x,
+               float offset_y,
+               float blur_radius,
+               float spread = 0.0F,
+               float corner_radius = 0.0F);
 
     [[nodiscard]] Color color() const;
     [[nodiscard]] float offset_x() const;

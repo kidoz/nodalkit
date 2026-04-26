@@ -14,8 +14,8 @@ namespace nk {
 /// draggable divider.
 class SplitView : public Widget {
 public:
-    [[nodiscard]] static std::shared_ptr<SplitView> create(
-        Orientation orientation = Orientation::Horizontal);
+    [[nodiscard]] static std::shared_ptr<SplitView>
+    create(Orientation orientation = Orientation::Horizontal);
     ~SplitView() override;
 
     [[nodiscard]] Orientation orientation() const;

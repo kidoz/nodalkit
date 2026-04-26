@@ -3,9 +3,8 @@
 /// @file label.h
 /// @brief Read-only text display widget.
 
-#include <nk/ui_core/widget.h>
-
 #include <memory>
+#include <nk/ui_core/widget.h>
 #include <string>
 #include <string_view>
 
@@ -15,8 +14,7 @@ namespace nk {
 class Label : public Widget {
 public:
     /// Create a label with the given text.
-    [[nodiscard]] static std::shared_ptr<Label> create(
-        std::string text = {});
+    [[nodiscard]] static std::shared_ptr<Label> create(std::string text = {});
 
     ~Label() override;
 
@@ -36,8 +34,7 @@ public:
     [[nodiscard]] bool has_height_for_width() const override;
     [[nodiscard]] float height_for_width(float width) const override;
 
-    [[nodiscard]] SizeRequest measure(
-        Constraints const& constraints) const override;
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
 
 protected:
     explicit Label(std::string text);

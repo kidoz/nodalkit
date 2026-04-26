@@ -3,10 +3,9 @@
 /// @file theme.h
 /// @brief Theme token system and style rule collection.
 
+#include <memory>
 #include <nk/style/style_class.h>
 #include <nk/style/theme_selection.h>
-
-#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -21,8 +20,8 @@ public:
     explicit Theme(std::string name);
     ~Theme();
 
-    Theme(Theme const&) = delete;
-    Theme& operator=(Theme const&) = delete;
+    Theme(const Theme&) = delete;
+    Theme& operator=(const Theme&) = delete;
 
     [[nodiscard]] std::string_view name() const;
 
@@ -33,14 +32,13 @@ public:
     void set_token(std::string name, StyleValue value);
 
     /// Look up a token. Returns nullptr if not found.
-    [[nodiscard]] StyleValue const* token(std::string_view name) const;
+    [[nodiscard]] const StyleValue* token(std::string_view name) const;
 
     /// Resolve a property for a widget given its type, classes, and state.
-    [[nodiscard]] StyleValue const* resolve(
-        std::string_view type_name,
-        std::vector<std::string> const& classes,
-        StateFlags state,
-        std::string_view property_name) const;
+    [[nodiscard]] const StyleValue* resolve(std::string_view type_name,
+                                            const std::vector<std::string>& classes,
+                                            StateFlags state,
+                                            std::string_view property_name) const;
 
     /// Set the process-wide active theme used by widget snapshot helpers.
     static void set_active(std::shared_ptr<Theme> theme);

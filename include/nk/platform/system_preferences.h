@@ -4,7 +4,6 @@
 /// @brief Cross-platform system visual preference model for theme selection.
 
 #include <nk/foundation/types.h>
-
 #include <optional>
 #include <string>
 #include <string_view>
@@ -59,7 +58,7 @@ struct SystemPreferences {
     float text_scale_factor = 1.0F;
     std::optional<Color> accent_color;
 
-    constexpr bool operator==(SystemPreferences const&) const = default;
+    constexpr bool operator==(const SystemPreferences&) const = default;
 };
 
 /// Convert a platform family to a stable lowercase token.

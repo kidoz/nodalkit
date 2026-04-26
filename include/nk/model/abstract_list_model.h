@@ -3,10 +3,9 @@
 /// @file abstract_list_model.h
 /// @brief Abstract interface for list data models.
 
-#include <nk/foundation/signal.h>
-
 #include <any>
 #include <cstddef>
+#include <nk/foundation/signal.h>
 #include <string>
 
 namespace nk {
@@ -20,8 +19,8 @@ class AbstractListModel {
 public:
     virtual ~AbstractListModel();
 
-    AbstractListModel(AbstractListModel const&) = delete;
-    AbstractListModel& operator=(AbstractListModel const&) = delete;
+    AbstractListModel(const AbstractListModel&) = delete;
+    AbstractListModel& operator=(const AbstractListModel&) = delete;
 
     /// Number of items.
     [[nodiscard]] virtual std::size_t row_count() const = 0;
@@ -85,7 +84,7 @@ public:
     void remove(std::size_t row);
     void clear();
 
-    [[nodiscard]] std::string const& at(std::size_t row) const;
+    [[nodiscard]] const std::string& at(std::size_t row) const;
 
 private:
     std::vector<std::string> items_;

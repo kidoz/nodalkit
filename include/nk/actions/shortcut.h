@@ -10,21 +10,19 @@ namespace nk {
 
 /// Modifier key flags.
 enum class Modifiers : uint32_t {
-    None    = 0,
-    Shift   = 1u << 0,
-    Ctrl    = 1u << 1,
-    Alt     = 1u << 2,
-    Super   = 1u << 3,
+    None = 0,
+    Shift = 1u << 0,
+    Ctrl = 1u << 1,
+    Alt = 1u << 2,
+    Super = 1u << 3,
 };
 
 constexpr Modifiers operator|(Modifiers a, Modifiers b) {
-    return static_cast<Modifiers>(
-        static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+    return static_cast<Modifiers>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
 }
 
 constexpr Modifiers operator&(Modifiers a, Modifiers b) {
-    return static_cast<Modifiers>(
-        static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+    return static_cast<Modifiers>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 }
 
 /// A keyboard shortcut descriptor (e.g. Ctrl+S).

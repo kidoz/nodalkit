@@ -29,8 +29,8 @@ enum class FontStyle : uint8_t {
 
 /// Describes a font for text rendering.
 struct FontDescriptor {
-    std::string family;             ///< Font family name (e.g. "System", "Menlo").
-    float size = 13.0F;             ///< Font size in points.
+    std::string family; ///< Font family name (e.g. "System", "Menlo").
+    float size = 13.0F; ///< Font size in points.
     FontWeight weight = FontWeight::Regular;
     FontStyle style = FontStyle::Normal;
 };

@@ -12,8 +12,8 @@ namespace nk {
 /// A horizontal or vertical separator line.
 class Separator : public Widget {
 public:
-    [[nodiscard]] static std::shared_ptr<Separator> create(
-        Orientation orientation = Orientation::Horizontal);
+    [[nodiscard]] static std::shared_ptr<Separator>
+    create(Orientation orientation = Orientation::Horizontal);
     ~Separator() override;
 
     [[nodiscard]] Orientation orientation() const;

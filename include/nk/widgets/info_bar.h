@@ -22,9 +22,8 @@ enum class InfoBarSeverity : uint8_t {
 /// An in-window notification bar with a message and optional close button.
 class InfoBar : public Widget {
 public:
-    [[nodiscard]] static std::shared_ptr<InfoBar> create(
-        std::string message = {},
-        InfoBarSeverity severity = InfoBarSeverity::Info);
+    [[nodiscard]] static std::shared_ptr<InfoBar>
+    create(std::string message = {}, InfoBarSeverity severity = InfoBarSeverity::Info);
     ~InfoBar() override;
 
     [[nodiscard]] std::string_view message() const;

@@ -3,10 +3,9 @@
 /// @file constraints.h
 /// @brief Layout measurement constraints and size requests.
 
-#include <nk/foundation/types.h>
-
 #include <algorithm>
 #include <limits>
+#include <nk/foundation/types.h>
 
 namespace nk {
 
@@ -21,14 +20,10 @@ struct Constraints {
     static constexpr Constraints unbounded() { return {}; }
 
     /// Tight constraints that force an exact size.
-    static constexpr Constraints tight(float w, float h) {
-        return {w, h, w, h};
-    }
+    static constexpr Constraints tight(float w, float h) { return {w, h, w, h}; }
 
     /// Tight constraints from a Size.
-    static constexpr Constraints tight(Size s) {
-        return tight(s.width, s.height);
-    }
+    static constexpr Constraints tight(Size s) { return tight(s.width, s.height); }
 
     /// Constrain a size to fit within these constraints.
     [[nodiscard]] Size constrain(Size s) const {

@@ -3,10 +3,9 @@
 /// @file shaped_text.h
 /// @brief Measured and rasterized text output.
 
-#include <nk/foundation/types.h>
-
 #include <cstdint>
 #include <memory>
+#include <nk/foundation/types.h>
 #include <vector>
 
 namespace nk {
@@ -21,8 +20,8 @@ public:
     ShapedText(ShapedText&&) noexcept;
     ShapedText& operator=(ShapedText&&) noexcept;
 
-    ShapedText(ShapedText const&) = delete;
-    ShapedText& operator=(ShapedText const&) = delete;
+    ShapedText(const ShapedText&) = delete;
+    ShapedText& operator=(const ShapedText&) = delete;
 
     /// Logical size of the text (width x height in logical pixels).
     [[nodiscard]] Size text_size() const;
@@ -33,7 +32,7 @@ public:
     void set_baseline(float baseline);
 
     /// Rasterized bitmap (RGBA8, row-major). May be empty if not rasterized.
-    [[nodiscard]] uint8_t const* bitmap_data() const;
+    [[nodiscard]] const uint8_t* bitmap_data() const;
     [[nodiscard]] int bitmap_width() const;
     [[nodiscard]] int bitmap_height() const;
 

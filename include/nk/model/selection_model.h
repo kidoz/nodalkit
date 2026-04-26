@@ -3,9 +3,8 @@
 /// @file selection_model.h
 /// @brief Selection tracking for item views.
 
-#include <nk/foundation/signal.h>
-
 #include <cstddef>
+#include <nk/foundation/signal.h>
 #include <set>
 
 namespace nk {
@@ -23,8 +22,8 @@ public:
     explicit SelectionModel(SelectionMode mode = SelectionMode::Single);
     ~SelectionModel();
 
-    SelectionModel(SelectionModel const&) = delete;
-    SelectionModel& operator=(SelectionModel const&) = delete;
+    SelectionModel(const SelectionModel&) = delete;
+    SelectionModel& operator=(const SelectionModel&) = delete;
 
     [[nodiscard]] SelectionMode mode() const;
     void set_mode(SelectionMode mode);
@@ -45,7 +44,7 @@ public:
     [[nodiscard]] bool is_selected(std::size_t row) const;
 
     /// All selected rows.
-    [[nodiscard]] std::set<std::size_t> const& selected_rows() const;
+    [[nodiscard]] const std::set<std::size_t>& selected_rows() const;
 
     /// The "current" row (e.g. for keyboard navigation). -1 if none.
     [[nodiscard]] std::size_t current_row() const;

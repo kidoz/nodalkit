@@ -19,21 +19,21 @@ class LayoutManager {
 public:
     virtual ~LayoutManager();
 
-    LayoutManager(LayoutManager const&) = delete;
-    LayoutManager& operator=(LayoutManager const&) = delete;
+    LayoutManager(const LayoutManager&) = delete;
+    LayoutManager& operator=(const LayoutManager&) = delete;
 
     /// Measure the container and its children.
-    [[nodiscard]] virtual SizeRequest measure(
-        Widget const& widget, Constraints const& constraints) const = 0;
+    [[nodiscard]] virtual SizeRequest measure(const Widget& widget,
+                                              const Constraints& constraints) const = 0;
 
     /// Whether this layout depends on width to compute height.
-    [[nodiscard]] virtual bool has_height_for_width(Widget const& widget) const;
+    [[nodiscard]] virtual bool has_height_for_width(const Widget& widget) const;
 
     /// Compute the required height for a given width.
-    [[nodiscard]] virtual float height_for_width(Widget const& widget, float width) const;
+    [[nodiscard]] virtual float height_for_width(const Widget& widget, float width) const;
 
     /// Allocate positions for all children within the given rectangle.
-    virtual void allocate(Widget& widget, Rect const& allocation) = 0;
+    virtual void allocate(Widget& widget, const Rect& allocation) = 0;
 
 protected:
     LayoutManager();

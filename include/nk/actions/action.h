@@ -3,9 +3,8 @@
 /// @file action.h
 /// @brief Decoupled named actions for menus, shortcuts, and commands.
 
-#include <nk/foundation/signal.h>
-
 #include <memory>
+#include <nk/foundation/signal.h>
 #include <string>
 #include <string_view>
 
@@ -20,8 +19,8 @@ public:
     explicit Action(std::string name);
     ~Action();
 
-    Action(Action const&) = delete;
-    Action& operator=(Action const&) = delete;
+    Action(const Action&) = delete;
+    Action& operator=(const Action&) = delete;
 
     /// The action name (e.g. "app.quit", "win.save").
     [[nodiscard]] std::string_view name() const;
@@ -47,8 +46,8 @@ public:
     ActionGroup();
     ~ActionGroup();
 
-    ActionGroup(ActionGroup const&) = delete;
-    ActionGroup& operator=(ActionGroup const&) = delete;
+    ActionGroup(const ActionGroup&) = delete;
+    ActionGroup& operator=(const ActionGroup&) = delete;
 
     /// Add an action to this group. The group takes shared ownership.
     void add(std::shared_ptr<Action> action);

@@ -272,8 +272,8 @@ protected:
     [[nodiscard]] Size measure_text(std::string_view text, const FontDescriptor& font) const;
 
     /// Measure wrapped text using the host window's active text shaper.
-    [[nodiscard]] Size measure_text_wrapped(std::string_view text, const FontDescriptor& font,
-                                            float max_width) const;
+    [[nodiscard]] Size
+    measure_text_wrapped(std::string_view text, const FontDescriptor& font, float max_width) const;
 
     /// Record a text-measure hotspot on this widget for the current frame.
     void note_text_measure_for_diagnostics() const;

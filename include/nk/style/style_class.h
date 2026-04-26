@@ -5,7 +5,6 @@
 
 #include <nk/foundation/types.h>
 #include <nk/ui_core/state_flags.h>
-
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -20,8 +19,8 @@ using StyleValue = std::variant<float, Color, std::string>;
 /// A CSS-like selector that matches widgets by type name, style class,
 /// and/or pseudo-state.
 struct StyleSelector {
-    std::string type_name;            ///< e.g. "Button", "" means any.
-    std::vector<std::string> classes; ///< e.g. {"destructive", "flat"}.
+    std::string type_name;                      ///< e.g. "Button", "" means any.
+    std::vector<std::string> classes;           ///< e.g. {"destructive", "flat"}.
     StateFlags pseudo_state = StateFlags::None; ///< e.g. Hovered|Pressed.
 
     /// Specificity for cascade ordering: (type, classes, pseudo).
