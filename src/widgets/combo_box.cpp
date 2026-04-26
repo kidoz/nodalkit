@@ -202,9 +202,8 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
     switch (event.type) {
     case MouseEvent::Type::Press:
         impl_->armed = allocation().contains(point);
-        impl_->armed_index = impl_->popup_open
-            ? popup_index_at(popup, point, impl_->popup_scroll_offset)
-            : -1;
+        impl_->armed_index =
+            impl_->popup_open ? popup_index_at(popup, point, impl_->popup_scroll_offset) : -1;
         return impl_->armed || impl_->armed_index >= 0;
     case MouseEvent::Type::Release: {
         const bool release_on_field = allocation().contains(point);
@@ -292,16 +291,13 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
     }
 
     const auto last_index = static_cast<int>(impl_->items.size()) - 1;
-    const auto popup_visible_count = popup_geometry(allocation(),
-                                                    impl_->items.size(),
-                                                    theme_number("popup-item-height", 28.0F))
-                                         .visible_count;
+    const auto popup_visible_count =
+        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F))
+            .visible_count;
     auto item_count = static_cast<int>(impl_->items.size());
     auto update_scroll = [&] {
-        impl_->popup_scroll_offset = clamp_scroll_offset(impl_->popup_scroll_offset,
-                                                          impl_->highlighted_index,
-                                                          item_count,
-                                                          popup_visible_count);
+        impl_->popup_scroll_offset = clamp_scroll_offset(
+            impl_->popup_scroll_offset, impl_->highlighted_index, item_count, popup_visible_count);
     };
     auto open_popup = [&, this](int highlight) {
         preserve_damage_regions_for_next_redraw();

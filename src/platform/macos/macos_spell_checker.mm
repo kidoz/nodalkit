@@ -32,8 +32,7 @@ std::vector<SpellCheckRange> MacosSpellChecker::check(std::string_view text) {
             NSRange prefix_range = NSMakeRange(0, range.location);
             NSString* prefix = [ns_text substringWithRange:prefix_range];
 
-            const std::size_t byte_start =
-                [prefix lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+            const std::size_t byte_start = [prefix lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
             const std::size_t byte_length =
                 [misspelled lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
 
@@ -60,11 +59,10 @@ std::vector<std::string> MacosSpellChecker::suggestions(std::string_view misspel
         }
 
         NSSpellChecker* checker = [NSSpellChecker sharedSpellChecker];
-        NSArray<NSString*>* guesses =
-            [checker guessesForWordRange:NSMakeRange(0, [ns_word length])
-                                inString:ns_word
-                                language:nil
-                  inSpellDocumentWithTag:0];
+        NSArray<NSString*>* guesses = [checker guessesForWordRange:NSMakeRange(0, [ns_word length])
+                                                          inString:ns_word
+                                                          language:nil
+                                            inSpellDocumentWithTag:0];
 
         result.reserve([guesses count]);
         for (NSString* guess in guesses) {

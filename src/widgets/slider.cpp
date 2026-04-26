@@ -159,7 +159,8 @@ bool Slider::handle_key_event(const KeyEvent& event) {
         return false;
     }
 
-    const double increment = impl_->step > 0.0 ? impl_->step : 0.05 * (impl_->max_val - impl_->min_val);
+    const double increment =
+        impl_->step > 0.0 ? impl_->step : 0.05 * (impl_->max_val - impl_->min_val);
 
     switch (event.key) {
     case KeyCode::Left:
@@ -195,12 +196,12 @@ void Slider::snapshot(SnapshotContext& ctx) const {
     const auto track_bg = theme_color("track-background", Color{0.82F, 0.84F, 0.88F, 1.0F});
     const auto fill_color = theme_color("fill-color", Color{0.3F, 0.56F, 0.9F, 1.0F});
     const auto thumb_color = theme_color("thumb-color", Color{1.0F, 1.0F, 1.0F, 1.0F});
-    const auto thumb_border_color = theme_color("thumb-border-color", Color{0.78F, 0.8F, 0.84F, 1.0F});
+    const auto thumb_border_color =
+        theme_color("thumb-border-color", Color{0.78F, 0.8F, 0.84F, 1.0F});
 
     const double range = impl_->max_val - impl_->min_val;
-    const float fraction = range > 0.0
-                               ? static_cast<float>((impl_->value - impl_->min_val) / range)
-                               : 0.0F;
+    const float fraction =
+        range > 0.0 ? static_cast<float>((impl_->value - impl_->min_val) / range) : 0.0F;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
         ctx.add_rounded_rect(a,
@@ -213,18 +214,19 @@ void Slider::snapshot(SnapshotContext& ctx) const {
         const float usable = std::max(0.0F, a.width - thumb_diameter);
 
         // Track background
-        ctx.add_rounded_rect(
-            {a.x + thumb_radius, track_y, std::max(0.0F, a.width - thumb_diameter), track_thickness},
-            track_bg,
-            track_radius);
+        ctx.add_rounded_rect({a.x + thumb_radius,
+                              track_y,
+                              std::max(0.0F, a.width - thumb_diameter),
+                              track_thickness},
+                             track_bg,
+                             track_radius);
 
         // Filled portion
         const float fill_width = usable * fraction;
         if (fill_width > 0.0F) {
-            ctx.add_rounded_rect(
-                {a.x + thumb_radius, track_y, fill_width, track_thickness},
-                fill_color,
-                track_radius);
+            ctx.add_rounded_rect({a.x + thumb_radius, track_y, fill_width, track_thickness},
+                                 fill_color,
+                                 track_radius);
         }
 
         // Thumb
@@ -244,10 +246,12 @@ void Slider::snapshot(SnapshotContext& ctx) const {
         const float usable = std::max(0.0F, a.height - thumb_diameter);
 
         // Track background
-        ctx.add_rounded_rect(
-            {track_x, a.y + thumb_radius, track_thickness, std::max(0.0F, a.height - thumb_diameter)},
-            track_bg,
-            track_radius);
+        ctx.add_rounded_rect({track_x,
+                              a.y + thumb_radius,
+                              track_thickness,
+                              std::max(0.0F, a.height - thumb_diameter)},
+                             track_bg,
+                             track_radius);
 
         // Filled portion (from bottom up)
         const float fill_height = usable * fraction;

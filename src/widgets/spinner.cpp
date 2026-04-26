@@ -81,8 +81,7 @@ void Spinner::snapshot(SnapshotContext& ctx) const {
     const Color base_color = theme_color("color", Color{0.4F, 0.45F, 0.5F, 1.0F});
 
     // Determine which dot index is "active" based on current angle.
-    const int active_index =
-        static_cast<int>(impl_->angle / kStepAngle) % kNumDots;
+    const int active_index = static_cast<int>(impl_->angle / kStepAngle) % kNumDots;
 
     for (int i = 0; i < kNumDots; ++i) {
         const float theta = static_cast<float>(i) * kStepAngle;

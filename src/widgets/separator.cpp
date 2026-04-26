@@ -34,8 +34,7 @@ SizeRequest Separator::measure(const Constraints& /*constraints*/) const {
 }
 
 void Separator::snapshot(SnapshotContext& ctx) const {
-    ctx.add_color_rect(allocation(),
-                       theme_color("color", Color{0.85F, 0.86F, 0.88F, 1.0F}));
+    ctx.add_color_rect(allocation(), theme_color("color", Color{0.85F, 0.86F, 0.88F, 1.0F}));
 }
 
 } // namespace nk

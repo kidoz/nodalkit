@@ -5,9 +5,8 @@
 
 #include "gdi_text_shaper.h"
 
-#include <nk/text/text_shaper.h>
-
 #include <memory>
+#include <nk/text/text_shaper.h>
 
 namespace nk {
 

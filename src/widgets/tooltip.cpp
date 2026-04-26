@@ -62,9 +62,8 @@ void Tooltip::snapshot(SnapshotContext& ctx) const {
     const float corner_radius = theme_number("corner-radius", 4.0F);
 
     // Dark background.
-    ctx.add_rounded_rect(a,
-                         theme_color("background", Color{0.15F, 0.15F, 0.17F, 0.95F}),
-                         corner_radius);
+    ctx.add_rounded_rect(
+        a, theme_color("background", Color{0.15F, 0.15F, 0.17F, 0.95F}), corner_radius);
 
     // White text.
     const auto font = tooltip_font();

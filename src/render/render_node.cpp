@@ -101,8 +101,8 @@ float RoundedClipNode::corner_radius() const {
 
 // --- TextNode ---
 
-TextNode::TextNode(Point origin, Size size, std::string text, Color color, FontDescriptor font,
-                   float max_width)
+TextNode::TextNode(
+    Point origin, Size size, std::string text, Color color, FontDescriptor font, float max_width)
     : RenderNode(RenderNodeKind::Text)
     , text_(std::move(text))
     , color_(color)
@@ -140,7 +140,9 @@ float OpacityNode::opacity() const {
 
 // --- LinearGradientNode ---
 
-LinearGradientNode::LinearGradientNode(Rect bounds, Color start_color, Color end_color,
+LinearGradientNode::LinearGradientNode(Rect bounds,
+                                       Color start_color,
+                                       Color end_color,
                                        Orientation direction)
     : RenderNode(RenderNodeKind::LinearGradient)
     , start_color_(start_color)
@@ -163,8 +165,13 @@ Orientation LinearGradientNode::direction() const {
 
 // --- ShadowNode ---
 
-ShadowNode::ShadowNode(Rect rect, Color color, float offset_x, float offset_y, float blur_radius,
-                       float spread, float corner_radius)
+ShadowNode::ShadowNode(Rect rect,
+                       Color color,
+                       float offset_x,
+                       float offset_y,
+                       float blur_radius,
+                       float spread,
+                       float corner_radius)
     : RenderNode(RenderNodeKind::Shadow)
     , color_(color)
     , offset_x_(offset_x)
@@ -180,11 +187,28 @@ ShadowNode::ShadowNode(Rect rect, Color color, float offset_x, float offset_y, f
                 rect.height + extend * 2.0F});
 }
 
-Color ShadowNode::color() const { return color_; }
-float ShadowNode::offset_x() const { return offset_x_; }
-float ShadowNode::offset_y() const { return offset_y_; }
-float ShadowNode::blur_radius() const { return blur_radius_; }
-float ShadowNode::spread() const { return spread_; }
-float ShadowNode::corner_radius() const { return corner_radius_; }
+Color ShadowNode::color() const {
+    return color_;
+}
+
+float ShadowNode::offset_x() const {
+    return offset_x_;
+}
+
+float ShadowNode::offset_y() const {
+    return offset_y_;
+}
+
+float ShadowNode::blur_radius() const {
+    return blur_radius_;
+}
+
+float ShadowNode::spread() const {
+    return spread_;
+}
+
+float ShadowNode::corner_radius() const {
+    return corner_radius_;
+}
 
 } // namespace nk

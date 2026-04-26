@@ -1,11 +1,11 @@
 #include <algorithm>
 #include <cmath>
-#include <sstream>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
 #include <nk/widgets/calendar.h>
+#include <sstream>
 
 namespace nk {
 
@@ -59,8 +59,19 @@ int day_of_week(int year, int month, int day) {
 
 const char* month_name(int month) {
     static constexpr const char* names[] = {
-        "", "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December",
+        "",
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     };
     return names[month];
 }
@@ -337,10 +348,10 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
     const float corner_radius = theme_number("corner-radius", 8.0F);
 
     // Background.
-    ctx.add_rounded_rect(a, theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}),
-                         corner_radius);
-    ctx.add_border(a, theme_color("border-color", Color{0.86F, 0.88F, 0.91F, 1.0F}), 1.0F,
-                   corner_radius);
+    ctx.add_rounded_rect(
+        a, theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}), corner_radius);
+    ctx.add_border(
+        a, theme_color("border-color", Color{0.86F, 0.88F, 0.91F, 1.0F}), 1.0F, corner_radius);
 
     const auto header_font = calendar_header_font();
     const auto font = calendar_font();
@@ -352,14 +363,18 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
     const auto prev_measured = measure_text(prev_arrow, header_font);
     const float prev_x = a.x + (cell_size - prev_measured.width) * 0.5F;
     const float prev_y = a.y + (header_height - prev_measured.height) * 0.5F;
-    ctx.add_text({prev_x, prev_y}, std::string(prev_arrow),
-                 theme_color("text-color", Color{0.2F, 0.2F, 0.2F, 1.0F}), header_font);
+    ctx.add_text({prev_x, prev_y},
+                 std::string(prev_arrow),
+                 theme_color("text-color", Color{0.2F, 0.2F, 0.2F, 1.0F}),
+                 header_font);
 
     const auto next_measured = measure_text(next_arrow, header_font);
     const float next_x = a.x + a.width - cell_size + (cell_size - next_measured.width) * 0.5F;
     const float next_y = a.y + (header_height - next_measured.height) * 0.5F;
-    ctx.add_text({next_x, next_y}, std::string(next_arrow),
-                 theme_color("text-color", Color{0.2F, 0.2F, 0.2F, 1.0F}), header_font);
+    ctx.add_text({next_x, next_y},
+                 std::string(next_arrow),
+                 theme_color("text-color", Color{0.2F, 0.2F, 0.2F, 1.0F}),
+                 header_font);
 
     std::ostringstream title_ss;
     title_ss << month_name(impl_->display_month) << " " << impl_->display_year;
@@ -367,8 +382,10 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
     const auto title_measured = measure_text(title, header_font);
     const float title_x = a.x + (a.width - title_measured.width) * 0.5F;
     const float title_y = a.y + (header_height - title_measured.height) * 0.5F;
-    ctx.add_text({title_x, title_y}, std::string(title),
-                 theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}), header_font);
+    ctx.add_text({title_x, title_y},
+                 std::string(title),
+                 theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
+                 header_font);
 
     // Day-of-week header.
     static constexpr const char* dow_labels[] = {"S", "M", "T", "W", "T", "F", "S"};
@@ -388,7 +405,8 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
     const Color accent_bg = theme_color("accent-color", Color{0.3F, 0.56F, 0.9F, 1.0F});
     const Color hover_bg = theme_color("hover-color", Color{0.9F, 0.92F, 0.95F, 1.0F});
     const Color day_text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    const Color selected_text_color = theme_color("selected-text-color", Color{1.0F, 1.0F, 1.0F, 1.0F});
+    const Color selected_text_color =
+        theme_color("selected-text-color", Color{1.0F, 1.0F, 1.0F, 1.0F});
 
     const bool selected_in_view = (impl_->selected_date.year == impl_->display_year &&
                                    impl_->selected_date.month == impl_->display_month);
@@ -422,13 +440,17 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
         const auto dm = measure_text(day_str, day_font);
         const float dx = cx + (cell_size - dm.width) * 0.5F;
         const float dy = cy + (cell_size - dm.height) * 0.5F;
-        ctx.add_text({dx, dy}, std::string(day_str),
-                     is_selected ? selected_text_color : day_text_color, day_font);
+        ctx.add_text({dx, dy},
+                     std::string(day_str),
+                     is_selected ? selected_text_color : day_text_color,
+                     day_font);
     }
 
     // Focus ring.
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_border(a, theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}), 2.0F,
+        ctx.add_border(a,
+                       theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
+                       2.0F,
                        corner_radius);
     }
 }

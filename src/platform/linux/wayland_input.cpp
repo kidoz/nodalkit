@@ -538,8 +538,8 @@ void WaylandInput::set_cursor_shape(CursorShape shape) {
         // over any of our surfaces. The shape is cached and will be reapplied on the next enter.
         return;
     }
-    wp_cursor_shape_device_v1_set_shape(cursor_shape_device_, pointer_enter_serial_,
-                                        wp_cursor_shape_for(shape));
+    wp_cursor_shape_device_v1_set_shape(
+        cursor_shape_device_, pointer_enter_serial_, wp_cursor_shape_for(shape));
 }
 
 bool WaylandInput::can_repeat_key(uint32_t key) const {

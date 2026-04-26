@@ -290,28 +290,35 @@ void install_shared_rules(Theme& theme) {
 }
 
 void install_macos_overrides(Theme& theme) {
-    add_rule(theme, {"button"}, StateFlags::None,
+    add_rule(theme,
+             {"button"},
+             StateFlags::None,
              {{"corner-radius", StyleValue{6.0F}},
               {"min-height", StyleValue{28.0F}},
               {"padding-x", StyleValue{12.0F}},
               {"padding-y", StyleValue{4.0F}}});
-    add_rule(theme, {"text-field"}, StateFlags::None,
-             {{"corner-radius", StyleValue{6.0F}},
-              {"min-height", StyleValue{28.0F}}});
-    add_rule(theme, {"combo-box"}, StateFlags::None,
+    add_rule(theme,
+             {"text-field"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{6.0F}}, {"min-height", StyleValue{28.0F}}});
+    add_rule(theme,
+             {"combo-box"},
+             StateFlags::None,
              {{"corner-radius", StyleValue{6.0F}},
               {"popup-radius", StyleValue{10.0F}},
               {"min-height", StyleValue{28.0F}}});
-    add_rule(theme, {"segmented-control"}, StateFlags::None,
+    add_rule(theme,
+             {"segmented-control"},
+             StateFlags::None,
              {{"corner-radius", StyleValue{8.0F}},
               {"selection-radius", StyleValue{6.0F}},
               {"track-padding", StyleValue{2.0F}},
               {"min-height", StyleValue{28.0F}}});
-    add_rule(theme, {"card"}, StateFlags::None,
-             {{"corner-radius", StyleValue{10.0F}}});
-    add_rule(theme, {"image-view"}, StateFlags::None,
-             {{"corner-radius", StyleValue{10.0F}},
-              {"content-radius", StyleValue{8.0F}}});
+    add_rule(theme, {"card"}, StateFlags::None, {{"corner-radius", StyleValue{10.0F}}});
+    add_rule(theme,
+             {"image-view"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{10.0F}}, {"content-radius", StyleValue{8.0F}}});
 }
 
 std::shared_ptr<Theme>& active_theme_storage() {

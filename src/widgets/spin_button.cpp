@@ -222,7 +222,8 @@ void SpinButton::snapshot(SnapshotContext& ctx) const {
     const auto button_bg = theme_color("button-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
     const auto armed_bg = theme_color("armed-background", Color{0.88F, 0.9F, 0.93F, 1.0F});
     const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    const auto button_text_color = theme_color("button-text-color", Color{0.25F, 0.27F, 0.3F, 1.0F});
+    const auto button_text_color =
+        theme_color("button-text-color", Color{0.25F, 0.27F, 0.3F, 1.0F});
 
     // Left divider
     ctx.add_color_rect({body.x + button_width, body.y + 1.0F, 1.0F, body.height - 2.0F},
@@ -241,9 +242,11 @@ void SpinButton::snapshot(SnapshotContext& ctx) const {
     // Increment button background
     {
         const auto bg = impl_->armed_button == 1 ? armed_bg : button_bg;
-        ctx.add_color_rect(
-            {body.right() - button_width + 1.0F, body.y + 1.0F, button_width - 2.0F, body.height - 2.0F},
-            bg);
+        ctx.add_color_rect({body.right() - button_width + 1.0F,
+                            body.y + 1.0F,
+                            button_width - 2.0F,
+                            body.height - 2.0F},
+                           bg);
     }
 
     // Decrement "-" text

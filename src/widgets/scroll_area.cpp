@@ -8,12 +8,16 @@ namespace nk {
 namespace {
 
 Constraints content_constraints(Rect viewport, ScrollPolicy h_policy, ScrollPolicy v_policy);
-SizeRequest content_request(const Widget* content,
-                            Rect viewport,
-                            ScrollPolicy h_policy,
-                            ScrollPolicy v_policy);
-float max_h_offset(const Widget* content, Rect viewport, ScrollPolicy h_policy, ScrollPolicy v_policy);
-float max_v_offset(const Widget* content, Rect viewport, ScrollPolicy h_policy, ScrollPolicy v_policy);
+SizeRequest
+content_request(const Widget* content, Rect viewport, ScrollPolicy h_policy, ScrollPolicy v_policy);
+float max_h_offset(const Widget* content,
+                   Rect viewport,
+                   ScrollPolicy h_policy,
+                   ScrollPolicy v_policy);
+float max_v_offset(const Widget* content,
+                   Rect viewport,
+                   ScrollPolicy h_policy,
+                   ScrollPolicy v_policy);
 bool rect_is_empty(Rect rect);
 bool should_show_v_scrollbar(ScrollPolicy h_policy,
                              ScrollPolicy v_policy,

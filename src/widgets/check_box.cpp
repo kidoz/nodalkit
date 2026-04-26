@@ -145,12 +145,13 @@ void CheckBox::snapshot(SnapshotContext& ctx) const {
 
     // Draw the check box frame.
     const auto box_bg = impl_->checked
-        ? theme_color("checked-background", Color{0.2F, 0.45F, 0.85F, 1.0F})
-        : theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F});
+                            ? theme_color("checked-background", Color{0.2F, 0.45F, 0.85F, 1.0F})
+                            : theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F});
     ctx.add_rounded_rect(box_rect, box_bg, corner_radius);
     ctx.add_border(box_rect,
                    theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}),
-                   1.0F, corner_radius);
+                   1.0F,
+                   corner_radius);
 
     // Draw check mark when checked (two strokes forming a checkmark shape).
     if (impl_->checked) {

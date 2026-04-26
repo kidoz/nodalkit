@@ -103,7 +103,8 @@ void ColorWell::snapshot(SnapshotContext& ctx) const {
 
     // Focus ring.
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a, theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
+        ctx.add_rounded_rect(a,
+                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
                              corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
@@ -115,8 +116,8 @@ void ColorWell::snapshot(SnapshotContext& ctx) const {
     ctx.add_rounded_rect(body, impl_->color, corner_radius);
 
     // Border.
-    ctx.add_border(body, theme_color("border-color", Color{0.6F, 0.62F, 0.66F, 1.0F}), 1.0F,
-                   corner_radius);
+    ctx.add_border(
+        body, theme_color("border-color", Color{0.6F, 0.62F, 0.66F, 1.0F}), 1.0F, corner_radius);
 }
 
 } // namespace nk

@@ -74,9 +74,7 @@ Rect intersect_rect(Rect lhs, Rect rhs) {
     return {left, top, right - left, bottom - top};
 }
 
-Rect list_content_rect(const ListView& view,
-                       const AbstractListModel* model,
-                       float row_height) {
+Rect list_content_rect(const ListView& view, const AbstractListModel* model, float row_height) {
     const auto inner = list_inner_rect(view);
     if (!model) {
         return inner;

@@ -4,8 +4,7 @@ namespace nk {
 
 // --- Connection ---
 
-Connection::Connection(std::shared_ptr<detail::ConnectionState> state)
-    : state_(std::move(state)) {}
+Connection::Connection(std::shared_ptr<detail::ConnectionState> state) : state_(std::move(state)) {}
 
 void Connection::disconnect() {
     if (state_) {
@@ -19,10 +18,11 @@ bool Connection::connected() const {
 
 // --- ScopedConnection ---
 
-ScopedConnection::ScopedConnection(Connection conn)
-    : conn_(std::move(conn)) {}
+ScopedConnection::ScopedConnection(Connection conn) : conn_(std::move(conn)) {}
 
-ScopedConnection::~ScopedConnection() { disconnect(); }
+ScopedConnection::~ScopedConnection() {
+    disconnect();
+}
 
 ScopedConnection::ScopedConnection(ScopedConnection&& other) noexcept
     : conn_(std::move(other.conn_)) {}
@@ -35,7 +35,9 @@ ScopedConnection& ScopedConnection::operator=(ScopedConnection&& other) noexcept
     return *this;
 }
 
-void ScopedConnection::disconnect() { conn_.disconnect(); }
+void ScopedConnection::disconnect() {
+    conn_.disconnect();
+}
 
 Connection ScopedConnection::release() {
     auto c = std::move(conn_);
@@ -43,6 +45,8 @@ Connection ScopedConnection::release() {
     return c;
 }
 
-bool ScopedConnection::connected() const { return conn_.connected(); }
+bool ScopedConnection::connected() const {
+    return conn_.connected();
+}
 
 } // namespace nk

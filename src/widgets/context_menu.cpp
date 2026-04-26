@@ -61,8 +61,8 @@ int item_index_at(const PopupGeometry& geometry,
 
     float y = geometry.bounds.y + 1.0F;
     for (std::size_t i = 0; i < items.size(); ++i) {
-        const float row_height = items[i].is_separator ? geometry.separator_height
-                                                       : geometry.item_height;
+        const float row_height =
+            items[i].is_separator ? geometry.separator_height : geometry.item_height;
         if (point.y >= y && point.y < y + row_height) {
             if (items[i].is_separator) {
                 return -1;
@@ -159,9 +159,10 @@ bool ContextMenu::hit_test(Point point) const {
     }
 
     const auto font = context_menu_font();
-    const auto geometry = compute_popup_geometry(
-        impl_->position, impl_->items,
-        [&](std::string_view text) { return measure_text(text, font); });
+    const auto geometry =
+        compute_popup_geometry(impl_->position, impl_->items, [&](std::string_view text) {
+            return measure_text(text, font);
+        });
     return geometry.bounds.contains(point);
 }
 
@@ -172,9 +173,10 @@ std::vector<Rect> ContextMenu::damage_regions() const {
     }
 
     const auto font = context_menu_font();
-    const auto geometry = compute_popup_geometry(
-        impl_->position, impl_->items,
-        [&](std::string_view text) { return measure_text(text, font); });
+    const auto geometry =
+        compute_popup_geometry(impl_->position, impl_->items, [&](std::string_view text) {
+            return measure_text(text, font);
+        });
     regions.push_back(geometry.bounds);
     return regions;
 }
@@ -185,9 +187,10 @@ bool ContextMenu::handle_mouse_event(const MouseEvent& event) {
     }
 
     const auto font = context_menu_font();
-    const auto geometry = compute_popup_geometry(
-        impl_->position, impl_->items,
-        [&](std::string_view text) { return measure_text(text, font); });
+    const auto geometry =
+        compute_popup_geometry(impl_->position, impl_->items, [&](std::string_view text) {
+            return measure_text(text, font);
+        });
     const auto point = Point{event.x, event.y};
     const int index = item_index_at(geometry, impl_->items, point);
     const bool inside_popup = geometry.bounds.contains(point);
@@ -266,15 +269,15 @@ bool ContextMenu::handle_key_event(const KeyEvent& event) {
         dismiss();
         return true;
     case KeyCode::Up:
-        impl_->hovered_index = next_selectable(
-            impl_->hovered_index >= 0 ? impl_->hovered_index
-                                      : static_cast<int>(impl_->items.size()),
-            -1);
+        impl_->hovered_index =
+            next_selectable(impl_->hovered_index >= 0 ? impl_->hovered_index
+                                                      : static_cast<int>(impl_->items.size()),
+                            -1);
         queue_redraw();
         return true;
     case KeyCode::Down:
-        impl_->hovered_index = next_selectable(
-            impl_->hovered_index >= 0 ? impl_->hovered_index : -1, 1);
+        impl_->hovered_index =
+            next_selectable(impl_->hovered_index >= 0 ? impl_->hovered_index : -1, 1);
         queue_redraw();
         return true;
     case KeyCode::Return:
@@ -296,9 +299,10 @@ void ContextMenu::snapshot(SnapshotContext& ctx) const {
     }
 
     const auto font = context_menu_font();
-    const auto geometry = compute_popup_geometry(
-        impl_->position, impl_->items,
-        [&](std::string_view text) { return measure_text(text, font); });
+    const auto geometry =
+        compute_popup_geometry(impl_->position, impl_->items, [&](std::string_view text) {
+            return measure_text(text, font);
+        });
 
     const float popup_radius = theme_number("popup-radius", 12.0F);
     const auto popup_bg = theme_color("popup-background", Color{1.0F, 1.0F, 1.0F, 1.0F});
@@ -310,10 +314,12 @@ void ContextMenu::snapshot(SnapshotContext& ctx) const {
     ctx.push_overlay_container(geometry.bounds);
 
     // Shadow
-    ctx.add_rounded_rect(
-        {geometry.bounds.x, geometry.bounds.y + 1.0F, geometry.bounds.width, geometry.bounds.height},
-        Color{0.08F, 0.12F, 0.18F, 0.05F},
-        popup_radius + 1.0F);
+    ctx.add_rounded_rect({geometry.bounds.x,
+                          geometry.bounds.y + 1.0F,
+                          geometry.bounds.width,
+                          geometry.bounds.height},
+                         Color{0.08F, 0.12F, 0.18F, 0.05F},
+                         popup_radius + 1.0F);
 
     // Background
     ctx.add_rounded_rect(geometry.bounds, popup_bg, popup_radius);
@@ -326,24 +332,28 @@ void ContextMenu::snapshot(SnapshotContext& ctx) const {
 
         if (item.is_separator) {
             const float sep_y = y + geometry.separator_height * 0.5F;
-            ctx.add_color_rect(
-                {geometry.bounds.x + 8.0F, sep_y,
-                 std::max(0.0F, geometry.bounds.width - 16.0F), 1.0F},
-                separator_color);
+            ctx.add_color_rect({geometry.bounds.x + 8.0F,
+                                sep_y,
+                                std::max(0.0F, geometry.bounds.width - 16.0F),
+                                1.0F},
+                               separator_color);
             y += geometry.separator_height;
             continue;
         }
 
-        const auto row_rect = Rect{
-            geometry.bounds.x + 1.0F, y,
-            std::max(0.0F, geometry.bounds.width - 2.0F), geometry.item_height};
+        const auto row_rect = Rect{geometry.bounds.x + 1.0F,
+                                   y,
+                                   std::max(0.0F, geometry.bounds.width - 2.0F),
+                                   geometry.item_height};
 
         const bool hovered = static_cast<int>(i) == impl_->hovered_index;
         if (hovered) {
-            ctx.add_rounded_rect(
-                {row_rect.x + 4.0F, row_rect.y + 2.0F,
-                 row_rect.width - 8.0F, row_rect.height - 4.0F},
-                hover_bg, 8.0F);
+            ctx.add_rounded_rect({row_rect.x + 4.0F,
+                                  row_rect.y + 2.0F,
+                                  row_rect.width - 8.0F,
+                                  row_rect.height - 4.0F},
+                                 hover_bg,
+                                 8.0F);
         }
 
         const auto measured = measure_text(item.label, font);

@@ -1293,8 +1293,7 @@ static id accessibility_focused_element(NSArray<id>* elements) {
             return search;
         }
         NSToolbarItem* fallback = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
-        NSSearchField* field =
-            [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 0, 180, 22)];
+        NSSearchField* field = [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 0, 180, 22)];
         [field setDelegate:self];
         [field setTarget:self];
         [field setAction:@selector(searchFieldSubmit:)];
@@ -1634,7 +1633,8 @@ void MacosSurface::set_native_toolbar(const NativeToolbarConfig* config) {
 
         NSToolbar* new_toolbar = [[NSToolbar alloc] initWithIdentifier:identifier];
         [new_toolbar setDelegate:toolbar_delegate_];
-        [new_toolbar setAllowsUserCustomization:toolbar_config_->allows_user_customization ? YES : NO];
+        [new_toolbar
+            setAllowsUserCustomization:toolbar_config_->allows_user_customization ? YES : NO];
         [new_toolbar setAutosavesConfiguration:YES];
         [new_toolbar setDisplayMode:NSToolbarDisplayModeIconAndLabel];
 

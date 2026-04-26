@@ -321,7 +321,8 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
     ctx.add_border(
         body, theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}), 1.0F, corner_radius);
 
-    const Rect text_area{body.x + padding, body.y + padding,
+    const Rect text_area{body.x + padding,
+                         body.y + padding,
                          std::max(0.0F, body.width - padding * 2.0F),
                          std::max(0.0F, body.height - padding * 2.0F)};
 
@@ -341,10 +342,7 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
         float y_offset = text_area.y - impl_->scroll_offset;
         for (const auto& line : lines) {
             if (y_offset + line_height > body.y && y_offset < body.bottom()) {
-                ctx.add_text({text_area.x, y_offset},
-                             std::string(line),
-                             text_color,
-                             font);
+                ctx.add_text({text_area.x, y_offset}, std::string(line), text_color, font);
             }
             y_offset += line_height;
         }
@@ -358,8 +356,7 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
             std::size_t cursor_col = 0;
             for (std::size_t i = 0; i < lines.size(); ++i) {
                 if (pos + lines[i].size() >= impl_->cursor_pos &&
-                    (i + 1 == lines.size() ||
-                     pos + lines[i].size() + 1 > impl_->cursor_pos)) {
+                    (i + 1 == lines.size() || pos + lines[i].size() + 1 > impl_->cursor_pos)) {
                     cursor_line = i;
                     cursor_col = impl_->cursor_pos - pos;
                     break;
@@ -369,10 +366,8 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
             const auto prefix = lines[cursor_line].substr(0, cursor_col);
             const float cursor_x = text_area.x + measure_text(prefix, font).width;
             const float cursor_y =
-                text_area.y - impl_->scroll_offset +
-                static_cast<float>(cursor_line) * line_height;
-            ctx.add_color_rect({cursor_x, cursor_y + 2.0F, 1.5F, line_height - 4.0F},
-                               cursor_color);
+                text_area.y - impl_->scroll_offset + static_cast<float>(cursor_line) * line_height;
+            ctx.add_color_rect({cursor_x, cursor_y + 2.0F, 1.5F, line_height - 4.0F}, cursor_color);
         }
     }
 

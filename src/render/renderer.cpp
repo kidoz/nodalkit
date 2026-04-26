@@ -585,10 +585,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
             // We need the original element rect from the node's stored bounds (which
             // were expanded by blur+spread in the constructor).
             const auto full = scale_rect(shadow.bounds(), sf);
-            const Rect shadow_rect{
-                full.x + blur, full.y + blur,
-                std::max(0.0F, full.width - blur * 2.0F),
-                std::max(0.0F, full.height - blur * 2.0F)};
+            const Rect shadow_rect{full.x + blur,
+                                   full.y + blur,
+                                   std::max(0.0F, full.width - blur * 2.0F),
+                                   std::max(0.0F, full.height - blur * 2.0F)};
             auto sc = shadow.color();
             sc.a *= opacity;
 
@@ -601,14 +601,14 @@ void SoftwareRenderer::render(const RenderNode& root) {
                 for (int x = x0; x < x1; ++x) {
                     const float px = static_cast<float>(x) + 0.5F;
                     const float py = static_cast<float>(y) + 0.5F;
-                    const float dist =
-                        signed_distance_to_rounded_rect(px, py, shadow_rect, cr);
+                    const float dist = signed_distance_to_rounded_rect(px, py, shadow_rect, cr);
                     if (dist >= blur) {
                         continue;
                     }
                     // Smooth falloff: full alpha inside, linear fade to zero at blur edge.
-                    const float shadow_alpha =
-                        blur > 0.0F ? clamp01(1.0F - std::max(0.0F, dist) / blur) : (dist < 0.0F ? 1.0F : 0.0F);
+                    const float shadow_alpha = blur > 0.0F
+                                                   ? clamp01(1.0F - std::max(0.0F, dist) / blur)
+                                                   : (dist < 0.0F ? 1.0F : 0.0F);
                     const float coverage = clip_coverage(x, y, clips);
                     if (coverage > 0.0F && shadow_alpha > 0.0F) {
                         Color pixel_color{sc.r, sc.g, sc.b, sc.a * shadow_alpha};
@@ -734,9 +734,9 @@ void SoftwareRenderer::render(const RenderNode& root) {
                     }
                     const float mw = text_node.max_width();
                     auto s = mw > 0.0F
-                        ? impl_->text_shaper->shape_wrapped(text_node.text(), font, color,
-                                                             mw * impl_->scale_factor)
-                        : impl_->text_shaper->shape(text_node.text(), font, color);
+                                 ? impl_->text_shaper->shape_wrapped(
+                                       text_node.text(), font, color, mw * impl_->scale_factor)
+                                 : impl_->text_shaper->shape(text_node.text(), font, color);
                     shaped_ptr = std::make_shared<ShapedText>(std::move(s));
                     impl_->shaped_text_cache[key] = shaped_ptr;
                     ++impl_->last_hotspot_counters.text_shape_count;

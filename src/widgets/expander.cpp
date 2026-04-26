@@ -179,9 +179,8 @@ void Expander::snapshot(SnapshotContext& ctx) const {
 
     // Header background.
     const Rect header{a.x, a.y, a.width, header_height};
-    ctx.add_rounded_rect(header,
-                         theme_color("header-background", Color{0.94F, 0.95F, 0.97F, 1.0F}),
-                         corner_radius);
+    ctx.add_rounded_rect(
+        header, theme_color("header-background", Color{0.94F, 0.95F, 0.97F, 1.0F}), corner_radius);
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
         ctx.add_border(header,

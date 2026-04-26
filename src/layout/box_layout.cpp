@@ -17,8 +17,8 @@ struct BoxChild {
     SizePolicy main_policy = SizePolicy::Preferred;
     SizePolicy cross_policy = SizePolicy::Preferred;
     uint8_t stretch = 0;
-    float margin_before = 0.0F; // top for vertical, left for horizontal
-    float margin_after = 0.0F;  // bottom for vertical, right for horizontal
+    float margin_before = 0.0F;      // top for vertical, left for horizontal
+    float margin_after = 0.0F;       // bottom for vertical, right for horizontal
     float margin_cross_start = 0.0F; // left for vertical, top for horizontal
     float margin_cross_end = 0.0F;   // right for vertical, bottom for horizontal
 };
@@ -63,9 +63,12 @@ collect_box_children(const Widget& widget, const Constraints& constraints, bool 
         children.push_back({
             .widget = child,
             .request = request,
-            .minimum_main = (vertical ? request.minimum_height : request.minimum_width) + margin_main,
-            .natural_main = (vertical ? request.natural_height : request.natural_width) + margin_main,
-            .natural_cross = (vertical ? request.natural_width : request.natural_height) + margin_cross,
+            .minimum_main =
+                (vertical ? request.minimum_height : request.minimum_width) + margin_main,
+            .natural_main =
+                (vertical ? request.natural_height : request.natural_width) + margin_main,
+            .natural_cross =
+                (vertical ? request.natural_width : request.natural_height) + margin_cross,
             .main_policy =
                 vertical ? child->vertical_size_policy() : child->horizontal_size_policy(),
             .cross_policy =
@@ -165,7 +168,7 @@ void BoxLayout::set_homogeneous(bool homogeneous) {
     homogeneous_ = homogeneous;
 }
 
-bool BoxLayout::has_height_for_width(Widget const& widget) const {
+bool BoxLayout::has_height_for_width(const Widget& widget) const {
     for (const auto& child : widget.children()) {
         if (child && participates_in_layout(*child) && child->has_height_for_width()) {
             return true;
@@ -174,7 +177,7 @@ bool BoxLayout::has_height_for_width(Widget const& widget) const {
     return false;
 }
 
-float BoxLayout::height_for_width(Widget const& widget, float width) const {
+float BoxLayout::height_for_width(const Widget& widget, float width) const {
     if (!has_height_for_width(widget)) {
         return measure(widget, Constraints::unbounded()).natural_height;
     }
@@ -204,13 +207,16 @@ float BoxLayout::height_for_width(Widget const& widget, float width) const {
 
     // Horizontal height-for-width
     float max_height = 0.0F;
-    const auto children = collect_box_children(widget, Constraints{0, 0, width, std::numeric_limits<float>::infinity()}, false);
-    float total_spacing = children.empty() ? 0.0F : spacing_ * static_cast<float>(children.size() - 1);
+    const auto children = collect_box_children(
+        widget, Constraints{0, 0, width, std::numeric_limits<float>::infinity()}, false);
+    float total_spacing =
+        children.empty() ? 0.0F : spacing_ * static_cast<float>(children.size() - 1);
     float available_main = std::max(0.0F, width - total_spacing);
 
     std::vector<float> main_sizes(children.size(), 0.0F);
     if (homogeneous_) {
-        float h_size = children.empty() ? 0.0F : available_main / static_cast<float>(children.size());
+        float h_size =
+            children.empty() ? 0.0F : available_main / static_cast<float>(children.size());
         std::fill(main_sizes.begin(), main_sizes.end(), h_size);
     } else {
         main_sizes = distribute_main_sizes(children, available_main);
@@ -218,7 +224,8 @@ float BoxLayout::height_for_width(Widget const& widget, float width) const {
 
     for (std::size_t index = 0; index < children.size(); ++index) {
         const auto& child = children[index];
-        float child_width = std::max(0.0F, main_sizes[index] - child.margin_before - child.margin_after);
+        float child_width =
+            std::max(0.0F, main_sizes[index] - child.margin_before - child.margin_after);
         float h = 0.0F;
         if (child.widget->has_height_for_width()) {
             h = child.widget->height_for_width(child_width);
@@ -293,9 +300,9 @@ void BoxLayout::allocate(Widget& widget, const Rect& allocation) {
         const float main_size = std::max(0.0F, main_sizes[index]);
         const float available_cross = vertical ? allocation.width : allocation.height;
         const float cross_margin = child.margin_cross_start + child.margin_cross_end;
-        const float cross_size = clamp_cross_size(
-            std::max(0.0F, available_cross - cross_margin), child.natural_cross - cross_margin,
-            child.cross_policy);
+        const float cross_size = clamp_cross_size(std::max(0.0F, available_cross - cross_margin),
+                                                  child.natural_cross - cross_margin,
+                                                  child.cross_policy);
 
         // Inset the child rect by margins so the widget receives the
         // content area, not the full margin-inclusive slot.

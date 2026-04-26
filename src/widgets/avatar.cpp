@@ -93,15 +93,17 @@ void Avatar::snapshot(SnapshotContext& ctx) const {
     const Rect circle_rect{cx, cy, d, d};
 
     // Background circle.
-    ctx.add_rounded_rect(circle_rect,
-                         theme_color("background", Color{0.75F, 0.78F, 0.82F, 1.0F}),
-                         circle_radius);
+    ctx.add_rounded_rect(
+        circle_rect, theme_color("background", Color{0.75F, 0.78F, 0.82F, 1.0F}), circle_radius);
 
     if (impl_->image_data != nullptr && impl_->image_width > 0 && impl_->image_height > 0) {
         // Clip image to circle.
         note_image_snapshot_for_diagnostics();
         ctx.push_rounded_clip(circle_rect, circle_radius);
-        ctx.add_image(circle_rect, impl_->image_data, impl_->image_width, impl_->image_height,
+        ctx.add_image(circle_rect,
+                      impl_->image_data,
+                      impl_->image_width,
+                      impl_->image_height,
                       ScaleMode::NearestNeighbor);
         ctx.pop_container();
     } else if (!impl_->initials.empty()) {
@@ -110,13 +112,16 @@ void Avatar::snapshot(SnapshotContext& ctx) const {
         const auto measured = measure_text(impl_->initials, font);
         const float text_x = cx + std::max(0.0F, (d - measured.width) * 0.5F);
         const float text_y = cy + std::max(0.0F, (d - measured.height) * 0.5F);
-        ctx.add_text({text_x, text_y}, std::string(impl_->initials),
-                     theme_color("text-color", Color{1.0F, 1.0F, 1.0F, 1.0F}), font);
+        ctx.add_text({text_x, text_y},
+                     std::string(impl_->initials),
+                     theme_color("text-color", Color{1.0F, 1.0F, 1.0F, 1.0F}),
+                     font);
     }
 
     // Optional border.
     ctx.add_border(circle_rect,
-                   theme_color("border-color", Color{0.0F, 0.0F, 0.0F, 0.08F}), 1.0F,
+                   theme_color("border-color", Color{0.0F, 0.0F, 0.0F, 0.08F}),
+                   1.0F,
                    circle_radius);
 }
 

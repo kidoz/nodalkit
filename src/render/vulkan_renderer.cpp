@@ -357,9 +357,9 @@ VkSurfaceFormatKHR choose_surface_format(const std::vector<VkSurfaceFormatKHR>& 
         }
     }
 
-    return formats.empty() ? VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM,
-                                                VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
-                           : formats.front();
+    return formats.empty()
+               ? VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
+               : formats.front();
 }
 
 VkExtent2D choose_swapchain_extent(const VkSurfaceCapabilitiesKHR& capabilities,
@@ -370,17 +370,15 @@ VkExtent2D choose_swapchain_extent(const VkSurfaceCapabilitiesKHR& capabilities,
     }
 
     return {
-        std::clamp(desired_width,
-                   capabilities.minImageExtent.width,
-                   capabilities.maxImageExtent.width),
-        std::clamp(desired_height,
-                   capabilities.minImageExtent.height,
-                   capabilities.maxImageExtent.height),
+        std::clamp(
+            desired_width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+        std::clamp(
+            desired_height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height),
     };
 }
 
-VkSurfaceTransformFlagBitsKHR choose_surface_transform(
-    const VkSurfaceCapabilitiesKHR& capabilities) {
+VkSurfaceTransformFlagBitsKHR
+choose_surface_transform(const VkSurfaceCapabilitiesKHR& capabilities) {
     if ((capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0) {
         return VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     }
@@ -479,8 +477,9 @@ public:
             .surface = wl_surface,
         };
 
-        if (!vk_ok(vkCreateWaylandSurfaceKHR(instance_, &wayland_surface_info, nullptr, &vk_surface_),
-                   "vkCreateWaylandSurfaceKHR")) {
+        if (!vk_ok(
+                vkCreateWaylandSurfaceKHR(instance_, &wayland_surface_info, nullptr, &vk_surface_),
+                "vkCreateWaylandSurfaceKHR")) {
             destroy_context();
             return false;
         }
@@ -510,7 +509,8 @@ public:
         }
 
         std::vector<VkPhysicalDevice> physical_devices(physical_device_count);
-        if (!vk_ok(vkEnumeratePhysicalDevices(instance_, &physical_device_count, physical_devices.data()),
+        if (!vk_ok(vkEnumeratePhysicalDevices(
+                       instance_, &physical_device_count, physical_devices.data()),
                    "vkEnumeratePhysicalDevices(list)")) {
             destroy_context();
             return false;
@@ -524,9 +524,8 @@ public:
             }
 
             std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
-            vkGetPhysicalDeviceQueueFamilyProperties(candidate,
-                                                     &queue_family_count,
-                                                     queue_families.data());
+            vkGetPhysicalDeviceQueueFamilyProperties(
+                candidate, &queue_family_count, queue_families.data());
 
             for (uint32_t queue_family_index = 0; queue_family_index < queue_family_count;
                  ++queue_family_index) {
@@ -535,10 +534,8 @@ public:
                 }
 
                 VkBool32 supports_present = VK_FALSE;
-                if (!vk_ok(vkGetPhysicalDeviceSurfaceSupportKHR(candidate,
-                                                               queue_family_index,
-                                                               vk_surface_,
-                                                               &supports_present),
+                if (!vk_ok(vkGetPhysicalDeviceSurfaceSupportKHR(
+                               candidate, queue_family_index, vk_surface_, &supports_present),
                            "vkGetPhysicalDeviceSurfaceSupportKHR")) {
                     continue;
                 }
@@ -564,10 +561,8 @@ public:
         }
 
         uint32_t device_extension_count = 0;
-        if (!vk_ok(vkEnumerateDeviceExtensionProperties(physical_device_,
-                                                        nullptr,
-                                                        &device_extension_count,
-                                                        nullptr),
+        if (!vk_ok(vkEnumerateDeviceExtensionProperties(
+                       physical_device_, nullptr, &device_extension_count, nullptr),
                    "vkEnumerateDeviceExtensionProperties(count)")) {
             destroy_context();
             return false;
@@ -575,9 +570,9 @@ public:
         std::vector<VkExtensionProperties> available_device_extensions(device_extension_count);
         if (device_extension_count > 0 &&
             !vk_ok(vkEnumerateDeviceExtensionProperties(physical_device_,
-                                                       nullptr,
-                                                       &device_extension_count,
-                                                       available_device_extensions.data()),
+                                                        nullptr,
+                                                        &device_extension_count,
+                                                        available_device_extensions.data()),
                    "vkEnumerateDeviceExtensionProperties(list)")) {
             destroy_context();
             return false;
@@ -725,8 +720,7 @@ public:
                 counters.gpu_present_region_count = preserved.gpu_present_region_count;
                 counters.gpu_swapchain_copy_count = preserved.gpu_swapchain_copy_count;
                 counters.gpu_viewport_pixel_count = preserved.gpu_viewport_pixel_count;
-                counters.gpu_estimated_draw_pixel_count =
-                    preserved.gpu_estimated_draw_pixel_count;
+                counters.gpu_estimated_draw_pixel_count = preserved.gpu_estimated_draw_pixel_count;
                 counters.gpu_present_path = preserved.gpu_present_path;
                 counters.gpu_present_tradeoff = preserved.gpu_present_tradeoff;
                 last_hotspot_counters_ = counters;
@@ -797,8 +791,9 @@ public:
         VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         bool recorded = false;
         const bool full_redraw = full_redraw_ || !scene_initialized_ || damage_regions_.empty();
-        const bool textures_ready =
-            !use_gpu_path_ || draw_textures_.size() == draw_commands_.size() || ensure_draw_textures_ready();
+        const bool textures_ready = !use_gpu_path_ ||
+                                    draw_textures_.size() == draw_commands_.size() ||
+                                    ensure_draw_textures_ready();
         if (use_gpu_path_ && scene_framebuffer_ != VK_NULL_HANDLE &&
             primitive_pipeline_ != VK_NULL_HANDLE && image_pipeline_ != VK_NULL_HANDLE &&
             descriptor_pool_ != VK_NULL_HANDLE && descriptor_set_layout_ != VK_NULL_HANDLE &&
@@ -831,7 +826,8 @@ public:
                                    static_cast<uint32_t>(pixel_width),
                                    static_cast<uint32_t>(pixel_height));
 
-            if (!vk_ok(vkResetCommandPool(device_, command_pool_, 0), "vkResetCommandPool(upload)") ||
+            if (!vk_ok(vkResetCommandPool(device_, command_pool_, 0),
+                       "vkResetCommandPool(upload)") ||
                 !record_software_upload_commands(image_index,
                                                  static_cast<uint32_t>(pixel_width),
                                                  static_cast<uint32_t>(pixel_height))) {
@@ -947,10 +943,8 @@ private:
         const Rect clipped = {
             std::max(0.0F, bounds.x),
             std::max(0.0F, bounds.y),
-            std::min(bounds.right(), static_cast<float>(target_width)) -
-                std::max(0.0F, bounds.x),
-            std::min(bounds.bottom(), static_cast<float>(target_height)) -
-                std::max(0.0F, bounds.y),
+            std::min(bounds.right(), static_cast<float>(target_width)) - std::max(0.0F, bounds.x),
+            std::min(bounds.bottom(), static_cast<float>(target_height)) - std::max(0.0F, bounds.y),
         };
         if (rect_is_empty(clipped)) {
             return 0;
@@ -972,8 +966,8 @@ private:
             swapchain_extent_.width > 0 ? swapchain_extent_.width : desired_pixel_width();
         const uint32_t target_height =
             swapchain_extent_.height > 0 ? swapchain_extent_.height : desired_pixel_height();
-        const std::size_t viewport_pixels = static_cast<std::size_t>(target_width) *
-                                            static_cast<std::size_t>(target_height);
+        const std::size_t viewport_pixels =
+            static_cast<std::size_t>(target_width) * static_cast<std::size_t>(target_height);
         if (viewport_pixels == 0) {
             return false;
         }
@@ -1077,9 +1071,8 @@ private:
 
             if (draw_command.kind == DrawCommandKind::Primitive) {
                 if (!pipeline_bound || active_kind != DrawCommandKind::Primitive) {
-                    vkCmdBindPipeline(command_buffer_,
-                                      VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                      primitive_pipeline_);
+                    vkCmdBindPipeline(
+                        command_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, primitive_pipeline_);
                     active_kind = DrawCommandKind::Primitive;
                     pipeline_bound = true;
                 }
@@ -1087,17 +1080,17 @@ private:
                 const auto& command = primitive_commands_[draw_command.command_index];
                 command_bounds = scale_rect(command.rect, scale_factor_);
                 DrawPushConstants push_constants{};
-                populate_draw_push_constants(push_constants,
-                                             command.rect,
-                                             command.color,
-                                             std::span<const ClipRegion>(command.clips.data(),
-                                                                         command.clip_count),
-                                             command.clip_count,
-                                             scale_factor_,
-                                             swapchain_extent_,
-                                             command.radius,
-                                             command.thickness,
-                                             command.kind);
+                populate_draw_push_constants(
+                    push_constants,
+                    command.rect,
+                    command.color,
+                    std::span<const ClipRegion>(command.clips.data(), command.clip_count),
+                    command.clip_count,
+                    scale_factor_,
+                    swapchain_extent_,
+                    command.radius,
+                    command.thickness,
+                    command.kind);
                 if (full_redraw) {
                     vkCmdSetScissor(command_buffer_, 0, 1, &scissor);
                     vkCmdPushConstants(command_buffer_,
@@ -1119,7 +1112,8 @@ private:
                             std::max(0.0F, damage.y),
                             std::min(damage.right(), static_cast<float>(swapchain_extent_.width)) -
                                 std::max(0.0F, damage.x),
-                            std::min(damage.bottom(), static_cast<float>(swapchain_extent_.height)) -
+                            std::min(damage.bottom(),
+                                     static_cast<float>(swapchain_extent_.height)) -
                                 std::max(0.0F, damage.y),
                         };
                         if (rect_is_empty(clipped)) {
@@ -1152,7 +1146,8 @@ private:
             }
 
             if (!pipeline_bound || active_kind == DrawCommandKind::Primitive) {
-                vkCmdBindPipeline(command_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, image_pipeline_);
+                vkCmdBindPipeline(
+                    command_buffer_, VK_PIPELINE_BIND_POINT_GRAPHICS, image_pipeline_);
                 active_kind = draw_command.kind;
                 pipeline_bound = true;
             }
@@ -1181,25 +1176,25 @@ private:
             if (draw_command.kind == DrawCommandKind::Image) {
                 const auto& command = image_commands_[draw_command.command_index];
                 command_bounds = scale_rect(command.rect, scale_factor_);
-                populate_draw_push_constants(push_constants,
-                                             command.rect,
-                                             {},
-                                             std::span<const ClipRegion>(command.clips.data(),
-                                                                         command.clip_count),
-                                             command.clip_count,
-                                             scale_factor_,
-                                             swapchain_extent_);
+                populate_draw_push_constants(
+                    push_constants,
+                    command.rect,
+                    {},
+                    std::span<const ClipRegion>(command.clips.data(), command.clip_count),
+                    command.clip_count,
+                    scale_factor_,
+                    swapchain_extent_);
             } else {
                 const auto& command = text_commands_[draw_command.command_index];
                 command_bounds = scale_rect(command.rect, scale_factor_);
-                populate_draw_push_constants(push_constants,
-                                             command.rect,
-                                             {},
-                                             std::span<const ClipRegion>(command.clips.data(),
-                                                                         command.clip_count),
-                                             command.clip_count,
-                                             scale_factor_,
-                                             swapchain_extent_);
+                populate_draw_push_constants(
+                    push_constants,
+                    command.rect,
+                    {},
+                    std::span<const ClipRegion>(command.clips.data(), command.clip_count),
+                    command.clip_count,
+                    scale_factor_,
+                    swapchain_extent_);
             }
 
             if (full_redraw) {
@@ -1286,10 +1281,12 @@ private:
             .pNext = nullptr,
             .flags = 0,
         };
-        if (!vk_ok(vkCreateSemaphore(device_, &semaphore_info, nullptr, &image_available_semaphore_),
-                   "vkCreateSemaphore(image_available)") ||
-            !vk_ok(vkCreateSemaphore(device_, &semaphore_info, nullptr, &render_finished_semaphore_),
-                   "vkCreateSemaphore(render_finished)")) {
+        if (!vk_ok(
+                vkCreateSemaphore(device_, &semaphore_info, nullptr, &image_available_semaphore_),
+                "vkCreateSemaphore(image_available)") ||
+            !vk_ok(
+                vkCreateSemaphore(device_, &semaphore_info, nullptr, &render_finished_semaphore_),
+                "vkCreateSemaphore(render_finished)")) {
             return false;
         }
 
@@ -1318,10 +1315,8 @@ private:
             .bindingCount = 1,
             .pBindings = &sampler_binding,
         };
-        if (!vk_ok(vkCreateDescriptorSetLayout(device_,
-                                               &descriptor_set_layout_info,
-                                               nullptr,
-                                               &descriptor_set_layout_),
+        if (!vk_ok(vkCreateDescriptorSetLayout(
+                       device_, &descriptor_set_layout_info, nullptr, &descriptor_set_layout_),
                    "vkCreateDescriptorSetLayout")) {
             return false;
         }
@@ -1338,8 +1333,9 @@ private:
             .poolSizeCount = 1,
             .pPoolSizes = &pool_size,
         };
-        if (!vk_ok(vkCreateDescriptorPool(device_, &descriptor_pool_info, nullptr, &descriptor_pool_),
-                   "vkCreateDescriptorPool")) {
+        if (!vk_ok(
+                vkCreateDescriptorPool(device_, &descriptor_pool_info, nullptr, &descriptor_pool_),
+                "vkCreateDescriptorPool")) {
             return false;
         }
 
@@ -1383,10 +1379,9 @@ private:
     }
 
     [[nodiscard]] uint32_t desired_pixel_height() const {
-        return std::max(
-            1U,
-            static_cast<uint32_t>(std::lround(logical_viewport_.height *
-                                              normalize_scale_factor(scale_factor_))));
+        return std::max(1U,
+                        static_cast<uint32_t>(std::lround(logical_viewport_.height *
+                                                          normalize_scale_factor(scale_factor_))));
     }
 
     void destroy_texture_entry(TextureCacheEntry& entry) {
@@ -1402,14 +1397,13 @@ private:
         if (nearest_descriptor_set != VK_NULL_HANDLE) {
             descriptor_sets[descriptor_set_count++] = nearest_descriptor_set;
         }
-        if (linear_descriptor_set != VK_NULL_HANDLE && linear_descriptor_set != nearest_descriptor_set) {
+        if (linear_descriptor_set != VK_NULL_HANDLE &&
+            linear_descriptor_set != nearest_descriptor_set) {
             descriptor_sets[descriptor_set_count++] = linear_descriptor_set;
         }
         if (descriptor_pool_ != VK_NULL_HANDLE && descriptor_set_count > 0) {
-            (void)vkFreeDescriptorSets(device_,
-                                       descriptor_pool_,
-                                       descriptor_set_count,
-                                       descriptor_sets.data());
+            (void)vkFreeDescriptorSets(
+                device_, descriptor_pool_, descriptor_set_count, descriptor_sets.data());
         }
         entry.nearest_descriptor_set = VK_NULL_HANDLE;
         entry.linear_descriptor_set = VK_NULL_HANDLE;
@@ -1541,9 +1535,8 @@ private:
         converted_pixels_.clear();
     }
 
-    [[nodiscard]] bool create_shader_module(const uint32_t* code,
-                                            std::size_t size,
-                                            VkShaderModule& shader_module) {
+    [[nodiscard]] bool
+    create_shader_module(const uint32_t* code, std::size_t size, VkShaderModule& shader_module) {
         const VkShaderModuleCreateInfo create_info = {
             .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
             .pNext = nullptr,
@@ -1708,12 +1701,8 @@ private:
         };
 
         const bool pipeline_ok =
-            vk_ok(vkCreateGraphicsPipelines(device_,
-                                            VK_NULL_HANDLE,
-                                            1,
-                                            &pipeline_info,
-                                            nullptr,
-                                            &pipeline),
+            vk_ok(vkCreateGraphicsPipelines(
+                      device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline),
                   "vkCreateGraphicsPipelines");
         vkDestroyShaderModule(device_, fragment_shader, nullptr);
         vkDestroyShaderModule(device_, vertex_shader, nullptr);
@@ -1794,8 +1783,9 @@ private:
             .pushConstantRangeCount = 1,
             .pPushConstantRanges = &push_constant_range,
         };
-        if (!vk_ok(vkCreatePipelineLayout(device_, &pipeline_layout_info, nullptr, &pipeline_layout_),
-                   "vkCreatePipelineLayout")) {
+        if (!vk_ok(
+                vkCreatePipelineLayout(device_, &pipeline_layout_info, nullptr, &pipeline_layout_),
+                "vkCreatePipelineLayout")) {
             destroy_render_targets();
             return false;
         }
@@ -1894,9 +1884,8 @@ private:
 
         VkMemoryRequirements scene_memory_requirements{};
         vkGetImageMemoryRequirements(device_, scene_image_, &scene_memory_requirements);
-        const uint32_t scene_memory_type =
-            find_memory_type(scene_memory_requirements.memoryTypeBits,
-                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        const uint32_t scene_memory_type = find_memory_type(
+            scene_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (scene_memory_type == std::numeric_limits<uint32_t>::max()) {
             NK_LOG_WARN("VulkanRenderer", "No device-local memory type available for scene image");
             destroy_render_targets();
@@ -1977,7 +1966,8 @@ private:
         const uint32_t desired_width = desired_pixel_width();
         const uint32_t desired_height = desired_pixel_height();
         if (!recreate_swapchain_ && swapchain_ != VK_NULL_HANDLE &&
-            swapchain_extent_.width == desired_width && swapchain_extent_.height == desired_height) {
+            swapchain_extent_.width == desired_width &&
+            swapchain_extent_.height == desired_height) {
             return true;
         }
 
@@ -1986,18 +1976,15 @@ private:
         }
 
         VkSurfaceCapabilitiesKHR capabilities{};
-        if (!vk_ok(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device_,
-                                                             vk_surface_,
-                                                             &capabilities),
+        if (!vk_ok(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                       physical_device_, vk_surface_, &capabilities),
                    "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")) {
             return false;
         }
 
         uint32_t format_count = 0;
-        if (!vk_ok(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device_,
-                                                        vk_surface_,
-                                                        &format_count,
-                                                        nullptr),
+        if (!vk_ok(vkGetPhysicalDeviceSurfaceFormatsKHR(
+                       physical_device_, vk_surface_, &format_count, nullptr),
                    "vkGetPhysicalDeviceSurfaceFormatsKHR(count)") ||
             format_count == 0) {
             NK_LOG_WARN("VulkanRenderer", "Native surface reported no Vulkan swapchain formats");
@@ -2005,19 +1992,15 @@ private:
         }
 
         std::vector<VkSurfaceFormatKHR> formats(format_count);
-        if (!vk_ok(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device_,
-                                                        vk_surface_,
-                                                        &format_count,
-                                                        formats.data()),
+        if (!vk_ok(vkGetPhysicalDeviceSurfaceFormatsKHR(
+                       physical_device_, vk_surface_, &format_count, formats.data()),
                    "vkGetPhysicalDeviceSurfaceFormatsKHR(list)")) {
             return false;
         }
 
         uint32_t present_mode_count = 0;
-        if (!vk_ok(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device_,
-                                                             vk_surface_,
-                                                             &present_mode_count,
-                                                             nullptr),
+        if (!vk_ok(vkGetPhysicalDeviceSurfacePresentModesKHR(
+                       physical_device_, vk_surface_, &present_mode_count, nullptr),
                    "vkGetPhysicalDeviceSurfacePresentModesKHR(count)") ||
             present_mode_count == 0) {
             NK_LOG_WARN("VulkanRenderer", "Native surface reported no Vulkan present modes");
@@ -2025,10 +2008,8 @@ private:
         }
 
         std::vector<VkPresentModeKHR> present_modes(present_mode_count);
-        if (!vk_ok(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_device_,
-                                                             vk_surface_,
-                                                             &present_mode_count,
-                                                             present_modes.data()),
+        if (!vk_ok(vkGetPhysicalDeviceSurfacePresentModesKHR(
+                       physical_device_, vk_surface_, &present_mode_count, present_modes.data()),
                    "vkGetPhysicalDeviceSurfacePresentModesKHR(list)")) {
             return false;
         }
@@ -2039,7 +2020,8 @@ private:
             present_modes.end()) {
             chosen_present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
         }
-        const auto chosen_extent = choose_swapchain_extent(capabilities, desired_width, desired_height);
+        const auto chosen_extent =
+            choose_swapchain_extent(capabilities, desired_width, desired_height);
         const auto chosen_transform = choose_surface_transform(capabilities);
 
         uint32_t image_count = capabilities.minImageCount + 1;
@@ -2085,10 +2067,8 @@ private:
         }
 
         swapchain_images_.resize(swapchain_image_count);
-        if (!vk_ok(vkGetSwapchainImagesKHR(device_,
-                                           swapchain_,
-                                           &swapchain_image_count,
-                                           swapchain_images_.data()),
+        if (!vk_ok(vkGetSwapchainImagesKHR(
+                       device_, swapchain_, &swapchain_image_count, swapchain_images_.data()),
                    "vkGetSwapchainImagesKHR(list)")) {
             destroy_swapchain();
             return false;
@@ -2280,9 +2260,8 @@ private:
         return true;
     }
 
-    [[nodiscard]] bool allocate_texture_image(uint32_t width,
-                                              uint32_t height,
-                                              TextureCacheEntry& entry) {
+    [[nodiscard]] bool
+    allocate_texture_image(uint32_t width, uint32_t height, TextureCacheEntry& entry) {
         const VkImageCreateInfo image_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .pNext = nullptr,
@@ -2306,10 +2285,11 @@ private:
 
         VkMemoryRequirements memory_requirements{};
         vkGetImageMemoryRequirements(device_, entry.image, &memory_requirements);
-        const uint32_t memory_type =
-            find_memory_type(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        const uint32_t memory_type = find_memory_type(memory_requirements.memoryTypeBits,
+                                                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         if (memory_type == std::numeric_limits<uint32_t>::max()) {
-            NK_LOG_WARN("VulkanRenderer", "No device-local memory type available for texture image");
+            NK_LOG_WARN("VulkanRenderer",
+                        "No device-local memory type available for texture image");
             destroy_texture_entry(entry);
             return false;
         }
@@ -2487,7 +2467,8 @@ private:
                                  1,
                                  &to_shader_read);
 
-            ok = vk_ok(vkEndCommandBuffer(temp_command_buffer), "vkEndCommandBuffer(texture_upload)");
+            ok = vk_ok(vkEndCommandBuffer(temp_command_buffer),
+                       "vkEndCommandBuffer(texture_upload)");
         }
 
         if (ok) {
@@ -2758,16 +2739,8 @@ private:
                     .layerCount = 1,
                 },
         };
-        vkCmdPipelineBarrier(command_buffer,
-                             src_stage,
-                             dst_stage,
-                             0,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             1,
-                             &barrier);
+        vkCmdPipelineBarrier(
+            command_buffer, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         scene_layout_ = new_layout;
     }
 
@@ -2777,25 +2750,22 @@ private:
         }
 
         if (entry.nearest_descriptor_set == VK_NULL_HANDLE &&
-            !create_texture_descriptor_set(entry.nearest_descriptor_set,
-                                           entry.image_view,
-                                           nearest_sampler_)) {
+            !create_texture_descriptor_set(
+                entry.nearest_descriptor_set, entry.image_view, nearest_sampler_)) {
             return false;
         }
 
         if (allow_linear && entry.linear_descriptor_set == VK_NULL_HANDLE &&
-            !create_texture_descriptor_set(entry.linear_descriptor_set,
-                                           entry.image_view,
-                                           linear_sampler_)) {
+            !create_texture_descriptor_set(
+                entry.linear_descriptor_set, entry.image_view, linear_sampler_)) {
             return false;
         }
 
         return true;
     }
 
-    [[nodiscard]] bool record_software_upload_commands(uint32_t image_index,
-                                                       uint32_t width,
-                                                       uint32_t height) {
+    [[nodiscard]] bool
+    record_software_upload_commands(uint32_t image_index, uint32_t width, uint32_t height) {
         const VkCommandBufferBeginInfo begin_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             .pNext = nullptr,
@@ -2891,7 +2861,8 @@ private:
     }
 
     [[nodiscard]] bool record_gpu_draw_commands(uint32_t image_index) {
-        if (image_index >= swapchain_images_.size() || image_index >= swapchain_framebuffers_.size()) {
+        if (image_index >= swapchain_images_.size() ||
+            image_index >= swapchain_framebuffers_.size()) {
             return false;
         }
         if (scene_framebuffer_ == VK_NULL_HANDLE || scene_image_ == VK_NULL_HANDLE) {
@@ -3135,8 +3106,8 @@ private:
                                  nullptr,
                                  1,
                                  &swapchain_to_attachment);
-            gpu_draw_call_count = record_draw_commands_for_target(swapchain_framebuffers_[image_index],
-                                                                  true);
+            gpu_draw_call_count =
+                record_draw_commands_for_target(swapchain_framebuffers_[image_index], true);
 
             const VkImageMemoryBarrier swapchain_to_source = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,

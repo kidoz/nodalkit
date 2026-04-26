@@ -3,16 +3,14 @@
 
 #include "freetype_shaper.h"
 
-#include <nk/foundation/logging.h>
-
 #include <ft2build.h>
+#include <nk/foundation/logging.h>
 #include FT_FREETYPE_H
-#include <fontconfig/fontconfig.h>
-#include <harfbuzz/hb-ft.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <fontconfig/fontconfig.h>
+#include <harfbuzz/hb-ft.h>
 #include <list>
 #include <unordered_map>
 #include <vector>
@@ -36,8 +34,10 @@ struct FontPathKey {
 struct FontPathKeyHash {
     std::size_t operator()(const FontPathKey& key) const noexcept {
         std::size_t h = std::hash<std::string>{}(key.family);
-        h ^= std::hash<uint16_t>{}(static_cast<uint16_t>(key.weight)) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.style)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<uint16_t>{}(static_cast<uint16_t>(key.weight)) + 0x9e3779b9 + (h << 6) +
+             (h >> 2);
+        h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.style)) + 0x9e3779b9 + (h << 6) +
+             (h >> 2);
         return h;
     }
 };
@@ -87,8 +87,10 @@ struct MeasureCacheKeyHash {
         std::size_t h = std::hash<std::string>{}(key.text);
         h ^= std::hash<std::string>{}(key.family) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<float>{}(key.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash<uint16_t>{}(static_cast<uint16_t>(key.weight)) + 0x9e3779b9 + (h << 6) + (h >> 2);
-        h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.style)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<uint16_t>{}(static_cast<uint16_t>(key.weight)) + 0x9e3779b9 + (h << 6) +
+             (h >> 2);
+        h ^= std::hash<uint8_t>{}(static_cast<uint8_t>(key.style)) + 0x9e3779b9 + (h << 6) +
+             (h >> 2);
         return h;
     }
 };
@@ -113,10 +115,19 @@ uint32_t decode_utf8_codepoint(std::string_view text, std::size_t& cursor) {
     }
     unsigned int extra = 0;
     uint32_t cp = 0;
-    if ((b0 & 0xE0U) == 0xC0U) { cp = b0 & 0x1FU; extra = 1; }
-    else if ((b0 & 0xF0U) == 0xE0U) { cp = b0 & 0x0FU; extra = 2; }
-    else if ((b0 & 0xF8U) == 0xF0U) { cp = b0 & 0x07U; extra = 3; }
-    else { ++cursor; return 0xFFFDU; }
+    if ((b0 & 0xE0U) == 0xC0U) {
+        cp = b0 & 0x1FU;
+        extra = 1;
+    } else if ((b0 & 0xF0U) == 0xE0U) {
+        cp = b0 & 0x0FU;
+        extra = 2;
+    } else if ((b0 & 0xF8U) == 0xF0U) {
+        cp = b0 & 0x07U;
+        extra = 3;
+    } else {
+        ++cursor;
+        return 0xFFFDU;
+    }
 
     if (cursor + 1U + extra > text.size()) {
         cursor = text.size();
@@ -170,25 +181,21 @@ struct TextRunBounds {
 };
 
 int to_pixel_floor(hb_position_t value) {
-    return static_cast<int>(
-        std::floor(static_cast<double>(value) / 64.0));
+    return static_cast<int>(std::floor(static_cast<double>(value) / 64.0));
 }
 
 int to_pixel_ceil(hb_position_t value) {
-    return static_cast<int>(
-        std::ceil(static_cast<double>(value) / 64.0));
+    return static_cast<int>(std::ceil(static_cast<double>(value) / 64.0));
 }
 
-TextRunBounds compute_text_run_bounds(
-    FT_Face face,
-    hb_glyph_info_t const* glyph_infos,
-    hb_glyph_position_t const* glyph_positions,
-    unsigned int glyph_count) {
+TextRunBounds compute_text_run_bounds(FT_Face face,
+                                      const hb_glyph_info_t* glyph_infos,
+                                      const hb_glyph_position_t* glyph_positions,
+                                      unsigned int glyph_count) {
     TextRunBounds bounds;
 
-    int const ascender = static_cast<int>(face->size->metrics.ascender >> 6);
-    int const descender =
-        static_cast<int>(-(face->size->metrics.descender >> 6));
+    const int ascender = static_cast<int>(face->size->metrics.ascender >> 6);
+    const int descender = static_cast<int>(-(face->size->metrics.descender >> 6));
     int min_x = 0;
     int max_x = 0;
     int min_y = 0;
@@ -196,21 +203,15 @@ TextRunBounds compute_text_run_bounds(
     hb_position_t pen_x = 0;
 
     for (unsigned int i = 0; i < glyph_count; ++i) {
-        if (FT_Load_Glyph(
-                face,
-                glyph_infos[i].codepoint,
-                FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) {
+        if (FT_Load_Glyph(face, glyph_infos[i].codepoint, FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) !=
+            0) {
             pen_x += glyph_positions[i].x_advance;
             continue;
         }
 
-        auto const* glyph = face->glyph;
-        int const gx =
-            to_pixel_floor(pen_x + glyph_positions[i].x_offset)
-            + glyph->bitmap_left;
-        int const gy =
-            ascender - to_pixel_floor(glyph_positions[i].y_offset)
-            - glyph->bitmap_top;
+        const auto* glyph = face->glyph;
+        const int gx = to_pixel_floor(pen_x + glyph_positions[i].x_offset) + glyph->bitmap_left;
+        const int gy = ascender - to_pixel_floor(glyph_positions[i].y_offset) - glyph->bitmap_top;
 
         if (glyph->bitmap.width > 0 && glyph->bitmap.rows > 0) {
             min_x = std::min(min_x, gx);
@@ -222,9 +223,9 @@ TextRunBounds compute_text_run_bounds(
         pen_x += glyph_positions[i].x_advance;
     }
 
-    int const advance_width = std::max(0, to_pixel_ceil(pen_x));
-    int const right = std::max(max_x, advance_width);
-    int const bottom = std::max(max_y, ascender + descender);
+    const int advance_width = std::max(0, to_pixel_ceil(pen_x));
+    const int right = std::max(max_x, advance_width);
+    const int bottom = std::max(max_y, ascender + descender);
     bounds.left = std::min(min_x, 0);
     bounds.top = std::min(min_y, 0);
     bounds.width = std::max(0, right - bounds.left);
@@ -233,44 +234,39 @@ TextRunBounds compute_text_run_bounds(
     return bounds;
 }
 
-void blend_alpha_mask(
-    std::vector<uint8_t>& bitmap,
-    int width,
-    int height,
-    int origin_x,
-    int origin_y,
-    FT_Bitmap const& source,
-    uint8_t cr,
-    uint8_t cg,
-    uint8_t cb) {
-    auto const stride = static_cast<std::size_t>(width) * 4;
+void blend_alpha_mask(std::vector<uint8_t>& bitmap,
+                      int width,
+                      int height,
+                      int origin_x,
+                      int origin_y,
+                      const FT_Bitmap& source,
+                      uint8_t cr,
+                      uint8_t cg,
+                      uint8_t cb) {
+    const auto stride = static_cast<std::size_t>(width) * 4;
 
     for (unsigned int row = 0; row < source.rows; ++row) {
         for (unsigned int col = 0; col < source.width; ++col) {
-            int const dest_x = origin_x + static_cast<int>(col);
-            int const dest_y = origin_y + static_cast<int>(row);
-            if (dest_x < 0 || dest_x >= width
-                || dest_y < 0 || dest_y >= height) {
+            const int dest_x = origin_x + static_cast<int>(col);
+            const int dest_y = origin_y + static_cast<int>(row);
+            if (dest_x < 0 || dest_x >= width || dest_y < 0 || dest_y >= height) {
                 continue;
             }
 
-            auto const alpha =
-                source.buffer[row * static_cast<unsigned int>(source.pitch) + col];
+            const auto alpha = source.buffer[row * static_cast<unsigned int>(source.pitch) + col];
             if (alpha == 0) {
                 continue;
             }
 
-            auto const idx = static_cast<std::size_t>(dest_y) * stride
-                           + static_cast<std::size_t>(dest_x) * 4;
-            float const src_a = static_cast<float>(alpha) / 255.0F;
-            float const dst_a =
-                static_cast<float>(bitmap[idx + 3]) / 255.0F;
-            float const out_a = src_a + dst_a * (1.0F - src_a);
+            const auto idx =
+                static_cast<std::size_t>(dest_y) * stride + static_cast<std::size_t>(dest_x) * 4;
+            const float src_a = static_cast<float>(alpha) / 255.0F;
+            const float dst_a = static_cast<float>(bitmap[idx + 3]) / 255.0F;
+            const float out_a = src_a + dst_a * (1.0F - src_a);
             bitmap[idx + 0] = cr;
             bitmap[idx + 1] = cg;
             bitmap[idx + 2] = cb;
-            bitmap[idx + 3] = static_cast<uint8_t>(
-                std::clamp(out_a * 255.0F, 0.0F, 255.0F));
+            bitmap[idx + 3] = static_cast<uint8_t>(std::clamp(out_a * 255.0F, 0.0F, 255.0F));
         }
     }
 }
@@ -293,7 +289,8 @@ struct FreeTypeShaper::Impl {
 
     // Measurement cache with LRU eviction.
     std::list<std::pair<MeasureCacheKey, Size>> measure_lru;
-    std::unordered_map<MeasureCacheKey, decltype(measure_lru)::iterator, MeasureCacheKeyHash> measure_map;
+    std::unordered_map<MeasureCacheKey, decltype(measure_lru)::iterator, MeasureCacheKeyHash>
+        measure_map;
 
     ~Impl() {
         for (auto& entry : face_lru) {
@@ -309,7 +306,7 @@ struct FreeTypeShaper::Impl {
         }
     }
 
-    std::string const& resolve_font_path(FontDescriptor const& desc) {
+    const std::string& resolve_font_path(const FontDescriptor& desc) {
         FontPathKey key{
             desc.family.empty() || desc.family == "System" ? "sans-serif" : desc.family,
             desc.weight,
@@ -331,8 +328,8 @@ struct FreeTypeShaper::Impl {
     // Otherwise queries fontconfig for a face matching the text's charset with the same
     // weight/slant as `desc`, so non-Latin strings render with real glyphs instead of .notdef
     // boxes. Runs through the face cache for both candidates.
-    FaceCacheEntry* resolve_face_for_text(FontDescriptor const& desc, std::string_view text) {
-        auto const& primary_path = resolve_font_path(desc);
+    FaceCacheEntry* resolve_face_for_text(const FontDescriptor& desc, std::string_view text) {
+        const auto& primary_path = resolve_font_path(desc);
         if (primary_path.empty()) {
             return nullptr;
         }
@@ -341,7 +338,7 @@ struct FreeTypeShaper::Impl {
             return primary;
         }
 
-        std::string const& fallback_path = resolve_fallback_font_path(desc, text);
+        const std::string& fallback_path = resolve_fallback_font_path(desc, text);
         if (fallback_path.empty() || fallback_path == primary_path) {
             return primary;
         }
@@ -352,9 +349,9 @@ struct FreeTypeShaper::Impl {
         return fallback;
     }
 
-    FaceCacheEntry* get_face(std::string const& path, FontDescriptor const& font) {
-        auto const px = static_cast<unsigned int>(
-            std::round(static_cast<double>(font.size) * 96.0 / 72.0));
+    FaceCacheEntry* get_face(const std::string& path, const FontDescriptor& font) {
+        const auto px =
+            static_cast<unsigned int>(std::round(static_cast<double>(font.size) * 96.0 / 72.0));
         FaceKey key{path, px};
 
         auto it = face_map.find(key);
@@ -393,7 +390,7 @@ struct FreeTypeShaper::Impl {
         return &face_lru.front().second;
     }
 
-    Size* find_cached_measure(std::string_view text, FontDescriptor const& font) {
+    Size* find_cached_measure(std::string_view text, const FontDescriptor& font) {
         MeasureCacheKey key{
             std::string(text),
             font.family,
@@ -409,7 +406,7 @@ struct FreeTypeShaper::Impl {
         return nullptr;
     }
 
-    void insert_measure(std::string_view text, FontDescriptor const& font, Size size) {
+    void insert_measure(std::string_view text, const FontDescriptor& font, Size size) {
         MeasureCacheKey key{
             std::string(text),
             font.family,
@@ -428,8 +425,8 @@ struct FreeTypeShaper::Impl {
     // Look up a font that covers a specific codepoint set. Keyed by the (weight, style) pair and
     // the sorted set of covered codepoints so repeated calls for the same text don't hammer
     // fontconfig. Falls back to the primary font path when fontconfig can't find a cover.
-    std::string const& resolve_fallback_font_path(FontDescriptor const& desc,
-                                                   std::string_view text) {
+    const std::string& resolve_fallback_font_path(const FontDescriptor& desc,
+                                                  std::string_view text) {
         FallbackKey key{desc.weight, desc.style, codepoint_fingerprint(text)};
         auto it = fallback_path_cache.find(key);
         if (it != fallback_path_cache.end()) {
@@ -451,7 +448,7 @@ private:
         while (cursor < text.size()) {
             const uint32_t cp = decode_utf8_codepoint(text, cursor);
             if (cp == 0U || cp == 0xFFFDU || cp < 0x80U) {
-                continue;  // ASCII is always covered; ignore to collapse common cases
+                continue; // ASCII is always covered; ignore to collapse common cases
             }
             codepoints.push_back(cp);
         }
@@ -486,8 +483,8 @@ private:
 
     std::unordered_map<FallbackKey, std::string, FallbackKeyHash> fallback_path_cache;
 
-    static std::string lookup_fallback_font_path(FontDescriptor const& desc,
-                                                  std::string_view text) {
+    static std::string lookup_fallback_font_path(const FontDescriptor& desc,
+                                                 std::string_view text) {
         FcCharSet* charset = FcCharSetCreate();
         if (charset == nullptr) {
             return {};
@@ -510,22 +507,44 @@ private:
         FcPatternAddCharSet(pattern, FC_CHARSET, charset);
         int fc_weight = FC_WEIGHT_REGULAR;
         switch (desc.weight) {
-        case FontWeight::Thin:      fc_weight = FC_WEIGHT_THIN; break;
-        case FontWeight::Light:     fc_weight = FC_WEIGHT_LIGHT; break;
-        case FontWeight::Regular:   fc_weight = FC_WEIGHT_REGULAR; break;
-        case FontWeight::Medium:    fc_weight = FC_WEIGHT_MEDIUM; break;
-        case FontWeight::SemiBold:  fc_weight = FC_WEIGHT_SEMIBOLD; break;
-        case FontWeight::Bold:      fc_weight = FC_WEIGHT_BOLD; break;
-        case FontWeight::ExtraBold: fc_weight = FC_WEIGHT_EXTRABOLD; break;
-        case FontWeight::Black:     fc_weight = FC_WEIGHT_BLACK; break;
+        case FontWeight::Thin:
+            fc_weight = FC_WEIGHT_THIN;
+            break;
+        case FontWeight::Light:
+            fc_weight = FC_WEIGHT_LIGHT;
+            break;
+        case FontWeight::Regular:
+            fc_weight = FC_WEIGHT_REGULAR;
+            break;
+        case FontWeight::Medium:
+            fc_weight = FC_WEIGHT_MEDIUM;
+            break;
+        case FontWeight::SemiBold:
+            fc_weight = FC_WEIGHT_SEMIBOLD;
+            break;
+        case FontWeight::Bold:
+            fc_weight = FC_WEIGHT_BOLD;
+            break;
+        case FontWeight::ExtraBold:
+            fc_weight = FC_WEIGHT_EXTRABOLD;
+            break;
+        case FontWeight::Black:
+            fc_weight = FC_WEIGHT_BLACK;
+            break;
         }
         FcPatternAddInteger(pattern, FC_WEIGHT, fc_weight);
 
         int fc_slant = FC_SLANT_ROMAN;
         switch (desc.style) {
-        case FontStyle::Normal:  fc_slant = FC_SLANT_ROMAN; break;
-        case FontStyle::Italic:  fc_slant = FC_SLANT_ITALIC; break;
-        case FontStyle::Oblique: fc_slant = FC_SLANT_OBLIQUE; break;
+        case FontStyle::Normal:
+            fc_slant = FC_SLANT_ROMAN;
+            break;
+        case FontStyle::Italic:
+            fc_slant = FC_SLANT_ITALIC;
+            break;
+        case FontStyle::Oblique:
+            fc_slant = FC_SLANT_OBLIQUE;
+            break;
         }
         FcPatternAddInteger(pattern, FC_SLANT, fc_slant);
 
@@ -538,7 +557,7 @@ private:
         if (match != nullptr) {
             FcChar8* file = nullptr;
             if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file != nullptr) {
-                path = reinterpret_cast<char const*>(file);
+                path = reinterpret_cast<const char*>(file);
             }
             FcPatternDestroy(match);
         }
@@ -548,33 +567,55 @@ private:
         return path;
     }
 
-    static std::string lookup_font_path(FontPathKey const& key) {
+    static std::string lookup_font_path(const FontPathKey& key) {
         FcPattern* pattern = FcPatternCreate();
         if (pattern == nullptr) {
             return {};
         }
 
-        FcPatternAddString(pattern, FC_FAMILY,
-                           reinterpret_cast<FcChar8 const*>(key.family.c_str()));
+        FcPatternAddString(
+            pattern, FC_FAMILY, reinterpret_cast<const FcChar8*>(key.family.c_str()));
 
         int fc_weight = FC_WEIGHT_REGULAR;
         switch (key.weight) {
-        case FontWeight::Thin:      fc_weight = FC_WEIGHT_THIN; break;
-        case FontWeight::Light:     fc_weight = FC_WEIGHT_LIGHT; break;
-        case FontWeight::Regular:   fc_weight = FC_WEIGHT_REGULAR; break;
-        case FontWeight::Medium:    fc_weight = FC_WEIGHT_MEDIUM; break;
-        case FontWeight::SemiBold:  fc_weight = FC_WEIGHT_SEMIBOLD; break;
-        case FontWeight::Bold:      fc_weight = FC_WEIGHT_BOLD; break;
-        case FontWeight::ExtraBold: fc_weight = FC_WEIGHT_EXTRABOLD; break;
-        case FontWeight::Black:     fc_weight = FC_WEIGHT_BLACK; break;
+        case FontWeight::Thin:
+            fc_weight = FC_WEIGHT_THIN;
+            break;
+        case FontWeight::Light:
+            fc_weight = FC_WEIGHT_LIGHT;
+            break;
+        case FontWeight::Regular:
+            fc_weight = FC_WEIGHT_REGULAR;
+            break;
+        case FontWeight::Medium:
+            fc_weight = FC_WEIGHT_MEDIUM;
+            break;
+        case FontWeight::SemiBold:
+            fc_weight = FC_WEIGHT_SEMIBOLD;
+            break;
+        case FontWeight::Bold:
+            fc_weight = FC_WEIGHT_BOLD;
+            break;
+        case FontWeight::ExtraBold:
+            fc_weight = FC_WEIGHT_EXTRABOLD;
+            break;
+        case FontWeight::Black:
+            fc_weight = FC_WEIGHT_BLACK;
+            break;
         }
         FcPatternAddInteger(pattern, FC_WEIGHT, fc_weight);
 
         int fc_slant = FC_SLANT_ROMAN;
         switch (key.style) {
-        case FontStyle::Normal:  fc_slant = FC_SLANT_ROMAN; break;
-        case FontStyle::Italic:  fc_slant = FC_SLANT_ITALIC; break;
-        case FontStyle::Oblique: fc_slant = FC_SLANT_OBLIQUE; break;
+        case FontStyle::Normal:
+            fc_slant = FC_SLANT_ROMAN;
+            break;
+        case FontStyle::Italic:
+            fc_slant = FC_SLANT_ITALIC;
+            break;
+        case FontStyle::Oblique:
+            fc_slant = FC_SLANT_OBLIQUE;
+            break;
         }
         FcPatternAddInteger(pattern, FC_SLANT, fc_slant);
 
@@ -587,9 +628,8 @@ private:
         std::string path;
         if (match != nullptr) {
             FcChar8* file = nullptr;
-            if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch &&
-                file != nullptr) {
-                path = reinterpret_cast<char const*>(file);
+            if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file != nullptr) {
+                path = reinterpret_cast<const char*>(file);
             }
             FcPatternDestroy(match);
         }
@@ -612,8 +652,7 @@ FreeTypeShaper::FreeTypeShaper() : impl_(std::make_unique<Impl>()) {
 
 FreeTypeShaper::~FreeTypeShaper() = default;
 
-Size FreeTypeShaper::measure(std::string_view text,
-                             FontDescriptor const& font) const {
+Size FreeTypeShaper::measure(std::string_view text, const FontDescriptor& font) const {
     if (impl_->ft_library == nullptr || text.empty()) {
         return {0, 0};
     }
@@ -633,9 +672,8 @@ Size FreeTypeShaper::measure(std::string_view text,
         return {0, 0};
     }
 
-    hb_buffer_add_utf8(hb_buffer, text.data(),
-                       static_cast<int>(text.size()),
-                       0, static_cast<int>(text.size()));
+    hb_buffer_add_utf8(
+        hb_buffer, text.data(), static_cast<int>(text.size()), 0, static_cast<int>(text.size()));
     hb_buffer_guess_segment_properties(hb_buffer);
     hb_shape(entry->hb_font, hb_buffer, nullptr, 0);
 
@@ -645,7 +683,7 @@ Size FreeTypeShaper::measure(std::string_view text,
 
     Size result{0, 0};
     if (glyph_infos != nullptr && glyph_positions != nullptr) {
-        auto const bounds =
+        const auto bounds =
             compute_text_run_bounds(entry->face, glyph_infos, glyph_positions, glyph_count);
         result = {static_cast<float>(bounds.width), static_cast<float>(bounds.height)};
     }
@@ -655,9 +693,8 @@ Size FreeTypeShaper::measure(std::string_view text,
     return result;
 }
 
-ShapedText FreeTypeShaper::shape(std::string_view text,
-                                 FontDescriptor const& font,
-                                 Color color) const {
+ShapedText
+FreeTypeShaper::shape(std::string_view text, const FontDescriptor& font, Color color) const {
     ShapedText result;
 
     if (impl_->ft_library == nullptr || text.empty()) {
@@ -675,9 +712,8 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
         return result;
     }
 
-    hb_buffer_add_utf8(hb_buffer, text.data(),
-                       static_cast<int>(text.size()),
-                       0, static_cast<int>(text.size()));
+    hb_buffer_add_utf8(
+        hb_buffer, text.data(), static_cast<int>(text.size()), 0, static_cast<int>(text.size()));
     hb_buffer_guess_segment_properties(hb_buffer);
     hb_shape(entry->hb_font, hb_buffer, nullptr, 0);
 
@@ -690,10 +726,9 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
         return result;
     }
 
-    auto const bounds =
+    const auto bounds =
         compute_text_run_bounds(entry->face, glyph_infos, glyph_positions, glyph_count);
-    result.set_text_size(
-        {static_cast<float>(bounds.width), static_cast<float>(bounds.height)});
+    result.set_text_size({static_cast<float>(bounds.width), static_cast<float>(bounds.height)});
     result.set_baseline(static_cast<float>(bounds.baseline));
 
     if (bounds.width <= 0 || bounds.height <= 0) {
@@ -701,45 +736,28 @@ ShapedText FreeTypeShaper::shape(std::string_view text,
         return result;
     }
 
-    std::vector<uint8_t> bitmap(
-        static_cast<std::size_t>(bounds.width * bounds.height * 4), 0);
+    std::vector<uint8_t> bitmap(static_cast<std::size_t>(bounds.width * bounds.height * 4), 0);
 
-    auto const cr = static_cast<uint8_t>(
-        std::clamp(color.r, 0.0F, 1.0F) * 255.0F + 0.5F);
-    auto const cg = static_cast<uint8_t>(
-        std::clamp(color.g, 0.0F, 1.0F) * 255.0F + 0.5F);
-    auto const cb = static_cast<uint8_t>(
-        std::clamp(color.b, 0.0F, 1.0F) * 255.0F + 0.5F);
+    const auto cr = static_cast<uint8_t>(std::clamp(color.r, 0.0F, 1.0F) * 255.0F + 0.5F);
+    const auto cg = static_cast<uint8_t>(std::clamp(color.g, 0.0F, 1.0F) * 255.0F + 0.5F);
+    const auto cb = static_cast<uint8_t>(std::clamp(color.b, 0.0F, 1.0F) * 255.0F + 0.5F);
 
     hb_position_t pen_x = 0;
     for (unsigned int i = 0; i < glyph_count; ++i) {
-        if (FT_Load_Glyph(
-                entry->face,
-                glyph_infos[i].codepoint,
-                FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) {
+        if (FT_Load_Glyph(entry->face,
+                          glyph_infos[i].codepoint,
+                          FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) != 0) {
             pen_x += glyph_positions[i].x_advance;
             continue;
         }
 
-        auto const* glyph = entry->face->glyph;
-        int const gx =
-            to_pixel_floor(pen_x + glyph_positions[i].x_offset)
-            + glyph->bitmap_left - bounds.left;
-        int const gy =
-            bounds.baseline
-            - to_pixel_floor(glyph_positions[i].y_offset)
-            - glyph->bitmap_top;
+        const auto* glyph = entry->face->glyph;
+        const int gx =
+            to_pixel_floor(pen_x + glyph_positions[i].x_offset) + glyph->bitmap_left - bounds.left;
+        const int gy =
+            bounds.baseline - to_pixel_floor(glyph_positions[i].y_offset) - glyph->bitmap_top;
 
-        blend_alpha_mask(
-            bitmap,
-            bounds.width,
-            bounds.height,
-            gx,
-            gy,
-            glyph->bitmap,
-            cr,
-            cg,
-            cb);
+        blend_alpha_mask(bitmap, bounds.width, bounds.height, gx, gy, glyph->bitmap, cr, cg, cb);
 
         pen_x += glyph_positions[i].x_advance;
     }
@@ -799,7 +817,7 @@ std::vector<std::string> tokenize_for_wrap(std::string_view text) {
 } // namespace
 
 Size FreeTypeShaper::measure_wrapped(std::string_view text,
-                                     FontDescriptor const& font,
+                                     const FontDescriptor& font,
                                      float max_width) const {
     if (text.empty() || max_width <= 0.0F) {
         return measure(text, font);
@@ -851,7 +869,7 @@ Size FreeTypeShaper::measure_wrapped(std::string_view text,
 }
 
 ShapedText FreeTypeShaper::shape_wrapped(std::string_view text,
-                                         FontDescriptor const& font,
+                                         const FontDescriptor& font,
                                          Color color,
                                          float max_width) const {
     if (text.empty() || max_width <= 0.0F) {
@@ -922,9 +940,9 @@ ShapedText FreeTypeShaper::shape_wrapped(std::string_view text,
         return result;
     }
 
-    std::vector<uint8_t> bitmap(
-        static_cast<std::size_t>(total_width_px) * static_cast<std::size_t>(total_height_px) * 4U,
-        0U);
+    std::vector<uint8_t> bitmap(static_cast<std::size_t>(total_width_px) *
+                                    static_cast<std::size_t>(total_height_px) * 4U,
+                                0U);
     int cursor_y = 0;
     for (const auto& shaped : shaped_lines) {
         const auto* src = shaped.bitmap_data();
@@ -938,8 +956,8 @@ ShapedText FreeTypeShaper::shape_wrapped(std::string_view text,
                 const auto src_row = static_cast<std::size_t>(y * src_w) * 4U;
                 const auto dst_row =
                     (static_cast<std::size_t>((cursor_y + y) * total_width_px)) * 4U;
-                std::memcpy(bitmap.data() + dst_row, src + src_row,
-                            static_cast<std::size_t>(copy_w) * 4U);
+                std::memcpy(
+                    bitmap.data() + dst_row, src + src_row, static_cast<std::size_t>(copy_w) * 4U);
             }
         }
         cursor_y += line_advance;

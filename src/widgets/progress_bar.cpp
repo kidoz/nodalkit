@@ -59,9 +59,8 @@ void ProgressBar::snapshot(SnapshotContext& ctx) const {
     const float corner_radius = theme_number("corner-radius", 3.0F);
 
     // Track (full-width background).
-    ctx.add_rounded_rect(a,
-                         theme_color("track-color", Color{0.88F, 0.89F, 0.91F, 1.0F}),
-                         corner_radius);
+    ctx.add_rounded_rect(
+        a, theme_color("track-color", Color{0.88F, 0.89F, 0.91F, 1.0F}), corner_radius);
 
     const auto fill_color = theme_color("fill-color", Color{0.2F, 0.45F, 0.85F, 1.0F});
 

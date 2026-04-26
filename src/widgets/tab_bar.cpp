@@ -282,8 +282,8 @@ void TabBar::snapshot(SnapshotContext& ctx) const {
     const auto hover_bg = theme_color("hover-background", Color{0.92F, 0.93F, 0.95F, 1.0F});
 
     for (std::size_t index = 0; index < impl_->tabs.size(); ++index) {
-        const auto tab_rect = Rect{
-            a.x + tab_width * static_cast<float>(index), a.y, tab_width, a.height};
+        const auto tab_rect =
+            Rect{a.x + tab_width * static_cast<float>(index), a.y, tab_width, a.height};
         const bool selected = static_cast<int>(index) == impl_->selected_index;
         const bool hovered = static_cast<int>(index) == impl_->hovered_index;
 
@@ -294,8 +294,7 @@ void TabBar::snapshot(SnapshotContext& ctx) const {
 
         // Tab label
         const auto measured = measure_text(impl_->tabs[index], font);
-        const float text_x =
-            tab_rect.x + std::max(0.0F, (tab_rect.width - measured.width) * 0.5F);
+        const float text_x = tab_rect.x + std::max(0.0F, (tab_rect.width - measured.width) * 0.5F);
         const float text_y =
             tab_rect.y + std::max(0.0F, (tab_rect.height - measured.height) * 0.5F);
         ctx.add_text({text_x, text_y},
@@ -315,10 +314,7 @@ void TabBar::snapshot(SnapshotContext& ctx) const {
     // Focus ring on the selected tab
     if (has_flag(state_flags(), StateFlags::Focused) && impl_->selected_index >= 0) {
         const auto selected_rect = Rect{
-            a.x + tab_width * static_cast<float>(impl_->selected_index),
-            a.y,
-            tab_width,
-            a.height};
+            a.x + tab_width * static_cast<float>(impl_->selected_index), a.y, tab_width, a.height};
         ctx.add_border(selected_rect,
                        theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
                        2.0F,

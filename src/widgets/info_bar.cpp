@@ -159,10 +159,8 @@ void InfoBar::snapshot(SnapshotContext& ctx) const {
     // Background based on severity.
     const auto bg = background_for_severity(impl_->severity);
     ctx.add_rounded_rect(a, theme_color("background", bg), corner_radius);
-    ctx.add_border(a,
-                   theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}),
-                   1.0F,
-                   corner_radius);
+    ctx.add_border(
+        a, theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}), 1.0F, corner_radius);
 
     // Message text.
     const float padding_x = theme_number("padding-x", 16.0F);

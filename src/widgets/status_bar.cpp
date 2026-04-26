@@ -128,8 +128,8 @@ void StatusBar::set_segments(std::vector<std::string> segments) {
     const auto measure_segment = [&](std::string_view text) { return measure_text(text, font); };
     const auto previous_damage = status_tail_damage_rect(
         a.width, a.height, previous_segments, changed_index, gap, measure_segment);
-    const auto next_damage =
-        status_tail_damage_rect(a.width, a.height, impl_->segments, changed_index, gap, measure_segment);
+    const auto next_damage = status_tail_damage_rect(
+        a.width, a.height, impl_->segments, changed_index, gap, measure_segment);
     queue_redraw(union_rect(previous_damage, next_damage));
 }
 
@@ -151,10 +151,10 @@ void StatusBar::set_segment(std::size_t index, std::string text) {
         const auto measure_segment = [&](std::string_view segment_text) {
             return measure_text(segment_text, font);
         };
-        const auto previous_damage =
-            status_tail_damage_rect(a.width, a.height, previous_segments, index, gap, measure_segment);
-        const auto next_damage =
-            status_tail_damage_rect(a.width, a.height, impl_->segments, index, gap, measure_segment);
+        const auto previous_damage = status_tail_damage_rect(
+            a.width, a.height, previous_segments, index, gap, measure_segment);
+        const auto next_damage = status_tail_damage_rect(
+            a.width, a.height, impl_->segments, index, gap, measure_segment);
         queue_redraw(union_rect(previous_damage, next_damage));
     }
 }

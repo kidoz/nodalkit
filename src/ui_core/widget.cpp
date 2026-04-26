@@ -846,8 +846,8 @@ Size Widget::measure_text(std::string_view text, const FontDescriptor& font) con
 }
 
 Size Widget::measure_text_wrapped(std::string_view text,
-                                   const FontDescriptor& font,
-                                   float max_width) const {
+                                  const FontDescriptor& font,
+                                  float max_width) const {
     if (text.empty()) {
         return {};
     }

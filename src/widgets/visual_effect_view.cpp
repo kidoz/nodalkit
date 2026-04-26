@@ -16,23 +16,17 @@ struct MaterialStyle {
 MaterialStyle style_for(VisualEffectMaterial material) {
     switch (material) {
     case VisualEffectMaterial::Sidebar:
-        return {"visual-effect-sidebar", "sidebar-background",
-                Color{0.92F, 0.93F, 0.95F, 0.72F}};
+        return {"visual-effect-sidebar", "sidebar-background", Color{0.92F, 0.93F, 0.95F, 0.72F}};
     case VisualEffectMaterial::HeaderView:
-        return {"visual-effect-header", "header-background",
-                Color{0.95F, 0.96F, 0.97F, 0.80F}};
+        return {"visual-effect-header", "header-background", Color{0.95F, 0.96F, 0.97F, 0.80F}};
     case VisualEffectMaterial::WindowBackground:
-        return {"visual-effect-window", "window-background",
-                Color{0.96F, 0.96F, 0.97F, 0.85F}};
+        return {"visual-effect-window", "window-background", Color{0.96F, 0.96F, 0.97F, 0.85F}};
     case VisualEffectMaterial::Popover:
-        return {"visual-effect-popover", "popover-background",
-                Color{0.98F, 0.98F, 0.99F, 0.88F}};
+        return {"visual-effect-popover", "popover-background", Color{0.98F, 0.98F, 0.99F, 0.88F}};
     case VisualEffectMaterial::Menu:
-        return {"visual-effect-menu", "menu-background",
-                Color{0.97F, 0.97F, 0.98F, 0.90F}};
+        return {"visual-effect-menu", "menu-background", Color{0.97F, 0.97F, 0.98F, 0.90F}};
     case VisualEffectMaterial::Tooltip:
-        return {"visual-effect-tooltip", "tooltip-background",
-                Color{0.12F, 0.12F, 0.14F, 0.88F}};
+        return {"visual-effect-tooltip", "tooltip-background", Color{0.12F, 0.12F, 0.14F, 0.88F}};
     }
     return {"visual-effect", "visual-effect-background", Color{0.95F, 0.95F, 0.96F, 0.80F}};
 }

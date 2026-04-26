@@ -1,5 +1,4 @@
 #include <nk/actions/action.h>
-
 #include <unordered_map>
 
 namespace nk {
@@ -12,16 +11,23 @@ struct Action::Impl {
     Signal<> on_activated;
 };
 
-Action::Action(std::string name)
-    : impl_(std::make_unique<Impl>()) {
+Action::Action(std::string name) : impl_(std::make_unique<Impl>()) {
     impl_->name = std::move(name);
 }
 
 Action::~Action() = default;
 
-std::string_view Action::name() const { return impl_->name; }
-bool Action::is_enabled() const { return impl_->enabled; }
-void Action::set_enabled(bool enabled) { impl_->enabled = enabled; }
+std::string_view Action::name() const {
+    return impl_->name;
+}
+
+bool Action::is_enabled() const {
+    return impl_->enabled;
+}
+
+void Action::set_enabled(bool enabled) {
+    impl_->enabled = enabled;
+}
 
 void Action::activate() {
     if (impl_->enabled) {
@@ -29,7 +35,9 @@ void Action::activate() {
     }
 }
 
-Signal<>& Action::on_activated() { return impl_->on_activated; }
+Signal<>& Action::on_activated() {
+    return impl_->on_activated;
+}
 
 // --- ActionGroup ---
 
@@ -38,6 +46,7 @@ struct ActionGroup::Impl {
 };
 
 ActionGroup::ActionGroup() : impl_(std::make_unique<Impl>()) {}
+
 ActionGroup::~ActionGroup() = default;
 
 void ActionGroup::add(std::shared_ptr<Action> action) {

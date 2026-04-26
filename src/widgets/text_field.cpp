@@ -990,11 +990,9 @@ void TextField::snapshot(SnapshotContext& ctx) const {
                 const float left = measure_text(impl_->text.substr(0, range.start), font).width;
                 const float width =
                     measure_text(impl_->text.substr(range.start, range.length), font).width;
-                ctx.add_color_rect({text_bounds.x + left - impl_->scroll_x,
-                                    underline_y,
-                                    width,
-                                    1.5F},
-                                   misspelling_color);
+                ctx.add_color_rect(
+                    {text_bounds.x + left - impl_->scroll_x, underline_y, width, 1.5F},
+                    misspelling_color);
             }
         }
 
@@ -1046,7 +1044,8 @@ Rect TextField::text_rect() const {
 Rect TextField::local_text_damage_rect() const {
     const auto a = allocation();
     const auto text_bounds = text_rect();
-    if (a.width <= 0.0F || a.height <= 0.0F || text_bounds.width <= 0.0F || text_bounds.height <= 0.0F) {
+    if (a.width <= 0.0F || a.height <= 0.0F || text_bounds.width <= 0.0F ||
+        text_bounds.height <= 0.0F) {
         return {};
     }
 

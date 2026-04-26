@@ -98,7 +98,8 @@ void Label::set_text(std::string text) {
             return Rect{text_x - a.x, text_y - a.y, damage_width, damage_height};
         };
 
-        const auto damage = union_rect(text_damage_bounds(previous_text), text_damage_bounds(impl_->text));
+        const auto damage =
+            union_rect(text_damage_bounds(previous_text), text_damage_bounds(impl_->text));
         if (rect_is_empty(damage)) {
             queue_redraw();
         } else {
@@ -149,13 +150,10 @@ float Label::height_for_width(float width) const {
 
 SizeRequest Label::measure(const Constraints& constraints) const {
     const auto font = label_font(*this);
-    if (impl_->wrapping && constraints.max_width > 0.0F &&
-        constraints.max_width < 1e6F) {
-        const auto measured =
-            measure_text_wrapped(impl_->text, font, constraints.max_width);
-        const float h = std::max(
-            measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
-            has_style_class("heading") ? 28.0F : 20.0F);
+    if (impl_->wrapping && constraints.max_width > 0.0F && constraints.max_width < 1e6F) {
+        const auto measured = measure_text_wrapped(impl_->text, font, constraints.max_width);
+        const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
+                                 has_style_class("heading") ? 28.0F : 20.0F);
         return {0, h, measured.width, h};
     }
     const auto measured = measure_text(impl_->text, font);

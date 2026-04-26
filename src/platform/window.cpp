@@ -1885,8 +1885,7 @@ std::unique_ptr<RenderNode> Window::build_window_debug_render_tree(Size viewport
     }
 
     SnapshotContext snap_ctx(impl_->text_shaper.get());
-    snap_ctx.set_debug_annotations_enabled(
-        impl_->debug_overlay_flags != DebugOverlayFlags::None);
+    snap_ctx.set_debug_annotations_enabled(impl_->debug_overlay_flags != DebugOverlayFlags::None);
     impl_->child->snapshot_subtree(snap_ctx);
     for (auto& overlay : impl_->overlays) {
         if (overlay.widget != nullptr && overlay.widget->is_visible()) {
@@ -2325,9 +2324,9 @@ void Window::request_frame(FrameRequestReason reason) {
             frame.widget_hotspot_totals = collect_widget_hotspot_totals(impl_->child.get());
             for (const auto& overlay : impl_->overlays) {
                 if (overlay.widget != nullptr) {
-                    accumulate_widget_hotspot_counters(frame.widget_hotspot_totals,
-                                                       collect_widget_hotspot_totals(
-                                                           overlay.widget.get()));
+                    accumulate_widget_hotspot_counters(
+                        frame.widget_hotspot_totals,
+                        collect_widget_hotspot_totals(overlay.widget.get()));
                 }
             }
             if (root_node) {

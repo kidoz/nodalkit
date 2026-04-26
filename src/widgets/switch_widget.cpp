@@ -110,17 +110,18 @@ void Switch::snapshot(SnapshotContext& ctx) const {
     const Rect track_rect{track_x, track_y, track_width, track_height};
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(
-            {track_rect.x - 2.0F, track_rect.y - 2.0F,
-             track_rect.width + 4.0F, track_rect.height + 4.0F},
-            theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-            track_radius + 2.0F);
+        ctx.add_rounded_rect({track_rect.x - 2.0F,
+                              track_rect.y - 2.0F,
+                              track_rect.width + 4.0F,
+                              track_rect.height + 4.0F},
+                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
+                             track_radius + 2.0F);
     }
 
     // Track background.
-    const auto track_color = impl_->active
-        ? theme_color("active-track-color", Color{0.2F, 0.45F, 0.85F, 1.0F})
-        : theme_color("inactive-track-color", Color{0.78F, 0.8F, 0.84F, 1.0F});
+    const auto track_color =
+        impl_->active ? theme_color("active-track-color", Color{0.2F, 0.45F, 0.85F, 1.0F})
+                      : theme_color("inactive-track-color", Color{0.78F, 0.8F, 0.84F, 1.0F});
     ctx.add_rounded_rect(track_rect, track_color, track_radius);
 
     // Thumb position: left when off, right when on.
@@ -130,9 +131,8 @@ void Switch::snapshot(SnapshotContext& ctx) const {
     const float thumb_y = track_rect.y + thumb_margin;
     const Rect thumb_rect{thumb_x, thumb_y, thumb_size, thumb_size};
 
-    ctx.add_rounded_rect(thumb_rect,
-                         theme_color("thumb-color", Color{1.0F, 1.0F, 1.0F, 1.0F}),
-                         thumb_radius);
+    ctx.add_rounded_rect(
+        thumb_rect, theme_color("thumb-color", Color{1.0F, 1.0F, 1.0F, 1.0F}), thumb_radius);
 }
 
 } // namespace nk

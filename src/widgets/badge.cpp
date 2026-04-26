@@ -64,16 +64,17 @@ void Badge::snapshot(SnapshotContext& ctx) const {
     const float pill_radius = a.height * 0.5F;
 
     // Pill background.
-    ctx.add_rounded_rect(a, theme_color("background", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                         pill_radius);
+    ctx.add_rounded_rect(a, theme_color("background", Color{0.3F, 0.56F, 0.9F, 1.0F}), pill_radius);
 
     // Text centered.
     const auto font = badge_font();
     const auto measured = measure_text(impl_->text, font);
     const float text_x = a.x + std::max(0.0F, (a.width - measured.width) * 0.5F);
     const float text_y = a.y + std::max(0.0F, (a.height - measured.height) * 0.5F);
-    ctx.add_text({text_x, text_y}, std::string(impl_->text),
-                 theme_color("text-color", Color{1.0F, 1.0F, 1.0F, 1.0F}), font);
+    ctx.add_text({text_x, text_y},
+                 std::string(impl_->text),
+                 theme_color("text-color", Color{1.0F, 1.0F, 1.0F, 1.0F}),
+                 font);
 }
 
 } // namespace nk

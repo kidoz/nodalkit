@@ -3,19 +3,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <commdlg.h>
 #include <cstdint>
+#include <dwmapi.h>
 #include <memory>
 #include <nk/foundation/logging.h>
 #include <nk/platform/window.h>
 #include <nk/runtime/event_loop.h>
+#include <shellscalingapi.h>
 #include <string>
 #include <vector>
-
 #include <windows.h>
 #include <windowsx.h>
-#include <commdlg.h>
-#include <dwmapi.h>
-#include <shellscalingapi.h>
 
 namespace nk {
 
@@ -49,8 +48,8 @@ std::string wide_to_utf8(std::wstring_view text) {
     if (text.empty()) {
         return {};
     }
-    const int required =
-        WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    const int required = WideCharToMultiByte(
+        CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
     if (required <= 0) {
         return {};
     }
@@ -116,13 +115,16 @@ Modifiers query_modifiers() {
 KeyCode translate_key_code(WPARAM virtual_key, LPARAM lparam) {
     const bool extended = (lparam & 0x01000000) != 0;
     if (virtual_key >= 'A' && virtual_key <= 'Z') {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::A) + static_cast<int>(virtual_key - 'A'));
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::A) +
+                                    static_cast<int>(virtual_key - 'A'));
     }
     if (virtual_key >= '0' && virtual_key <= '9') {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::Num0) + static_cast<int>(virtual_key - '0'));
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::Num0) +
+                                    static_cast<int>(virtual_key - '0'));
     }
     if (virtual_key >= VK_F1 && virtual_key <= VK_F12) {
-        return static_cast<KeyCode>(static_cast<int>(KeyCode::F1) + static_cast<int>(virtual_key - VK_F1));
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::F1) +
+                                    static_cast<int>(virtual_key - VK_F1));
     }
     if (virtual_key >= VK_NUMPAD0 && virtual_key <= VK_NUMPAD9) {
         return static_cast<KeyCode>(static_cast<int>(KeyCode::Numpad0) +
@@ -320,11 +322,14 @@ HCURSOR cursor_for_shape(CursorShape shape) {
     return LoadCursorW(nullptr, id);
 }
 
-RECT logical_client_rect_for_window(Size logical_size, DWORD style, DWORD ex_style, float scale_factor) {
-    const int pixel_width =
-        std::max(1, static_cast<int>(std::lround(logical_size.width * std::max(scale_factor, 1.0F))));
-    const int pixel_height =
-        std::max(1, static_cast<int>(std::lround(logical_size.height * std::max(scale_factor, 1.0F))));
+RECT logical_client_rect_for_window(Size logical_size,
+                                    DWORD style,
+                                    DWORD ex_style,
+                                    float scale_factor) {
+    const int pixel_width = std::max(
+        1, static_cast<int>(std::lround(logical_size.width * std::max(scale_factor, 1.0F))));
+    const int pixel_height = std::max(
+        1, static_cast<int>(std::lround(logical_size.height * std::max(scale_factor, 1.0F))));
     RECT rect{0, 0, pixel_width, pixel_height};
 
     using AdjustWindowRectExForDpiFn = BOOL(WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
@@ -355,7 +360,10 @@ public:
     [[nodiscard]] float scale_factor() const override;
     [[nodiscard]] Size framebuffer_size() const override;
     [[nodiscard]] RendererBackendSupport renderer_backend_support() const override;
-    void present(const uint8_t* rgba, int width, int height, std::span<const Rect> damage_regions) override;
+    void present(const uint8_t* rgba,
+                 int width,
+                 int height,
+                 std::span<const Rect> damage_regions) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
@@ -403,11 +411,12 @@ Win32Surface::Win32Surface(HINSTANCE instance, const WindowConfig& config, Windo
     }
     ex_style_ = WS_EX_APPWINDOW;
 
-    const RECT window_rect = logical_client_rect_for_window(
-        {static_cast<float>(std::max(1, config.width)), static_cast<float>(std::max(1, config.height))},
-        style_,
-        ex_style_,
-        current_system_scale());
+    const RECT window_rect =
+        logical_client_rect_for_window({static_cast<float>(std::max(1, config.width)),
+                                        static_cast<float>(std::max(1, config.height))},
+                                       style_,
+                                       ex_style_,
+                                       current_system_scale());
 
     hwnd_ = CreateWindowExW(ex_style_,
                             kWindowClassName,
@@ -455,11 +464,11 @@ void Win32Surface::resize(int width, int height) {
     if (hwnd_ == nullptr) {
         return;
     }
-    const RECT rect = logical_client_rect_for_window({static_cast<float>(std::max(1, width)),
-                                                       static_cast<float>(std::max(1, height))},
-                                                      style_,
-                                                      ex_style_,
-                                                      scale_factor_);
+    const RECT rect = logical_client_rect_for_window(
+        {static_cast<float>(std::max(1, width)), static_cast<float>(std::max(1, height))},
+        style_,
+        ex_style_,
+        scale_factor_);
     SetWindowPos(hwnd_,
                  nullptr,
                  0,
@@ -506,8 +515,9 @@ void Win32Surface::present(const uint8_t* rgba,
     }
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            const auto index =
-                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 4;
+            const auto index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                static_cast<std::size_t>(x)) *
+                               4;
             back_buffer_[index + 0] = rgba[index + 2];
             back_buffer_[index + 1] = rgba[index + 1];
             back_buffer_[index + 2] = rgba[index + 0];
@@ -536,7 +546,8 @@ void Win32Surface::set_fullscreen(bool fullscreen) {
         monitor_info.cbSize = sizeof(monitor_info);
         GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor_info);
 
-        SetWindowLongPtrW(hwnd_, GWL_STYLE, static_cast<LONG_PTR>(windowed_style_ & ~WS_OVERLAPPEDWINDOW));
+        SetWindowLongPtrW(
+            hwnd_, GWL_STYLE, static_cast<LONG_PTR>(windowed_style_ & ~WS_OVERLAPPEDWINDOW));
         SetWindowPos(hwnd_,
                      HWND_TOP,
                      monitor_info.rcMonitor.left,
@@ -584,13 +595,15 @@ void Win32Surface::update_metrics(UINT dpi_override) {
     if (hwnd_ == nullptr) {
         return;
     }
-    scale_factor_ = dpi_override != 0 ? scale_factor_from_dpi(dpi_override) : query_dpi_scale(hwnd_);
+    scale_factor_ =
+        dpi_override != 0 ? scale_factor_from_dpi(dpi_override) : query_dpi_scale(hwnd_);
     RECT client_rect{};
     GetClientRect(hwnd_, &client_rect);
     physical_size_ = {static_cast<float>(std::max<LONG>(0, client_rect.right - client_rect.left)),
                       static_cast<float>(std::max<LONG>(0, client_rect.bottom - client_rect.top))};
-    logical_size_ = {scale_factor_ > 0.0F ? physical_size_.width / scale_factor_ : physical_size_.width,
-                     scale_factor_ > 0.0F ? physical_size_.height / scale_factor_ : physical_size_.height};
+    logical_size_ = {
+        scale_factor_ > 0.0F ? physical_size_.width / scale_factor_ : physical_size_.width,
+        scale_factor_ > 0.0F ? physical_size_.height / scale_factor_ : physical_size_.height};
 }
 
 void Win32Surface::dispatch_metric_events(Size previous_logical_size, float previous_scale_factor) {
@@ -601,9 +614,10 @@ void Win32Surface::dispatch_metric_events(Size previous_logical_size, float prev
 
     if (!nearly_equal(logical_size_.width, previous_logical_size.width) ||
         !nearly_equal(logical_size_.height, previous_logical_size.height)) {
-        owner_.dispatch_window_event({.type = WindowEvent::Type::Resize,
-                                      .width = static_cast<int>(std::lround(logical_size_.width)),
-                                      .height = static_cast<int>(std::lround(logical_size_.height))});
+        owner_.dispatch_window_event(
+            {.type = WindowEvent::Type::Resize,
+             .width = static_cast<int>(std::lround(logical_size_.width)),
+             .height = static_cast<int>(std::lround(logical_size_.height))});
     }
 }
 
@@ -742,10 +756,9 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
             track_mouse.hwndTrack = hwnd_;
             TrackMouseEvent(&track_mouse);
             tracking_mouse_ = true;
-            dispatch_mouse_event(
-                {.type = MouseEvent::Type::Enter,
-                 .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
-                 .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_});
+            dispatch_mouse_event({.type = MouseEvent::Type::Enter,
+                                  .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
+                                  .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_});
         }
         dispatch_mouse_event({.type = MouseEvent::Type::Move,
                               .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
@@ -760,19 +773,21 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_RBUTTONDOWN:
     case WM_MBUTTONDOWN:
         SetCapture(hwnd_);
-        dispatch_mouse_event({.type = MouseEvent::Type::Press,
-                              .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
-                              .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_,
-                              .button = message == WM_LBUTTONDOWN ? 1 : (message == WM_RBUTTONDOWN ? 2 : 3)});
+        dispatch_mouse_event(
+            {.type = MouseEvent::Type::Press,
+             .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
+             .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_,
+             .button = message == WM_LBUTTONDOWN ? 1 : (message == WM_RBUTTONDOWN ? 2 : 3)});
         return 0;
     case WM_LBUTTONUP:
     case WM_RBUTTONUP:
     case WM_MBUTTONUP:
         ReleaseCapture();
-        dispatch_mouse_event({.type = MouseEvent::Type::Release,
-                              .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
-                              .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_,
-                              .button = message == WM_LBUTTONUP ? 1 : (message == WM_RBUTTONUP ? 2 : 3)});
+        dispatch_mouse_event(
+            {.type = MouseEvent::Type::Release,
+             .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
+             .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_,
+             .button = message == WM_LBUTTONUP ? 1 : (message == WM_RBUTTONUP ? 2 : 3)});
         return 0;
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
@@ -795,7 +810,8 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         return 0;
     case WM_KEYUP:
     case WM_SYSKEYUP:
-        dispatch_key_event({.type = KeyEvent::Type::Release, .key = translate_key_code(wparam, lparam)});
+        dispatch_key_event(
+            {.type = KeyEvent::Type::Release, .key = translate_key_code(wparam, lparam)});
         return 0;
     case WM_CHAR:
         dispatch_text_utf16(static_cast<wchar_t>(wparam));
@@ -860,7 +876,8 @@ void Win32Backend::shutdown() {
     }
 }
 
-std::unique_ptr<NativeSurface> Win32Backend::create_surface(const WindowConfig& config, Window& owner) {
+std::unique_ptr<NativeSurface> Win32Backend::create_surface(const WindowConfig& config,
+                                                            Window& owner) {
     auto surface = std::make_unique<Win32Surface>(impl_->instance, config, owner);
     if (surface->hwnd() == nullptr) {
         NK_LOG_ERROR("Win32Backend", "Failed to create Win32 window surface");

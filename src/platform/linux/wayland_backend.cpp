@@ -23,12 +23,12 @@
 #include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/logging.h>
 #include <nk/runtime/event_loop.h>
+#include <nk/ui_core/widget.h>
 #include <optional>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <thread>
 #include <unistd.h>
-#include <nk/ui_core/widget.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <wayland-client.h>
@@ -354,7 +354,9 @@ void output_mode(void* /*data*/,
 
 void output_scale(void* data, wl_output* output, int32_t scale);
 void output_done(void* data, wl_output* output);
+
 void output_name(void* /*data*/, wl_output* /*output*/, const char* /*name*/) {}
+
 void output_description(void* /*data*/, wl_output* /*output*/, const char* /*description*/) {}
 
 constexpr struct wl_output_listener output_listener = {
@@ -462,7 +464,8 @@ void output_done(void* data, wl_output* output) {
         impl->output_scales[output] = pending_it->second;
         impl->pending_output_scales.erase(pending_it);
     }
-    // Scale may have changed for every surface currently on this output. Let each surface recompute.
+    // Scale may have changed for every surface currently on this output. Let each surface
+    // recompute.
     for (const auto& [wl_surf, surface] : impl->surfaces) {
         if (surface != nullptr) {
             surface->recompute_scale_factor();
@@ -568,9 +571,8 @@ std::optional<Color> gnome_accent_color(std::string_view accent_name) {
 // inner `v` nested inside the `(v)` reply. Returns nullptr (with transferred ownership) when the
 // key is unavailable or the call fails — callers should treat that as "no-preference" and leave
 // the matching SystemPreferences field alone.
-GVariant* read_portal_setting(GDBusConnection* connection,
-                              const char* namespace_name,
-                              const char* key) {
+GVariant*
+read_portal_setting(GDBusConnection* connection, const char* namespace_name, const char* key) {
     GError* error = nullptr;
     GVariant* reply = g_dbus_connection_call_sync(connection,
                                                   PortalBusName,
@@ -623,12 +625,14 @@ std::optional<Color> parse_portal_accent_color(GVariant* value) {
 
 // Overlays portal org.freedesktop.appearance values onto preferences already seeded by GSettings.
 // Portal values "win" where reported; "no-preference" leaves the GSettings value intact.
-void apply_portal_appearance_overrides(SystemPreferences& preferences, GDBusConnection* connection) {
+void apply_portal_appearance_overrides(SystemPreferences& preferences,
+                                       GDBusConnection* connection) {
     if (connection == nullptr) {
         return;
     }
 
-    if (GVariant* value = read_portal_setting(connection, PortalAppearanceNamespace, "color-scheme");
+    if (GVariant* value =
+            read_portal_setting(connection, PortalAppearanceNamespace, "color-scheme");
         value != nullptr) {
         if (g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32)) {
             const uint32_t scheme = g_variant_get_uint32(value);
@@ -655,7 +659,8 @@ void apply_portal_appearance_overrides(SystemPreferences& preferences, GDBusConn
         g_variant_unref(value);
     }
 
-    if (GVariant* value = read_portal_setting(connection, PortalAppearanceNamespace, "accent-color");
+    if (GVariant* value =
+            read_portal_setting(connection, PortalAppearanceNamespace, "accent-color");
         value != nullptr) {
         if (auto color = parse_portal_accent_color(value)) {
             preferences.accent_color = *color;
@@ -736,8 +741,8 @@ SystemPreferences query_linux_preferences() {
         has_gsettings_schema("org.gnome.desktop.interface")) {
         GSettings* interface_settings = create_settings_for_schema("org.gnome.desktop.interface");
         GSettings* a11y_settings = create_settings_for_schema("org.gnome.desktop.a11y.interface");
-        preferences =
-            linux_preferences_from_gsettings(interface_settings, a11y_settings, desktop_environment);
+        preferences = linux_preferences_from_gsettings(
+            interface_settings, a11y_settings, desktop_environment);
         if (interface_settings != nullptr) {
             g_object_unref(interface_settings);
         }
@@ -770,10 +775,16 @@ SystemPreferences observed_linux_preferences(const WaylandBackend::Impl& impl) {
 }
 
 // Forward declarations — defined later alongside the subtree dispatch vtable.
-void atspi_method_call(GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*,
-                       GVariant*, GDBusMethodInvocation*, gpointer);
-GVariant* atspi_get_property(GDBusConnection*, const gchar*, const gchar*, const gchar*,
-                             const gchar*, GError**, gpointer);
+void atspi_method_call(GDBusConnection*,
+                       const gchar*,
+                       const gchar*,
+                       const gchar*,
+                       const gchar*,
+                       GVariant*,
+                       GDBusMethodInvocation*,
+                       gpointer);
+GVariant* atspi_get_property(
+    GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*, GError**, gpointer);
 AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl);
 
 // Returns a thread-safe copy of the cached accessibility snapshot. Built on the main thread via
@@ -908,8 +919,8 @@ void on_portal_setting_changed(GDBusConnection* /*connection*/,
     g_variant_get(parameters, "(&s&sv)", &namespace_name, &key, &value);
     // Only re-emit for namespaces we actually observe; the portal's SettingChanged signal is a
     // broadcast and fires for any key that changed (including ones unrelated to appearance).
-    const bool appearance = namespace_name != nullptr &&
-                            std::strcmp(namespace_name, PortalAppearanceNamespace) == 0;
+    const bool appearance =
+        namespace_name != nullptr && std::strcmp(namespace_name, PortalAppearanceNamespace) == 0;
     if (value != nullptr) {
         g_variant_unref(value);
     }
@@ -1362,8 +1373,8 @@ static void registry_global(void* data,
             registry, name, &wp_cursor_shape_manager_v1_interface, std::min(version, 1u)));
         NK_LOG_INFO("Wayland", "Bound wp_cursor_shape_manager_v1");
     } else if (std::strcmp(interface, wp_fractional_scale_manager_v1_interface.name) == 0) {
-        impl->fractional_scale_manager = static_cast<wp_fractional_scale_manager_v1*>(
-            wl_registry_bind(
+        impl->fractional_scale_manager =
+            static_cast<wp_fractional_scale_manager_v1*>(wl_registry_bind(
                 registry, name, &wp_fractional_scale_manager_v1_interface, std::min(version, 1u)));
         NK_LOG_INFO("Wayland", "Bound wp_fractional_scale_manager_v1");
     } else if (std::strcmp(interface, wp_viewporter_interface.name) == 0) {
@@ -1453,11 +1464,12 @@ void WaylandBackend::start_accessibility_thread() {
         guint subtree_id = 0;
         if (connection != nullptr) {
             GError* error = nullptr;
-            // Register the subtree at /org/a11y/atspi/accessible. Uses DISPATCH_TO_UNENUMERATED_NODES
-            // so deeper widget paths (e.g. /accessible/root/window0/0_0) reach the dispatch handler
-            // even though our enumerate function couldn't represent them as single-segment names.
-            // Registration is done on this thread so messages dispatch on its GMainContext — GDBus
-            // binds the subtree to whatever thread-default context is current at registration time.
+            // Register the subtree at /org/a11y/atspi/accessible. Uses
+            // DISPATCH_TO_UNENUMERATED_NODES so deeper widget paths (e.g.
+            // /accessible/root/window0/0_0) reach the dispatch handler even though our enumerate
+            // function couldn't represent them as single-segment names. Registration is done on
+            // this thread so messages dispatch on its GMainContext — GDBus binds the subtree to
+            // whatever thread-default context is current at registration time.
             subtree_id = g_dbus_connection_register_subtree(
                 connection,
                 AtspiObjectRootPath,
@@ -1478,7 +1490,6 @@ void WaylandBackend::start_accessibility_thread() {
                     "WaylandA11y",
                     "Registered AT-SPI accessibility subtree on the accessibility bus thread");
             }
-
         }
 
         bool stop_requested = false;
@@ -1589,8 +1600,8 @@ void WaylandBackend::shutdown() {
     }
     for (auto& [output, scale] : impl_->output_scales) {
         if (output != nullptr) {
-            const uint32_t output_version = wl_proxy_get_version(
-                reinterpret_cast<wl_proxy*>(output));
+            const uint32_t output_version =
+                wl_proxy_get_version(reinterpret_cast<wl_proxy*>(output));
             if (output_version >= 3u) {
                 wl_output_release(output);
             } else {
@@ -1893,17 +1904,16 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
         guint portal_subscription = 0;
         if (portal_connection != nullptr) {
             if (session_bus_name_has_owner(portal_connection, PortalBusName)) {
-                portal_subscription =
-                    g_dbus_connection_signal_subscribe(portal_connection,
-                                                       PortalBusName,
-                                                       PortalSettingsInterface,
-                                                       "SettingChanged",
-                                                       PortalObjectPath,
-                                                       nullptr,
-                                                       G_DBUS_SIGNAL_FLAGS_NONE,
-                                                       on_portal_setting_changed,
-                                                       impl,
-                                                       nullptr);
+                portal_subscription = g_dbus_connection_signal_subscribe(portal_connection,
+                                                                         PortalBusName,
+                                                                         PortalSettingsInterface,
+                                                                         "SettingChanged",
+                                                                         PortalObjectPath,
+                                                                         nullptr,
+                                                                         G_DBUS_SIGNAL_FLAGS_NONE,
+                                                                         on_portal_setting_changed,
+                                                                         impl,
+                                                                         nullptr);
             } else {
                 g_object_unref(portal_connection);
                 portal_connection = nullptr;
@@ -1932,8 +1942,8 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
             stop_requested = impl->system_preferences_stop_requested;
         }
 
-        const bool any_source = (interface_settings != nullptr || a11y_settings != nullptr ||
-                                 portal_subscription != 0);
+        const bool any_source =
+            (interface_settings != nullptr || a11y_settings != nullptr || portal_subscription != 0);
         if (!stop_requested && any_source) {
             g_main_loop_run(loop);
         }

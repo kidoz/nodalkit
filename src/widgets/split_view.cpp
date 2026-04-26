@@ -141,9 +141,10 @@ void SplitView::allocate(const Rect& allocation) {
                 {allocation.x, allocation.y, start_size, allocation.height});
         }
         if (impl_->end_child) {
-            impl_->end_child->allocate(
-                {allocation.x + start_size + divider_width, allocation.y,
-                 end_size, allocation.height});
+            impl_->end_child->allocate({allocation.x + start_size + divider_width,
+                                        allocation.y,
+                                        end_size,
+                                        allocation.height});
         }
     } else {
         if (impl_->start_child) {
@@ -151,9 +152,10 @@ void SplitView::allocate(const Rect& allocation) {
                 {allocation.x, allocation.y, allocation.width, start_size});
         }
         if (impl_->end_child) {
-            impl_->end_child->allocate(
-                {allocation.x, allocation.y + start_size + divider_width,
-                 allocation.width, end_size});
+            impl_->end_child->allocate({allocation.x,
+                                        allocation.y + start_size + divider_width,
+                                        allocation.width,
+                                        end_size});
         }
     }
 }
@@ -231,7 +233,7 @@ bool SplitView::handle_mouse_event(const MouseEvent& event) {
 CursorShape SplitView::cursor_shape() const {
     if (impl_->dragging) {
         return impl_->orientation == Orientation::Horizontal ? CursorShape::ResizeLeftRight
-                                                            : CursorShape::ResizeUpDown;
+                                                             : CursorShape::ResizeUpDown;
     }
     return CursorShape::Default;
 }

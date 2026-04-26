@@ -3,7 +3,6 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
 #import <Foundation/Foundation.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -17,10 +16,9 @@ CoreTextShaper::~CoreTextShaper() = default;
 
 namespace {
 
-CTFontRef create_ct_font(FontDescriptor const& font) {
-    NSString* family = font.family.empty()
-        ? @".AppleSystemUIFont"
-        : [NSString stringWithUTF8String:font.family.c_str()];
+CTFontRef create_ct_font(const FontDescriptor& font) {
+    NSString* family = font.family.empty() ? @".AppleSystemUIFont"
+                                           : [NSString stringWithUTF8String:font.family.c_str()];
 
     CTFontSymbolicTraits traits = 0;
     if (font.weight >= FontWeight::Bold) {
@@ -31,26 +29,23 @@ CTFontRef create_ct_font(FontDescriptor const& font) {
     }
 
     NSDictionary* attributes = @{
-        (id)kCTFontFamilyNameAttribute: family,
-        (id)kCTFontTraitsAttribute: @{
-            (id)kCTFontSymbolicTrait: @(traits),
+        (id)kCTFontFamilyNameAttribute : family,
+        (id)kCTFontTraitsAttribute : @{
+            (id)kCTFontSymbolicTrait : @(traits),
         },
     };
     CTFontDescriptorRef descriptor =
         CTFontDescriptorCreateWithAttributes((CFDictionaryRef)attributes);
-    CTFontRef ct_font =
-        CTFontCreateWithFontDescriptor(descriptor, font.size, nullptr);
+    CTFontRef ct_font = CTFontCreateWithFontDescriptor(descriptor, font.size, nullptr);
     CFRelease(descriptor);
     return ct_font;
 }
 
-CFAttributedStringRef create_attributed_string(
-    std::string_view text, CTFontRef font, Color color) {
+CFAttributedStringRef create_attributed_string(std::string_view text, CTFontRef font, Color color) {
     @autoreleasepool {
-        NSString* str = [[NSString alloc]
-            initWithBytes:text.data()
-                   length:text.size()
-                 encoding:NSUTF8StringEncoding];
+        NSString* str = [[NSString alloc] initWithBytes:text.data()
+                                                 length:text.size()
+                                               encoding:NSUTF8StringEncoding];
         if (!str) {
             str = @"";
         }
@@ -66,12 +61,12 @@ CFAttributedStringRef create_attributed_string(
         CGColorSpaceRelease(cs);
 
         NSDictionary* attrs = @{
-            (id)kCTFontAttributeName: (__bridge id)font,
-            (id)kCTForegroundColorAttributeName: (__bridge id)cg_color,
+            (id)kCTFontAttributeName : (__bridge id)font,
+            (id)kCTForegroundColorAttributeName : (__bridge id)cg_color,
         };
 
-        CFAttributedStringRef result = CFAttributedStringCreate(
-            nullptr, (CFStringRef)str, (CFDictionaryRef)attrs);
+        CFAttributedStringRef result =
+            CFAttributedStringCreate(nullptr, (CFStringRef)str, (CFDictionaryRef)attrs);
         CGColorRelease(cg_color);
         return result;
     }
@@ -102,12 +97,10 @@ void convert_premultiplied_to_straight_rgba(std::vector<uint8_t>& bitmap) {
 
 } // namespace
 
-Size CoreTextShaper::measure(
-    std::string_view text, FontDescriptor const& font) const {
+Size CoreTextShaper::measure(std::string_view text, const FontDescriptor& font) const {
     @autoreleasepool {
         CTFontRef ct_font = create_ct_font(font);
-        CFAttributedStringRef attr_str =
-            create_attributed_string(text, ct_font, {0, 0, 0, 1});
+        CFAttributedStringRef attr_str = create_attributed_string(text, ct_font, {0, 0, 0, 1});
 
         CTLineRef line = CTLineCreateWithAttributedString(attr_str);
         CGRect bounds = CTLineGetBoundsWithOptions(line, 0);
@@ -121,13 +114,11 @@ Size CoreTextShaper::measure(
     }
 }
 
-ShapedText CoreTextShaper::shape(
-    std::string_view text, FontDescriptor const& font,
-    Color color) const {
+ShapedText
+CoreTextShaper::shape(std::string_view text, const FontDescriptor& font, Color color) const {
     @autoreleasepool {
         CTFontRef ct_font = create_ct_font(font);
-        CFAttributedStringRef attr_str =
-            create_attributed_string(text, ct_font, color);
+        CFAttributedStringRef attr_str = create_attributed_string(text, ct_font, color);
 
         CTLineRef line = CTLineCreateWithAttributedString(attr_str);
 
@@ -135,10 +126,9 @@ ShapedText CoreTextShaper::shape(
         CGFloat ascent = 0;
         CGFloat descent = 0;
         CGFloat leading = 0;
-        double line_width =
-            CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
-        int const w = static_cast<int>(std::ceil(line_width));
-        int const h = static_cast<int>(std::ceil(ascent + descent + leading));
+        double line_width = CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
+        const int w = static_cast<int>(std::ceil(line_width));
+        const int h = static_cast<int>(std::ceil(ascent + descent + leading));
 
         ShapedText result;
         result.set_text_size({static_cast<float>(w), static_cast<float>(h)});
@@ -146,14 +136,19 @@ ShapedText CoreTextShaper::shape(
 
         if (w > 0 && h > 0) {
             // Rasterize into an RGBA8 bitmap.
-            auto const stride = static_cast<std::size_t>(w * 4);
+            const auto stride = static_cast<std::size_t>(w * 4);
             std::vector<uint8_t> bitmap(stride * static_cast<std::size_t>(h), 0);
 
             CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-            CGContextRef ctx = CGBitmapContextCreate(
-                bitmap.data(), static_cast<size_t>(w),
-                static_cast<size_t>(h), 8, stride, cs,
-                kCGImageAlphaPremultipliedLast | static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big));
+            CGContextRef ctx =
+                CGBitmapContextCreate(bitmap.data(),
+                                      static_cast<size_t>(w),
+                                      static_cast<size_t>(h),
+                                      8,
+                                      stride,
+                                      cs,
+                                      kCGImageAlphaPremultipliedLast |
+                                          static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big));
             CGColorSpaceRelease(cs);
 
             if (ctx) {
@@ -178,24 +173,19 @@ ShapedText CoreTextShaper::shape(
     }
 }
 
-Size CoreTextShaper::measure_wrapped(
-    std::string_view text, FontDescriptor const& font,
-    float max_width) const {
+Size CoreTextShaper::measure_wrapped(std::string_view text,
+                                     const FontDescriptor& font,
+                                     float max_width) const {
     @autoreleasepool {
         CTFontRef ct_font = create_ct_font(font);
-        CFAttributedStringRef attr_str =
-            create_attributed_string(text, ct_font, {0, 0, 0, 1});
+        CFAttributedStringRef attr_str = create_attributed_string(text, ct_font, {0, 0, 0, 1});
 
-        CTFramesetterRef framesetter =
-            CTFramesetterCreateWithAttributedString(attr_str);
+        CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attr_str);
 
         CFRange fit_range{};
-        CGSize constraints = CGSizeMake(
-            static_cast<CGFloat>(max_width), CGFLOAT_MAX);
-        CGSize frame_size =
-            CTFramesetterSuggestFrameSizeWithConstraints(
-                framesetter, CFRangeMake(0, 0), nullptr,
-                constraints, &fit_range);
+        CGSize constraints = CGSizeMake(static_cast<CGFloat>(max_width), CGFLOAT_MAX);
+        CGSize frame_size = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, CFRangeMake(0, 0), nullptr, constraints, &fit_range);
 
         CFRelease(framesetter);
         CFRelease(attr_str);
@@ -206,83 +196,71 @@ Size CoreTextShaper::measure_wrapped(
     }
 }
 
-ShapedText CoreTextShaper::shape_wrapped(
-    std::string_view text, FontDescriptor const& font,
-    Color color, float max_width) const {
+ShapedText CoreTextShaper::shape_wrapped(std::string_view text,
+                                         const FontDescriptor& font,
+                                         Color color,
+                                         float max_width) const {
     @autoreleasepool {
         CTFontRef ct_font = create_ct_font(font);
-        CFAttributedStringRef attr_str =
-            create_attributed_string(text, ct_font, color);
+        CFAttributedStringRef attr_str = create_attributed_string(text, ct_font, color);
 
-        CTFramesetterRef framesetter =
-            CTFramesetterCreateWithAttributedString(attr_str);
+        CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attr_str);
 
         // Measure to determine bitmap size.
         CFRange fit_range{};
-        CGSize constraints = CGSizeMake(
-            static_cast<CGFloat>(max_width), CGFLOAT_MAX);
-        CGSize frame_size =
-            CTFramesetterSuggestFrameSizeWithConstraints(
-                framesetter, CFRangeMake(0, 0), nullptr,
-                constraints, &fit_range);
+        CGSize constraints = CGSizeMake(static_cast<CGFloat>(max_width), CGFLOAT_MAX);
+        CGSize frame_size = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, CFRangeMake(0, 0), nullptr, constraints, &fit_range);
 
-        int const w = static_cast<int>(std::ceil(frame_size.width));
-        int const h = static_cast<int>(std::ceil(frame_size.height));
+        const int w = static_cast<int>(std::ceil(frame_size.width));
+        const int h = static_cast<int>(std::ceil(frame_size.height));
 
         ShapedText result;
-        result.set_text_size(
-            {static_cast<float>(w), static_cast<float>(h)});
+        result.set_text_size({static_cast<float>(w), static_cast<float>(h)});
 
         // Baseline of the first line.
         CGMutablePathRef path = CGPathCreateMutable();
-        CGPathAddRect(path, nullptr,
-                      CGRectMake(0, 0, frame_size.width,
-                                 frame_size.height));
-        CTFrameRef frame = CTFramesetterCreateFrame(
-            framesetter, CFRangeMake(0, 0), path, nullptr);
+        CGPathAddRect(path, nullptr, CGRectMake(0, 0, frame_size.width, frame_size.height));
+        CTFrameRef frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nullptr);
 
         CFArrayRef lines = CTFrameGetLines(frame);
         CFIndex line_count = CFArrayGetCount(lines);
         if (line_count > 0) {
-            auto* first_line = static_cast<CTLineRef>(
-                CFArrayGetValueAtIndex(lines, 0));
+            auto* first_line = static_cast<CTLineRef>(CFArrayGetValueAtIndex(lines, 0));
             CGFloat ascent = 0;
-            CTLineGetTypographicBounds(first_line, &ascent, nullptr,
-                                       nullptr);
+            CTLineGetTypographicBounds(first_line, &ascent, nullptr, nullptr);
             result.set_baseline(static_cast<float>(ascent));
         }
 
         if (w > 0 && h > 0) {
-            auto const stride = static_cast<std::size_t>(w * 4);
-            std::vector<uint8_t> bitmap(
-                stride * static_cast<std::size_t>(h), 0);
+            const auto stride = static_cast<std::size_t>(w * 4);
+            std::vector<uint8_t> bitmap(stride * static_cast<std::size_t>(h), 0);
 
             CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-            CGContextRef ctx = CGBitmapContextCreate(
-                bitmap.data(), static_cast<size_t>(w),
-                static_cast<size_t>(h), 8, stride, cs,
-                kCGImageAlphaPremultipliedLast |
-                    static_cast<CGBitmapInfo>(
-                        kCGBitmapByteOrder32Big));
+            CGContextRef ctx =
+                CGBitmapContextCreate(bitmap.data(),
+                                      static_cast<size_t>(w),
+                                      static_cast<size_t>(h),
+                                      8,
+                                      stride,
+                                      cs,
+                                      kCGImageAlphaPremultipliedLast |
+                                          static_cast<CGBitmapInfo>(kCGBitmapByteOrder32Big));
             CGColorSpaceRelease(cs);
 
             if (ctx) {
-                CGContextSetTextMatrix(ctx,
-                                       CGAffineTransformIdentity);
+                CGContextSetTextMatrix(ctx, CGAffineTransformIdentity);
                 // Draw each line manually with correct top-down
                 // positioning. CoreText origins are bottom-up, but
                 // the bitmap context has (0,0) at bottom-left.
-                std::vector<CGPoint> origins(
-                    static_cast<std::size_t>(line_count));
-                CTFrameGetLineOrigins(
-                    frame, CFRangeMake(0, 0), origins.data());
+                std::vector<CGPoint> origins(static_cast<std::size_t>(line_count));
+                CTFrameGetLineOrigins(frame, CFRangeMake(0, 0), origins.data());
 
                 for (CFIndex i = 0; i < line_count; ++i) {
-                    auto* line_ref = static_cast<CTLineRef>(
-                        CFArrayGetValueAtIndex(lines, i));
-                    CGContextSetTextPosition(
-                        ctx, origins[static_cast<std::size_t>(i)].x,
-                        origins[static_cast<std::size_t>(i)].y);
+                    auto* line_ref = static_cast<CTLineRef>(CFArrayGetValueAtIndex(lines, i));
+                    CGContextSetTextPosition(ctx,
+                                             origins[static_cast<std::size_t>(i)].x,
+                                             origins[static_cast<std::size_t>(i)].y);
                     CTLineDraw(line_ref, ctx);
                 }
                 CGContextRelease(ctx);

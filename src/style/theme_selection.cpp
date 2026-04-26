@@ -1,8 +1,6 @@
-#include <nk/style/theme_selection.h>
-
-#include <nk/style/theme.h>
-
 #include <algorithm>
+#include <nk/style/theme.h>
+#include <nk/style/theme_selection.h>
 
 namespace nk {
 
@@ -56,24 +54,18 @@ void apply_density(Theme& theme, ThemeDensity density) {
     }
 }
 
-void apply_accent_override(
-    Theme& theme,
-    ColorScheme color_scheme,
-    std::optional<Color> const& accent_color) {
+void apply_accent_override(Theme& theme,
+                           ColorScheme color_scheme,
+                           const std::optional<Color>& accent_color) {
     if (!accent_color.has_value()) {
         return;
     }
 
     auto accent = *accent_color;
-    auto hover = color_scheme == ColorScheme::Dark
-        ? lighten(accent, 0.12F)
-        : darken(accent, 0.08F);
-    auto pressed = color_scheme == ColorScheme::Dark
-        ? darken(accent, 0.10F)
-        : darken(accent, 0.18F);
-    auto soft = color_scheme == ColorScheme::Dark
-        ? lighten(accent, 0.10F)
-        : lighten(accent, 0.72F);
+    auto hover = color_scheme == ColorScheme::Dark ? lighten(accent, 0.12F) : darken(accent, 0.08F);
+    auto pressed =
+        color_scheme == ColorScheme::Dark ? darken(accent, 0.10F) : darken(accent, 0.18F);
+    auto soft = color_scheme == ColorScheme::Dark ? lighten(accent, 0.10F) : lighten(accent, 0.72F);
 
     theme.set_token("accent", StyleValue{accent});
     theme.set_token("accent-hover", StyleValue{hover});
@@ -84,8 +76,7 @@ void apply_accent_override(
 
 } // namespace
 
-ThemeFamily default_theme_family_for(
-    SystemPreferences const& system_preferences) {
+ThemeFamily default_theme_family_for(const SystemPreferences& system_preferences) {
     switch (system_preferences.platform_family) {
     case PlatformFamily::Windows:
         return ThemeFamily::Windows11;
@@ -98,23 +89,21 @@ ThemeFamily default_theme_family_for(
     }
 }
 
-ResolvedThemeSelection resolve_theme_selection(
-    ThemeSelection const& selection,
-    SystemPreferences const& system_preferences) {
+ResolvedThemeSelection resolve_theme_selection(const ThemeSelection& selection,
+                                               const SystemPreferences& system_preferences) {
     ResolvedThemeSelection resolved;
     resolved.family = selection.family == ThemeFamily::SystemDefault
-        ? default_theme_family_for(system_preferences)
-        : selection.family;
-    resolved.color_scheme = selection.color_scheme_override.value_or(
-        system_preferences.color_scheme);
-    resolved.density = selection.density == ThemeDensity::SystemDefault
-        ? ThemeDensity::Standard
-        : selection.density;
+                          ? default_theme_family_for(system_preferences)
+                          : selection.family;
+    resolved.color_scheme =
+        selection.color_scheme_override.value_or(system_preferences.color_scheme);
+    resolved.density = selection.density == ThemeDensity::SystemDefault ? ThemeDensity::Standard
+                                                                        : selection.density;
     resolved.accent_color = selection.accent_color_override.has_value()
-        ? selection.accent_color_override
-        : system_preferences.accent_color;
-    resolved.high_contrast = selection.force_high_contrast
-        || system_preferences.contrast == ContrastPreference::High;
+                                ? selection.accent_color_override
+                                : system_preferences.accent_color;
+    resolved.high_contrast =
+        selection.force_high_contrast || system_preferences.contrast == ContrastPreference::High;
 
     switch (selection.motion_policy) {
     case MotionPolicy::Reduced:
@@ -125,8 +114,7 @@ ResolvedThemeSelection resolve_theme_selection(
         break;
     case MotionPolicy::FollowSystem:
     default:
-        resolved.reduced_motion =
-            system_preferences.motion == MotionPreference::Reduced;
+        resolved.reduced_motion = system_preferences.motion == MotionPreference::Reduced;
         break;
     }
 
@@ -147,9 +135,8 @@ ResolvedThemeSelection resolve_theme_selection(
     return resolved;
 }
 
-std::shared_ptr<Theme> make_theme(
-    ResolvedThemeSelection const& selection,
-    SystemPreferences const& /*system_preferences*/) {
+std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
+                                  const SystemPreferences& /*system_preferences*/) {
     std::unique_ptr<Theme> theme;
 
     switch (selection.family) {
@@ -172,8 +159,7 @@ std::shared_ptr<Theme> make_theme(
         theme->set_token("contrast-mode", StyleValue{std::string("high")});
     }
     if (!selection.transparency_allowed) {
-        theme->set_token("transparency-mode",
-                         StyleValue{std::string("reduced")});
+        theme->set_token("transparency-mode", StyleValue{std::string("reduced")});
     }
     if (selection.reduced_motion) {
         theme->set_token("motion-mode", StyleValue{std::string("reduced")});

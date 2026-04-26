@@ -201,30 +201,26 @@ void RadioButton::snapshot(SnapshotContext& ctx) const {
     const Rect circle_rect{a.x, circle_y, circle_size, circle_size};
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(
-            {circle_rect.x - 2.0F, circle_rect.y - 2.0F,
-             circle_rect.width + 4.0F, circle_rect.height + 4.0F},
-            theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-            radius + 2.0F);
+        ctx.add_rounded_rect({circle_rect.x - 2.0F,
+                              circle_rect.y - 2.0F,
+                              circle_rect.width + 4.0F,
+                              circle_rect.height + 4.0F},
+                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
+                             radius + 2.0F);
     }
 
     // Outer circle.
-    ctx.add_rounded_rect(circle_rect,
-                         theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}),
-                         radius);
-    ctx.add_border(circle_rect,
-                   theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}),
-                   1.0F, radius);
+    ctx.add_rounded_rect(
+        circle_rect, theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}), radius);
+    ctx.add_border(
+        circle_rect, theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}), 1.0F, radius);
 
     // Inner dot when selected.
     if (impl_->is_selected) {
         const float inner_size = theme_number("inner-dot-size", 8.0F);
         const float inner_offset = (circle_size - inner_size) * 0.5F;
         const Rect inner_rect{
-            circle_rect.x + inner_offset,
-            circle_rect.y + inner_offset,
-            inner_size,
-            inner_size};
+            circle_rect.x + inner_offset, circle_rect.y + inner_offset, inner_size, inner_size};
         ctx.add_rounded_rect(inner_rect,
                              theme_color("selected-color", Color{0.2F, 0.45F, 0.85F, 1.0F}),
                              inner_size * 0.5F);

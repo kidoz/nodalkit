@@ -110,11 +110,10 @@ void ImageView::update_pixel_buffer(const uint32_t* data, int width, int height)
         impl_->pixels.assign(data, data + count);
         impl_->src_width = width;
         impl_->src_height = height;
-        damage = union_rect(previous_damage,
-                            local_image_content_rect(a,
-                                                     impl_->src_width,
-                                                     impl_->src_height,
-                                                     impl_->preserve_aspect_ratio));
+        damage =
+            union_rect(previous_damage,
+                       local_image_content_rect(
+                           a, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio));
     }
     // queue_redraw can fan out to the Window / damage tracker on the main thread; keeping the
     // mutex across that call risks lock-order inversions with anything those paths touch. The
@@ -145,13 +144,14 @@ ScaleMode ImageView::scale_mode() const {
 
 void ImageView::set_preserve_aspect_ratio(bool preserve) {
     if (impl_->preserve_aspect_ratio != preserve) {
-        const auto previous_damage =
-            local_image_content_rect(allocation(), source_width(), source_height(), impl_->preserve_aspect_ratio);
+        const auto previous_damage = local_image_content_rect(
+            allocation(), source_width(), source_height(), impl_->preserve_aspect_ratio);
         impl_->preserve_aspect_ratio = preserve;
         queue_layout();
         const auto damage = union_rect(
             previous_damage,
-            local_image_content_rect(allocation(), source_width(), source_height(), impl_->preserve_aspect_ratio));
+            local_image_content_rect(
+                allocation(), source_width(), source_height(), impl_->preserve_aspect_ratio));
         if (rect_is_empty(damage)) {
             queue_redraw();
         } else {
@@ -215,9 +215,11 @@ void ImageView::snapshot(SnapshotContext& ctx) const {
     if (!impl_->pixels.empty() && impl_->src_width > 0 && impl_->src_height > 0) {
         note_image_snapshot_for_diagnostics();
         const bool use_integer = impl_->scale_mode == ScaleMode::IntegerNearest;
-        const auto image_bounds = use_integer
-            ? integer_fit_rect(inner, impl_->src_width, impl_->src_height)
-            : fit_rect(inner, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
+        const auto image_bounds =
+            use_integer
+                ? integer_fit_rect(inner, impl_->src_width, impl_->src_height)
+                : fit_rect(
+                      inner, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
         const auto effective_mode = use_integer ? ScaleMode::NearestNeighbor : impl_->scale_mode;
         ctx.push_rounded_clip(inner, content_radius);
         ctx.add_image(image_bounds,

@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-
 #include <windows.h>
 
 namespace nk {
@@ -17,12 +16,8 @@ std::wstring utf8_to_wide(std::string_view text) {
         return {};
     }
 
-    const int required = MultiByteToWideChar(CP_UTF8,
-                                             MB_ERR_INVALID_CHARS,
-                                             text.data(),
-                                             static_cast<int>(text.size()),
-                                             nullptr,
-                                             0);
+    const int required = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
     if (required <= 0) {
         return {};
     }
@@ -50,8 +45,8 @@ LONG font_height_pixels(float logical_pixel_size) {
     if (screen_dc != nullptr) {
         ReleaseDC(nullptr, screen_dc);
     }
-    const auto scaled =
-        std::max(1, static_cast<int>(std::lround(logical_pixel_size * static_cast<float>(dpi) / 96.0F)));
+    const auto scaled = std::max(
+        1, static_cast<int>(std::lround(logical_pixel_size * static_cast<float>(dpi) / 96.0F)));
     return -scaled;
 }
 
@@ -86,7 +81,8 @@ struct ScopedFontSelection {
     HFONT font = nullptr;
     HGDIOBJ previous = nullptr;
 
-    explicit ScopedFontSelection(HDC target_dc, HFONT selected_font) : dc(target_dc), font(selected_font) {
+    explicit ScopedFontSelection(HDC target_dc, HFONT selected_font)
+        : dc(target_dc), font(selected_font) {
         if (dc != nullptr && font != nullptr) {
             previous = SelectObject(dc, font);
         }
@@ -121,14 +117,10 @@ TextMetricsData measure_text(HDC dc, std::wstring_view text) {
     return data;
 }
 
-std::vector<uint8_t> rasterize_text_bitmap(std::wstring_view text,
-                                           const FontDescriptor& font,
-                                           Color color,
-                                           int width,
-                                           int height) {
-    std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) *
-                              4,
-                              0);
+std::vector<uint8_t> rasterize_text_bitmap(
+    std::wstring_view text, const FontDescriptor& font, Color color, int width, int height) {
+    std::vector<uint8_t> rgba(
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4, 0);
     if (text.empty() || width <= 0 || height <= 0) {
         return rgba;
     }
@@ -145,8 +137,9 @@ std::vector<uint8_t> rasterize_text_bitmap(std::wstring_view text,
     HDC memory_dc = screen_dc != nullptr ? CreateCompatibleDC(screen_dc) : nullptr;
     void* bits = nullptr;
     HBITMAP bitmap =
-        memory_dc != nullptr ? CreateDIBSection(memory_dc, &bitmap_info, DIB_RGB_COLORS, &bits, nullptr, 0)
-                             : nullptr;
+        memory_dc != nullptr
+            ? CreateDIBSection(memory_dc, &bitmap_info, DIB_RGB_COLORS, &bits, nullptr, 0)
+            : nullptr;
 
     if (screen_dc == nullptr || memory_dc == nullptr || bitmap == nullptr || bits == nullptr) {
         if (bitmap != nullptr) {
@@ -162,7 +155,9 @@ std::vector<uint8_t> rasterize_text_bitmap(std::wstring_view text,
     }
 
     auto* pixels = static_cast<uint32_t*>(bits);
-    std::fill(pixels, pixels + static_cast<std::size_t>(width) * static_cast<std::size_t>(height), 0x00FFFFFFU);
+    std::fill(pixels,
+              pixels + static_cast<std::size_t>(width) * static_cast<std::size_t>(height),
+              0x00FFFFFFU);
 
     const HGDIOBJ previous_bitmap = SelectObject(memory_dc, bitmap);
     const ScopedFontSelection font_selection(memory_dc, create_font(font));
@@ -178,14 +173,15 @@ std::vector<uint8_t> rasterize_text_bitmap(std::wstring_view text,
 
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            const auto pixel = pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
-                                      static_cast<std::size_t>(x)];
+            const auto pixel =
+                pixels[static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                       static_cast<std::size_t>(x)];
             const uint8_t pixel_red = static_cast<uint8_t>((pixel >> 16) & 0xFF);
             const uint8_t coverage = static_cast<uint8_t>(
                 std::clamp((255.0F - static_cast<float>(pixel_red)) * alpha_scale, 0.0F, 255.0F));
-            const auto index =
-                (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) *
-                4;
+            const auto index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                static_cast<std::size_t>(x)) *
+                               4;
             rgba[index + 0] = red;
             rgba[index + 1] = green;
             rgba[index + 2] = blue;
@@ -224,7 +220,8 @@ Size GdiTextShaper::measure(std::string_view text, const FontDescriptor& font) c
     };
 }
 
-ShapedText GdiTextShaper::shape(std::string_view text, const FontDescriptor& font, Color color) const {
+ShapedText
+GdiTextShaper::shape(std::string_view text, const FontDescriptor& font, Color color) const {
     ShapedText shaped;
     const auto wide = utf8_to_wide(text);
 

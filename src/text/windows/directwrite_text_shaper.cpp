@@ -3,26 +3,23 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <dwrite.h>
 #include <string>
 #include <vector>
-
-#include <dwrite.h>
 #include <windows.h>
 
 namespace nk {
 
 namespace {
 
-template <typename T>
-void safe_release(T*& ptr) {
+template <typename T> void safe_release(T*& ptr) {
     if (ptr != nullptr) {
         ptr->Release();
         ptr = nullptr;
     }
 }
 
-template <typename Interface>
-REFIID interface_iid() {
+template <typename Interface> REFIID interface_iid() {
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlanguage-extension-token"
@@ -38,12 +35,8 @@ std::wstring utf8_to_wide(std::string_view text) {
         return {};
     }
 
-    const int required = MultiByteToWideChar(CP_UTF8,
-                                             MB_ERR_INVALID_CHARS,
-                                             text.data(),
-                                             static_cast<int>(text.size()),
-                                             nullptr,
-                                             0);
+    const int required = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
     if (required <= 0) {
         return {};
     }
@@ -95,10 +88,10 @@ public:
                        IDWriteRenderingParams* rendering_params,
                        COLORREF text_color,
                        float pixels_per_dip)
-        : target_(target),
-          rendering_params_(rendering_params),
-          text_color_(text_color),
-          pixels_per_dip_(pixels_per_dip) {
+        : target_(target)
+        , rendering_params_(rendering_params)
+        , text_color_(text_color)
+        , pixels_per_dip_(pixels_per_dip) {
         if (target_ != nullptr) {
             target_->AddRef();
         }
@@ -189,21 +182,13 @@ public:
         return S_OK;
     }
 
-    IFACEMETHODIMP DrawStrikethrough(void*,
-                                     FLOAT,
-                                     FLOAT,
-                                     DWRITE_STRIKETHROUGH const*,
-                                     IUnknown*) noexcept {
+    IFACEMETHODIMP
+    DrawStrikethrough(void*, FLOAT, FLOAT, DWRITE_STRIKETHROUGH const*, IUnknown*) noexcept {
         return S_OK;
     }
 
-    IFACEMETHODIMP DrawInlineObject(void*,
-                                    FLOAT,
-                                    FLOAT,
-                                    IDWriteInlineObject*,
-                                    BOOL,
-                                    BOOL,
-                                    IUnknown*) noexcept {
+    IFACEMETHODIMP
+    DrawInlineObject(void*, FLOAT, FLOAT, IDWriteInlineObject*, BOOL, BOOL, IUnknown*) noexcept {
         return S_OK;
     }
 
@@ -230,7 +215,8 @@ struct DirectWriteTextShaper::Impl {
     }
 
     [[nodiscard]] bool available() const {
-        return factory != nullptr && gdi_interop != nullptr && grayscale_rendering_params != nullptr;
+        return factory != nullptr && gdi_interop != nullptr &&
+               grayscale_rendering_params != nullptr;
     }
 
     bool initialize() {
@@ -337,10 +323,12 @@ struct DirectWriteTextShaper::Impl {
         return result;
     }
 
-    [[nodiscard]] std::vector<uint8_t>
-    extract_rgba_bitmap(IDWriteBitmapRenderTarget* render_target, int width, int height, Color color) const {
-        std::vector<uint8_t> rgba(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4,
-                                  0);
+    [[nodiscard]] std::vector<uint8_t> extract_rgba_bitmap(IDWriteBitmapRenderTarget* render_target,
+                                                           int width,
+                                                           int height,
+                                                           Color color) const {
+        std::vector<uint8_t> rgba(
+            static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4, 0);
         if (render_target == nullptr || width <= 0 || height <= 0) {
             return rgba;
         }
@@ -356,12 +344,13 @@ struct DirectWriteTextShaper::Impl {
         }
 
         DIBSECTION dib{};
-        if (GetObjectW(render_bitmap, sizeof(dib), &dib) != sizeof(dib) || dib.dsBm.bmBits == nullptr) {
+        if (GetObjectW(render_bitmap, sizeof(dib), &dib) != sizeof(dib) ||
+            dib.dsBm.bmBits == nullptr) {
             return rgba;
         }
 
         const auto stride = static_cast<std::size_t>(dib.dsBm.bmWidthBytes);
-        const auto* bgra = static_cast<uint8_t const*>(dib.dsBm.bmBits);
+        const auto* bgra = static_cast<const uint8_t*>(dib.dsBm.bmBits);
         const auto red = static_cast<uint8_t>(std::clamp(color.r * 255.0F, 0.0F, 255.0F));
         const auto green = static_cast<uint8_t>(std::clamp(color.g * 255.0F, 0.0F, 255.0F));
         const auto blue = static_cast<uint8_t>(std::clamp(color.b * 255.0F, 0.0F, 255.0F));
@@ -372,8 +361,8 @@ struct DirectWriteTextShaper::Impl {
             for (int x = 0; x < width; ++x) {
                 const auto source_index = static_cast<std::size_t>(x) * 4;
                 const uint8_t source_red = source_row[source_index + 2];
-                const uint8_t coverage = static_cast<uint8_t>(
-                    std::clamp((255.0F - static_cast<float>(source_red)) * alpha_scale, 0.0F, 255.0F));
+                const uint8_t coverage = static_cast<uint8_t>(std::clamp(
+                    (255.0F - static_cast<float>(source_red)) * alpha_scale, 0.0F, 255.0F));
 
                 const auto destination_index =
                     (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
@@ -421,9 +410,8 @@ Size DirectWriteTextShaper::measure(std::string_view text, const FontDescriptor&
     };
 }
 
-ShapedText DirectWriteTextShaper::shape(std::string_view text,
-                                        const FontDescriptor& font,
-                                        Color color) const {
+ShapedText
+DirectWriteTextShaper::shape(std::string_view text, const FontDescriptor& font, Color color) const {
     if (!impl_->available()) {
         return fallback_.shape(text, font, color);
     }
@@ -471,10 +459,8 @@ ShapedText DirectWriteTextShaper::shape(std::string_view text,
         DeleteObject(clear_brush);
     }
 
-    auto* renderer = new BitmapTextRenderer(render_target,
-                                            impl_->grayscale_rendering_params,
-                                            RGB(0, 0, 0),
-                                            impl_->pixels_per_dip);
+    auto* renderer = new BitmapTextRenderer(
+        render_target, impl_->grayscale_rendering_params, RGB(0, 0, 0), impl_->pixels_per_dip);
     const HRESULT draw_result = layout->Draw(nullptr, renderer, 0.0F, 0.0F);
     renderer->Release();
 

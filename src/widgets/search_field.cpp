@@ -292,8 +292,7 @@ void SearchField::snapshot(SnapshotContext& ctx) const {
     const float text_right_margin = (!impl_->text.empty()) ? clear_button_width : 12.0F;
     const float text_width = std::max(0.0F, body.width - icon_width - text_right_margin);
 
-    ctx.push_rounded_clip(
-        {text_left, body.y, text_width, body.height}, corner_radius);
+    ctx.push_rounded_clip({text_left, body.y, text_width, body.height}, corner_radius);
 
     if (impl_->text.empty()) {
         // Placeholder text
@@ -301,8 +300,7 @@ void SearchField::snapshot(SnapshotContext& ctx) const {
             const auto placeholder_color =
                 theme_color("placeholder-color", Color{0.55F, 0.58F, 0.62F, 1.0F});
             const auto measured = measure_text(impl_->placeholder, font);
-            const float text_y =
-                body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
+            const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
             ctx.add_text({text_left, text_y}, impl_->placeholder, placeholder_color, font);
         }
     } else {
@@ -317,9 +315,8 @@ void SearchField::snapshot(SnapshotContext& ctx) const {
             const auto text_before_cursor = impl_->text.substr(0, impl_->cursor_pos);
             const auto cursor_offset = measure_text(text_before_cursor, font);
             const float caret_x = text_left + cursor_offset.width;
-            ctx.add_color_rect(
-                {caret_x, body.y + 4.0F, 1.5F, std::max(0.0F, body.height - 8.0F)},
-                theme_color("caret-color", text_color));
+            ctx.add_color_rect({caret_x, body.y + 4.0F, 1.5F, std::max(0.0F, body.height - 8.0F)},
+                               theme_color("caret-color", text_color));
         }
     }
 
@@ -335,10 +332,8 @@ void SearchField::snapshot(SnapshotContext& ctx) const {
         const auto clear_text = std::string("x");
         const auto clear_measured = measure_text(clear_text, clear_font);
         const float clear_x =
-            body.right() - clear_button_width +
-            (clear_button_width - clear_measured.width) * 0.5F;
-        const float clear_y =
-            body.y + std::max(0.0F, (body.height - clear_measured.height) * 0.5F);
+            body.right() - clear_button_width + (clear_button_width - clear_measured.width) * 0.5F;
+        const float clear_y = body.y + std::max(0.0F, (body.height - clear_measured.height) * 0.5F);
         ctx.add_text({clear_x, clear_y}, clear_text, icon_color, clear_font);
     }
 }

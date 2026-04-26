@@ -10,14 +10,15 @@ struct SelectionModel::Impl {
     Signal<std::size_t> current_changed;
 };
 
-SelectionModel::SelectionModel(SelectionMode mode)
-    : impl_(std::make_unique<Impl>()) {
+SelectionModel::SelectionModel(SelectionMode mode) : impl_(std::make_unique<Impl>()) {
     impl_->mode = mode;
 }
 
 SelectionModel::~SelectionModel() = default;
 
-SelectionMode SelectionModel::mode() const { return impl_->mode; }
+SelectionMode SelectionModel::mode() const {
+    return impl_->mode;
+}
 
 void SelectionModel::set_mode(SelectionMode mode) {
     impl_->mode = mode;
@@ -60,11 +61,13 @@ bool SelectionModel::is_selected(std::size_t row) const {
     return impl_->selected.contains(row);
 }
 
-std::set<std::size_t> const& SelectionModel::selected_rows() const {
+const std::set<std::size_t>& SelectionModel::selected_rows() const {
     return impl_->selected;
 }
 
-std::size_t SelectionModel::current_row() const { return impl_->current; }
+std::size_t SelectionModel::current_row() const {
+    return impl_->current;
+}
 
 void SelectionModel::set_current_row(std::size_t row) {
     if (impl_->current != row) {
