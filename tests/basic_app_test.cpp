@@ -3847,6 +3847,90 @@ TEST_CASE("DataTable keyboard navigation and activation use source rows", "[app]
     REQUIRE(activated == 0);
 }
 
+TEST_CASE("DataTable resizes columns with a minimum width", "[app][table]") {
+    auto source =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    table->set_min_column_width(80.0F);
+    table->set_columns({nk::DataTableColumn{
+                            .id = "name",
+                            .title = "Name",
+                            .width = 120.0F,
+                            .sortable = true,
+                        },
+                        nk::DataTableColumn{
+                            .id = "status",
+                            .title = "Status",
+                            .width = 120.0F,
+                            .sortable = true,
+                        }});
+    table->allocate({0.0F, 0.0F, 260.0F, 130.0F});
+
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 121.0F, .y = 12.0F, .button = 1}));
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Move, .x = 50.0F, .y = 12.0F, .button = 1}));
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 50.0F, .y = 12.0F, .button = 1}));
+
+    REQUIRE(table->columns()[0].width == Catch::Approx(80.0F));
+}
+
+TEST_CASE("DataTable horizontal scroll keeps offscreen columns reachable", "[app][table]") {
+    auto source =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    table->set_columns({nk::DataTableColumn{
+                            .id = "name",
+                            .title = "Name",
+                            .width = 180.0F,
+                            .sortable = true,
+                        },
+                        nk::DataTableColumn{
+                            .id = "status",
+                            .title = "Status",
+                            .width = 180.0F,
+                            .sortable = true,
+                            .text = [](const nk::AbstractListModel&,
+                                       std::size_t row) { return row == 0 ? "Ready" : "Queued"; },
+                        }});
+    table->allocate({0.0F, 0.0F, 220.0F, 130.0F});
+
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Scroll, .x = 80.0F, .y = 70.0F, .scroll_dx = -4.0F}));
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 70.0F, .y = 12.0F, .button = 1}));
+    REQUIRE(table->sort_column() == 1);
+    REQUIRE(table->sort_direction() == nk::DataTableSortDirection::Ascending);
+}
+
+TEST_CASE("DataTable exposes available accessibility details", "[app][table]") {
+    auto source =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    table->set_selection_model(selection);
+    table->set_columns({nk::DataTableColumn{
+        .id = "name",
+        .title = "Name",
+        .width = 160.0F,
+        .sortable = true,
+    }});
+
+    REQUIRE(table->accessible() != nullptr);
+    REQUIRE(table->accessible()->role() == nk::AccessibleRole::Grid);
+    REQUIRE(table->accessible()->description().find("3 rows") != std::string_view::npos);
+    REQUIRE(table->accessible()->description().find("1 columns") != std::string_view::npos);
+
+    selection->set_current_row(2);
+    selection->select(2);
+    REQUIRE(table->accessible()->description().find("current row 3") != std::string_view::npos);
+    REQUIRE(table->accessible()->value().find("Name: Beta") != std::string_view::npos);
+}
+
 TEST_CASE("BoxLayout passes constraints and distributes extra space by stretch", "[app][layout]") {
     auto container = TestContainer::create();
     auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);

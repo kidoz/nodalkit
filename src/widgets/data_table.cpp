@@ -10,6 +10,7 @@
 #include <nk/widgets/data_table.h>
 #include <numeric>
 #include <set>
+#include <sstream>
 
 namespace nk {
 
@@ -59,6 +60,17 @@ Rect table_body_rect(const DataTable& table, float header_height) {
     return {inner.x, inner.y + header, inner.width, std::max(0.0F, inner.height - header)};
 }
 
+Rect table_rows_viewport_rect(const DataTable& table,
+                              float header_height,
+                              std::span<const DataTableColumn> columns) {
+    auto body = table_body_rect(table, header_height);
+    const bool show_h_scrollbar = total_column_width(columns) > body.width;
+    if (show_h_scrollbar) {
+        body.height = std::max(0.0F, body.height - 12.0F);
+    }
+    return body;
+}
+
 float max_scroll_offset(const AbstractListModel* model, float row_height, float viewport_height) {
     if (!model || viewport_height <= 0.0F) {
         return 0.0F;
@@ -73,6 +85,17 @@ void clamp_scroll_offset(float& scroll_offset,
                          float viewport_height) {
     scroll_offset =
         std::clamp(scroll_offset, 0.0F, max_scroll_offset(model, row_height, viewport_height));
+}
+
+float max_horizontal_scroll_offset(std::span<const DataTableColumn> columns, float viewport_width) {
+    return std::max(0.0F, total_column_width(columns) - std::max(0.0F, viewport_width));
+}
+
+void clamp_horizontal_scroll_offset(float& scroll_offset,
+                                    std::span<const DataTableColumn> columns,
+                                    float viewport_width) {
+    scroll_offset =
+        std::clamp(scroll_offset, 0.0F, max_horizontal_scroll_offset(columns, viewport_width));
 }
 
 std::size_t current_source_row(const SelectionModel* selection) {
@@ -107,18 +130,40 @@ int view_row_at_point(const AbstractListModel* display_model,
     return row;
 }
 
-int column_at_point(std::span<const DataTableColumn> columns, Rect header, Point point) {
+int column_at_point(std::span<const DataTableColumn> columns,
+                    Rect header,
+                    float horizontal_scroll_offset,
+                    Point point) {
     if (!header.contains(point)) {
         return -1;
     }
 
-    float x = header.x;
+    float x = header.x - horizontal_scroll_offset;
     for (std::size_t index = 0; index < columns.size(); ++index) {
         const float width = std::max(1.0F, columns[index].width);
         if (point.x >= x && point.x < x + width) {
             return static_cast<int>(index);
         }
         x += width;
+    }
+    return -1;
+}
+
+int resize_column_at_point(std::span<const DataTableColumn> columns,
+                           Rect header,
+                           float horizontal_scroll_offset,
+                           Point point) {
+    if (!header.contains(point)) {
+        return -1;
+    }
+
+    float x = header.x - horizontal_scroll_offset;
+    constexpr float HitSlop = 5.0F;
+    for (std::size_t index = 0; index < columns.size(); ++index) {
+        x += std::max(1.0F, columns[index].width);
+        if (std::abs(point.x - x) <= HitSlop) {
+            return static_cast<int>(index);
+        }
     }
     return -1;
 }
@@ -140,6 +185,21 @@ DataTableSortDirection toggled_direction(DataTableSortDirection current) {
                                                         : DataTableSortDirection::Ascending;
 }
 
+std::string table_accessible_description(const AbstractListModel* model,
+                                         std::span<const DataTableColumn> columns,
+                                         const SelectionModel* selection) {
+    std::ostringstream stream;
+    stream << (model ? model->row_count() : 0) << " rows, " << columns.size() << " columns";
+    const auto current = current_source_row(selection);
+    if (current != invalid_row()) {
+        stream << ", current row " << (current + 1);
+    }
+    if (selection && !selection->selected_rows().empty()) {
+        stream << ", " << selection->selected_rows().size() << " selected";
+    }
+    return stream.str();
+}
+
 } // namespace
 
 struct DataTable::Impl {
@@ -149,7 +209,13 @@ struct DataTable::Impl {
     std::vector<DataTableColumn> columns;
     float row_height = 28.0F;
     float header_height = 30.0F;
+    float min_column_width = 56.0F;
     float scroll_offset = 0.0F;
+    float horizontal_scroll_offset = 0.0F;
+    bool resizing_column = false;
+    std::size_t resize_column = invalid_row();
+    float resize_start_x = 0.0F;
+    float resize_start_width = 0.0F;
     std::optional<std::size_t> sort_column;
     DataTableSortDirection sort_direction = DataTableSortDirection::None;
     Signal<std::size_t> row_activated;
@@ -173,6 +239,7 @@ DataTable::DataTable() : impl_(std::make_unique<Impl>()) {
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Grid);
     accessible.set_name("Data table");
+    sync_accessible_summary();
 }
 
 DataTable::~DataTable() = default;
@@ -186,10 +253,14 @@ void DataTable::set_model(std::shared_ptr<AbstractListModel> model) {
     impl_->display_model->set_source_model(impl_->model);
     reconnect_model();
     rebuild_sort();
-    clamp_scroll_offset(impl_->scroll_offset,
-                        impl_->display_model.get(),
-                        impl_->row_height,
-                        table_body_rect(*this, impl_->header_height).height);
+    clamp_scroll_offset(
+        impl_->scroll_offset,
+        impl_->display_model.get(),
+        impl_->row_height,
+        table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height);
+    clamp_horizontal_scroll_offset(
+        impl_->horizontal_scroll_offset, impl_->columns, table_inner_rect(*this).width);
+    sync_accessible_summary();
     queue_layout();
     queue_redraw();
 }
@@ -211,6 +282,7 @@ void DataTable::set_selection_model(std::shared_ptr<SelectionModel> model) {
     impl_->last_selected_rows =
         impl_->selection ? impl_->selection->selected_rows() : std::set<std::size_t>{};
     impl_->last_current_row = current_source_row(impl_->selection.get());
+    sync_accessible_summary();
     queue_redraw();
 }
 
@@ -220,11 +292,17 @@ SelectionModel* DataTable::selection_model() const {
 
 void DataTable::set_columns(std::vector<DataTableColumn> columns) {
     impl_->columns = std::move(columns);
+    for (auto& column : impl_->columns) {
+        column.width = std::max(impl_->min_column_width, column.width);
+    }
     if (impl_->sort_column && *impl_->sort_column >= impl_->columns.size()) {
         clear_sort();
         return;
     }
     rebuild_sort();
+    clamp_horizontal_scroll_offset(
+        impl_->horizontal_scroll_offset, impl_->columns, table_inner_rect(*this).width);
+    sync_accessible_summary();
     queue_layout();
     queue_redraw();
 }
@@ -233,12 +311,28 @@ std::span<const DataTableColumn> DataTable::columns() const {
     return impl_->columns;
 }
 
+void DataTable::set_min_column_width(float width) {
+    impl_->min_column_width = std::max(1.0F, width);
+    for (auto& column : impl_->columns) {
+        column.width = std::max(impl_->min_column_width, column.width);
+    }
+    clamp_horizontal_scroll_offset(
+        impl_->horizontal_scroll_offset, impl_->columns, table_inner_rect(*this).width);
+    queue_layout();
+    queue_redraw();
+}
+
+float DataTable::min_column_width() const {
+    return impl_->min_column_width;
+}
+
 void DataTable::set_row_height(float height) {
     impl_->row_height = std::max(1.0F, height);
-    clamp_scroll_offset(impl_->scroll_offset,
-                        impl_->display_model.get(),
-                        impl_->row_height,
-                        table_body_rect(*this, impl_->header_height).height);
+    clamp_scroll_offset(
+        impl_->scroll_offset,
+        impl_->display_model.get(),
+        impl_->row_height,
+        table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height);
     queue_layout();
     queue_redraw();
 }
@@ -249,10 +343,11 @@ float DataTable::row_height() const {
 
 void DataTable::set_header_height(float height) {
     impl_->header_height = std::max(1.0F, height);
-    clamp_scroll_offset(impl_->scroll_offset,
-                        impl_->display_model.get(),
-                        impl_->row_height,
-                        table_body_rect(*this, impl_->header_height).height);
+    clamp_scroll_offset(
+        impl_->scroll_offset,
+        impl_->display_model.get(),
+        impl_->row_height,
+        table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height);
     queue_layout();
     queue_redraw();
 }
@@ -271,6 +366,7 @@ void DataTable::sort_by_column(std::size_t column, DataTableSortDirection direct
     impl_->sort_column = column;
     impl_->sort_direction = direction;
     rebuild_sort();
+    sync_accessible_summary();
     queue_redraw();
 }
 
@@ -278,6 +374,7 @@ void DataTable::clear_sort() {
     impl_->sort_column.reset();
     impl_->sort_direction = DataTableSortDirection::None;
     rebuild_sort();
+    sync_accessible_summary();
     queue_redraw();
 }
 
@@ -307,17 +404,31 @@ SizeRequest DataTable::measure(const Constraints& /*constraints*/) const {
 
 void DataTable::allocate(const Rect& allocation) {
     Widget::allocate(allocation);
-    clamp_scroll_offset(impl_->scroll_offset,
-                        impl_->display_model.get(),
-                        impl_->row_height,
-                        table_body_rect(*this, impl_->header_height).height);
+    clamp_scroll_offset(
+        impl_->scroll_offset,
+        impl_->display_model.get(),
+        impl_->row_height,
+        table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height);
+    clamp_horizontal_scroll_offset(
+        impl_->horizontal_scroll_offset, impl_->columns, table_inner_rect(*this).width);
 }
 
 bool DataTable::handle_mouse_event(const MouseEvent& event) {
     if (event.type == MouseEvent::Type::Press && event.button == 1) {
         const Point point{event.x, event.y};
         const auto header = table_header_rect(*this, impl_->header_height);
-        const int column = column_at_point(impl_->columns, header, point);
+        const int resize_column =
+            resize_column_at_point(impl_->columns, header, impl_->horizontal_scroll_offset, point);
+        if (resize_column >= 0) {
+            impl_->resizing_column = true;
+            impl_->resize_column = static_cast<std::size_t>(resize_column);
+            impl_->resize_start_x = event.x;
+            impl_->resize_start_width = impl_->columns[impl_->resize_column].width;
+            return true;
+        }
+
+        const int column =
+            column_at_point(impl_->columns, header, impl_->horizontal_scroll_offset, point);
         if (column >= 0) {
             const auto column_index = static_cast<std::size_t>(column);
             if (impl_->columns[column_index].sortable) {
@@ -347,15 +458,44 @@ bool DataTable::handle_mouse_event(const MouseEvent& event) {
         return body.contains(point);
     }
 
+    if (event.type == MouseEvent::Type::Move && impl_->resizing_column) {
+        if (impl_->resize_column < impl_->columns.size()) {
+            const float delta = event.x - impl_->resize_start_x;
+            impl_->columns[impl_->resize_column].width =
+                std::max(impl_->min_column_width, impl_->resize_start_width + delta);
+            clamp_horizontal_scroll_offset(
+                impl_->horizontal_scroll_offset, impl_->columns, table_inner_rect(*this).width);
+            queue_layout();
+            queue_redraw();
+        }
+        return true;
+    }
+
+    if (event.type == MouseEvent::Type::Release && impl_->resizing_column) {
+        impl_->resizing_column = false;
+        impl_->resize_column = invalid_row();
+        return true;
+    }
+
     if (event.type == MouseEvent::Type::Scroll) {
         const auto body = table_body_rect(*this, impl_->header_height);
         if (!body.contains({event.x, event.y}) || !impl_->display_model) {
             return false;
         }
+        const float horizontal_unit = event.precise_scrolling ? 1.0F : 32.0F;
+        if (std::abs(event.scroll_dx) > 0.01F) {
+            impl_->horizontal_scroll_offset = std::clamp(
+                impl_->horizontal_scroll_offset - event.scroll_dx * horizontal_unit,
+                0.0F,
+                max_horizontal_scroll_offset(impl_->columns, table_inner_rect(*this).width));
+        }
         impl_->scroll_offset = std::clamp(
             impl_->scroll_offset - (event.scroll_dy * impl_->row_height),
             0.0F,
-            max_scroll_offset(impl_->display_model.get(), impl_->row_height, body.height));
+            max_scroll_offset(
+                impl_->display_model.get(),
+                impl_->row_height,
+                table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height));
         queue_redraw();
         return true;
     }
@@ -376,7 +516,7 @@ bool DataTable::handle_key_event(const KeyEvent& event) {
             impl_->selection->select(source_row);
         }
 
-        const auto body = table_body_rect(*this, impl_->header_height);
+        const auto body = table_rows_viewport_rect(*this, impl_->header_height, impl_->columns);
         const float row_top = static_cast<float>(view_row) * impl_->row_height;
         const float row_bottom = row_top + impl_->row_height;
         if (row_top < impl_->scroll_offset) {
@@ -410,14 +550,14 @@ bool DataTable::handle_key_event(const KeyEvent& event) {
         select_view_row(row_count - 1);
         return true;
     case KeyCode::PageUp: {
-        const auto body = table_body_rect(*this, impl_->header_height);
+        const auto body = table_rows_viewport_rect(*this, impl_->header_height, impl_->columns);
         const auto page_rows =
             std::max<std::size_t>(1, static_cast<std::size_t>(body.height / impl_->row_height));
         select_view_row(current_view_row > page_rows ? current_view_row - page_rows : 0);
         return true;
     }
     case KeyCode::PageDown: {
-        const auto body = table_body_rect(*this, impl_->header_height);
+        const auto body = table_rows_viewport_rect(*this, impl_->header_height, impl_->columns);
         const auto page_rows =
             std::max<std::size_t>(1, static_cast<std::size_t>(body.height / impl_->row_height));
         select_view_row(std::min(current_view_row + page_rows, row_count - 1));
@@ -451,6 +591,11 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
     const auto muted_text = theme_color("muted-text-color", Color{0.42F, 0.45F, 0.50F, 1.0F});
     const auto selected_bg = theme_color("selected-background", Color{0.86F, 0.92F, 0.99F, 1.0F});
     const auto selected_text = theme_color("selected-text-color", text_color);
+    const auto focus_ring = theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F});
+    const auto scrollbar_track =
+        theme_color("scrollbar-track-color", Color{0.88F, 0.90F, 0.93F, 1.0F});
+    const auto scrollbar_thumb =
+        theme_color("scrollbar-thumb-color", Color{0.67F, 0.71F, 0.76F, 1.0F});
 
     ctx.add_rounded_rect(body, background, corner_radius);
     ctx.add_border(body, border, 1.0F, corner_radius);
@@ -461,8 +606,8 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
                         std::max(0.0F, body.height - 2.0F)};
     const Rect header = {
         inner.x, inner.y, inner.width, std::min(impl_->header_height, inner.height)};
-    const Rect rows = {
-        inner.x, header.bottom(), inner.width, std::max(0.0F, inner.bottom() - header.bottom())};
+    const bool show_h_scrollbar = total_column_width(impl_->columns) > inner.width;
+    const Rect rows = table_rows_viewport_rect(*this, impl_->header_height, impl_->columns);
 
     ctx.push_rounded_clip(inner, corner_radius);
     ctx.add_color_rect(header, header_bg);
@@ -470,22 +615,33 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
 
     const auto header_font = table_font(12.5F, FontWeight::Medium);
     const auto cell_font = table_font();
-    float x = header.x;
+    ctx.push_rounded_clip(header, 0.0F);
+    float x = header.x - impl_->horizontal_scroll_offset;
     for (std::size_t column_index = 0; column_index < impl_->columns.size(); ++column_index) {
         const auto& column = impl_->columns[column_index];
         const float width = std::max(1.0F, column.width);
         const Rect cell = {x, header.y, width, header.height};
-        const std::string suffix =
-            impl_->sort_column && *impl_->sort_column == column_index
-                ? (impl_->sort_direction == DataTableSortDirection::Ascending ? " ^" : " v")
-                : "";
-        ctx.add_text(
-            {cell.x + 10.0F, cell.y + 8.0F}, column.title + suffix, muted_text, header_font);
+        ctx.add_text({cell.x + 10.0F, cell.y + 8.0F}, column.title, muted_text, header_font);
+        if (impl_->sort_column && *impl_->sort_column == column_index) {
+            const float arrow_x = cell.right() - 18.0F;
+            const float arrow_y = cell.y + 11.0F;
+            if (impl_->sort_direction == DataTableSortDirection::Ascending) {
+                ctx.add_color_rect({arrow_x + 4.0F, arrow_y, 2.0F, 2.0F}, muted_text);
+                ctx.add_color_rect({arrow_x + 2.0F, arrow_y + 2.0F, 6.0F, 2.0F}, muted_text);
+                ctx.add_color_rect({arrow_x, arrow_y + 4.0F, 10.0F, 2.0F}, muted_text);
+            } else {
+                ctx.add_color_rect({arrow_x, arrow_y, 10.0F, 2.0F}, muted_text);
+                ctx.add_color_rect({arrow_x + 2.0F, arrow_y + 2.0F, 6.0F, 2.0F}, muted_text);
+                ctx.add_color_rect({arrow_x + 4.0F, arrow_y + 4.0F, 2.0F, 2.0F}, muted_text);
+            }
+        }
         ctx.add_color_rect({cell.right() - 1.0F, cell.y, 1.0F, inner.height}, separator);
         x += width;
     }
+    ctx.pop_container();
 
     if (impl_->model && impl_->display_model && rows.height > 0.0F) {
+        ctx.push_rounded_clip(rows, 0.0F);
         const auto total_rows = impl_->display_model->row_count();
         const auto first_row = static_cast<std::size_t>(impl_->scroll_offset / impl_->row_height);
         float y = rows.y - std::fmod(impl_->scroll_offset, impl_->row_height);
@@ -498,12 +654,20 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
 
             const auto source_row = source_row_for_view_row(view_row);
             const bool selected = impl_->selection && impl_->selection->is_selected(source_row);
+            const bool current = impl_->selection && impl_->selection->current_row() == source_row;
             if (selected) {
                 ctx.add_color_rect({rows.x, y, rows.width, impl_->row_height},
                                    Color{selected_bg.r, selected_bg.g, selected_bg.b, 0.8F});
             }
+            if (current) {
+                ctx.add_border(
+                    {rows.x + 2.0F, y + 2.0F, rows.width - 4.0F, impl_->row_height - 4.0F},
+                    Color{focus_ring.r, focus_ring.g, focus_ring.b, 0.9F},
+                    1.5F,
+                    5.0F);
+            }
 
-            float cell_x = rows.x;
+            float cell_x = rows.x - impl_->horizontal_scroll_offset;
             for (const auto& column : impl_->columns) {
                 const float width = std::max(1.0F, column.width);
                 const auto text = cell_text(column, *impl_->model, source_row);
@@ -516,6 +680,25 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
             ctx.add_color_rect({rows.x, y + impl_->row_height - 1.0F, rows.width, 1.0F}, separator);
             y += impl_->row_height;
         }
+        ctx.pop_container();
+    }
+
+    if (show_h_scrollbar) {
+        const float track_height = 8.0F;
+        const float track_y = inner.bottom() - track_height - 3.0F;
+        const float track_x = inner.x + 8.0F;
+        const float track_width = std::max(0.0F, inner.width - 16.0F);
+        ctx.add_rounded_rect(
+            {track_x, track_y, track_width, track_height}, scrollbar_track, track_height * 0.5F);
+        const float content_width = total_column_width(impl_->columns);
+        const float thumb_width =
+            std::max(32.0F, (inner.width / std::max(inner.width, content_width)) * track_width);
+        const float max_offset = std::max(1.0F, content_width - inner.width);
+        const float thumb_x =
+            track_x + (impl_->horizontal_scroll_offset / max_offset) * (track_width - thumb_width);
+        ctx.add_rounded_rect({thumb_x, track_y + 2.0F, thumb_width, track_height - 4.0F},
+                             scrollbar_thumb,
+                             (track_height - 4.0F) * 0.5F);
     }
 
     ctx.pop_container();
@@ -532,10 +715,12 @@ void DataTable::reconnect_model() {
 
     auto refresh = [this] {
         rebuild_sort();
-        clamp_scroll_offset(impl_->scroll_offset,
-                            impl_->display_model.get(),
-                            impl_->row_height,
-                            table_body_rect(*this, impl_->header_height).height);
+        clamp_scroll_offset(
+            impl_->scroll_offset,
+            impl_->display_model.get(),
+            impl_->row_height,
+            table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height);
+        sync_accessible_summary();
         queue_layout();
         queue_redraw();
     };
@@ -578,7 +763,25 @@ void DataTable::queue_selection_redraw() {
     impl_->last_selected_rows =
         impl_->selection ? impl_->selection->selected_rows() : std::set<std::size_t>{};
     impl_->last_current_row = current_source_row(impl_->selection.get());
+    sync_accessible_summary();
     queue_redraw();
+}
+
+void DataTable::sync_accessible_summary() {
+    auto& accessible = ensure_accessible();
+    accessible.set_description(
+        table_accessible_description(impl_->model.get(), impl_->columns, impl_->selection.get()));
+    const auto current = current_source_row(impl_->selection.get());
+    if (impl_->model && current != invalid_row() && current < impl_->model->row_count()) {
+        std::ostringstream value;
+        value << "Row " << (current + 1);
+        for (const auto& column : impl_->columns) {
+            value << ", " << column.title << ": " << cell_text(column, *impl_->model, current);
+        }
+        accessible.set_value(value.str());
+    } else {
+        accessible.set_value({});
+    }
 }
 
 std::size_t DataTable::source_row_for_view_row(std::size_t view_row) const {

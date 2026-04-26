@@ -54,6 +54,9 @@ public:
     void set_columns(std::vector<DataTableColumn> columns);
     [[nodiscard]] std::span<const DataTableColumn> columns() const;
 
+    void set_min_column_width(float width);
+    [[nodiscard]] float min_column_width() const;
+
     void set_row_height(float height);
     [[nodiscard]] float row_height() const;
 
@@ -81,6 +84,7 @@ private:
     void reconnect_model();
     void rebuild_sort();
     void queue_selection_redraw();
+    void sync_accessible_summary();
     [[nodiscard]] std::size_t source_row_for_view_row(std::size_t view_row) const;
     [[nodiscard]] std::optional<std::size_t> view_row_for_source_row(std::size_t source_row) const;
 

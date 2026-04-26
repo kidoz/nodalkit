@@ -298,6 +298,8 @@ void force_symbol_references() {
         &nk::DataTable::set_columns);
     (void)static_cast<std::span<const nk::DataTableColumn> (nk::DataTable::*)() const>(
         &nk::DataTable::columns);
+    (void)static_cast<void (nk::DataTable::*)(float)>(&nk::DataTable::set_min_column_width);
+    (void)static_cast<float (nk::DataTable::*)() const>(&nk::DataTable::min_column_width);
     (void)static_cast<void (nk::DataTable::*)(float)>(&nk::DataTable::set_row_height);
     (void)static_cast<float (nk::DataTable::*)() const>(&nk::DataTable::row_height);
     (void)static_cast<void (nk::DataTable::*)(float)>(&nk::DataTable::set_header_height);
