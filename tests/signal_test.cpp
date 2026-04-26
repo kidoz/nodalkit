@@ -3,14 +3,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <nk/foundation/signal.h>
-
 #include <string>
 
 TEST_CASE("Signal emits to connected slots", "[signal]") {
     nk::Signal<int> sig;
     int received = 0;
 
-    auto conn = sig.connect([&](int const& v) { received = v; });
+    auto conn = sig.connect([&](const int& v) { received = v; });
     sig.emit(42);
 
     REQUIRE(received == 42);
@@ -37,8 +36,7 @@ TEST_CASE("ScopedConnection disconnects on destruction", "[signal]") {
     int call_count = 0;
 
     {
-        nk::ScopedConnection sc(
-            sig.connect([&] { ++call_count; }));
+        nk::ScopedConnection sc(sig.connect([&] { ++call_count; }));
         sig.emit();
         REQUIRE(call_count == 1);
     }
@@ -52,8 +50,8 @@ TEST_CASE("Signal supports multiple independent slots", "[signal]") {
     std::string a;
     std::string b;
 
-    auto c1 = sig.connect([&](std::string const& s) { a = s; });
-    auto c2 = sig.connect([&](std::string const& s) { b = s; });
+    auto c1 = sig.connect([&](const std::string& s) { a = s; });
+    auto c2 = sig.connect([&](const std::string& s) { b = s; });
     sig.emit("hello");
 
     REQUIRE(a == "hello");

@@ -1,25 +1,21 @@
 /// @file text_shaper_test.cpp
 /// @brief Regression tests for platform text shaping output.
 
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nk/text/text_shaper.h>
-
-#include <algorithm>
-#include <cstdlib>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <nk/text/text_shaper.h>
 #include <optional>
 
 namespace {
 
-std::size_t alpha_sum_for_rows(
-    nk::ShapedText const& shaped,
-    int row_begin,
-    int row_end) {
-    auto const* bitmap = shaped.bitmap_data();
-    int const width = shaped.bitmap_width();
-    int const height = shaped.bitmap_height();
+std::size_t alpha_sum_for_rows(const nk::ShapedText& shaped, int row_begin, int row_end) {
+    const auto* bitmap = shaped.bitmap_data();
+    const int width = shaped.bitmap_width();
+    const int height = shaped.bitmap_height();
     if (bitmap == nullptr || width <= 0 || height <= 0) {
         return 0;
     }
@@ -30,22 +26,22 @@ std::size_t alpha_sum_for_rows(
     std::size_t alpha_sum = 0;
     for (int y = row_begin; y < row_end; ++y) {
         for (int x = 0; x < width; ++x) {
-            auto const idx = static_cast<std::size_t>((y * width + x) * 4 + 3);
+            const auto idx = static_cast<std::size_t>((y * width + x) * 4 + 3);
             alpha_sum += bitmap[idx];
         }
     }
     return alpha_sum;
 }
 
-std::optional<std::size_t> first_covered_pixel_index(nk::ShapedText const& shaped) {
-    auto const* bitmap = shaped.bitmap_data();
-    int const width = shaped.bitmap_width();
-    int const height = shaped.bitmap_height();
+std::optional<std::size_t> first_covered_pixel_index(const nk::ShapedText& shaped) {
+    const auto* bitmap = shaped.bitmap_data();
+    const int width = shaped.bitmap_width();
+    const int height = shaped.bitmap_height();
     if (bitmap == nullptr || width <= 0 || height <= 0) {
         return std::nullopt;
     }
 
-    auto const pixel_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    const auto pixel_count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
     for (std::size_t pixel_index = 0; pixel_index < pixel_count; ++pixel_index) {
         if (bitmap[pixel_index * 4 + 3] != 0) {
             return pixel_index * 4;
@@ -60,17 +56,17 @@ bool channel_matches_tint(uint8_t actual, float component) {
     return std::abs(static_cast<int>(actual) - expected) <= 1;
 }
 
-[[maybe_unused]] std::optional<int> first_covered_row(nk::ShapedText const& shaped) {
-    auto const* bitmap = shaped.bitmap_data();
-    int const width = shaped.bitmap_width();
-    int const height = shaped.bitmap_height();
+[[maybe_unused]] std::optional<int> first_covered_row(const nk::ShapedText& shaped) {
+    const auto* bitmap = shaped.bitmap_data();
+    const int width = shaped.bitmap_width();
+    const int height = shaped.bitmap_height();
     if (bitmap == nullptr || width <= 0 || height <= 0) {
         return std::nullopt;
     }
 
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            auto const idx = static_cast<std::size_t>((y * width + x) * 4 + 3);
+            const auto idx = static_cast<std::size_t>((y * width + x) * 4 + 3);
             if (bitmap[idx] != 0) {
                 return y;
             }
@@ -97,12 +93,12 @@ TEST_CASE("Shaped text bitmaps keep more ink in the upper half for top-heavy gly
     REQUIRE(shaped.bitmap_width() > 0);
     REQUIRE(shaped.bitmap_height() > 0);
 
-    int const height = shaped.bitmap_height();
-    int const top_band = std::max(1, height / 2);
-    int const bottom_band = std::max(1, height / 4);
+    const int height = shaped.bitmap_height();
+    const int top_band = std::max(1, height / 2);
+    const int bottom_band = std::max(1, height / 4);
 
-    auto const top_alpha = alpha_sum_for_rows(shaped, 0, top_band);
-    auto const bottom_alpha = alpha_sum_for_rows(shaped, height - bottom_band, height);
+    const auto top_alpha = alpha_sum_for_rows(shaped, 0, top_band);
+    const auto bottom_alpha = alpha_sum_for_rows(shaped, height - bottom_band, height);
 
     // An upright "P" should carry visibly more ink in the upper half than in
     // the bottom quarter. This still catches vertically inverted text
@@ -193,7 +189,7 @@ TEST_CASE("Shaped text preserves the requested tint for covered pixels", "[text]
     auto pixel_index = first_covered_pixel_index(shaped);
     REQUIRE(pixel_index.has_value());
 
-    auto const* bitmap = shaped.bitmap_data();
+    const auto* bitmap = shaped.bitmap_data();
     REQUIRE(channel_matches_tint(bitmap[*pixel_index + 0], color.r));
     REQUIRE(channel_matches_tint(bitmap[*pixel_index + 1], color.g));
     REQUIRE(channel_matches_tint(bitmap[*pixel_index + 2], color.b));
@@ -211,9 +207,8 @@ TEST_CASE("Windows text shaper renders Unicode fallback glyphs", "[text][windows
         .weight = nk::FontWeight::Regular,
     };
 
-    auto shaped = shaper->shape("\xE6\xBC\xA2\xE5\xAD\x97",
-                                font,
-                                nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+    auto shaped =
+        shaper->shape("\xE6\xBC\xA2\xE5\xAD\x97", font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
     REQUIRE(shaped.bitmap_data() != nullptr);
     REQUIRE(shaped.bitmap_width() > 0);
     REQUIRE(shaped.bitmap_height() > 0);
@@ -294,8 +289,8 @@ TEST_CASE("Linux shaper wraps long single-line text into multiple rendered lines
     REQUIRE(wrapped.width <= max_width);
     REQUIRE(wrapped.height > measured.height);
 
-    auto shaped = shaper->shape_wrapped(paragraph, font,
-                                         nk::Color{0.0F, 0.0F, 0.0F, 1.0F}, max_width);
+    auto shaped =
+        shaper->shape_wrapped(paragraph, font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F}, max_width);
     REQUIRE(shaped.bitmap_data() != nullptr);
     REQUIRE(shaped.bitmap_width() > 0);
     REQUIRE(shaped.bitmap_height() > 0);
@@ -334,7 +329,7 @@ TEST_CASE("Linux shaper renders non-Latin text via fontconfig fallback", "[text]
         .weight = nk::FontWeight::Regular,
     };
 
-    const std::string cjk = "日本語";  // "Japanese language"
+    const std::string cjk = "日本語"; // "Japanese language"
     auto measured = shaper->measure(cjk, font);
     auto shaped = shaper->shape(cjk, font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
 
@@ -343,8 +338,7 @@ TEST_CASE("Linux shaper renders non-Latin text via fontconfig fallback", "[text]
     REQUIRE(measured.width >= 0.0F);
     REQUIRE(measured.height >= 0.0F);
 
-    if (shaped.bitmap_data() == nullptr ||
-        shaped.bitmap_width() <= 0 ||
+    if (shaped.bitmap_data() == nullptr || shaped.bitmap_width() <= 0 ||
         shaped.bitmap_height() <= 0) {
         SUCCEED("No CJK-capable font installed on this host; fallback path untested");
         return;

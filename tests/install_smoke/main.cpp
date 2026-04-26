@@ -9,6 +9,7 @@
 // reachable through pkg-config and that every public type links against
 // the installed libNodalKit.
 
+#include <cstdio>
 #include <nk/actions/action.h>
 #include <nk/actions/shortcut.h>
 #include <nk/foundation/logging.h>
@@ -33,8 +34,6 @@
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
-
-#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -42,7 +41,7 @@ namespace {
 
 int failures = 0;
 
-void check(bool condition, char const* what) {
+void check(bool condition, const char* what) {
     if (!condition) {
         std::fprintf(stderr, "install_smoke: FAIL: %s\n", what);
         ++failures;
@@ -59,7 +58,7 @@ void check_foundation() {
 
     nk::Property<int> prop{7};
     int last = 0;
-    auto prop_conn = prop.on_changed().connect([&last](int const& v) { last = v; });
+    auto prop_conn = prop.on_changed().connect([&last](const int& v) { last = v; });
     prop.set(11);
     check(prop.get() == 11, "Property stores new value");
     check(last == 11, "Property fires on_changed");
@@ -110,11 +109,9 @@ void check_model() {
     nk::SelectionModel multi{nk::SelectionMode::Multiple};
     multi.select(0);
     multi.select(2);
-    check(multi.is_selected(0) && multi.is_selected(2),
-          "SelectionModel multi select");
+    check(multi.is_selected(0) && multi.is_selected(2), "SelectionModel multi select");
     multi.toggle(0);
-    check(!multi.is_selected(0) && multi.is_selected(2),
-          "SelectionModel toggle deselect");
+    check(!multi.is_selected(0) && multi.is_selected(2), "SelectionModel toggle deselect");
     multi.clear();
     check(!multi.is_selected(2), "SelectionModel clear");
 }
@@ -145,7 +142,7 @@ void check_style() {
     auto theme = nk::Theme::make_light();
     check(theme != nullptr, "Theme::make_light returns a theme");
     theme->set_token("smoke-token", nk::StyleValue{std::string{"value"}});
-    auto const* token = theme->token("smoke-token");
+    const auto* token = theme->token("smoke-token");
     check(token != nullptr, "Theme token is retrievable");
 
     auto dark = nk::Theme::make_dark();
@@ -169,8 +166,8 @@ void check_widgets() {
 
     auto list_view = nk::ListView::create();
     check(list_view != nullptr, "ListView::create");
-    auto list_model = std::make_shared<nk::StringListModel>(
-        std::vector<std::string>{"row-0", "row-1"});
+    auto list_model =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"row-0", "row-1"});
     list_view->set_model(list_model);
     check(list_view->model() == list_model.get(), "ListView::set_model");
 

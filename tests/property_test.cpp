@@ -3,7 +3,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <nk/foundation/property.h>
-
 #include <string>
 
 TEST_CASE("Property get and set update the value", "[property]") {
@@ -18,8 +17,7 @@ TEST_CASE("Property emits only when the value changes", "[property]") {
     nk::Property<std::string> prop{"hello"};
     std::string last;
 
-    auto conn = prop.on_changed().connect(
-        [&](std::string const& v) { last = v; });
+    auto conn = prop.on_changed().connect([&](const std::string& v) { last = v; });
 
     prop.set("world");
     REQUIRE(last == "world");

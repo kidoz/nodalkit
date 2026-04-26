@@ -38,8 +38,8 @@
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
-#include <sstream>
 #include <optional>
+#include <sstream>
 #include <string>
 
 #if defined(_WIN32)
@@ -70,10 +70,10 @@ RECT suggested_window_rect_for_dpi(HWND hwnd, nk::Size logical_size, UINT dpi) {
     const int non_client_width = current_window_width - current_client_width;
     const int non_client_height = current_window_height - current_client_height;
 
-    const int target_client_width =
-        std::max(1, static_cast<int>(std::lround(logical_size.width * static_cast<float>(dpi) / 96.0F)));
-    const int target_client_height =
-        std::max(1, static_cast<int>(std::lround(logical_size.height * static_cast<float>(dpi) / 96.0F)));
+    const int target_client_width = std::max(
+        1, static_cast<int>(std::lround(logical_size.width * static_cast<float>(dpi) / 96.0F)));
+    const int target_client_height = std::max(
+        1, static_cast<int>(std::lround(logical_size.height * static_cast<float>(dpi) / 96.0F)));
 
     return {
         current_window_rect.left,
@@ -108,9 +108,7 @@ public:
         }
     }
 
-    int set(const char* value) {
-        return set_test_env(name_, value);
-    }
+    int set(const char* value) { return set_test_env(name_, value); }
 
 private:
     const char* name_;
@@ -118,7 +116,8 @@ private:
 };
 
 std::filesystem::path test_fixture_path(std::string_view relative) {
-    const auto source_relative = std::filesystem::path(__FILE__).parent_path() / "fixtures" / relative;
+    const auto source_relative =
+        std::filesystem::path(__FILE__).parent_path() / "fixtures" / relative;
     if (std::filesystem::exists(source_relative)) {
         return source_relative;
     }
@@ -626,11 +625,11 @@ TEST_CASE("Window honors a renderer backend override from the environment", "[ap
     window.present();
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Software);
-
 }
 
 #if defined(_WIN32)
-TEST_CASE("Window honors a D3D11 renderer backend override from the environment", "[app][render][windows]") {
+TEST_CASE("Window honors a D3D11 renderer backend override from the environment",
+          "[app][render][windows]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
@@ -641,7 +640,6 @@ TEST_CASE("Window honors a D3D11 renderer backend override from the environment"
     window.present();
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
-
 }
 
 TEST_CASE("Win32 D3D11 renders clipped image content on the GPU and reuses image textures",
@@ -677,11 +675,9 @@ TEST_CASE("Win32 D3D11 renders clipped image content on the GPU and reuses image
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::FullRedrawCopyBack);
-
 }
 
-TEST_CASE("Win32 D3D11 keeps mixed text and image content on the GPU",
-          "[app][render][windows]") {
+TEST_CASE("Win32 D3D11 keeps mixed text and image content on the GPU", "[app][render][windows]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
@@ -718,7 +714,6 @@ TEST_CASE("Win32 D3D11 keeps mixed text and image content on the GPU",
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 3);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::FullRedrawCopyBack);
-
 }
 
 TEST_CASE("Win32 D3D11 reduces mixed-content draw work for localized widget damage",
@@ -785,7 +780,6 @@ TEST_CASE("Win32 D3D11 reduces mixed-content draw work for localized widget dama
     REQUIRE(third_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::PartialRedrawCopy);
     REQUIRE(third_frame.render_hotspot_counters.gpu_present_region_count >= 1);
-
 }
 
 TEST_CASE("Win32 D3D11 forces a full copy on the first visible dirty frame",
@@ -811,7 +805,6 @@ TEST_CASE("Win32 D3D11 forces a full copy on the first visible dirty frame",
             nk::GpuPresentPath::FullRedrawCopyBack);
     REQUIRE(frame.render_hotspot_counters.gpu_present_region_count == 0);
     REQUIRE(frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
-
 }
 
 TEST_CASE("Win32 D3D11 merges nearby image damage slices into one textured replay",
@@ -842,7 +835,6 @@ TEST_CASE("Win32 D3D11 merges nearby image damage slices into one textured repla
     REQUIRE(second_frame.render_hotspot_counters.gpu_replayed_command_count == 3);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::PartialRedrawCopy);
-
 }
 #endif
 
@@ -899,9 +891,8 @@ TEST_CASE("Win32 DPI changes update scale factor and framebuffer metrics",
     window.set_child(nk::Label::create("DPI change"));
 
     float observed_scale_factor = 0.0F;
-    auto scale_conn = window.on_scale_factor_changed().connect([&](float scale_factor) {
-        observed_scale_factor = scale_factor;
-    });
+    auto scale_conn = window.on_scale_factor_changed().connect(
+        [&](float scale_factor) { observed_scale_factor = scale_factor; });
     (void)scale_conn;
 
     window.present();
@@ -1248,11 +1239,9 @@ TEST_CASE("Window damage regions include previous widget bounds after movement",
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
-
 }
 
-TEST_CASE("Window layout reflow promotes sibling damage to full redraw",
-          "[app][render]") {
+TEST_CASE("Window layout reflow promotes sibling damage to full redraw", "[app][render]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("software") == 0);
 
@@ -1287,11 +1276,11 @@ TEST_CASE("Window layout reflow promotes sibling damage to full redraw",
     REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count ==
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
-
 }
 
 #if defined(_WIN32)
-TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw", "[app][render][windows]") {
+TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw",
+          "[app][render][windows]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
@@ -1342,7 +1331,6 @@ TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw", "[app
             nk::GpuPresentPath::PartialRedrawCopy);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
             nk::GpuPresentTradeoff::BandwidthFavored);
-
 }
 #endif
 
@@ -1737,7 +1725,6 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
     REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") != std::string::npos);
-
 }
 
 TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds",
@@ -1786,7 +1773,6 @@ TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
     REQUIRE(window.dump_selected_frame_render_snapshot().find("Famicom") != std::string::npos);
-
 }
 
 TEST_CASE("ComboBox popup scrolls to keep the highlighted item visible with many items",
@@ -2104,11 +2090,9 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
     REQUIRE(sheet_damage.size() == 1);
     REQUIRE(sheet_damage.front().width < window.size().width);
     REQUIRE(sheet_damage.front().height < window.size().height);
-
 }
 
-TEST_CASE("Dialog overlay layout changes promote damage to full redraw",
-          "[app][dialog][render]") {
+TEST_CASE("Dialog overlay layout changes promote damage to full redraw", "[app][dialog][render]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("software") == 0);
 
@@ -2144,7 +2128,6 @@ TEST_CASE("Dialog overlay layout changes promote damage to full redraw",
     REQUIRE(dismiss_frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(dismiss_frame.render_hotspot_counters.gpu_estimated_draw_pixel_count ==
             dismiss_frame.render_hotspot_counters.gpu_viewport_pixel_count);
-
 }
 
 TEST_CASE("Window dispatches pointer, keyboard, and focus controllers", "[app][controllers]") {
@@ -3767,8 +3750,8 @@ TEST_CASE("Widget padding defines content_rect inside the allocation", "[app][la
     widget->allocate({10.0F, 20.0F, 100.0F, 60.0F});
 
     const auto content = widget->content_rect();
-    REQUIRE(content.x == Catch::Approx(22.0F));   // 10 + 12 left padding
-    REQUIRE(content.y == Catch::Approx(28.0F));   // 20 + 8 top padding
+    REQUIRE(content.x == Catch::Approx(22.0F));      // 10 + 12 left padding
+    REQUIRE(content.y == Catch::Approx(28.0F));      // 20 + 8 top padding
     REQUIRE(content.width == Catch::Approx(76.0F));  // 100 - 12 - 12
     REQUIRE(content.height == Catch::Approx(44.0F)); // 60 - 8 - 8
 }
@@ -3854,7 +3837,8 @@ TEST_CASE("TimedAnimation progresses from 0 to 1 over its duration", "[animation
     REQUIRE(anim.value_at(start) < 0.1F);
 
     // Midpoint: ~0.5.
-    REQUIRE(anim.value_at(start + std::chrono::milliseconds(100)) == Catch::Approx(0.5F).margin(0.05));
+    REQUIRE(anim.value_at(start + std::chrono::milliseconds(100)) ==
+            Catch::Approx(0.5F).margin(0.05));
 
     // Past duration: 1.0 and finished.
     REQUIRE(anim.value_at(start + std::chrono::milliseconds(300)) == Catch::Approx(1.0F));
@@ -4041,8 +4025,7 @@ TEST_CASE("Focus navigation skips invisible and disabled widgets", "[app][focus]
     REQUIRE_FALSE(is_focused(disabled));
 }
 
-TEST_CASE("Focus clears when the focused widget becomes hidden or disabled",
-          "[app][focus]") {
+TEST_CASE("Focus clears when the focused widget becomes hidden or disabled", "[app][focus]") {
     nk::Window window({.title = "Focus clear", .width = 240, .height = 160});
     auto root = TestContainer::create();
     auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
@@ -4072,8 +4055,7 @@ TEST_CASE("Focus clears when the focused widget becomes hidden or disabled",
     REQUIRE_FALSE(is_focused());
 }
 
-TEST_CASE("BoxLayout ignores invisible children for measure and allocate",
-          "[app][layout]") {
+TEST_CASE("BoxLayout ignores invisible children for measure and allocate", "[app][layout]") {
     auto container = TestContainer::create();
     auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
     layout->set_spacing(4.0F);
@@ -4091,7 +4073,7 @@ TEST_CASE("BoxLayout ignores invisible children for measure and allocate",
     // Natural size must not include the invisible child's 200 px height and
     // must drop the spacing slot that would otherwise sit next to it.
     const auto request = container->measure(nk::Constraints::unbounded());
-    REQUIRE(request.natural_height == Catch::Approx(44.0F));  // 20 + 4 + 20
+    REQUIRE(request.natural_height == Catch::Approx(44.0F)); // 20 + 4 + 20
 
     container->allocate({0.0F, 0.0F, 100.0F, 44.0F});
     REQUIRE(visible_a->allocation().y == Catch::Approx(0.0F));
@@ -4146,9 +4128,8 @@ TEST_CASE("WindowEvent::Resize updates size, fires signal, and requests a Resize
     (void)resize_conn;
 
     const auto baseline_frame = window.last_frame_diagnostics().frame_id;
-    window.dispatch_window_event({.type = nk::WindowEvent::Type::Resize,
-                                  .width = 300,
-                                  .height = 220});
+    window.dispatch_window_event(
+        {.type = nk::WindowEvent::Type::Resize, .width = 300, .height = 220});
     REQUIRE(app.event_loop().poll());
 
     REQUIRE(resize_events == 1);
@@ -4183,8 +4164,8 @@ TEST_CASE("WindowEvent::ScaleFactorChanged fires signal and requests a ScaleFact
     (void)scale_conn;
 
     const auto baseline_frame = window.last_frame_diagnostics().frame_id;
-    window.dispatch_window_event({.type = nk::WindowEvent::Type::ScaleFactorChanged,
-                                  .scale_factor = 2.0F});
+    window.dispatch_window_event(
+        {.type = nk::WindowEvent::Type::ScaleFactorChanged, .scale_factor = 2.0F});
     REQUIRE(app.event_loop().poll());
 
     REQUIRE(scale_events == 1);

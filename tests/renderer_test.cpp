@@ -74,13 +74,13 @@ public:
 class RecordingTextShaper final : public nk::TextShaper {
 public:
     [[nodiscard]] nk::Size measure(std::string_view /*text*/,
-                                   nk::FontDescriptor const& font) const override {
+                                   const nk::FontDescriptor& font) const override {
         last_measured_font_size = font.size;
         return {font.size, font.size};
     }
 
     [[nodiscard]] nk::ShapedText shape(std::string_view /*text*/,
-                                       nk::FontDescriptor const& font,
+                                       const nk::FontDescriptor& font,
                                        nk::Color color) const override {
         last_shaped_font_size = font.size;
         nk::ShapedText shaped;
@@ -261,9 +261,8 @@ const nk::RenderNode* find_text_node(const nk::RenderNode& node) {
 TEST_CASE("ShadowNode renders a blurred outset shadow in software", "[renderer][shadow]") {
     nk::SnapshotContext snapshot;
     // Black shadow with 4px blur, no offset, behind a 10×10 rect centered at (10,10).
-    snapshot.add_shadow({10.0F, 10.0F, 10.0F, 10.0F},
-                        nk::Color{0.0F, 0.0F, 0.0F, 1.0F},
-                        0.0F, 0.0F, 4.0F);
+    snapshot.add_shadow(
+        {10.0F, 10.0F, 10.0F, 10.0F}, nk::Color{0.0F, 0.0F, 0.0F, 1.0F}, 0.0F, 0.0F, 4.0F);
     auto root = snapshot.take_root();
     REQUIRE(root != nullptr);
 
@@ -386,7 +385,7 @@ TEST_CASE("OpacityNode multiplies child alpha in software rendering", "[renderer
 
 TEST_CASE("SnapshotContext::add_text falls back to zero-size bounds without a shaper",
           "[renderer][text-bounds]") {
-    nk::SnapshotContext snapshot;  // no shaper
+    nk::SnapshotContext snapshot; // no shaper
     nk::FontDescriptor font{
         .family = "System",
         .size = 14.0F,
@@ -567,10 +566,11 @@ TEST_CASE("SoftwareRenderer preserves undamaged quadrants across consecutive par
           "[renderer]") {
     // Frame 1: 4 quadrants with distinct colors.
     nk::SnapshotContext snap1;
-    snap1.add_color_rect({0.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 0, 0));     // TL red
-    snap1.add_color_rect({10.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 255, 0));     // TR green
-    snap1.add_color_rect({0.0F, 10.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 0, 255));     // BL blue
-    snap1.add_color_rect({10.0F, 10.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 255, 255)); // BR white
+    snap1.add_color_rect({0.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(255, 0, 0));  // TL red
+    snap1.add_color_rect({10.0F, 0.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 255, 0)); // TR green
+    snap1.add_color_rect({0.0F, 10.0F, 10.0F, 10.0F}, nk::Color::from_rgb(0, 0, 255)); // BL blue
+    snap1.add_color_rect({10.0F, 10.0F, 10.0F, 10.0F},
+                         nk::Color::from_rgb(255, 255, 255)); // BR white
     auto root1 = snap1.take_root();
 
     nk::SoftwareRenderer renderer;
@@ -579,10 +579,10 @@ TEST_CASE("SoftwareRenderer preserves undamaged quadrants across consecutive par
     renderer.end_frame();
 
     // Verify initial state.
-    REQUIRE(pixel_at(renderer, 5, 5).r == 255);    // TL red
-    REQUIRE(pixel_at(renderer, 15, 5).g == 255);    // TR green
-    REQUIRE(pixel_at(renderer, 5, 15).b == 255);    // BL blue
-    REQUIRE(pixel_at(renderer, 15, 15).r == 255);   // BR white
+    REQUIRE(pixel_at(renderer, 5, 5).r == 255);   // TL red
+    REQUIRE(pixel_at(renderer, 15, 5).g == 255);  // TR green
+    REQUIRE(pixel_at(renderer, 5, 15).b == 255);  // BL blue
+    REQUIRE(pixel_at(renderer, 15, 15).r == 255); // BR white
 
     // Frame 2: damage only TL quadrant, change to yellow.
     nk::SnapshotContext snap2;
@@ -595,12 +595,12 @@ TEST_CASE("SoftwareRenderer preserves undamaged quadrants across consecutive par
     renderer.render(*root2);
     renderer.end_frame();
 
-    REQUIRE(pixel_at(renderer, 5, 5).r == 255);     // TL now yellow
+    REQUIRE(pixel_at(renderer, 5, 5).r == 255); // TL now yellow
     REQUIRE(pixel_at(renderer, 5, 5).g == 255);
     REQUIRE(pixel_at(renderer, 5, 5).b == 0);
-    REQUIRE(pixel_at(renderer, 15, 5).g == 255);     // TR still green
-    REQUIRE(pixel_at(renderer, 5, 15).b == 255);     // BL still blue
-    REQUIRE(pixel_at(renderer, 15, 15).r == 255);    // BR still white
+    REQUIRE(pixel_at(renderer, 15, 5).g == 255);  // TR still green
+    REQUIRE(pixel_at(renderer, 5, 15).b == 255);  // BL still blue
+    REQUIRE(pixel_at(renderer, 15, 15).r == 255); // BR still white
 
     // Frame 3: damage only BR quadrant, change to cyan.
     nk::SnapshotContext snap3;
@@ -613,11 +613,11 @@ TEST_CASE("SoftwareRenderer preserves undamaged quadrants across consecutive par
     renderer.render(*root3);
     renderer.end_frame();
 
-    REQUIRE(pixel_at(renderer, 5, 5).r == 255);      // TL still yellow (from frame 2)
+    REQUIRE(pixel_at(renderer, 5, 5).r == 255); // TL still yellow (from frame 2)
     REQUIRE(pixel_at(renderer, 5, 5).g == 255);
-    REQUIRE(pixel_at(renderer, 15, 5).g == 255);      // TR still green (never touched)
-    REQUIRE(pixel_at(renderer, 5, 15).b == 255);      // BL still blue (never touched)
-    REQUIRE(pixel_at(renderer, 15, 15).r == 0);       // BR now cyan
+    REQUIRE(pixel_at(renderer, 15, 5).g == 255); // TR still green (never touched)
+    REQUIRE(pixel_at(renderer, 5, 15).b == 255); // BL still blue (never touched)
+    REQUIRE(pixel_at(renderer, 15, 15).r == 0);  // BR now cyan
     REQUIRE(pixel_at(renderer, 15, 15).g == 255);
     REQUIRE(pixel_at(renderer, 15, 15).b == 255);
     REQUIRE(renderer.last_hotspot_counters().damage_region_count == 1);
