@@ -67,6 +67,7 @@ nk_sources = files(
     'src/widgets/toolbar.cpp',
     'src/widgets/context_menu.cpp',
     'src/widgets/search_field.cpp',
+    'src/widgets/command_palette.cpp',
     'src/widgets/split_view.cpp',
     'src/widgets/info_bar.cpp',
     'src/widgets/expander.cpp',

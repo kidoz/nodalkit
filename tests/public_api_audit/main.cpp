@@ -60,6 +60,7 @@
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
@@ -372,6 +373,20 @@ void force_symbol_references() {
     (void)static_cast<float (nk::GridView::*)() const>(&nk::GridView::gap);
     (void)static_cast<nk::Signal<std::size_t>& (nk::GridView::*)()>(
         &nk::GridView::on_item_activated);
+    (void)&nk::CommandPalette::create;
+    (void)static_cast<void (nk::CommandPalette::*)(std::vector<nk::CommandPaletteCommand>)>(
+        &nk::CommandPalette::set_commands);
+    (void)static_cast<std::span<const nk::CommandPaletteCommand> (nk::CommandPalette::*)() const>(
+        &nk::CommandPalette::commands);
+    (void)static_cast<void (nk::CommandPalette::*)(std::string)>(&nk::CommandPalette::set_query);
+    (void)static_cast<std::string_view (nk::CommandPalette::*)() const>(&nk::CommandPalette::query);
+    (void)static_cast<void (nk::CommandPalette::*)()>(&nk::CommandPalette::clear_query);
+    (void)static_cast<std::optional<std::size_t> (nk::CommandPalette::*)() const>(
+        &nk::CommandPalette::current_command);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::CommandPalette::*)()>(
+        &nk::CommandPalette::on_command_activated);
+    (void)static_cast<nk::Signal<>& (nk::CommandPalette::*)()>(
+        &nk::CommandPalette::on_dismiss_requested);
     (void)static_cast<int (nk::Application::*)()>(&nk::Application::run);
     (void)static_cast<void (nk::Application::*)(int)>(&nk::Application::quit);
     (void)static_cast<nk::EventLoop& (nk::Application::*)()>(&nk::Application::event_loop);

@@ -27,6 +27,7 @@
 #include <nk/style/theme.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
@@ -232,6 +233,20 @@ void check_widgets() {
     check(grid_view->cell_width() == 84.0F, "GridView::set_cell_width");
     check(grid_view->cell_height() == 64.0F, "GridView::set_cell_height");
     check(grid_view->gap() == 6.0F, "GridView::set_gap");
+
+    auto palette = nk::CommandPalette::create();
+    check(palette != nullptr, "CommandPalette::create");
+    palette->set_commands({
+        nk::CommandPaletteCommand{.id = "file.open", .title = "Open File"},
+        nk::CommandPaletteCommand{
+            .id = "file.save", .title = "Save File", .category = "File", .enabled = false},
+    });
+    palette->set_query("open");
+    check(palette->commands().size() == 2, "CommandPalette::set_commands");
+    check(palette->query() == "open", "CommandPalette::set_query");
+    check(palette->current_command().has_value(), "CommandPalette current command");
+    palette->clear_query();
+    check(palette->query().empty(), "CommandPalette::clear_query");
 
     auto dialog = nk::Dialog::create("Confirm", "Save changes?");
     check(dialog != nullptr, "Dialog::create");

@@ -32,6 +32,7 @@
 #include <nk/text/font.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
@@ -4316,6 +4317,116 @@ TEST_CASE("GridView tracks model changes in accessibility summaries", "[app][gri
     REQUIRE(grid->accessible()->description().find("1 items") != std::string_view::npos);
     REQUIRE(grid->accessible()->description().find("no current item") != std::string_view::npos);
     REQUIRE(grid->accessible()->value().empty());
+}
+
+TEST_CASE("CommandPalette filters, navigates, and activates enabled commands", "[app][command]") {
+    auto palette = nk::CommandPalette::create();
+    palette->set_commands({
+        nk::CommandPaletteCommand{.id = "file.open",
+                                  .title = "Open File",
+                                  .subtitle = "Choose a document",
+                                  .category = "File"},
+        nk::CommandPaletteCommand{.id = "file.save",
+                                  .title = "Save File",
+                                  .subtitle = "Write current file",
+                                  .category = "File",
+                                  .enabled = false},
+        nk::CommandPaletteCommand{
+            .id = "view.sidebar", .title = "Toggle Sidebar", .category = "View"},
+    });
+    palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
+
+    palette->set_query("file");
+    REQUIRE(palette->query() == "file");
+    REQUIRE(palette->current_command() == 0);
+
+    REQUIRE(
+        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    REQUIRE(palette->current_command() == 1);
+
+    std::string activated;
+    auto activated_conn = palette->on_command_activated().connect(
+        [&](std::string_view command_id) { activated = std::string(command_id); });
+    (void)activated_conn;
+    REQUIRE_FALSE(
+        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(activated.empty());
+
+    REQUIRE(palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Up}));
+    REQUIRE(palette->current_command() == 0);
+    REQUIRE(
+        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(activated == "file.open");
+
+    palette->set_query({});
+    REQUIRE(palette->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Commit, .text = "side"}));
+    REQUIRE(palette->query() == "side");
+    REQUIRE(palette->current_command() == 2);
+}
+
+TEST_CASE("CommandPalette pointer activation and escape behavior", "[app][command]") {
+    auto palette = nk::CommandPalette::create();
+    palette->set_commands({
+        nk::CommandPaletteCommand{.id = "file.open", .title = "Open File"},
+        nk::CommandPaletteCommand{.id = "view.sidebar", .title = "Toggle Sidebar"},
+    });
+    palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
+
+    std::string activated;
+    auto activated_conn = palette->on_command_activated().connect(
+        [&](std::string_view command_id) { activated = std::string(command_id); });
+    (void)activated_conn;
+    REQUIRE(palette->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                         .x = 20.0F,
+                                         .y = 112.0F,
+                                         .button = 1,
+                                         .click_count = 2}));
+    REQUIRE(palette->current_command() == 1);
+    REQUIRE(activated == "view.sidebar");
+
+    bool dismissed = false;
+    auto dismiss_conn = palette->on_dismiss_requested().connect([&] { dismissed = true; });
+    (void)dismiss_conn;
+    palette->set_query("open");
+    REQUIRE(
+        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape}));
+    REQUIRE(palette->query().empty());
+    REQUIRE_FALSE(dismissed);
+    REQUIRE(
+        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape}));
+    REQUIRE(dismissed);
+}
+
+TEST_CASE("CommandPalette exposes accessibility details and empty state", "[app][command]") {
+    auto palette = nk::CommandPalette::create();
+    palette->set_commands({
+        nk::CommandPaletteCommand{.id = "file.open", .title = "Open File", .category = "File"},
+        nk::CommandPaletteCommand{
+            .id = "file.save", .title = "Save File", .category = "File", .enabled = false},
+    });
+    palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
+
+    REQUIRE(palette->accessible() != nullptr);
+    REQUIRE(palette->accessible()->role() == nk::AccessibleRole::Dialog);
+    REQUIRE(palette->accessible()->supports_action(nk::AccessibleAction::Focus));
+    REQUIRE(palette->accessible()->supports_action(nk::AccessibleAction::Activate));
+    REQUIRE(palette->accessible()->description().find("2 results") != std::string_view::npos);
+    REQUIRE(palette->accessible()->description().find("2 commands") != std::string_view::npos);
+    REQUIRE(palette->accessible()->value().find("Open File") != std::string_view::npos);
+
+    palette->set_query("save");
+    REQUIRE(palette->current_command() == 1);
+    REQUIRE(palette->accessible()->description().find("1 results") != std::string_view::npos);
+    REQUIRE(palette->accessible()->description().find("disabled") != std::string_view::npos);
+    REQUIRE(palette->accessible()->value().find("disabled") != std::string_view::npos);
+    REQUIRE_FALSE(palette->accessible()->perform_action(nk::AccessibleAction::Activate));
+
+    palette->set_query("nothing");
+    REQUIRE_FALSE(palette->current_command().has_value());
+    REQUIRE(palette->accessible()->description().find("0 results") != std::string_view::npos);
+    REQUIRE(palette->accessible()->description().find("empty") != std::string_view::npos);
+    REQUIRE(palette->accessible()->value().empty());
 }
 
 TEST_CASE("BoxLayout passes constraints and distributes extra space by stretch", "[app][layout]") {
