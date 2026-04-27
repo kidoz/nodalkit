@@ -19,6 +19,7 @@
 #include <nk/style/theme_selection.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
@@ -257,7 +258,7 @@ int run_showcase(int argc, char** argv) {
         "NK-108 | TreeView | Preview | Medium",
         "NK-114 | GridView | Preview | Medium",
         "NK-120 | ToastOverlay | Backlog | Low",
-        "NK-131 | CommandPalette | Research | High",
+        "NK-131 | CommandPalette | Preview | High",
     });
     auto table_selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
     table_selection->select(0);
@@ -583,11 +584,56 @@ int run_showcase(int argc, char** argv) {
     auto actions_row =
         SplitColumns::create(property_panel, dialog_panel, 0.5F, profile.actions_row_spacing);
 
+    auto palette_label = FieldLabel::create("Command palette");
+    auto command_palette = nk::CommandPalette::create();
+    command_palette->set_commands({
+        nk::CommandPaletteCommand{
+            .id = "file.quit",
+            .title = "Quit",
+            .subtitle = "Close the showcase window",
+            .category = "File",
+        },
+        nk::CommandPaletteCommand{
+            .id = "debug.export_bundle",
+            .title = "Export Diagnostics Bundle",
+            .subtitle = "Save frame and widget diagnostics",
+            .category = "Debug",
+        },
+        nk::CommandPaletteCommand{
+            .id = "app.preferences",
+            .title = "Show Preferences",
+            .subtitle = "Open the preferences sheet",
+            .category = "Application",
+        },
+        nk::CommandPaletteCommand{
+            .id = "help.about",
+            .title = "About NodalKit",
+            .subtitle = "Show toolkit version information",
+            .category = "Help",
+        },
+        nk::CommandPaletteCommand{
+            .id = "edit.disabled",
+            .title = "Disabled Command",
+            .subtitle = "Visible but unavailable",
+            .category = "Edit",
+            .enabled = false,
+        },
+    });
+    (void)command_palette->on_command_activated().connect([&](std::string_view command_id) {
+        status_bar->set_segment(0, "Command: " + std::string(command_id));
+        runtime_status->set_text("Command palette: " + std::string(command_id));
+        runtime_status_detail->set_text("The command was activated from the searchable palette.");
+    });
+    auto palette_stage =
+        InsetStage::create(command_palette, 186.0F, 220.0F, profile.runtime_status_padding);
+
     auto actions_content = Box::vertical(profile.preview_section_spacing);
     actions_content->append(actions_title);
     actions_content->append(actions_subtitle);
     actions_content->append(status_panel);
     actions_content->append(actions_row);
+    actions_content->append(palette_label);
+    actions_content->append(palette_stage);
     auto actions_card = SurfacePanel::card(actions_content);
 
     auto left_column = Box::vertical(profile.controls_spacing);
