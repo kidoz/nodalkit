@@ -12,6 +12,7 @@
 #include <nk/foundation/property.h>
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/selection_model.h>
+#include <nk/model/tree_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/native_toolbar.h>
 #include <nk/platform/window.h>
@@ -20,11 +21,13 @@
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
+#include <nk/widgets/grid_view.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/tree_view.h>
 #include <nk/widgets/visual_effect_view.h>
 #include <string>
 #include <string_view>
@@ -251,8 +254,8 @@ int run_showcase(int argc, char** argv) {
     auto table_label = FieldLabel::create("Data table");
     auto table_model = std::make_shared<nk::StringListModel>(std::vector<std::string>{
         "NK-101 | DataTable | In Progress | High",
-        "NK-108 | TreeView | Planned | Medium",
-        "NK-114 | GridView | Planned | Medium",
+        "NK-108 | TreeView | Preview | Medium",
+        "NK-114 | GridView | Preview | Medium",
         "NK-120 | ToastOverlay | Backlog | Low",
         "NK-131 | CommandPalette | Research | High",
     });
@@ -307,6 +310,46 @@ int run_showcase(int argc, char** argv) {
     data_table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
     auto table_stage = InsetStage::create(data_table, 156.0F, 172.0F, profile.list_stage_padding);
 
+    auto tree_label = FieldLabel::create("Tree view");
+    auto tree_model = std::make_shared<nk::TreeModel>();
+    const auto project_node = tree_model->add_root("NodalKit");
+    const auto include_node = tree_model->append_child(project_node, "include/nk");
+    (void)tree_model->append_child(include_node, "model");
+    (void)tree_model->append_child(include_node, "widgets");
+    const auto source_node = tree_model->append_child(project_node, "src");
+    (void)tree_model->append_child(source_node, "model");
+    (void)tree_model->append_child(source_node, "widgets");
+    const auto docs_node = tree_model->add_root("docs");
+    (void)tree_model->append_child(docs_node, "BUILDING_APPLICATIONS.md");
+    auto tree_selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    tree_selection->select(project_node);
+    tree_selection->set_current_row(project_node);
+    auto tree_view = nk::TreeView::create();
+    tree_view->set_model(tree_model);
+    tree_view->set_selection_model(tree_selection);
+    tree_view->set_row_height(26.0F);
+    auto tree_stage = InsetStage::create(tree_view, 144.0F, 160.0F, profile.list_stage_padding);
+
+    auto grid_label = FieldLabel::create("Grid view");
+    auto grid_model = std::make_shared<nk::StringListModel>(std::vector<std::string>{
+        "Button",
+        "TextField",
+        "ListView",
+        "DataTable",
+        "TreeView",
+        "GridView",
+    });
+    auto grid_selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    grid_selection->select(0);
+    grid_selection->set_current_row(0);
+    auto grid_view = nk::GridView::create();
+    grid_view->set_model(grid_model);
+    grid_view->set_selection_model(grid_selection);
+    grid_view->set_cell_width(96.0F);
+    grid_view->set_cell_height(58.0F);
+    grid_view->set_gap(8.0F);
+    auto grid_stage = InsetStage::create(grid_view, 144.0F, 160.0F, profile.list_stage_padding);
+
     auto list_content = Box::vertical(12.0F);
     list_content->append(list_title);
     list_content->append(list_subtitle);
@@ -314,6 +357,10 @@ int run_showcase(int argc, char** argv) {
     list_content->append(list_footer);
     list_content->append(table_label);
     list_content->append(table_stage);
+    list_content->append(tree_label);
+    list_content->append(tree_stage);
+    list_content->append(grid_label);
+    list_content->append(grid_stage);
     std::shared_ptr<nk::Widget> list_card;
     if (is_macos) {
         // Native-Mac sidebar: edge-to-edge vibrancy with no card chrome so the
