@@ -23,11 +23,13 @@
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
+#include <nk/model/tree_model.h>
 #include <nk/style/theme.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
+#include <nk/widgets/grid_view.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
@@ -36,6 +38,7 @@
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/tree_view.h>
 #include <string>
 #include <vector>
 
@@ -131,6 +134,15 @@ void check_model() {
     check(!multi.is_selected(0) && multi.is_selected(2), "SelectionModel toggle deselect");
     multi.clear();
     check(!multi.is_selected(2), "SelectionModel clear");
+
+    nk::TreeModel tree;
+    const auto root = tree.add_root("Project");
+    const auto child = tree.append_child(root, "main.cpp");
+    check(tree.visible_row_count() == 2, "TreeModel visible rows");
+    tree.set_expanded(root, false);
+    check(tree.visible_row_count() == 1, "TreeModel collapse");
+    tree.set_expanded(root, true);
+    check(tree.visible_node_at(1) == child, "TreeModel visible node mapping");
 }
 
 void check_actions() {
@@ -201,6 +213,25 @@ void check_widgets() {
     check(table->model() == list_model.get(), "DataTable::set_model");
     check(table->columns().size() == 1, "DataTable::set_columns");
     check(table->sort_column() == 0, "DataTable::sort_by_column");
+
+    auto tree = std::make_shared<nk::TreeModel>();
+    const auto root = tree->add_root("Project");
+    (void)tree->append_child(root, "main.cpp");
+    auto tree_view = nk::TreeView::create();
+    check(tree_view != nullptr, "TreeView::create");
+    tree_view->set_model(tree);
+    check(tree_view->model() == tree.get(), "TreeView::set_model");
+
+    auto grid_view = nk::GridView::create();
+    check(grid_view != nullptr, "GridView::create");
+    grid_view->set_model(list_model);
+    grid_view->set_cell_width(84.0F);
+    grid_view->set_cell_height(64.0F);
+    grid_view->set_gap(6.0F);
+    check(grid_view->model() == list_model.get(), "GridView::set_model");
+    check(grid_view->cell_width() == 84.0F, "GridView::set_cell_width");
+    check(grid_view->cell_height() == 64.0F, "GridView::set_cell_height");
+    check(grid_view->gap() == 6.0F, "GridView::set_gap");
 
     auto dialog = nk::Dialog::create("Confirm", "Save changes?");
     check(dialog != nullptr, "Dialog::create");

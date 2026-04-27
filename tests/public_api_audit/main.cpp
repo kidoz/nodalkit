@@ -33,6 +33,7 @@
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
+#include <nk/model/tree_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/file_dialog.h>
@@ -61,6 +62,7 @@
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
+#include <nk/widgets/grid_view.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
@@ -69,6 +71,7 @@
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/tree_view.h>
 
 namespace {
 
@@ -286,6 +289,32 @@ void force_symbol_references() {
         &nk::SelectionModel::on_selection_changed);
     (void)static_cast<nk::Signal<std::size_t>& (nk::SelectionModel::*)()>(
         &nk::SelectionModel::on_current_changed);
+    (void)static_cast<nk::TreeNodeId (nk::TreeModel::*)(std::string)>(&nk::TreeModel::add_root);
+    (void)static_cast<nk::TreeNodeId (nk::TreeModel::*)(nk::TreeNodeId, std::string)>(
+        &nk::TreeModel::append_child);
+    (void)static_cast<void (nk::TreeModel::*)()>(&nk::TreeModel::clear);
+    (void)static_cast<bool (nk::TreeModel::*)(nk::TreeNodeId) const>(&nk::TreeModel::contains);
+    (void)static_cast<std::string_view (nk::TreeModel::*)(nk::TreeNodeId) const>(
+        &nk::TreeModel::display_text);
+    (void)static_cast<void (nk::TreeModel::*)(nk::TreeNodeId, std::string)>(
+        &nk::TreeModel::set_display_text);
+    (void)static_cast<nk::TreeNodeId (nk::TreeModel::*)(nk::TreeNodeId) const>(
+        &nk::TreeModel::parent);
+    (void)static_cast<std::span<const nk::TreeNodeId> (nk::TreeModel::*)(nk::TreeNodeId) const>(
+        &nk::TreeModel::children);
+    (void)static_cast<std::span<const nk::TreeNodeId> (nk::TreeModel::*)() const>(
+        &nk::TreeModel::roots);
+    (void)static_cast<bool (nk::TreeModel::*)(nk::TreeNodeId) const>(&nk::TreeModel::has_children);
+    (void)static_cast<std::size_t (nk::TreeModel::*)(nk::TreeNodeId) const>(&nk::TreeModel::depth);
+    (void)static_cast<void (nk::TreeModel::*)(nk::TreeNodeId, bool)>(&nk::TreeModel::set_expanded);
+    (void)static_cast<void (nk::TreeModel::*)(nk::TreeNodeId)>(&nk::TreeModel::toggle_expanded);
+    (void)static_cast<bool (nk::TreeModel::*)(nk::TreeNodeId) const>(&nk::TreeModel::is_expanded);
+    (void)static_cast<std::size_t (nk::TreeModel::*)() const>(&nk::TreeModel::visible_row_count);
+    (void)static_cast<nk::TreeNodeId (nk::TreeModel::*)(std::size_t) const>(
+        &nk::TreeModel::visible_node_at);
+    (void)static_cast<std::optional<std::size_t> (nk::TreeModel::*)(nk::TreeNodeId) const>(
+        &nk::TreeModel::visible_row_for_node);
+    (void)static_cast<nk::Signal<>& (nk::TreeModel::*)()>(&nk::TreeModel::on_model_reset);
     (void)&nk::DataTable::create;
     (void)static_cast<void (nk::DataTable::*)(std::shared_ptr<nk::AbstractListModel>)>(
         &nk::DataTable::set_model);
@@ -313,6 +342,36 @@ void force_symbol_references() {
         &nk::DataTable::sort_direction);
     (void)static_cast<nk::Signal<std::size_t>& (nk::DataTable::*)()>(
         &nk::DataTable::on_row_activated);
+    (void)&nk::TreeView::create;
+    (void)static_cast<void (nk::TreeView::*)(std::shared_ptr<nk::TreeModel>)>(
+        &nk::TreeView::set_model);
+    (void)static_cast<nk::TreeModel* (nk::TreeView::*)() const>(&nk::TreeView::model);
+    (void)static_cast<void (nk::TreeView::*)(std::shared_ptr<nk::SelectionModel>)>(
+        &nk::TreeView::set_selection_model);
+    (void)static_cast<nk::SelectionModel* (nk::TreeView::*)() const>(
+        &nk::TreeView::selection_model);
+    (void)static_cast<void (nk::TreeView::*)(float)>(&nk::TreeView::set_row_height);
+    (void)static_cast<float (nk::TreeView::*)() const>(&nk::TreeView::row_height);
+    (void)static_cast<void (nk::TreeView::*)(float)>(&nk::TreeView::set_indent_width);
+    (void)static_cast<float (nk::TreeView::*)() const>(&nk::TreeView::indent_width);
+    (void)static_cast<nk::Signal<nk::TreeNodeId>& (nk::TreeView::*)()>(
+        &nk::TreeView::on_node_activated);
+    (void)&nk::GridView::create;
+    (void)static_cast<void (nk::GridView::*)(std::shared_ptr<nk::AbstractListModel>)>(
+        &nk::GridView::set_model);
+    (void)static_cast<nk::AbstractListModel* (nk::GridView::*)() const>(&nk::GridView::model);
+    (void)static_cast<void (nk::GridView::*)(std::shared_ptr<nk::SelectionModel>)>(
+        &nk::GridView::set_selection_model);
+    (void)static_cast<nk::SelectionModel* (nk::GridView::*)() const>(
+        &nk::GridView::selection_model);
+    (void)static_cast<void (nk::GridView::*)(float)>(&nk::GridView::set_cell_width);
+    (void)static_cast<float (nk::GridView::*)() const>(&nk::GridView::cell_width);
+    (void)static_cast<void (nk::GridView::*)(float)>(&nk::GridView::set_cell_height);
+    (void)static_cast<float (nk::GridView::*)() const>(&nk::GridView::cell_height);
+    (void)static_cast<void (nk::GridView::*)(float)>(&nk::GridView::set_gap);
+    (void)static_cast<float (nk::GridView::*)() const>(&nk::GridView::gap);
+    (void)static_cast<nk::Signal<std::size_t>& (nk::GridView::*)()>(
+        &nk::GridView::on_item_activated);
     (void)static_cast<int (nk::Application::*)()>(&nk::Application::run);
     (void)static_cast<void (nk::Application::*)(int)>(&nk::Application::quit);
     (void)static_cast<nk::EventLoop& (nk::Application::*)()>(&nk::Application::event_loop);

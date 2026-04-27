@@ -20,6 +20,7 @@
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
+#include <nk/model/tree_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/platform_backend.h>
@@ -32,6 +33,7 @@
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
+#include <nk/widgets/grid_view.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
@@ -40,6 +42,7 @@
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/tree_view.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -3929,6 +3932,275 @@ TEST_CASE("DataTable exposes available accessibility details", "[app][table]") {
     selection->select(2);
     REQUIRE(table->accessible()->description().find("current row 3") != std::string_view::npos);
     REQUIRE(table->accessible()->value().find("Name: Beta") != std::string_view::npos);
+}
+
+TEST_CASE("TreeModel tracks expansion and visible row mapping", "[app][tree]") {
+    nk::TreeModel model;
+    const auto project = model.add_root("Project");
+    const auto src = model.append_child(project, "src");
+    const auto main_cpp = model.append_child(src, "main.cpp");
+    const auto readme = model.add_root("README.md");
+
+    REQUIRE(model.visible_row_count() == 4);
+    REQUIRE(model.visible_node_at(0) == project);
+    REQUIRE(model.visible_node_at(1) == src);
+    REQUIRE(model.visible_node_at(2) == main_cpp);
+    REQUIRE(model.visible_node_at(3) == readme);
+    REQUIRE(model.depth(main_cpp) == 2);
+    REQUIRE(model.parent(main_cpp) == src);
+    REQUIRE(model.visible_row_for_node(readme) == 3);
+
+    model.set_expanded(src, false);
+    REQUIRE(model.visible_row_count() == 3);
+    REQUIRE(model.visible_row_for_node(main_cpp) == std::nullopt);
+
+    model.set_expanded(project, false);
+    REQUIRE(model.visible_row_count() == 2);
+    REQUIRE(model.visible_node_at(0) == project);
+    REQUIRE(model.visible_node_at(1) == readme);
+}
+
+TEST_CASE("TreeModel emits resets for structural, label, and expansion changes", "[app][tree]") {
+    nk::TreeModel model;
+    int resets = 0;
+    auto reset_conn = model.on_model_reset().connect([&] { ++resets; });
+    (void)reset_conn;
+
+    const auto project = model.add_root("Project");
+    REQUIRE(resets == 1);
+    const auto src = model.append_child(project, "src");
+    REQUIRE(resets == 2);
+
+    model.set_display_text(src, "source");
+    REQUIRE(resets == 3);
+    REQUIRE(model.display_text(src) == "source");
+
+    model.set_expanded(project, false);
+    REQUIRE(resets == 4);
+    model.set_expanded(project, false);
+    REQUIRE(resets == 4);
+
+    model.clear();
+    REQUIRE(resets == 5);
+    REQUIRE(model.visible_row_count() == 0);
+    REQUIRE_FALSE(model.contains(project));
+
+    model.clear();
+    REQUIRE(resets == 5);
+}
+
+TEST_CASE("TreeView mouse toggles disclosure and selects nodes", "[app][tree]") {
+    auto model = std::make_shared<nk::TreeModel>();
+    const auto project = model->add_root("Project");
+    const auto src = model->append_child(project, "src");
+    const auto main_cpp = model->append_child(src, "main.cpp");
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto tree = nk::TreeView::create();
+    tree->set_model(model);
+    tree->set_selection_model(selection);
+    tree->allocate({0.0F, 0.0F, 240.0F, 140.0F});
+
+    REQUIRE(tree->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 12.0F, .y = 12.0F, .button = 1}));
+    REQUIRE_FALSE(model->is_expanded(project));
+    REQUIRE(model->visible_row_count() == 1);
+
+    REQUIRE(tree->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 12.0F, .y = 12.0F, .button = 1}));
+    REQUIRE(model->is_expanded(project));
+
+    REQUIRE(tree->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 44.0F, .y = 38.0F, .button = 1}));
+    REQUIRE(selection->current_row() == src);
+    REQUIRE(selection->is_selected(src));
+
+    REQUIRE(tree->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 30.0F, .y = 38.0F, .button = 1}));
+    REQUIRE_FALSE(model->is_expanded(src));
+    REQUIRE(model->visible_row_for_node(main_cpp) == std::nullopt);
+}
+
+TEST_CASE("TreeView keyboard navigation expands, collapses, and activates", "[app][tree]") {
+    auto model = std::make_shared<nk::TreeModel>();
+    const auto project = model->add_root("Project");
+    const auto src = model->append_child(project, "src");
+    const auto main_cpp = model->append_child(src, "main.cpp");
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto tree = nk::TreeView::create();
+    tree->set_model(model);
+    tree->set_selection_model(selection);
+    tree->allocate({0.0F, 0.0F, 240.0F, 140.0F});
+
+    nk::TreeNodeId activated = nk::InvalidTreeNodeId;
+    auto activation_conn =
+        tree->on_node_activated().connect([&](nk::TreeNodeId node) { activated = node; });
+    (void)activation_conn;
+
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    REQUIRE(selection->current_row() == project);
+
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    REQUIRE(selection->current_row() == src);
+
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    REQUIRE(selection->current_row() == main_cpp);
+
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left}));
+    REQUIRE(selection->current_row() == src);
+
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left}));
+    REQUIRE_FALSE(model->is_expanded(src));
+
+    REQUIRE(
+        tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(activated == src);
+}
+
+TEST_CASE("TreeView exposes accessibility details and actions", "[app][tree]") {
+    auto model = std::make_shared<nk::TreeModel>();
+    const auto project = model->add_root("Project");
+    const auto src = model->append_child(project, "src");
+    (void)src;
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    selection->set_current_row(project);
+    selection->select(project);
+
+    auto tree = nk::TreeView::create();
+    tree->set_model(model);
+    tree->set_selection_model(selection);
+
+    REQUIRE(tree->accessible() != nullptr);
+    REQUIRE(tree->accessible()->role() == nk::AccessibleRole::Tree);
+    REQUIRE(tree->accessible()->supports_action(nk::AccessibleAction::Focus));
+    REQUIRE(tree->accessible()->supports_action(nk::AccessibleAction::Activate));
+    REQUIRE(tree->accessible()->supports_action(nk::AccessibleAction::Toggle));
+    REQUIRE(tree->accessible()->description().find("2 visible rows") != std::string_view::npos);
+    REQUIRE(tree->accessible()->description().find("current row 1 of 2") != std::string_view::npos);
+    REQUIRE(tree->accessible()->description().find("expanded") != std::string_view::npos);
+    REQUIRE(tree->accessible()->description().find("selected") != std::string_view::npos);
+    REQUIRE(tree->accessible()->value().find("Project, row 1 of 2, expanded") !=
+            std::string_view::npos);
+
+    nk::TreeNodeId activated = nk::InvalidTreeNodeId;
+    auto activation_conn =
+        tree->on_node_activated().connect([&](nk::TreeNodeId node) { activated = node; });
+    (void)activation_conn;
+    REQUIRE(tree->accessible()->perform_action(nk::AccessibleAction::Activate));
+    REQUIRE(activated == project);
+
+    REQUIRE(tree->accessible()->perform_action(nk::AccessibleAction::Toggle));
+    REQUIRE_FALSE(model->is_expanded(project));
+    REQUIRE(tree->accessible()->description().find("1 visible rows") != std::string_view::npos);
+    REQUIRE(tree->accessible()->value().find("collapsed") != std::string_view::npos);
+
+    model->clear();
+    REQUIRE(tree->accessible()->description().find("0 visible rows, empty") !=
+            std::string_view::npos);
+    REQUIRE(tree->accessible()->value().empty());
+}
+
+TEST_CASE("GridView mouse selects and activates items", "[app][grid]") {
+    auto model = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"One", "Two", "Three", "Four", "Five"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto grid = nk::GridView::create();
+    grid->set_model(model);
+    grid->set_selection_model(selection);
+    grid->set_cell_width(80.0F);
+    grid->set_cell_height(48.0F);
+    grid->set_gap(4.0F);
+    grid->allocate({0.0F, 0.0F, 180.0F, 170.0F});
+
+    REQUIRE(grid->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 90.0F, .y = 58.0F, .button = 1}));
+    REQUIRE(selection->current_row() == 3);
+    REQUIRE(selection->is_selected(3));
+
+    std::size_t activated = static_cast<std::size_t>(-1);
+    auto activation_conn =
+        grid->on_item_activated().connect([&](std::size_t row) { activated = row; });
+    (void)activation_conn;
+    REQUIRE(grid->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                      .x = 90.0F,
+                                      .y = 58.0F,
+                                      .button = 1,
+                                      .click_count = 2}));
+    REQUIRE(activated == 3);
+}
+
+TEST_CASE("GridView keyboard navigation follows grid geometry", "[app][grid]") {
+    auto model = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"One", "Two", "Three", "Four", "Five", "Six"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto grid = nk::GridView::create();
+    grid->set_model(model);
+    grid->set_selection_model(selection);
+    grid->set_cell_width(80.0F);
+    grid->set_cell_height(48.0F);
+    grid->set_gap(4.0F);
+    grid->allocate({0.0F, 0.0F, 180.0F, 170.0F});
+
+    REQUIRE(grid->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    REQUIRE(selection->current_row() == 0);
+
+    REQUIRE(grid->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    REQUIRE(selection->current_row() == 1);
+
+    REQUIRE(grid->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    REQUIRE(selection->current_row() == 3);
+
+    REQUIRE(grid->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left}));
+    REQUIRE(selection->current_row() == 2);
+
+    REQUIRE(grid->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    REQUIRE(selection->current_row() == 5);
+
+    std::size_t activated = static_cast<std::size_t>(-1);
+    auto activation_conn =
+        grid->on_item_activated().connect([&](std::size_t row) { activated = row; });
+    (void)activation_conn;
+    REQUIRE(
+        grid->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(activated == 5);
+}
+
+TEST_CASE("GridView exposes accessibility details and actions", "[app][grid]") {
+    auto model = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"One", "Two", "Three", "Four"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    selection->set_current_row(1);
+    selection->select(1);
+
+    auto grid = nk::GridView::create();
+    grid->set_model(model);
+    grid->set_selection_model(selection);
+    grid->set_cell_width(80.0F);
+    grid->set_cell_height(48.0F);
+    grid->set_gap(4.0F);
+    grid->allocate({0.0F, 0.0F, 180.0F, 120.0F});
+
+    REQUIRE(grid->accessible() != nullptr);
+    REQUIRE(grid->accessible()->role() == nk::AccessibleRole::Grid);
+    REQUIRE(grid->accessible()->supports_action(nk::AccessibleAction::Focus));
+    REQUIRE(grid->accessible()->supports_action(nk::AccessibleAction::Activate));
+    REQUIRE(grid->accessible()->description().find("4 items") != std::string_view::npos);
+    REQUIRE(grid->accessible()->description().find("2 columns") != std::string_view::npos);
+    REQUIRE(grid->accessible()->description().find("current item 2 of 4") !=
+            std::string_view::npos);
+    REQUIRE(grid->accessible()->description().find("Two") != std::string_view::npos);
+    REQUIRE(grid->accessible()->value().find("Two, item 2 of 4") != std::string_view::npos);
+
+    std::size_t activated = static_cast<std::size_t>(-1);
+    auto activation_conn =
+        grid->on_item_activated().connect([&](std::size_t row) { activated = row; });
+    (void)activation_conn;
+    REQUIRE(grid->accessible()->perform_action(nk::AccessibleAction::Activate));
+    REQUIRE(activated == 1);
+
+    model->clear();
+    REQUIRE(grid->accessible()->description().find("0 items") != std::string_view::npos);
+    REQUIRE(grid->accessible()->description().find("empty") != std::string_view::npos);
+    REQUIRE(grid->accessible()->value().empty());
 }
 
 TEST_CASE("BoxLayout passes constraints and distributes extra space by stretch", "[app][layout]") {
