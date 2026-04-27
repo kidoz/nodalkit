@@ -2,6 +2,7 @@
 /// @brief Smoke test: create Application, Window, widgets, and quit.
 
 #include <algorithm>
+#include <any>
 #include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -4200,6 +4201,120 @@ TEST_CASE("GridView exposes accessibility details and actions", "[app][grid]") {
     model->clear();
     REQUIRE(grid->accessible()->description().find("0 items") != std::string_view::npos);
     REQUIRE(grid->accessible()->description().find("empty") != std::string_view::npos);
+    REQUIRE(grid->accessible()->value().empty());
+}
+
+TEST_CASE("GridView ignores gaps and scrollbar gutter during hit testing", "[app][grid]") {
+    auto model = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto grid = nk::GridView::create();
+    grid->set_model(model);
+    grid->set_selection_model(selection);
+    grid->set_cell_width(80.0F);
+    grid->set_cell_height(48.0F);
+    grid->set_gap(4.0F);
+    grid->allocate({0.0F, 0.0F, 210.0F, 106.0F});
+
+    REQUIRE(grid->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 83.0F, .y = 20.0F, .button = 1}));
+    REQUIRE(selection->current_row() == static_cast<std::size_t>(-1));
+    REQUIRE(selection->selected_rows().empty());
+
+    REQUIRE_FALSE(grid->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 199.0F, .y = 20.0F, .button = 1}));
+    REQUIRE(selection->current_row() == static_cast<std::size_t>(-1));
+}
+
+TEST_CASE("GridView keeps keyboard-selected items visible while scrolling", "[app][grid]") {
+    auto model = std::make_shared<nk::StringListModel>(std::vector<std::string>{
+        "One",
+        "Two",
+        "Three",
+        "Four",
+        "Five",
+        "Six",
+        "Seven",
+        "Eight",
+        "Nine",
+        "Ten",
+        "Eleven",
+        "Twelve",
+    });
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto grid = nk::GridView::create();
+    grid->set_model(model);
+    grid->set_selection_model(selection);
+    grid->set_cell_width(80.0F);
+    grid->set_cell_height(48.0F);
+    grid->set_gap(4.0F);
+    grid->allocate({0.0F, 0.0F, 210.0F, 106.0F});
+
+    REQUIRE(grid->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    REQUIRE(selection->current_row() == 11);
+
+    REQUIRE(grid->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 2.0F, .y = 7.0F, .button = 1}));
+    REQUIRE(selection->current_row() == 8);
+}
+
+TEST_CASE("GridView tracks model changes in accessibility summaries", "[app][grid]") {
+    class MutableListModel final : public nk::AbstractListModel {
+    public:
+        explicit MutableListModel(std::vector<std::string> items) : items_(std::move(items)) {}
+
+        [[nodiscard]] std::size_t row_count() const override { return items_.size(); }
+
+        [[nodiscard]] std::any data(std::size_t row) const override { return items_.at(row); }
+
+        [[nodiscard]] std::string display_text(std::size_t row) const override {
+            return items_.at(row);
+        }
+
+        void rename(std::size_t row, std::string text) {
+            items_.at(row) = std::move(text);
+            notify_data_changed(row, row);
+        }
+
+        void remove_last() {
+            REQUIRE_FALSE(items_.empty());
+            begin_remove_rows(items_.size() - 1, 1);
+            items_.pop_back();
+            end_remove_rows();
+        }
+
+    private:
+        std::vector<std::string> items_;
+    };
+
+    auto model =
+        std::make_shared<MutableListModel>(std::vector<std::string>{"Alpha", "Beta", "Gamma"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    selection->set_current_row(1);
+    selection->select(1);
+    auto grid = nk::GridView::create();
+    grid->set_model(model);
+    grid->set_selection_model(selection);
+    grid->set_cell_width(80.0F);
+    grid->set_cell_height(48.0F);
+    grid->set_gap(4.0F);
+    grid->allocate({0.0F, 0.0F, 210.0F, 106.0F});
+
+    REQUIRE(grid->accessible()->value().find("Beta, item 2 of 3") != std::string_view::npos);
+    model->rename(1, "Beta Updated");
+    REQUIRE(grid->accessible()->description().find("Beta Updated") != std::string_view::npos);
+    REQUIRE(grid->accessible()->value().find("Beta Updated, item 2 of 3") !=
+            std::string_view::npos);
+
+    REQUIRE(grid->handle_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 2.0F, .y = 55.0F}));
+    model->remove_last();
+    REQUIRE(grid->accessible()->description().find("2 items") != std::string_view::npos);
+    REQUIRE(grid->accessible()->value().find("Beta Updated, item 2 of 2") !=
+            std::string_view::npos);
+
+    model->remove_last();
+    REQUIRE(grid->accessible()->description().find("1 items") != std::string_view::npos);
+    REQUIRE(grid->accessible()->description().find("no current item") != std::string_view::npos);
     REQUIRE(grid->accessible()->value().empty());
 }
 

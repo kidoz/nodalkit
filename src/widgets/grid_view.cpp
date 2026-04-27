@@ -173,7 +173,7 @@ int item_at_point(const AbstractListModel* model,
     }
     const float cell_local_x = local_x - (static_cast<float>(col) * stride_x);
     const float cell_local_y = local_y - (static_cast<float>(grid_row) * stride_y);
-    if (cell_local_x > cell_width || cell_local_y > cell_height) {
+    if (cell_local_x >= cell_width || cell_local_y >= cell_height) {
         return -1;
     }
 
@@ -612,11 +612,21 @@ void GridView::snapshot(SnapshotContext& ctx) const {
         }
 
         const auto text = impl_->model->display_text(row);
-        const auto measured = measure_text(text, font);
-        const float text_x = cell.x + 10.0F;
-        const float text_y = cell.y + std::max(8.0F, (impl_->cell_height - measured.height) * 0.5F);
-        ctx.add_text(
-            {text_x, text_y}, std::string(text), selected ? selected_text : text_color, font);
+        const Rect text_rect = {cell.x + 9.0F,
+                                cell.y + 8.0F,
+                                std::max(0.0F, cell.width - 18.0F),
+                                std::max(0.0F, cell.height - 16.0F)};
+        const auto measured = measure_text_wrapped(text, font, text_rect.width);
+        const float text_y =
+            text_rect.y +
+            std::max(0.0F, (text_rect.height - std::min(measured.height, text_rect.height)) * 0.5F);
+        ctx.push_rounded_clip(text_rect, 4.0F);
+        ctx.add_wrapped_text({text_rect.x, text_y},
+                             std::string(text),
+                             selected ? selected_text : text_color,
+                             font,
+                             text_rect.width);
+        ctx.pop_container();
     }
 
     const float total_height =
