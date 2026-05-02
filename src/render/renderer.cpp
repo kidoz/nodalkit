@@ -42,6 +42,15 @@ FontDescriptor renderer_font_for_shape(FontDescriptor font, float scale_factor) 
 #endif
 }
 
+float renderer_max_width_for_shape(float max_width, float scale_factor) {
+#if defined(_WIN32)
+    (void)scale_factor;
+    return max_width;
+#else
+    return max_width * scale_factor;
+#endif
+}
+
 #if defined(_WIN32)
 bool d3d11_hardware_available() {
     static const bool available = [] {
@@ -248,11 +257,13 @@ struct TextKey {
     int weight;
     int style;
     float r, g, b, a;
+    float max_width;
     float scale;
 
     bool operator==(const TextKey& o) const {
         return text == o.text && family == o.family && size == o.size && weight == o.weight &&
-               style == o.style && r == o.r && g == o.g && b == o.b && a == o.a && scale == o.scale;
+               style == o.style && r == o.r && g == o.g && b == o.b && a == o.a &&
+               max_width == o.max_width && scale == o.scale;
     }
 };
 
@@ -262,6 +273,12 @@ struct TextKeyHash {
         h ^= std::hash<std::string>{}(k.family) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<float>{}(k.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<int>{}(k.weight) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(k.style) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(k.r) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(k.g) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(k.b) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(k.a) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<float>{}(k.max_width) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<float>{}(k.scale) + 0x9e3779b9 + (h << 6) + (h >> 2);
         return h;
     }
@@ -715,6 +732,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
             if (impl_->text_shaper && !text_node.text().empty()) {
                 auto font = renderer_font_for_shape(text_node.font(), impl_->scale_factor);
                 const auto color = text_node.text_color();
+                const float max_width =
+                    text_node.max_width() > 0.0F
+                        ? renderer_max_width_for_shape(text_node.max_width(), impl_->scale_factor)
+                        : 0.0F;
                 TextKey key{text_node.text(),
                             font.family,
                             font.size,
@@ -724,6 +745,7 @@ void SoftwareRenderer::render(const RenderNode& root) {
                             color.g,
                             color.b,
                             color.a,
+                            max_width,
                             impl_->scale_factor};
 
                 std::shared_ptr<ShapedText> shaped_ptr;
@@ -735,10 +757,9 @@ void SoftwareRenderer::render(const RenderNode& root) {
                     if (impl_->shaped_text_cache.size() >= 1024) {
                         impl_->shaped_text_cache.clear();
                     }
-                    const float mw = text_node.max_width();
-                    auto s = mw > 0.0F
+                    auto s = max_width > 0.0F
                                  ? impl_->text_shaper->shape_wrapped(
-                                       text_node.text(), font, color, mw * impl_->scale_factor)
+                                       text_node.text(), font, color, max_width)
                                  : impl_->text_shaper->shape(text_node.text(), font, color);
                     shaped_ptr = std::make_shared<ShapedText>(std::move(s));
                     impl_->shaped_text_cache[key] = shaped_ptr;

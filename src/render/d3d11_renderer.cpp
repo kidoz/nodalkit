@@ -135,6 +135,7 @@ struct TextKey {
     float g = 0.0F;
     float b = 0.0F;
     float a = 0.0F;
+    float max_width = 0.0F;
     float scale = 1.0F;
 
     bool operator==(const TextKey& other) const = default;
@@ -151,6 +152,7 @@ struct TextKeyHash {
         hash ^= std::hash<float>{}(key.g) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.b) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.a) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<float>{}(key.max_width) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.scale) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         return hash;
     }
@@ -383,6 +385,15 @@ FontDescriptor renderer_font_for_shape(FontDescriptor font, float scale_factor) 
 #else
     font.size *= scale_factor;
     return font;
+#endif
+}
+
+float renderer_max_width_for_shape(float max_width, float scale_factor) {
+#if defined(_WIN32)
+    (void)scale_factor;
+    return max_width;
+#else
+    return max_width * scale_factor;
 #endif
 }
 
@@ -996,6 +1007,9 @@ std::shared_ptr<ShapedText> D3D11Renderer::shape_text_node(const TextNode& text_
 
     auto font = renderer_font_for_shape(text_node.font(), scale_factor_);
     const auto color = text_node.text_color();
+    const float max_width = text_node.max_width() > 0.0F
+                                ? renderer_max_width_for_shape(text_node.max_width(), scale_factor_)
+                                : 0.0F;
     const TextKey key{
         .text = text_node.text(),
         .family = font.family,
@@ -1006,6 +1020,7 @@ std::shared_ptr<ShapedText> D3D11Renderer::shape_text_node(const TextNode& text_
         .g = color.g,
         .b = color.b,
         .a = color.a,
+        .max_width = max_width,
         .scale = scale_factor_,
     };
 
@@ -1014,7 +1029,11 @@ std::shared_ptr<ShapedText> D3D11Renderer::shape_text_node(const TextNode& text_
         return it->second;
     }
 
-    auto shaped = std::make_shared<ShapedText>(text_shaper_->shape(text_node.text(), font, color));
+    auto shaped =
+        std::make_shared<ShapedText>(max_width > 0.0F
+                                         ? text_shaper_->shape_wrapped(
+                                               text_node.text(), font, color, max_width)
+                                         : text_shaper_->shape(text_node.text(), font, color));
     ++last_hotspot_counters_.text_shape_count;
     shaped_text_cache_[key] = shaped;
     return shaped;

@@ -261,6 +261,62 @@ TEST_CASE("Windows text shaper treats font sizes as logical UI pixels", "[text][
     REQUIRE(measured.height < 19.0F);
     REQUIRE(static_cast<float>(shaped.bitmap_height()) < 19.0F);
 }
+
+TEST_CASE("Windows text shaper wraps text to the requested logical width", "[text][windows]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 14.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    const std::string paragraph =
+        "Windows wrapped labels need DirectWrite layout instead of falling back to one long line.";
+    constexpr float max_width = 150.0F;
+
+    const auto unwrapped = shaper->measure(paragraph, font);
+    const auto wrapped = shaper->measure_wrapped(paragraph, font, max_width);
+
+    REQUIRE(unwrapped.width > max_width);
+    REQUIRE(wrapped.width <= max_width + 1.0F);
+    REQUIRE(wrapped.height > unwrapped.height);
+
+    auto shaped =
+        shaper->shape_wrapped(paragraph, font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F}, max_width);
+    REQUIRE(shaped.bitmap_data() != nullptr);
+    REQUIRE(shaped.bitmap_width() > 0);
+    REQUIRE(shaped.bitmap_height() > 0);
+    REQUIRE(shaped.text_size().width <= max_width + 1.0F);
+    REQUIRE(static_cast<float>(shaped.bitmap_width()) <= max_width + 1.0F);
+}
+
+TEST_CASE("Windows wrapped text keeps logical width stable under device scale", "[text][windows]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 14.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    const std::string paragraph =
+        "Scaled Windows text should use a high-resolution bitmap without changing layout width.";
+    constexpr float max_width = 140.0F;
+
+    shaper->set_scale_factor(2.0F);
+    const auto wrapped = shaper->measure_wrapped(paragraph, font, max_width);
+    auto shaped =
+        shaper->shape_wrapped(paragraph, font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F}, max_width);
+
+    REQUIRE(wrapped.width <= max_width + 1.0F);
+    REQUIRE(shaped.bitmap_data() != nullptr);
+    REQUIRE(shaped.text_size().width <= max_width + 1.0F);
+    REQUIRE(static_cast<float>(shaped.bitmap_width()) > shaped.text_size().width);
+    REQUIRE(static_cast<float>(shaped.bitmap_width()) <= (max_width * 2.0F) + 2.0F);
+}
 #endif
 
 #if defined(__linux__)
