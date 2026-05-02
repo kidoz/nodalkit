@@ -957,13 +957,13 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
     case RenderNodeKind::Opacity:
     case RenderNodeKind::LinearGradient:
     case RenderNodeKind::Shadow:
-        // GPU-level opacity and gradient rendering not yet implemented on D3D11.
-        for (const auto& child : node.children()) {
-            if (child != nullptr && !collect_gpu_commands(*child)) {
-                return false;
-            }
-        }
-        return true;
+        // These nodes carry visual semantics that the D3D11 path does not yet implement.
+        // Falling back preserves correctness until the GPU path supports them explicitly.
+        primitive_commands_.clear();
+        image_commands_.clear();
+        text_commands_.clear();
+        draw_commands_.clear();
+        return false;
     default:
         primitive_commands_.clear();
         image_commands_.clear();
