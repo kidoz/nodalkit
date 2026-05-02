@@ -841,6 +841,9 @@ struct Win32Backend::Impl {
     int exit_code = 0;
     bool quit_requested = false;
     bool window_class_registered = false;
+    mutable std::string clipboard_text_cache;
+    mutable bool clipboard_text_cache_valid = false;
+    mutable bool clipboard_native_write_failed = false;
 };
 
 Win32Backend::Win32Backend() : impl_(std::make_unique<Impl>()) {}
@@ -962,8 +965,12 @@ bool Win32Backend::supports_clipboard_text() const {
 }
 
 std::string Win32Backend::clipboard_text() const {
+    if (impl_->clipboard_native_write_failed && impl_->clipboard_text_cache_valid) {
+        return impl_->clipboard_text_cache;
+    }
+
     if (!OpenClipboard(nullptr)) {
-        return {};
+        return impl_->clipboard_text_cache_valid ? impl_->clipboard_text_cache : std::string{};
     }
 
     std::string text;
@@ -977,12 +984,21 @@ std::string Win32Backend::clipboard_text() const {
     }
 
     CloseClipboard();
+    if (!text.empty()) {
+        impl_->clipboard_text_cache = text;
+        impl_->clipboard_text_cache_valid = true;
+    }
     return text;
 }
 
 void Win32Backend::set_clipboard_text(std::string_view text) {
+    impl_->clipboard_text_cache = std::string(text);
+    impl_->clipboard_text_cache_valid = true;
+    impl_->clipboard_native_write_failed = false;
+
     const auto wide = utf8_to_wide(text);
     if (!OpenClipboard(nullptr)) {
+        impl_->clipboard_native_write_failed = true;
         return;
     }
 
@@ -995,12 +1011,14 @@ void Win32Backend::set_clipboard_text(std::string_view text) {
             std::copy(wide.begin(), wide.end(), destination);
             destination[wide.size()] = L'\0';
             GlobalUnlock(storage);
-            SetClipboardData(CF_UNICODETEXT, storage);
-            storage = nullptr;
+            if (SetClipboardData(CF_UNICODETEXT, storage) != nullptr) {
+                storage = nullptr;
+            }
         }
     }
     if (storage != nullptr) {
         GlobalFree(storage);
+        impl_->clipboard_native_write_failed = true;
     }
     CloseClipboard();
 }
