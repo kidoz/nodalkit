@@ -26,7 +26,7 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-constexpr std::size_t kMaxClipDepth = 3;
+constexpr std::size_t kMaxClipDepth = 8;
 constexpr uint64_t kTextureCacheMaxAgeFrames = 120;
 constexpr std::size_t kImageTextureCacheMaxEntries = 128;
 constexpr std::size_t kTextTextureCacheMaxEntries = 256;
@@ -77,22 +77,28 @@ struct DrawCommand {
 struct DrawConstants {
     float rect[4]{};
     float color[4]{};
-    float clip_rects[12]{};
-    float clip_radii[4]{};
+    float clip_rects[kMaxClipDepth * 4]{};
+    float clip_radii[kMaxClipDepth]{};
     float params0[4]{};
     float viewport[4]{};
 };
 
-static_assert(sizeof(DrawConstants) == 128);
+static_assert(sizeof(DrawConstants) == 16 + 16 + (kMaxClipDepth * 16) +
+                                           (kMaxClipDepth * 4) + 16 + 16);
+static_assert(sizeof(DrawConstants) % 16 == 0,
+              "Constant buffer size must be a multiple of 16 bytes");
 
 struct ImageDrawConstants {
     float rect[4]{};
-    float clip_rects[12]{};
-    float clip_radii[4]{};
+    float clip_rects[kMaxClipDepth * 4]{};
+    float clip_radii[kMaxClipDepth]{};
     float viewport[4]{};
 };
 
-static_assert(sizeof(ImageDrawConstants) == 96);
+static_assert(sizeof(ImageDrawConstants) ==
+              16 + (kMaxClipDepth * 16) + (kMaxClipDepth * 4) + 16);
+static_assert(sizeof(ImageDrawConstants) % 16 == 0,
+              "Constant buffer size must be a multiple of 16 bytes");
 
 struct ImageTextureCacheKey {
     const uint32_t* pixel_data = nullptr;
@@ -180,8 +186,8 @@ constexpr std::string_view kPrimitiveVertexShader = R"(
 cbuffer DrawConstantsBuffer : register(b0) {
     float4 rect;
     float4 color;
-    float4 clip_rects[3];
-    float4 clip_radii;
+    float4 clip_rects[8];
+    float4 clip_radii[2];
     float4 params0;
     float4 viewport;
 };
@@ -214,8 +220,8 @@ constexpr std::string_view kPrimitivePixelShader = R"(
 cbuffer DrawConstantsBuffer : register(b0) {
     float4 rect;
     float4 color;
-    float4 clip_rects[3];
-    float4 clip_radii;
+    float4 clip_rects[8];
+    float4 clip_radii[2];
     float4 params0;
     float4 viewport;
 };
@@ -239,13 +245,10 @@ float rounded_rect_sd(float2 pixel_position, float4 rect_value, float radius) {
 
 float clip_coverage(float2 pixel_position, uint clip_count) {
     float coverage = 1.0;
-    [unroll]
-    for (uint clip_index = 0; clip_index < 3; ++clip_index) {
-        if (clip_index >= clip_count) {
-            break;
-        }
+    for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {
+        float radius = clip_radii[clip_index / 4][clip_index % 4];
         coverage *= saturate(
-            0.5 - rounded_rect_sd(pixel_position, clip_rects[clip_index], clip_radii[clip_index]));
+            0.5 - rounded_rect_sd(pixel_position, clip_rects[clip_index], radius));
     }
     return coverage;
 }
@@ -274,8 +277,8 @@ float4 main(VertexOutput input) : SV_Target {
 constexpr std::string_view kImageVertexShader = R"(
 cbuffer ImageDrawConstantsBuffer : register(b0) {
     float4 rect;
-    float4 clip_rects[3];
-    float4 clip_radii;
+    float4 clip_rects[8];
+    float4 clip_radii[2];
     float4 viewport;
 };
 
@@ -312,8 +315,8 @@ SamplerState image_sampler : register(s0);
 
 cbuffer ImageDrawConstantsBuffer : register(b0) {
     float4 rect;
-    float4 clip_rects[3];
-    float4 clip_radii;
+    float4 clip_rects[8];
+    float4 clip_radii[2];
     float4 viewport;
 };
 
@@ -337,13 +340,13 @@ float rounded_rect_sd(float2 pixel_position, float4 rect_value, float radius) {
 
 float clip_coverage(float2 pixel_position) {
     float coverage = 1.0;
-    [unroll]
-    for (uint clip_index = 0; clip_index < 3; ++clip_index) {
+    for (uint clip_index = 0; clip_index < 8; ++clip_index) {
         if (clip_rects[clip_index].z <= 0.0 || clip_rects[clip_index].w <= 0.0) {
             break;
         }
+        float radius = clip_radii[clip_index / 4][clip_index % 4];
         coverage *= saturate(
-            0.5 - rounded_rect_sd(pixel_position, clip_rects[clip_index], clip_radii[clip_index]));
+            0.5 - rounded_rect_sd(pixel_position, clip_rects[clip_index], radius));
     }
     return coverage;
 }
