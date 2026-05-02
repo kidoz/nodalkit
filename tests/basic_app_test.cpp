@@ -582,10 +582,6 @@ protected:
                        8.0F,
                        0.0F,
                        14.0F);
-        ctx.add_linear_gradient({rect.x + 22.0F, rect.y + 20.0F, rect.width - 44.0F, 42.0F},
-                                nk::Color::from_rgb(232, 244, 243),
-                                accent_,
-                                nk::Orientation::Horizontal);
         ctx.push_opacity({rect.x + 24.0F, rect.y + 74.0F, rect.width - 48.0F, 36.0F}, 0.65F);
         ctx.add_color_rect({rect.x + 24.0F, rect.y + 74.0F, rect.width - 48.0F, 36.0F}, accent_);
         ctx.pop_container();
@@ -593,6 +589,47 @@ protected:
 
 private:
     UnsupportedSemanticGpuWidget(float width, float height) : width_(width), height_(height) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
+    nk::Color accent_ = nk::Color::from_rgb(26, 153, 150);
+};
+
+class NativeGradientGpuWidget : public nk::Widget {
+public:
+    static std::shared_ptr<NativeGradientGpuWidget> create(float width, float height) {
+        return std::shared_ptr<NativeGradientGpuWidget>(new NativeGradientGpuWidget(width, height));
+    }
+
+    void set_accent(nk::Color color) {
+        accent_ = color;
+        queue_redraw({16.0F, 18.0F, width_ - 32.0F, height_ - 36.0F});
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, height_, width_, height_};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        const auto rect = allocation();
+        ctx.add_color_rect(rect, nk::Color::from_rgb(245, 248, 251));
+        ctx.push_rounded_clip(
+            {rect.x + 16.0F, rect.y + 18.0F, rect.width - 32.0F, rect.height - 36.0F}, 12.0F);
+        ctx.add_linear_gradient({rect.x + 16.0F, rect.y + 18.0F, rect.width - 32.0F, 44.0F},
+                                nk::Color::from_rgb(232, 244, 243),
+                                accent_,
+                                nk::Orientation::Horizontal);
+        ctx.add_linear_gradient(
+            {rect.x + 16.0F, rect.y + 62.0F, rect.width - 32.0F, rect.height - 80.0F},
+            accent_,
+            nk::Color::from_rgb(248, 251, 253),
+            nk::Orientation::Vertical);
+        ctx.pop_container();
+    }
+
+private:
+    NativeGradientGpuWidget(float width, float height) : width_(width), height_(height) {}
 
     float width_ = 0.0F;
     float height_ = 0.0F;
@@ -1402,6 +1439,44 @@ TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw",
     REQUIRE(second_frame.render_hotspot_counters.gpu_replayed_command_count <=
             first_frame.render_hotspot_counters.gpu_replayed_command_count);
     REQUIRE(second_frame.render_hotspot_counters.gpu_skipped_command_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_swapchain_copy_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::PartialRedrawCopy);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::BandwidthFavored);
+}
+
+TEST_CASE("Win32 D3D11 renders linear gradients on the GPU scene", "[app][render][windows]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "D3D11 gradient", .width = 340, .height = 180});
+
+    auto gradient_widget = NativeGradientGpuWidget::create(190.0F, 124.0F);
+    window.set_child(gradient_widget);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
+
+    const auto first_frame = window.last_frame_diagnostics();
+    REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 3);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_replayed_command_count >= 3);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::FullRedrawCopyBack);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::DrawFavored);
+
+    gradient_widget->set_accent(nk::Color::from_rgb(51, 89, 170));
+    REQUIRE(app.event_loop().poll());
+
+    const auto second_frame = window.last_frame_diagnostics();
+    REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_replayed_command_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_swapchain_copy_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
