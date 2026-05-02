@@ -953,7 +953,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
     case RenderNodeKind::Shadow:
         // GPU-level opacity and gradient rendering not yet implemented on D3D11.
         for (const auto& child : node.children()) {
-            if (child != nullptr && !collect_draw_commands(*child)) {
+            if (child != nullptr && !collect_gpu_commands(*child)) {
                 return false;
             }
         }

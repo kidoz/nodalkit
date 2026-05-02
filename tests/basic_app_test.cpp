@@ -3796,6 +3796,7 @@ TEST_CASE("DataTable sorts by header click and selects source rows", "[app][tabl
         .title = "Name",
         .width = 220.0F,
         .sortable = true,
+        .text = {},
     }});
     table->allocate({0.0F, 0.0F, 260.0F, 130.0F});
 
@@ -3831,6 +3832,7 @@ TEST_CASE("DataTable keyboard navigation and activation use source rows", "[app]
         .title = "Name",
         .width = 220.0F,
         .sortable = true,
+        .text = {},
     }});
     table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
     table->allocate({0.0F, 0.0F, 260.0F, 130.0F});
@@ -3863,12 +3865,14 @@ TEST_CASE("DataTable resizes columns with a minimum width", "[app][table]") {
                             .title = "Name",
                             .width = 120.0F,
                             .sortable = true,
+                            .text = {},
                         },
                         nk::DataTableColumn{
                             .id = "status",
                             .title = "Status",
                             .width = 120.0F,
                             .sortable = true,
+                            .text = {},
                         }});
     table->allocate({0.0F, 0.0F, 260.0F, 130.0F});
 
@@ -3892,6 +3896,7 @@ TEST_CASE("DataTable horizontal scroll keeps offscreen columns reachable", "[app
                             .title = "Name",
                             .width = 180.0F,
                             .sortable = true,
+                            .text = {},
                         },
                         nk::DataTableColumn{
                             .id = "status",
@@ -3923,6 +3928,7 @@ TEST_CASE("DataTable exposes available accessibility details", "[app][table]") {
         .title = "Name",
         .width = 160.0F,
         .sortable = true,
+        .text = {},
     }});
 
     REQUIRE(table->accessible() != nullptr);
@@ -4331,8 +4337,10 @@ TEST_CASE("CommandPalette filters, navigates, and activates enabled commands", "
                                   .subtitle = "Write current file",
                                   .category = "File",
                                   .enabled = false},
-        nk::CommandPaletteCommand{
-            .id = "view.sidebar", .title = "Toggle Sidebar", .category = "View"},
+        nk::CommandPaletteCommand{.id = "view.sidebar",
+                                  .title = "Toggle Sidebar",
+                                  .subtitle = "",
+                                  .category = "View"},
     });
     palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
 
@@ -4368,8 +4376,10 @@ TEST_CASE("CommandPalette filters, navigates, and activates enabled commands", "
 TEST_CASE("CommandPalette pointer activation and escape behavior", "[app][command]") {
     auto palette = nk::CommandPalette::create();
     palette->set_commands({
-        nk::CommandPaletteCommand{.id = "file.open", .title = "Open File"},
-        nk::CommandPaletteCommand{.id = "view.sidebar", .title = "Toggle Sidebar"},
+        nk::CommandPaletteCommand{
+            .id = "file.open", .title = "Open File", .subtitle = "", .category = ""},
+        nk::CommandPaletteCommand{
+            .id = "view.sidebar", .title = "Toggle Sidebar", .subtitle = "", .category = ""},
     });
     palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
 
@@ -4401,9 +4411,15 @@ TEST_CASE("CommandPalette pointer activation and escape behavior", "[app][comman
 TEST_CASE("CommandPalette exposes accessibility details and empty state", "[app][command]") {
     auto palette = nk::CommandPalette::create();
     palette->set_commands({
-        nk::CommandPaletteCommand{.id = "file.open", .title = "Open File", .category = "File"},
-        nk::CommandPaletteCommand{
-            .id = "file.save", .title = "Save File", .category = "File", .enabled = false},
+        nk::CommandPaletteCommand{.id = "file.open",
+                                  .title = "Open File",
+                                  .subtitle = "",
+                                  .category = "File"},
+        nk::CommandPaletteCommand{.id = "file.save",
+                                  .title = "Save File",
+                                  .subtitle = "",
+                                  .category = "File",
+                                  .enabled = false},
     });
     palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
 

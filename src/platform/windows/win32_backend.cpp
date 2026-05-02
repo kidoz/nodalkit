@@ -3,17 +3,20 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <commdlg.h>
 #include <cstdint>
-#include <dwmapi.h>
 #include <memory>
 #include <nk/foundation/logging.h>
 #include <nk/platform/window.h>
 #include <nk/runtime/event_loop.h>
-#include <shellscalingapi.h>
 #include <string>
 #include <vector>
+
+// windows.h must precede the Windows-specific headers below.
 #include <windows.h>
+
+#include <commdlg.h>
+#include <dwmapi.h>
+#include <shellscalingapi.h>
 #include <windowsx.h>
 
 namespace nk {

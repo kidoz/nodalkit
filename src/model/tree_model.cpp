@@ -15,6 +15,7 @@ TreeNodeId TreeModel::add_root(std::string text) {
         .id = id,
         .parent = InvalidTreeNodeId,
         .text = std::move(text),
+        .children = {},
     });
     roots_.push_back(id);
     model_reset_.emit();
@@ -28,6 +29,7 @@ TreeNodeId TreeModel::append_child(TreeNodeId parent, std::string text) {
         .id = id,
         .parent = parent,
         .text = std::move(text),
+        .children = {},
     });
     node(parent).children.push_back(id);
     model_reset_.emit();
