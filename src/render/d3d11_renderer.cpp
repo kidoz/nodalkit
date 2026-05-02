@@ -733,6 +733,9 @@ void D3D11Renderer::set_damage_regions(std::span<const Rect> regions) {
 void D3D11Renderer::begin_frame(Size viewport, float scale_factor) {
     logical_viewport_ = viewport;
     scale_factor_ = normalize_scale_factor(scale_factor);
+    if (text_shaper_ != nullptr) {
+        text_shaper_->set_scale_factor(scale_factor_);
+    }
     ++frame_serial_;
 
     const auto framebuffer = attached_surface_ != nullptr

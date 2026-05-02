@@ -28,6 +28,9 @@ public:
     [[nodiscard]] virtual ShapedText
     shape(std::string_view text, const FontDescriptor& font, Color color) const = 0;
 
+    /// Notify the shaper of the active device scale for future rasterization.
+    virtual void set_scale_factor(float scale_factor);
+
     /// Measure text with word wrapping within max_width.
     [[nodiscard]] virtual Size
     measure_wrapped(std::string_view text, const FontDescriptor& font, float max_width) const;

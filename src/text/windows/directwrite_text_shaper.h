@@ -20,6 +20,8 @@ public:
     [[nodiscard]] ShapedText
     shape(std::string_view text, const FontDescriptor& font, Color color) const override;
 
+    void set_scale_factor(float scale_factor) override;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

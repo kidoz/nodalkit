@@ -385,6 +385,9 @@ bool SoftwareRenderer::attach_surface(NativeSurface& surface) {
 void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
     impl_->logical_viewport = viewport;
     impl_->scale_factor = normalize_scale_factor(scale_factor);
+    if (impl_->text_shaper != nullptr) {
+        impl_->text_shaper->set_scale_factor(impl_->scale_factor);
+    }
     const int next_width = scaled_extent(viewport.width, impl_->scale_factor);
     const int next_height = scaled_extent(viewport.height, impl_->scale_factor);
     const bool size_changed = next_width != impl_->width || next_height != impl_->height;
