@@ -590,6 +590,32 @@ TEST_CASE("Window and basic widgets support smoke-test interactions", "[app]") {
     REQUIRE_FALSE(window.is_visible());
 }
 
+TEST_CASE("Dialog can close after caller releases its setup reference", "[app][dialog]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Dialog lifetime", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Root"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    std::weak_ptr<nk::Dialog> weak_dialog;
+    bool accepted = false;
+    {
+        auto dialog = nk::Dialog::create("About", "Dialog lifetime regression");
+        dialog->add_button("OK", nk::DialogResponse::Accept);
+        auto conn = dialog->on_response().connect([&](nk::DialogResponse response) {
+            accepted = response == nk::DialogResponse::Accept;
+        });
+        (void)conn;
+        weak_dialog = dialog;
+        dialog->present(window);
+    }
+
+    REQUIRE_FALSE(weak_dialog.expired());
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    REQUIRE(accepted);
+    REQUIRE(weak_dialog.expired());
+}
+
 TEST_CASE("Window exposes the active renderer backend", "[app][render]") {
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Renderer backend", .width = 320, .height = 240});
