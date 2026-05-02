@@ -71,6 +71,14 @@ float normalize_pixels_per_dip(float scale_factor) {
     return std::isfinite(scale_factor) && scale_factor > 0.0F ? scale_factor : 1.0F;
 }
 
+float normalize_layout_width(float max_width) {
+    constexpr float kMaxLayoutWidth = 16384.0F;
+    if (!std::isfinite(max_width) || max_width <= 0.0F) {
+        return kMaxLayoutWidth;
+    }
+    return std::clamp(max_width, 1.0F, kMaxLayoutWidth);
+}
+
 struct TextLayoutMetrics {
     float width = 0.0F;
     float height = 0.0F;
@@ -238,7 +246,8 @@ struct DirectWriteTextShaper::Impl {
         return true;
     }
 
-    [[nodiscard]] IDWriteTextFormat* create_text_format(const FontDescriptor& font) const {
+    [[nodiscard]] IDWriteTextFormat* create_text_format(const FontDescriptor& font,
+                                                        bool wrapping) const {
         if (factory == nullptr) {
             return nullptr;
         }
@@ -266,23 +275,24 @@ struct DirectWriteTextShaper::Impl {
 
         format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
         format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
-        format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        format->SetWordWrapping(wrapping ? DWRITE_WORD_WRAPPING_WRAP
+                                         : DWRITE_WORD_WRAPPING_NO_WRAP);
         return format;
     }
 
     [[nodiscard]] IDWriteTextLayout* create_text_layout(std::wstring_view text,
-                                                        IDWriteTextFormat* format) const {
+                                                        IDWriteTextFormat* format,
+                                                        float max_width) const {
         if (factory == nullptr || format == nullptr) {
             return nullptr;
         }
 
         IDWriteTextLayout* layout = nullptr;
-        constexpr FLOAT kMaxLayoutWidth = 16384.0F;
         constexpr FLOAT kMaxLayoutHeight = 4096.0F;
         if (FAILED(factory->CreateTextLayout(text.data(),
                                              static_cast<UINT32>(text.size()),
                                              format,
-                                             kMaxLayoutWidth,
+                                             normalize_layout_width(max_width),
                                              kMaxLayoutHeight,
                                              &layout))) {
             return nullptr;
@@ -315,6 +325,127 @@ struct DirectWriteTextShaper::Impl {
         result.width = metrics.widthIncludingTrailingWhitespace;
         result.height = metrics.height;
         return result;
+    }
+
+    [[nodiscard]] Size measure_text(std::string_view text,
+                                    const FontDescriptor& font,
+                                    float max_width,
+                                    bool wrapping,
+                                    const GdiTextShaper& fallback) const {
+        if (!available()) {
+            return wrapping ? fallback.measure_wrapped(text, font, max_width)
+                            : fallback.measure(text, font);
+        }
+
+        const auto wide = utf8_to_wide(text);
+        IDWriteTextFormat* format = create_text_format(font, wrapping);
+        if (format == nullptr) {
+            return wrapping ? fallback.measure_wrapped(text, font, max_width)
+                            : fallback.measure(text, font);
+        }
+
+        IDWriteTextLayout* layout = create_text_layout(wide, format, max_width);
+        format->Release();
+        if (layout == nullptr) {
+            return wrapping ? fallback.measure_wrapped(text, font, max_width)
+                            : fallback.measure(text, font);
+        }
+
+        const auto metrics = layout_metrics(layout);
+        layout->Release();
+        return {
+            std::ceil(metrics.width),
+            std::ceil(metrics.height),
+        };
+    }
+
+    [[nodiscard]] ShapedText shape_text(std::string_view text,
+                                        const FontDescriptor& font,
+                                        Color color,
+                                        float max_width,
+                                        bool wrapping,
+                                        const GdiTextShaper& fallback) const {
+        if (!available()) {
+            return wrapping ? fallback.shape_wrapped(text, font, color, max_width)
+                            : fallback.shape(text, font, color);
+        }
+
+        const auto wide = utf8_to_wide(text);
+        IDWriteTextFormat* format = create_text_format(font, wrapping);
+        if (format == nullptr) {
+            return wrapping ? fallback.shape_wrapped(text, font, color, max_width)
+                            : fallback.shape(text, font, color);
+        }
+
+        IDWriteTextLayout* layout = create_text_layout(wide, format, max_width);
+        format->Release();
+        if (layout == nullptr) {
+            return wrapping ? fallback.shape_wrapped(text, font, color, max_width)
+                            : fallback.shape(text, font, color);
+        }
+
+        const auto metrics = layout_metrics(layout);
+        const float ppd = pixels_per_dip;
+        const int bitmap_width = std::max(1, static_cast<int>(std::ceil(metrics.width * ppd)));
+        const int bitmap_height = std::max(1, static_cast<int>(std::ceil(metrics.height * ppd)));
+
+        HDC screen_dc = GetDC(nullptr);
+        IDWriteBitmapRenderTarget* render_target = nullptr;
+        if (screen_dc == nullptr || gdi_interop == nullptr ||
+            FAILED(gdi_interop->CreateBitmapRenderTarget(
+                screen_dc, bitmap_width, bitmap_height, &render_target))) {
+            if (screen_dc != nullptr) {
+                ReleaseDC(nullptr, screen_dc);
+            }
+            layout->Release();
+            return wrapping ? fallback.shape_wrapped(text, font, color, max_width)
+                            : fallback.shape(text, font, color);
+        }
+
+        (void)render_target->SetPixelsPerDip(pixels_per_dip);
+        DWRITE_MATRIX identity{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+        (void)render_target->SetCurrentTransform(&identity);
+
+        HDC memory_dc = render_target->GetMemoryDC();
+        RECT clear_rect{0, 0, bitmap_width, bitmap_height};
+        HBRUSH clear_brush = CreateSolidBrush(RGB(255, 255, 255));
+        if (memory_dc != nullptr && clear_brush != nullptr) {
+            FillRect(memory_dc, &clear_rect, clear_brush);
+        }
+        if (clear_brush != nullptr) {
+            DeleteObject(clear_brush);
+        }
+
+        auto* renderer = new BitmapTextRenderer(
+            render_target, grayscale_rendering_params, RGB(0, 0, 0), pixels_per_dip);
+        const HRESULT draw_result = layout->Draw(nullptr, renderer, 0.0F, 0.0F);
+        renderer->Release();
+
+        std::vector<uint8_t> rgba;
+        if (SUCCEEDED(draw_result)) {
+            rgba = extract_rgba_bitmap(render_target, bitmap_width, bitmap_height, color);
+        }
+
+        render_target->Release();
+        ReleaseDC(nullptr, screen_dc);
+        layout->Release();
+
+        if (rgba.empty()) {
+            return wrapping ? fallback.shape_wrapped(text, font, color, max_width)
+                            : fallback.shape(text, font, color);
+        }
+
+        ShapedText shaped;
+        shaped.set_text_size({
+            std::ceil(metrics.width),
+            std::ceil(metrics.height),
+        });
+        shaped.set_baseline(std::max(0.0F, metrics.baseline));
+        // Preserve the full raster height. The current ShapedText contract does
+        // not carry bitmap bearings, so trimming leading transparent rows would
+        // shift glyph coverage upward at draw time.
+        shaped.set_bitmap(std::move(rgba), bitmap_width, bitmap_height);
+        return shaped;
     }
 
     [[nodiscard]] std::vector<uint8_t> extract_rgba_bitmap(IDWriteBitmapRenderTarget* render_target,
@@ -385,108 +516,31 @@ void DirectWriteTextShaper::set_scale_factor(float scale_factor) {
 }
 
 Size DirectWriteTextShaper::measure(std::string_view text, const FontDescriptor& font) const {
-    if (!impl_->available()) {
-        return fallback_.measure(text, font);
-    }
-
-    const auto wide = utf8_to_wide(text);
-    IDWriteTextFormat* format = impl_->create_text_format(font);
-    if (format == nullptr) {
-        return fallback_.measure(text, font);
-    }
-
-    IDWriteTextLayout* layout = impl_->create_text_layout(wide, format);
-    format->Release();
-    if (layout == nullptr) {
-        return fallback_.measure(text, font);
-    }
-
-    const auto metrics = impl_->layout_metrics(layout);
-    layout->Release();
-    return {
-        std::ceil(metrics.width),
-        std::ceil(metrics.height),
-    };
+    return impl_->measure_text(text, font, normalize_layout_width(0.0F), false, fallback_);
 }
 
 ShapedText
 DirectWriteTextShaper::shape(std::string_view text, const FontDescriptor& font, Color color) const {
-    if (!impl_->available()) {
-        return fallback_.shape(text, font, color);
+    return impl_->shape_text(text, font, color, normalize_layout_width(0.0F), false, fallback_);
+}
+
+Size DirectWriteTextShaper::measure_wrapped(std::string_view text,
+                                            const FontDescriptor& font,
+                                            float max_width) const {
+    if (text.empty() || max_width <= 0.0F) {
+        return measure(text, font);
     }
+    return impl_->measure_text(text, font, max_width, true, fallback_);
+}
 
-    const auto wide = utf8_to_wide(text);
-    IDWriteTextFormat* format = impl_->create_text_format(font);
-    if (format == nullptr) {
-        return fallback_.shape(text, font, color);
+ShapedText DirectWriteTextShaper::shape_wrapped(std::string_view text,
+                                                const FontDescriptor& font,
+                                                Color color,
+                                                float max_width) const {
+    if (text.empty() || max_width <= 0.0F) {
+        return shape(text, font, color);
     }
-
-    IDWriteTextLayout* layout = impl_->create_text_layout(wide, format);
-    format->Release();
-    if (layout == nullptr) {
-        return fallback_.shape(text, font, color);
-    }
-
-    const auto metrics = impl_->layout_metrics(layout);
-    const float ppd = impl_->pixels_per_dip;
-    const int bitmap_width = std::max(1, static_cast<int>(std::ceil(metrics.width * ppd)));
-    const int bitmap_height = std::max(1, static_cast<int>(std::ceil(metrics.height * ppd)));
-
-    HDC screen_dc = GetDC(nullptr);
-    IDWriteBitmapRenderTarget* render_target = nullptr;
-    if (screen_dc == nullptr || impl_->gdi_interop == nullptr ||
-        FAILED(impl_->gdi_interop->CreateBitmapRenderTarget(
-            screen_dc, bitmap_width, bitmap_height, &render_target))) {
-        if (screen_dc != nullptr) {
-            ReleaseDC(nullptr, screen_dc);
-        }
-        layout->Release();
-        return fallback_.shape(text, font, color);
-    }
-
-    (void)render_target->SetPixelsPerDip(impl_->pixels_per_dip);
-    DWRITE_MATRIX identity{1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
-    (void)render_target->SetCurrentTransform(&identity);
-
-    HDC memory_dc = render_target->GetMemoryDC();
-    RECT clear_rect{0, 0, bitmap_width, bitmap_height};
-    HBRUSH clear_brush = CreateSolidBrush(RGB(255, 255, 255));
-    if (memory_dc != nullptr && clear_brush != nullptr) {
-        FillRect(memory_dc, &clear_rect, clear_brush);
-    }
-    if (clear_brush != nullptr) {
-        DeleteObject(clear_brush);
-    }
-
-    auto* renderer = new BitmapTextRenderer(
-        render_target, impl_->grayscale_rendering_params, RGB(0, 0, 0), impl_->pixels_per_dip);
-    const HRESULT draw_result = layout->Draw(nullptr, renderer, 0.0F, 0.0F);
-    renderer->Release();
-
-    std::vector<uint8_t> rgba;
-    if (SUCCEEDED(draw_result)) {
-        rgba = impl_->extract_rgba_bitmap(render_target, bitmap_width, bitmap_height, color);
-    }
-
-    render_target->Release();
-    ReleaseDC(nullptr, screen_dc);
-    layout->Release();
-
-    if (rgba.empty()) {
-        return fallback_.shape(text, font, color);
-    }
-
-    ShapedText shaped;
-    shaped.set_text_size({
-        std::ceil(metrics.width),
-        std::ceil(metrics.height),
-    });
-    shaped.set_baseline(std::max(0.0F, metrics.baseline));
-    // Preserve the full raster height. The current ShapedText contract does
-    // not carry bitmap bearings, so trimming leading transparent rows would
-    // shift glyph coverage upward at draw time.
-    shaped.set_bitmap(std::move(rgba), bitmap_width, bitmap_height);
-    return shaped;
+    return impl_->shape_text(text, font, color, max_width, true, fallback_);
 }
 
 } // namespace nk

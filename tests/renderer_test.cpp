@@ -10,6 +10,7 @@
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/text_shaper.h>
+#include <vector>
 
 namespace {
 
@@ -79,9 +80,18 @@ public:
         return {font.size, font.size};
     }
 
+    [[nodiscard]] nk::Size measure_wrapped(std::string_view /*text*/,
+                                           const nk::FontDescriptor& font,
+                                           float max_width) const override {
+        last_measured_font_size = font.size;
+        last_wrapped_measure_max_width = max_width;
+        return {max_width, font.size * 2.0F};
+    }
+
     [[nodiscard]] nk::ShapedText shape(std::string_view /*text*/,
                                        const nk::FontDescriptor& font,
                                        nk::Color color) const override {
+        ++shape_count;
         last_shaped_font_size = font.size;
         nk::ShapedText shaped;
         shaped.set_text_size({font.size, font.size});
@@ -93,8 +103,29 @@ public:
         return shaped;
     }
 
+    [[nodiscard]] nk::ShapedText shape_wrapped(std::string_view /*text*/,
+                                               const nk::FontDescriptor& font,
+                                               nk::Color color,
+                                               float max_width) const override {
+        ++wrapped_shape_count;
+        last_shaped_font_size = font.size;
+        last_wrapped_shape_max_width = max_width;
+        nk::ShapedText shaped;
+        shaped.set_text_size({max_width, font.size * 2.0F});
+        shaped.set_baseline(font.size * 0.8F);
+        const auto red = static_cast<uint8_t>(color.r * 255.0F);
+        const auto green = static_cast<uint8_t>(color.g * 255.0F);
+        const auto blue = static_cast<uint8_t>(color.b * 255.0F);
+        shaped.set_bitmap({red, green, blue, 255, red, green, blue, 255}, 2, 1);
+        return shaped;
+    }
+
     mutable float last_measured_font_size = 0.0F;
     mutable float last_shaped_font_size = 0.0F;
+    mutable float last_wrapped_measure_max_width = 0.0F;
+    mutable float last_wrapped_shape_max_width = 0.0F;
+    mutable int shape_count = 0;
+    mutable int wrapped_shape_count = 0;
 };
 
 } // namespace
@@ -241,6 +272,54 @@ TEST_CASE("SoftwareRenderer forwards logical font sizes to text shaping on Windo
     REQUIRE(std::fabs(text_shaper.last_shaped_font_size - 24.0F) < 0.01F);
 #endif
 }
+
+#if defined(_WIN32)
+TEST_CASE("D3D11Renderer shapes wrapped text with logical width in the text cache",
+          "[renderer][d3d11][text]") {
+    auto renderer = nk::create_renderer(nk::RendererBackend::D3D11);
+    REQUIRE(renderer != nullptr);
+
+    RecordingTextShaper text_shaper;
+    renderer->set_text_shaper(&text_shaper);
+
+    const nk::FontDescriptor font{
+        .family = "System",
+        .size = 12.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    auto render_wrapped = [&](float max_width) {
+        nk::SnapshotContext snapshot{&text_shaper};
+        snapshot.add_wrapped_text({2.0F, 3.0F},
+                                  "This sentence should wrap in the D3D11 renderer.",
+                                  nk::Color::from_rgb(0, 0, 0),
+                                  font,
+                                  max_width);
+        auto root = snapshot.take_root();
+        REQUIRE(root != nullptr);
+
+        renderer->begin_frame({240.0F, 120.0F}, 2.0F);
+        renderer->render(*root);
+        renderer->end_frame();
+    };
+
+    render_wrapped(140.0F);
+    REQUIRE(text_shaper.wrapped_shape_count == 1);
+    REQUIRE(text_shaper.shape_count == 0);
+    REQUIRE(std::fabs(text_shaper.last_shaped_font_size - 12.0F) < 0.01F);
+    REQUIRE(std::fabs(text_shaper.last_wrapped_shape_max_width - 140.0F) < 0.01F);
+    REQUIRE(renderer->last_hotspot_counters().text_shape_count == 1);
+
+    render_wrapped(140.0F);
+    REQUIRE(text_shaper.wrapped_shape_count == 1);
+    REQUIRE(renderer->last_hotspot_counters().text_shape_cache_hit_count == 1);
+
+    render_wrapped(90.0F);
+    REQUIRE(text_shaper.wrapped_shape_count == 2);
+    REQUIRE(std::fabs(text_shaper.last_wrapped_shape_max_width - 90.0F) < 0.01F);
+    REQUIRE(renderer->last_hotspot_counters().text_shape_count == 1);
+}
+#endif
 
 namespace {
 
