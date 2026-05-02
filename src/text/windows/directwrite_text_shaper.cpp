@@ -67,13 +67,8 @@ float font_em_size_dips(float logical_pixel_size) {
     return std::max(1.0F, logical_pixel_size);
 }
 
-float system_pixels_per_dip() {
-    HDC screen_dc = GetDC(nullptr);
-    const int dpi_x = screen_dc != nullptr ? GetDeviceCaps(screen_dc, LOGPIXELSX) : 96;
-    if (screen_dc != nullptr) {
-        ReleaseDC(nullptr, screen_dc);
-    }
-    return std::max(1.0F, static_cast<float>(dpi_x) / 96.0F);
+float normalize_pixels_per_dip(float scale_factor) {
+    return std::isfinite(scale_factor) && scale_factor > 0.0F ? scale_factor : 1.0F;
 }
 
 struct TextLayoutMetrics {
@@ -231,7 +226,6 @@ struct DirectWriteTextShaper::Impl {
             return false;
         }
 
-        pixels_per_dip = system_pixels_per_dip();
         if (FAILED(factory->CreateCustomRenderingParams(2.2F,
                                                         0.0F,
                                                         0.0F,
@@ -384,6 +378,11 @@ DirectWriteTextShaper::DirectWriteTextShaper() : impl_(std::make_unique<Impl>())
 }
 
 DirectWriteTextShaper::~DirectWriteTextShaper() = default;
+
+void DirectWriteTextShaper::set_scale_factor(float scale_factor) {
+    impl_->pixels_per_dip = normalize_pixels_per_dip(scale_factor);
+    fallback_.set_scale_factor(scale_factor);
+}
 
 Size DirectWriteTextShaper::measure(std::string_view text, const FontDescriptor& font) const {
     if (!impl_->available()) {

@@ -11,6 +11,8 @@
 
 namespace nk {
 
+void TextShaper::set_scale_factor(float /*scale_factor*/) {}
+
 Size TextShaper::measure_wrapped(std::string_view text,
                                  const FontDescriptor& font,
                                  float /*max_width*/) const {
