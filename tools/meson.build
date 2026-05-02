@@ -66,6 +66,12 @@ stable_localized_redraw_artifact = meson.project_source_root() / 'tests' / 'fixt
 stable_localized_redraw_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_localized_redraw_trace.json'
 stable_metal_localized_redraw_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_metal_localized_redraw_frame_diagnostics.json'
 stable_metal_localized_redraw_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_metal_localized_redraw_trace.json'
+stable_win32_text_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_text_heavy_frame_diagnostics.json'
+stable_win32_text_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_text_heavy_trace.json'
+stable_win32_list_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_list_heavy_frame_diagnostics.json'
+stable_win32_list_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_list_heavy_trace.json'
+stable_win32_animation_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_animation_heavy_frame_diagnostics.json'
+stable_win32_animation_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_animation_heavy_trace.json'
 trace_capture_harness_mixed_artifact = meson.project_build_root() / 'trace_capture_harness_mixed_artifact.json'
 trace_capture_harness_mixed_trace = meson.project_build_root() / 'trace_capture_harness_mixed_trace.json'
 trace_capture_harness_text_artifact = meson.project_build_root() / 'trace_capture_harness_text_artifact.json'
@@ -220,7 +226,36 @@ test('trace_capture_harness',
         '--baseline-artifact=' + stable_mixed_artifact,
         '--baseline-trace=' + stable_mixed_trace,
     ]),
+    is_parallel : false,
 )
+
+# The text-heavy / list-heavy / animation-heavy baselines reflect wall-clock
+# frame timing, which is platform-dependent: Linux uses FreeType + fontconfig
+# text shaping with a stub surface present, Windows uses DirectWrite + Win32 GDI
+# BitBlt, and macOS uses CoreText + AppKit. Different glyph metrics and per-frame
+# present costs mean a single fixture set isn't portable, so each supported host
+# pins its own baseline. Hosts without a captured baseline (currently macOS) and
+# sanitizer builds run the harness for code-path coverage but skip the comparison.
+host_system = host_machine.system()
+if not sanitizers_enabled and host_system == 'linux'
+    heavy_text_baseline_artifact = stable_text_artifact
+    heavy_text_baseline_trace = stable_text_trace
+    heavy_list_baseline_artifact = stable_list_artifact
+    heavy_list_baseline_trace = stable_list_trace
+    heavy_animation_baseline_artifact = stable_animation_artifact
+    heavy_animation_baseline_trace = stable_animation_trace
+    heavy_baselines_supported = true
+elif not sanitizers_enabled and host_system == 'windows'
+    heavy_text_baseline_artifact = stable_win32_text_artifact
+    heavy_text_baseline_trace = stable_win32_text_trace
+    heavy_list_baseline_artifact = stable_win32_list_artifact
+    heavy_list_baseline_trace = stable_win32_list_trace
+    heavy_animation_baseline_artifact = stable_win32_animation_artifact
+    heavy_animation_baseline_trace = stable_win32_animation_trace
+    heavy_baselines_supported = true
+else
+    heavy_baselines_supported = false
+endif
 
 test('trace_capture_harness_text_heavy',
     trace_capture_harness,
@@ -228,10 +263,11 @@ test('trace_capture_harness_text_heavy',
         'text-heavy',
         trace_capture_harness_text_artifact,
         trace_capture_harness_text_trace,
-    ] + (sanitizers_enabled ? [] : [
-        '--baseline-artifact=' + stable_text_artifact,
-        '--baseline-trace=' + stable_text_trace,
-    ]),
+    ] + (heavy_baselines_supported ? [
+        '--baseline-artifact=' + heavy_text_baseline_artifact,
+        '--baseline-trace=' + heavy_text_baseline_trace,
+    ] : []),
+    is_parallel : false,
 )
 
 test('trace_capture_harness_list_heavy',
@@ -240,10 +276,11 @@ test('trace_capture_harness_list_heavy',
         'list-heavy',
         trace_capture_harness_list_artifact,
         trace_capture_harness_list_trace,
-    ] + (sanitizers_enabled ? [] : [
-        '--baseline-artifact=' + stable_list_artifact,
-        '--baseline-trace=' + stable_list_trace,
-    ]),
+    ] + (heavy_baselines_supported ? [
+        '--baseline-artifact=' + heavy_list_baseline_artifact,
+        '--baseline-trace=' + heavy_list_baseline_trace,
+    ] : []),
+    is_parallel : false,
 )
 
 test('trace_capture_harness_animation_heavy',
@@ -252,10 +289,11 @@ test('trace_capture_harness_animation_heavy',
         'animation-heavy',
         trace_capture_harness_animation_artifact,
         trace_capture_harness_animation_trace,
-    ] + (sanitizers_enabled ? [] : [
-        '--baseline-artifact=' + stable_animation_artifact,
-        '--baseline-trace=' + stable_animation_trace,
-    ]),
+    ] + (heavy_baselines_supported ? [
+        '--baseline-artifact=' + heavy_animation_baseline_artifact,
+        '--baseline-trace=' + heavy_animation_baseline_trace,
+    ] : []),
+    is_parallel : false,
 )
 
 test('trace_capture_harness_localized_redraw',
@@ -268,6 +306,7 @@ test('trace_capture_harness_localized_redraw',
         '--baseline-artifact=' + stable_localized_redraw_artifact,
         '--baseline-trace=' + stable_localized_redraw_trace,
     ]),
+    is_parallel : false,
 )
 
 if host_machine.system() == 'darwin'
@@ -282,6 +321,7 @@ if host_machine.system() == 'darwin'
             '--baseline-artifact=' + stable_metal_localized_redraw_artifact,
             '--baseline-trace=' + stable_metal_localized_redraw_trace,
         ]),
+        is_parallel : false,
     )
 endif
 
