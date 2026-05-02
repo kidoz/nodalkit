@@ -134,6 +134,8 @@ bool Dialog::is_presented() const {
 }
 
 void Dialog::close(DialogResponse response) {
+    auto keep_alive = shared_from_this();
+    (void)keep_alive;
     if (impl_->presented && impl_->parent_window != nullptr) {
         impl_->backdrop_dirty = true;
         impl_->parent_window->dismiss_overlay(*this);
