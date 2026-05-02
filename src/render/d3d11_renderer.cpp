@@ -46,6 +46,15 @@ struct PrimitiveCommand {
     uint32_t clip_count = 0;
 };
 
+struct GradientCommand {
+    Rect rect{};
+    Color start_color{};
+    Color end_color{};
+    Orientation direction = Orientation::Vertical;
+    std::array<ClipRegion, kMaxClipDepth> clips{};
+    uint32_t clip_count = 0;
+};
+
 struct ImageCommand {
     Rect rect{};
     const uint32_t* pixel_data = nullptr;
@@ -65,6 +74,7 @@ struct TextCommand {
 
 enum class DrawCommandKind : uint8_t {
     Primitive,
+    Gradient,
     Image,
     Text,
 };
@@ -86,6 +96,21 @@ struct DrawConstants {
 static_assert(sizeof(DrawConstants) == 16 + 16 + (kMaxClipDepth * 16) +
                                            (kMaxClipDepth * 4) + 16 + 16);
 static_assert(sizeof(DrawConstants) % 16 == 0,
+              "Constant buffer size must be a multiple of 16 bytes");
+
+struct GradientDrawConstants {
+    float rect[4]{};
+    float start_color[4]{};
+    float end_color[4]{};
+    float clip_rects[kMaxClipDepth * 4]{};
+    float clip_radii[kMaxClipDepth]{};
+    float params0[4]{};
+    float viewport[4]{};
+};
+
+static_assert(sizeof(GradientDrawConstants) == 16 + 16 + 16 + (kMaxClipDepth * 16) +
+                                                 (kMaxClipDepth * 4) + 16 + 16);
+static_assert(sizeof(GradientDrawConstants) % 16 == 0,
               "Constant buffer size must be a multiple of 16 bytes");
 
 struct ImageDrawConstants {
@@ -276,6 +301,92 @@ float4 main(VertexOutput input) : SV_Target {
 }
 )";
 
+constexpr std::string_view kGradientVertexShader = R"(
+cbuffer GradientDrawConstantsBuffer : register(b0) {
+    float4 rect;
+    float4 start_color;
+    float4 end_color;
+    float4 clip_rects[8];
+    float4 clip_radii[2];
+    float4 params0;
+    float4 viewport;
+};
+
+struct VertexOutput {
+    float4 position : SV_Position;
+    float2 pixel : TEXCOORD0;
+};
+
+VertexOutput main(uint vertex_id : SV_VertexID) {
+    const float2 unit_positions[4] = {
+        float2(0.0, 0.0),
+        float2(1.0, 0.0),
+        float2(0.0, 1.0),
+        float2(1.0, 1.0),
+    };
+    float2 pixel_position = rect.xy + (rect.zw * unit_positions[vertex_id]);
+    float2 ndc;
+    ndc.x = (pixel_position.x / max(viewport.x, 1.0)) * 2.0 - 1.0;
+    ndc.y = 1.0 - ((pixel_position.y / max(viewport.y, 1.0)) * 2.0);
+
+    VertexOutput output;
+    output.position = float4(ndc, 0.0, 1.0);
+    output.pixel = pixel_position;
+    return output;
+}
+)";
+
+constexpr std::string_view kGradientPixelShader = R"(
+cbuffer GradientDrawConstantsBuffer : register(b0) {
+    float4 rect;
+    float4 start_color;
+    float4 end_color;
+    float4 clip_rects[8];
+    float4 clip_radii[2];
+    float4 params0;
+    float4 viewport;
+};
+
+struct VertexOutput {
+    float4 position : SV_Position;
+    float2 pixel : TEXCOORD0;
+};
+
+float rounded_rect_sd(float2 pixel_position, float4 rect_value, float radius) {
+    float clamped_radius = clamp(radius, 0.0, min(rect_value.z, rect_value.w) * 0.5);
+    float2 center = rect_value.xy + rect_value.zw * 0.5;
+    float2 local = abs(pixel_position - center);
+    float2 half_size = rect_value.zw * 0.5;
+    float2 inner = max(half_size - clamped_radius, float2(0.0, 0.0));
+    float2 q = local - inner;
+    float outside = length(max(q, float2(0.0, 0.0)));
+    float inside = min(max(q.x, q.y), 0.0);
+    return outside + inside - clamped_radius;
+}
+
+float clip_coverage(float2 pixel_position, uint clip_count) {
+    float coverage = 1.0;
+    for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {
+        float radius = clip_radii[clip_index / 4][clip_index % 4];
+        coverage *= saturate(
+            0.5 - rounded_rect_sd(pixel_position, clip_rects[clip_index], radius));
+    }
+    return coverage;
+}
+
+float4 main(VertexOutput input) : SV_Target {
+    bool horizontal = params0.x > 0.5;
+    uint clip_count = (uint)params0.w;
+    float span = max(horizontal ? rect.z : rect.w, 1.0);
+    float position = horizontal ? (input.pixel.x - rect.x) : (input.pixel.y - rect.y);
+    float t = saturate(position / span);
+    float4 gradient_color = lerp(start_color, end_color, t);
+    float coverage = saturate(0.5 - rounded_rect_sd(input.pixel, rect, 0.0));
+    coverage *= clip_coverage(input.pixel, clip_count);
+    return float4(gradient_color.rgb, gradient_color.a * coverage);
+}
+)";
+
 constexpr std::string_view kImageVertexShader = R"(
 cbuffer ImageDrawConstantsBuffer : register(b0) {
     float4 rect;
@@ -437,17 +548,20 @@ private:
     bool present_uploaded_software_frame();
     void present_software_direct(NativeSurface& surface);
     [[nodiscard]] Rect effective_command_bounds(const PrimitiveCommand& command) const;
+    [[nodiscard]] Rect effective_command_bounds(const GradientCommand& command) const;
     [[nodiscard]] Rect effective_command_bounds(const ImageCommand& command) const;
     [[nodiscard]] Rect effective_command_bounds(const TextCommand& command) const;
     [[nodiscard]] bool primitive_covers_damage(const PrimitiveCommand& command, Rect damage) const;
     [[nodiscard]] bool damage_requires_clear(Rect damage) const;
     bool command_intersects_damage(const PrimitiveCommand& command, Rect damage) const;
+    bool command_intersects_damage(const GradientCommand& command, Rect damage) const;
     bool command_intersects_damage(const ImageCommand& command, Rect damage) const;
     bool command_intersects_damage(const TextCommand& command, Rect damage) const;
     void draw_clear_rect(Rect damage);
     void draw_primitive(const PrimitiveCommand& command,
                         std::optional<Rect> scissor,
                         bool already_scaled = false);
+    void draw_gradient(const GradientCommand& command, std::optional<Rect> scissor);
     void draw_image(const ImageCommand& command,
                     ID3D11ShaderResourceView& shader_resource_view,
                     std::optional<Rect> scissor);
@@ -468,9 +582,12 @@ private:
     ComPtr<ID3D11Texture2D> software_texture_;
     ComPtr<ID3D11VertexShader> vertex_shader_;
     ComPtr<ID3D11PixelShader> pixel_shader_;
+    ComPtr<ID3D11VertexShader> gradient_vertex_shader_;
+    ComPtr<ID3D11PixelShader> gradient_pixel_shader_;
     ComPtr<ID3D11VertexShader> image_vertex_shader_;
     ComPtr<ID3D11PixelShader> image_pixel_shader_;
     ComPtr<ID3D11Buffer> constant_buffer_;
+    ComPtr<ID3D11Buffer> gradient_constant_buffer_;
     ComPtr<ID3D11BlendState> blend_state_;
     ComPtr<ID3D11RasterizerState> rasterizer_state_;
     ComPtr<ID3D11SamplerState> nearest_sampler_state_;
@@ -485,6 +602,7 @@ private:
     std::vector<Rect> pixel_damage_regions_;
     std::vector<DrawCommand> draw_commands_;
     std::vector<PrimitiveCommand> primitive_commands_;
+    std::vector<GradientCommand> gradient_commands_;
     std::vector<ImageCommand> image_commands_;
     std::vector<TextCommand> text_commands_;
     std::vector<ClipRegion> active_clips_;
@@ -763,6 +881,7 @@ void D3D11Renderer::begin_frame(Size viewport, float scale_factor) {
     trim_texture_cache(text_texture_cache_, kTextTextureCacheMaxEntries);
     draw_commands_.clear();
     primitive_commands_.clear();
+    gradient_commands_.clear();
     image_commands_.clear();
     text_commands_.clear();
     active_clips_.clear();
@@ -780,6 +899,7 @@ void D3D11Renderer::render(const RenderNode& root) {
     last_root_ = &root;
     draw_commands_.clear();
     primitive_commands_.clear();
+    gradient_commands_.clear();
     image_commands_.clear();
     text_commands_.clear();
     active_clips_.clear();
@@ -836,6 +956,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         for (const auto& child : node.children()) {
             if (child != nullptr && !collect_gpu_commands(*child)) {
                 primitive_commands_.clear();
+                gradient_commands_.clear();
                 image_commands_.clear();
                 text_commands_.clear();
                 draw_commands_.clear();
@@ -884,9 +1005,25 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
             {.kind = DrawCommandKind::Primitive, .command_index = primitive_commands_.size() - 1});
         return true;
     }
+    case RenderNodeKind::LinearGradient: {
+        const auto& gradient_node = static_cast<const LinearGradientNode&>(node);
+        GradientCommand command{
+            .rect = gradient_node.bounds(),
+            .start_color = gradient_node.start_color(),
+            .end_color = gradient_node.end_color(),
+            .direction = gradient_node.direction(),
+        };
+        command.clip_count = static_cast<uint32_t>(active_clips_.size());
+        std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+        gradient_commands_.push_back(command);
+        draw_commands_.push_back(
+            {.kind = DrawCommandKind::Gradient, .command_index = gradient_commands_.size() - 1});
+        return true;
+    }
     case RenderNodeKind::RoundedClip: {
         if (active_clips_.size() >= kMaxClipDepth) {
             primitive_commands_.clear();
+            gradient_commands_.clear();
             image_commands_.clear();
             text_commands_.clear();
             draw_commands_.clear();
@@ -901,6 +1038,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
             if (child != nullptr && !collect_gpu_commands(*child)) {
                 active_clips_.pop_back();
                 primitive_commands_.clear();
+                gradient_commands_.clear();
                 image_commands_.clear();
                 text_commands_.clear();
                 draw_commands_.clear();
@@ -966,17 +1104,18 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         return true;
     }
     case RenderNodeKind::Opacity:
-    case RenderNodeKind::LinearGradient:
     case RenderNodeKind::Shadow:
         // These nodes carry visual semantics that the D3D11 path does not yet implement.
         // Falling back preserves correctness until the GPU path supports them explicitly.
         primitive_commands_.clear();
+        gradient_commands_.clear();
         image_commands_.clear();
         text_commands_.clear();
         draw_commands_.clear();
         return false;
     default:
         primitive_commands_.clear();
+        gradient_commands_.clear();
         image_commands_.clear();
         text_commands_.clear();
         draw_commands_.clear();
@@ -1114,10 +1253,15 @@ bool D3D11Renderer::create_device_objects() {
 bool D3D11Renderer::create_pipeline_objects() {
     ComPtr<ID3DBlob> vertex_bytecode;
     ComPtr<ID3DBlob> pixel_bytecode;
+    ComPtr<ID3DBlob> gradient_vertex_bytecode;
+    ComPtr<ID3DBlob> gradient_pixel_bytecode;
     ComPtr<ID3DBlob> image_vertex_bytecode;
     ComPtr<ID3DBlob> image_pixel_bytecode;
     if (FAILED(compile_shader(kPrimitiveVertexShader, "main", "vs_5_0", vertex_bytecode)) ||
         FAILED(compile_shader(kPrimitivePixelShader, "main", "ps_5_0", pixel_bytecode)) ||
+        FAILED(
+            compile_shader(kGradientVertexShader, "main", "vs_5_0", gradient_vertex_bytecode)) ||
+        FAILED(compile_shader(kGradientPixelShader, "main", "ps_5_0", gradient_pixel_bytecode)) ||
         FAILED(compile_shader(kImageVertexShader, "main", "vs_5_0", image_vertex_bytecode)) ||
         FAILED(compile_shader(kImagePixelShader, "main", "ps_5_0", image_pixel_bytecode))) {
         destroy_device_objects();
@@ -1132,6 +1276,14 @@ bool D3D11Renderer::create_pipeline_objects() {
                                           pixel_bytecode->GetBufferSize(),
                                           nullptr,
                                           &pixel_shader_)) ||
+        FAILED(device_->CreateVertexShader(gradient_vertex_bytecode->GetBufferPointer(),
+                                           gradient_vertex_bytecode->GetBufferSize(),
+                                           nullptr,
+                                           &gradient_vertex_shader_)) ||
+        FAILED(device_->CreatePixelShader(gradient_pixel_bytecode->GetBufferPointer(),
+                                          gradient_pixel_bytecode->GetBufferSize(),
+                                          nullptr,
+                                          &gradient_pixel_shader_)) ||
         FAILED(device_->CreateVertexShader(image_vertex_bytecode->GetBufferPointer(),
                                            image_vertex_bytecode->GetBufferSize(),
                                            nullptr,
@@ -1149,6 +1301,16 @@ bool D3D11Renderer::create_pipeline_objects() {
     constant_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
     constant_buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(device_->CreateBuffer(&constant_buffer_desc, nullptr, &constant_buffer_))) {
+        destroy_device_objects();
+        return false;
+    }
+
+    D3D11_BUFFER_DESC gradient_constant_buffer_desc{};
+    gradient_constant_buffer_desc.ByteWidth = sizeof(GradientDrawConstants);
+    gradient_constant_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
+    gradient_constant_buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    if (FAILED(device_->CreateBuffer(
+            &gradient_constant_buffer_desc, nullptr, &gradient_constant_buffer_))) {
         destroy_device_objects();
         return false;
     }
@@ -1281,12 +1443,15 @@ void D3D11Renderer::destroy_device_objects() {
     scene_texture_.Reset();
     back_buffer_.Reset();
     constant_buffer_.Reset();
+    gradient_constant_buffer_.Reset();
     blend_state_.Reset();
     rasterizer_state_.Reset();
     linear_sampler_state_.Reset();
     nearest_sampler_state_.Reset();
     image_pixel_shader_.Reset();
     image_vertex_shader_.Reset();
+    gradient_pixel_shader_.Reset();
+    gradient_vertex_shader_.Reset();
     pixel_shader_.Reset();
     vertex_shader_.Reset();
     shaped_text_cache_.clear();
@@ -1471,6 +1636,11 @@ bool D3D11Renderer::draw_gpu_scene() {
                 continue;
             }
 
+            if (draw_command.kind == DrawCommandKind::Gradient) {
+                draw_gradient(gradient_commands_[draw_command.command_index], std::nullopt);
+                continue;
+            }
+
             if (draw_command.kind == DrawCommandKind::Image) {
                 auto* texture = ensure_image_texture(image_commands_[draw_command.command_index]);
                 if (texture == nullptr || texture->shader_resource_view == nullptr) {
@@ -1562,6 +1732,19 @@ bool D3D11Renderer::draw_gpu_scene() {
                     }
                     ++last_hotspot_counters_.gpu_replayed_command_count;
                     draw_primitive(command, damage);
+                }
+                continue;
+            }
+
+            if (draw_command.kind == DrawCommandKind::Gradient) {
+                for (const auto& damage : pixel_damage_regions_) {
+                    const auto& command = gradient_commands_[draw_command.command_index];
+                    if (!command_intersects_damage(command, damage)) {
+                        ++last_hotspot_counters_.gpu_skipped_command_count;
+                        continue;
+                    }
+                    ++last_hotspot_counters_.gpu_replayed_command_count;
+                    draw_gradient(command, damage);
                 }
                 continue;
             }
@@ -1743,6 +1926,17 @@ Rect D3D11Renderer::effective_command_bounds(const PrimitiveCommand& command) co
     return bounds;
 }
 
+Rect D3D11Renderer::effective_command_bounds(const GradientCommand& command) const {
+    Rect bounds = scale_rect(command.rect, scale_factor_);
+    for (uint32_t index = 0; index < command.clip_count && index < kMaxClipDepth; ++index) {
+        bounds = intersect_rect(bounds, scale_rect(command.clips[index].rect, scale_factor_));
+        if (rect_is_empty(bounds)) {
+            break;
+        }
+    }
+    return bounds;
+}
+
 Rect D3D11Renderer::effective_command_bounds(const ImageCommand& command) const {
     Rect bounds = scale_rect(command.rect, scale_factor_);
     for (uint32_t index = 0; index < command.clip_count && index < kMaxClipDepth; ++index) {
@@ -1816,6 +2010,12 @@ bool D3D11Renderer::command_intersects_damage(const PrimitiveCommand& command, R
     return !rect_is_empty(scaled_bounds) && rects_overlap_or_touch(scaled_bounds, damage);
 }
 
+bool D3D11Renderer::command_intersects_damage(const GradientCommand& command, Rect damage) const {
+    const auto scaled_bounds = clip_rect_to_viewport(
+        effective_command_bounds(command), framebuffer_width_, framebuffer_height_);
+    return !rect_is_empty(scaled_bounds) && rects_overlap_or_touch(scaled_bounds, damage);
+}
+
 bool D3D11Renderer::command_intersects_damage(const ImageCommand& command, Rect damage) const {
     const auto scaled_bounds = clip_rect_to_viewport(
         effective_command_bounds(command), framebuffer_width_, framebuffer_height_);
@@ -1871,6 +2071,51 @@ void D3D11Renderer::draw_primitive(const PrimitiveCommand& command,
     context_->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
     context_->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
     context_->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
+
+    const auto scissor_rect =
+        scissor.has_value()
+            ? clip_rect_to_viewport(*scissor, framebuffer_width_, framebuffer_height_)
+            : clip_rect_to_viewport(draw_rect, framebuffer_width_, framebuffer_height_);
+    const auto d3d_scissor = to_d3d_rect(scissor_rect);
+    context_->RSSetScissorRects(1, &d3d_scissor);
+    ID3D11ShaderResourceView* null_views[] = {nullptr};
+    context_->PSSetShaderResources(0, 1, null_views);
+    context_->Draw(4, 0);
+    ++last_hotspot_counters_.gpu_draw_call_count;
+}
+
+void D3D11Renderer::draw_gradient(const GradientCommand& command, std::optional<Rect> scissor) {
+    GradientDrawConstants constants{};
+    const Rect draw_rect = scale_rect(command.rect, scale_factor_);
+    constants.rect[0] = draw_rect.x;
+    constants.rect[1] = draw_rect.y;
+    constants.rect[2] = draw_rect.width;
+    constants.rect[3] = draw_rect.height;
+    constants.start_color[0] = command.start_color.r;
+    constants.start_color[1] = command.start_color.g;
+    constants.start_color[2] = command.start_color.b;
+    constants.start_color[3] = command.start_color.a;
+    constants.end_color[0] = command.end_color.r;
+    constants.end_color[1] = command.end_color.g;
+    constants.end_color[2] = command.end_color.b;
+    constants.end_color[3] = command.end_color.a;
+    for (uint32_t index = 0; index < command.clip_count && index < kMaxClipDepth; ++index) {
+        const auto clip_rect = scale_rect(command.clips[index].rect, scale_factor_);
+        constants.clip_rects[index * 4 + 0] = clip_rect.x;
+        constants.clip_rects[index * 4 + 1] = clip_rect.y;
+        constants.clip_rects[index * 4 + 2] = clip_rect.width;
+        constants.clip_rects[index * 4 + 3] = clip_rect.height;
+        constants.clip_radii[index] = command.clips[index].radius * scale_factor_;
+    }
+    constants.params0[0] = command.direction == Orientation::Horizontal ? 1.0F : 0.0F;
+    constants.params0[3] = static_cast<float>(command.clip_count);
+    constants.viewport[0] = static_cast<float>(framebuffer_width_);
+    constants.viewport[1] = static_cast<float>(framebuffer_height_);
+    context_->VSSetShader(gradient_vertex_shader_.Get(), nullptr, 0);
+    context_->PSSetShader(gradient_pixel_shader_.Get(), nullptr, 0);
+    context_->VSSetConstantBuffers(0, 1, gradient_constant_buffer_.GetAddressOf());
+    context_->PSSetConstantBuffers(0, 1, gradient_constant_buffer_.GetAddressOf());
+    context_->UpdateSubresource(gradient_constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
         scissor.has_value()
