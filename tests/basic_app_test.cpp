@@ -555,6 +555,50 @@ private:
     float height_ = 0.0F;
 };
 
+class UnsupportedSemanticGpuWidget : public nk::Widget {
+public:
+    static std::shared_ptr<UnsupportedSemanticGpuWidget> create(float width, float height) {
+        return std::shared_ptr<UnsupportedSemanticGpuWidget>(
+            new UnsupportedSemanticGpuWidget(width, height));
+    }
+
+    void set_accent(nk::Color color) {
+        accent_ = color;
+        queue_redraw({0.0F, 0.0F, width_, height_});
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, height_, width_, height_};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        const auto rect = allocation();
+        ctx.add_color_rect(rect, nk::Color::from_rgb(246, 248, 251));
+        ctx.add_shadow({rect.x + 18.0F, rect.y + 18.0F, rect.width - 36.0F, rect.height - 36.0F},
+                       nk::Color{0.0F, 0.0F, 0.0F, 0.22F},
+                       0.0F,
+                       3.0F,
+                       8.0F,
+                       0.0F,
+                       14.0F);
+        ctx.add_linear_gradient({rect.x + 22.0F, rect.y + 20.0F, rect.width - 44.0F, 42.0F},
+                                nk::Color::from_rgb(232, 244, 243),
+                                accent_,
+                                nk::Orientation::Horizontal);
+        ctx.push_opacity({rect.x + 24.0F, rect.y + 74.0F, rect.width - 48.0F, 36.0F}, 0.65F);
+        ctx.add_color_rect({rect.x + 24.0F, rect.y + 74.0F, rect.width - 48.0F, 36.0F}, accent_);
+        ctx.pop_container();
+    }
+
+private:
+    UnsupportedSemanticGpuWidget(float width, float height) : width_(width), height_(height) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
+    nk::Color accent_ = nk::Color::from_rgb(26, 153, 150);
+};
+
 } // namespace
 
 TEST_CASE("Application lifecycle can enter and exit the event loop", "[app]") {
@@ -1362,6 +1406,44 @@ TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw",
     REQUIRE(second_frame.render_hotspot_counters.gpu_swapchain_copy_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::PartialRedrawCopy);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::BandwidthFavored);
+}
+
+TEST_CASE("Win32 D3D11 falls back to software upload for unsupported semantic nodes",
+          "[app][render][windows]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "D3D11 semantic fallback", .width = 340, .height = 180});
+
+    auto fallback_widget = UnsupportedSemanticGpuWidget::create(180.0F, 120.0F);
+    window.set_child(fallback_widget);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
+
+    const auto first_frame = window.last_frame_diagnostics();
+    REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_region_count == 0);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::SoftwareUpload);
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_tradeoff ==
+            nk::GpuPresentTradeoff::None);
+
+    fallback_widget->set_accent(nk::Color::from_rgb(51, 89, 170));
+    REQUIRE(app.event_loop().poll());
+
+    const auto second_frame = window.last_frame_diagnostics();
+    REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count == 0);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_swapchain_copy_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count >= 1);
+    REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::SoftwareUpload);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_tradeoff ==
             nk::GpuPresentTradeoff::BandwidthFavored);
 }
