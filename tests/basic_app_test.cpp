@@ -157,6 +157,13 @@ float widest_render_snapshot_kind_containing(const nk::RenderSnapshotNode& node,
     return widest;
 }
 
+void dispatch_click(nk::Window& window, nk::Point point) {
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = point.x, .y = point.y, .button = 1});
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = point.x, .y = point.y, .button = 1});
+}
+
 class FixedWidget : public nk::Widget {
 public:
     static std::shared_ptr<FixedWidget> create(float width, float height) {
@@ -694,6 +701,63 @@ TEST_CASE("Dialog can close after caller releases its setup reference", "[app][d
     REQUIRE_FALSE(weak_dialog.expired());
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
     REQUIRE(accepted);
+    REQUIRE(weak_dialog.expired());
+}
+
+TEST_CASE("Dialog OK pointer activation survives caller releasing setup reference",
+          "[app][dialog][input]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Dialog pointer", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Root"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    std::weak_ptr<nk::Dialog> weak_dialog;
+    nk::DialogResponse response = nk::DialogResponse::None;
+    {
+        auto dialog = nk::Dialog::create("About", "Dialog pointer regression");
+        dialog->add_button("OK", nk::DialogResponse::Accept);
+        auto conn = dialog->on_response().connect(
+            [&](nk::DialogResponse value) { response = value; });
+        (void)conn;
+        weak_dialog = dialog;
+        dialog->present(window);
+    }
+
+    REQUIRE(app.event_loop().poll());
+    REQUIRE_FALSE(weak_dialog.expired());
+
+    dispatch_click(window, {236.0F, 152.0F});
+
+    REQUIRE(response == nk::DialogResponse::Accept);
+    REQUIRE(weak_dialog.expired());
+}
+
+TEST_CASE("Dialog Escape cancellation survives caller releasing setup reference",
+          "[app][dialog][input]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Dialog Escape", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Root"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    std::weak_ptr<nk::Dialog> weak_dialog;
+    nk::DialogResponse response = nk::DialogResponse::None;
+    {
+        auto dialog = nk::Dialog::create("Confirm", "Dismiss?");
+        dialog->add_button("Cancel", nk::DialogResponse::Cancel);
+        dialog->add_button("OK", nk::DialogResponse::Accept);
+        auto conn = dialog->on_response().connect(
+            [&](nk::DialogResponse value) { response = value; });
+        (void)conn;
+        weak_dialog = dialog;
+        dialog->present(window);
+    }
+
+    REQUIRE_FALSE(weak_dialog.expired());
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+
+    REQUIRE(response == nk::DialogResponse::Cancel);
     REQUIRE(weak_dialog.expired());
 }
 
