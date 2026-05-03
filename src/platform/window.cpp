@@ -3328,9 +3328,13 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         update_cursor_shape(target);
         if (impl_->pressed_widget != nullptr) {
             auto* pressed = impl_->pressed_widget;
+            auto pressed_keep_alive = pressed->weak_from_this().lock();
+            (void)pressed_keep_alive;
             (void)dispatch_mouse_bubble(pressed);
-            pressed->set_state_flag(StateFlags::Pressed, false);
-            impl_->pressed_widget = nullptr;
+            if (impl_->pressed_widget == pressed) {
+                pressed->set_state_flag(StateFlags::Pressed, false);
+                impl_->pressed_widget = nullptr;
+            }
         } else if (target != nullptr) {
             (void)dispatch_mouse_bubble(target);
         }
