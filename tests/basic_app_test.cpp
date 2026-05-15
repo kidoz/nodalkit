@@ -5170,3 +5170,25 @@ TEST_CASE("WindowEvent::ScaleFactorChanged fires signal and requests a ScaleFact
     REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
                                          nk::FrameRequestReason::ScaleFactorChanged));
 }
+
+TEST_CASE("TextField secures text entry with bullets", "[app][text]") {
+    auto field = nk::TextField::create("password");
+    REQUIRE(field->text() == "password");
+    REQUIRE(!field->is_secure_text_entry());
+
+    field->set_secure_text_entry(true);
+    REQUIRE(field->is_secure_text_entry());
+    
+    nk::SnapshotContext snap;
+    field->allocate({0, 0, 100, 30});
+    field->on_focus_changed(true);
+    
+    // Simulate commit
+    nk::TextInputEvent ev{
+        .type = nk::TextInputEvent::Type::Commit,
+        .text = "x"
+    };
+    field->handle_text_input_event(ev);
+    REQUIRE(field->text() == "passwordx");
+}
+

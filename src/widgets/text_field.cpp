@@ -502,6 +502,7 @@ struct TextField::Impl {
     std::size_t history_index = 0;
     HistoryGroup history_group = HistoryGroup::None;
     bool spell_check_enabled = false;
+    bool secure_text_entry = false;
     mutable std::string spell_check_cache_text;
     mutable bool spell_check_cache_valid = false;
     mutable std::vector<SpellCheckRange> spell_check_ranges;
@@ -609,6 +610,18 @@ void TextField::set_spell_check_enabled(bool enabled) {
 
 bool TextField::is_spell_check_enabled() const {
     return impl_->spell_check_enabled;
+}
+
+void TextField::set_secure_text_entry(bool secure) {
+    if (impl_->secure_text_entry == secure) {
+        return;
+    }
+    impl_->secure_text_entry = secure;
+    queue_text_redraw();
+}
+
+bool TextField::is_secure_text_entry() const {
+    return impl_->secure_text_entry;
 }
 
 Signal<std::string_view>& TextField::on_text_changed() {
@@ -1421,21 +1434,40 @@ bool TextField::delete_surrounding_text(std::size_t before_length, std::size_t a
 }
 
 std::string TextField::composed_display_text() const {
-    if (impl_->preedit_text.empty()) {
-        return impl_->text.empty() ? impl_->placeholder : impl_->text;
+    std::string text_to_show = impl_->text;
+    if (impl_->secure_text_entry && !impl_->text.empty()) {
+        const std::size_t num_chars = decode_utf8_units(impl_->text).size();
+        text_to_show.clear();
+        text_to_show.reserve(num_chars * 3);
+        for (std::size_t i = 0; i < num_chars; ++i) {
+            text_to_show.append("\xE2\x80\xA2");
+        }
     }
 
-    std::string display = impl_->text;
-    display.insert(impl_->cursor, impl_->preedit_text);
+    if (impl_->preedit_text.empty()) {
+        return text_to_show.empty() ? impl_->placeholder : text_to_show;
+    }
+
+    std::string display = text_to_show;
+    std::size_t insert_pos = impl_->cursor;
+    if (impl_->secure_text_entry) {
+        insert_pos = decode_utf8_units(impl_->text.substr(0, impl_->cursor)).size() * 3;
+    }
+    display.insert(insert_pos, impl_->preedit_text);
     return display;
 }
 
 std::size_t TextField::display_caret_position() const {
-    if (impl_->preedit_text.empty()) {
-        return impl_->cursor;
+    std::size_t base_cursor = impl_->cursor;
+    if (impl_->secure_text_entry) {
+        base_cursor = decode_utf8_units(impl_->text.substr(0, impl_->cursor)).size() * 3;
     }
 
-    return impl_->cursor + std::min(impl_->preedit_selection_end, impl_->preedit_text.size());
+    if (impl_->preedit_text.empty()) {
+        return base_cursor;
+    }
+
+    return base_cursor + std::min(impl_->preedit_selection_end, impl_->preedit_text.size());
 }
 
 } // namespace nk

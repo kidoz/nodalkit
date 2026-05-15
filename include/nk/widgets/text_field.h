@@ -52,6 +52,10 @@ public:
     void set_spell_check_enabled(bool enabled);
     [[nodiscard]] bool is_spell_check_enabled() const;
 
+    /// Enable or disable secure text entry (e.g. for passwords).
+    void set_secure_text_entry(bool secure);
+    [[nodiscard]] bool is_secure_text_entry() const;
+
     /// Signal emitted when the text changes.
     Signal<std::string_view>& on_text_changed();
 
