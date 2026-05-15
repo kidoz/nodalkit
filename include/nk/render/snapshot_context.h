@@ -96,6 +96,18 @@ public:
     /// content. Useful for popups and transient surfaces.
     void push_overlay_container(Rect bounds);
 
+    /// Convenience: add a line segment.
+    void add_line(Point start, Point end, Color color, float thickness = 1.0F);
+
+    /// Convenience: add a 2D path.
+    void add_path(Path2D path, Color stroke_color, float thickness = 1.0F);
+
+    /// Push an affine transformation container.
+    void push_transform(Matrix3x2 transform);
+
+    /// Pop a transformation container.
+    void pop_transform();
+
     /// Pop the current container.
     void pop_container();
 

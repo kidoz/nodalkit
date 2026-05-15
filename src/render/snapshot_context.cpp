@@ -89,6 +89,25 @@ void SnapshotContext::add_image(Rect dest, const uint32_t* data, int w, int h, S
     add_node(std::make_unique<ImageNode>(dest, data, w, h, scale));
 }
 
+void SnapshotContext::add_path(Path2D path, Color stroke_color, float thickness) {
+    add_node(std::make_unique<PathNode>(std::move(path), stroke_color, thickness));
+}
+
+void SnapshotContext::add_line(Point start, Point end, Color color, float thickness) {
+    add_node(std::make_unique<LineNode>(start, end, color, thickness));
+}
+
+void SnapshotContext::push_transform(Matrix3x2 transform) {
+    auto node = std::make_unique<TransformNode>(transform);
+    auto* raw = node.get();
+    add_node(std::move(node));
+    impl_->container_stack.push(raw);
+}
+
+void SnapshotContext::pop_transform() {
+    pop_container();
+}
+
 void SnapshotContext::push_container(Rect bounds) {
     auto container = std::make_unique<RenderNode>(RenderNodeKind::Container);
     container->set_bounds(bounds);

@@ -24,6 +24,9 @@ enum class RenderNodeKind {
     Opacity,        ///< Multiplies children's alpha by a factor.
     LinearGradient, ///< Linear gradient fill.
     Shadow,         ///< Box shadow (outset).
+    Line,           ///< Line segment.
+    Path,           ///< 2D path.
+    Transform,      ///< Applies a 2D affine transformation to children.
 };
 
 /// A node in the retained render tree. Widgets produce render nodes
@@ -195,6 +198,49 @@ private:
     float blur_radius_ = 0.0F;
     float spread_ = 0.0F;
     float corner_radius_ = 0.0F;
+};
+
+/// A line segment render node.
+class LineNode : public RenderNode {
+public:
+    LineNode(Point start, Point end, Color color, float thickness);
+
+    [[nodiscard]] Point start() const;
+    [[nodiscard]] Point end() const;
+    [[nodiscard]] Color color() const;
+    [[nodiscard]] float thickness() const;
+
+private:
+    Point start_;
+    Point end_;
+    Color color_;
+    float thickness_ = 1.0F;
+};
+
+/// A 2D path render node.
+class PathNode : public RenderNode {
+public:
+    PathNode(Path2D path, Color stroke_color, float thickness);
+
+    [[nodiscard]] const Path2D& path() const;
+    [[nodiscard]] Color stroke_color() const;
+    [[nodiscard]] float thickness() const;
+
+private:
+    Path2D path_;
+    Color stroke_color_;
+    float thickness_ = 1.0F;
+};
+
+/// A transform container node.
+class TransformNode : public RenderNode {
+public:
+    TransformNode(Matrix3x2 transform);
+
+    [[nodiscard]] const Matrix3x2& transform() const;
+
+private:
+    Matrix3x2 transform_;
 };
 
 } // namespace nk

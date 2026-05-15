@@ -5216,3 +5216,24 @@ TEST_CASE("CanvasWidget dispatches on_draw signal", "[app][canvas]") {
     REQUIRE(drawn);
 }
 
+TEST_CASE("SnapshotContext constructs new graph primitives", "[app][render]") {
+    nk::SnapshotContext snap;
+    snap.add_line({0, 0}, {100, 100}, nk::Color{1, 0, 0, 1}, 2.0F);
+    
+    nk::Path2D path;
+    path.points.push_back({0, 0});
+    path.points.push_back({50, 50});
+    snap.add_path(path, nk::Color{0, 1, 0, 1}, 1.0F);
+    
+    nk::Matrix3x2 mat{2.0F, 0.0F, 0.0F, 2.0F, 10.0F, 10.0F};
+    snap.push_transform(mat);
+    snap.add_color_rect({0, 0, 10, 10}, nk::Color{0, 0, 1, 1});
+    snap.pop_transform();
+    
+    auto root = snap.take_root();
+    REQUIRE(root != nullptr);
+    REQUIRE(root->children().size() == 2); // 2 containers (content, overlay)
+    
+    auto* content_root = root->children()[0].get();
+    REQUIRE(content_root->children().size() == 3); // line, path, transform
+}

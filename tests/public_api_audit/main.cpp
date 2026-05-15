@@ -621,8 +621,13 @@ void force_symbol_references() {
         nk::Point, std::string, nk::Color, nk::FontDescriptor)>(&nk::SnapshotContext::add_text);
     (void)static_cast<void (nk::SnapshotContext::*)(
         nk::Rect, const uint32_t*, int, int, nk::ScaleMode)>(&nk::SnapshotContext::add_image);
-    (void)static_cast<void (nk::SnapshotContext::*)(nk::Rect)>(
-        &nk::SnapshotContext::push_container);
+    (void)static_cast<void (nk::SnapshotContext::*)(nk::Point, nk::Point, nk::Color, float)>(
+        &nk::SnapshotContext::add_line);
+    (void)static_cast<void (nk::SnapshotContext::*)(nk::Path2D, nk::Color, float)>(
+        &nk::SnapshotContext::add_path);
+    (void)static_cast<void (nk::SnapshotContext::*)(nk::Rect)>(&nk::SnapshotContext::push_container);
+    (void)static_cast<void (nk::SnapshotContext::*)(nk::Matrix3x2)>(&nk::SnapshotContext::push_transform);
+    (void)static_cast<void (nk::SnapshotContext::*)()>(&nk::SnapshotContext::pop_transform);
     (void)static_cast<void (nk::SnapshotContext::*)(bool)>(
         &nk::SnapshotContext::set_debug_annotations_enabled);
     (void)static_cast<bool (nk::SnapshotContext::*)() const>(

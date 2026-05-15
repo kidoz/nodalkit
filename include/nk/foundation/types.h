@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 namespace nk {
 
@@ -75,6 +76,21 @@ struct Color {
     }
 
     constexpr bool operator==(const Color&) const = default;
+};
+
+/// 2D affine transformation matrix.
+struct Matrix3x2 {
+    float m11 = 1.0F, m12 = 0.0F;
+    float m21 = 0.0F, m22 = 1.0F;
+    float m31 = 0.0F, m32 = 0.0F;
+
+    constexpr bool operator==(const Matrix3x2&) const = default;
+};
+
+/// A 2D path containing multiple points.
+struct Path2D {
+    std::vector<Point> points;
+    bool closed = false;
 };
 
 /// Layout orientation.

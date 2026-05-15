@@ -952,7 +952,11 @@ void D3D11Renderer::trim_texture_cache(Map& cache, std::size_t max_entries) {
 
 bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
     switch (node.kind()) {
-    case RenderNodeKind::Container:
+    case RenderNodeKind::Line:
+        case RenderNodeKind::Path:
+        case RenderNodeKind::Transform:
+            return true;
+        case RenderNodeKind::Container:
         for (const auto& child : node.children()) {
             if (child != nullptr && !collect_gpu_commands(*child)) {
                 primitive_commands_.clear();

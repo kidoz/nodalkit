@@ -99,6 +99,88 @@ float RoundedClipNode::corner_radius() const {
     return corner_radius_;
 }
 
+// --- LineNode ---
+
+LineNode::LineNode(Point start, Point end, Color color, float thickness)
+    : RenderNode(RenderNodeKind::Line)
+    , start_(start)
+    , end_(end)
+    , color_(color)
+    , thickness_(thickness) {
+    const float min_x = std::min(start.x, end.x) - thickness / 2.0F;
+    const float max_x = std::max(start.x, end.x) + thickness / 2.0F;
+    const float min_y = std::min(start.y, end.y) - thickness / 2.0F;
+    const float max_y = std::max(start.y, end.y) + thickness / 2.0F;
+    set_bounds({min_x, min_y, max_x - min_x, max_y - min_y});
+}
+
+Point LineNode::start() const {
+    return start_;
+}
+
+Point LineNode::end() const {
+    return end_;
+}
+
+Color LineNode::color() const {
+    return color_;
+}
+
+float LineNode::thickness() const {
+    return thickness_;
+}
+
+// --- PathNode ---
+
+PathNode::PathNode(Path2D path, Color stroke_color, float thickness)
+    : RenderNode(RenderNodeKind::Path)
+    , path_(std::move(path))
+    , stroke_color_(stroke_color)
+    , thickness_(thickness) {
+    if (path_.points.empty()) {
+        set_bounds({});
+    } else {
+        float min_x = path_.points[0].x;
+        float max_x = path_.points[0].x;
+        float min_y = path_.points[0].y;
+        float max_y = path_.points[0].y;
+        for (const auto& pt : path_.points) {
+            min_x = std::min(min_x, pt.x);
+            max_x = std::max(max_x, pt.x);
+            min_y = std::min(min_y, pt.y);
+            max_y = std::max(max_y, pt.y);
+        }
+        min_x -= thickness / 2.0F;
+        max_x += thickness / 2.0F;
+        min_y -= thickness / 2.0F;
+        max_y += thickness / 2.0F;
+        set_bounds({min_x, min_y, max_x - min_x, max_y - min_y});
+    }
+}
+
+const Path2D& PathNode::path() const {
+    return path_;
+}
+
+Color PathNode::stroke_color() const {
+    return stroke_color_;
+}
+
+float PathNode::thickness() const {
+    return thickness_;
+}
+
+// --- TransformNode ---
+
+TransformNode::TransformNode(Matrix3x2 transform)
+    : RenderNode(RenderNodeKind::Transform), transform_(transform) {
+    // TransformNode bounds are unbounded by default or derived from children.
+}
+
+const Matrix3x2& TransformNode::transform() const {
+    return transform_;
+}
+
 // --- TextNode ---
 
 TextNode::TextNode(

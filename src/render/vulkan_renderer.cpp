@@ -3396,6 +3396,10 @@ private:
 
     bool collect_draw_commands(const RenderNode& node) {
         switch (node.kind()) {
+        case RenderNodeKind::Line:
+        case RenderNodeKind::Path:
+        case RenderNodeKind::Transform:
+            return true;
         case RenderNodeKind::Container:
             for (const auto& child : node.children()) {
                 if (child != nullptr && !collect_draw_commands(*child)) {

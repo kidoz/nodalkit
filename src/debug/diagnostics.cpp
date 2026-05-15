@@ -3172,6 +3172,12 @@ std::string render_node_kind_name(RenderNodeKind kind) {
         return "LinearGradient";
     case RenderNodeKind::Shadow:
         return "Shadow";
+    case RenderNodeKind::Line:
+        return "Line";
+    case RenderNodeKind::Path:
+        return "Path";
+    case RenderNodeKind::Transform:
+        return "Transform";
     }
     return "Unknown";
 }
@@ -3251,6 +3257,9 @@ RenderSnapshotNode build_render_snapshot_node(const RenderNode& node) {
     case RenderNodeKind::Opacity:
     case RenderNodeKind::LinearGradient:
     case RenderNodeKind::Shadow:
+    case RenderNodeKind::Line:
+    case RenderNodeKind::Path:
+    case RenderNodeKind::Transform:
         break;
     }
 
