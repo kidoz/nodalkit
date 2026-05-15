@@ -3340,7 +3340,10 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         }
         break;
     }
-    case MouseEvent::Type::Scroll: {
+    case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd: {
         if (has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             inspector_layout.panel.contains(point)) {
             break;

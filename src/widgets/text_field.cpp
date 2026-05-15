@@ -740,6 +740,9 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Enter:
     case MouseEvent::Type::Leave:
     case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd:
         return false;
     }
 

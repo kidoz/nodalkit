@@ -307,7 +307,10 @@ bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
         impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport, impl_->h_offset);
 
     switch (event.type) {
-    case MouseEvent::Type::Scroll: {
+    case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd: {
         const float scroll_step = event.precise_scrolling ? 1.0F : 40.0F;
         float next_h = impl_->h_offset;
         float next_v = impl_->v_offset;

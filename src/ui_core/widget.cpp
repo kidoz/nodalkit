@@ -541,6 +541,9 @@ void Widget::dispatch_pointer_controllers(const MouseEvent& event) {
             pointer->on_released().emit(event.x, event.y, event.button);
             break;
         case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd:
             break;
         }
     }

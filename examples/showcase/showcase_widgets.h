@@ -553,6 +553,9 @@ public:
         case nk::MouseEvent::Type::Enter:
         case nk::MouseEvent::Type::Leave:
         case nk::MouseEvent::Type::Scroll:
+        case nk::MouseEvent::Type::DragStart:
+        case nk::MouseEvent::Type::DragUpdate:
+        case nk::MouseEvent::Type::DragEnd:
             return false;
         }
 

@@ -237,6 +237,9 @@ bool ContextMenu::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Enter:
         return inside_popup;
     case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd:
         return inside_popup;
     }
 

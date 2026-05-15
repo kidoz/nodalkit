@@ -176,6 +176,9 @@ bool Breadcrumb::handle_mouse_event(const MouseEvent& event) {
         return false;
     }
     case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd:
         return false;
     }
 

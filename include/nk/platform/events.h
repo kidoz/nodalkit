@@ -21,6 +21,9 @@ struct MouseEvent {
         Enter,
         Leave,
         Scroll,
+        DragStart,
+        DragUpdate,
+        DragEnd,
     };
 
     Type type{};

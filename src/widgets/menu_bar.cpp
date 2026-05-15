@@ -515,6 +515,9 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Enter:
         return hovered_menu >= 0 || popup_hit;
     case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd:
         return popup_hit;
     }
 

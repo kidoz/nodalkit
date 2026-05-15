@@ -263,6 +263,9 @@ bool ListView::handle_mouse_event(const MouseEvent& event) {
         }
         return inner.contains({event.x, event.y});
     case MouseEvent::Type::Scroll:
+    case MouseEvent::Type::DragStart:
+    case MouseEvent::Type::DragUpdate:
+    case MouseEvent::Type::DragEnd:
         if (!inner.contains({event.x, event.y}) || !impl_->model) {
             return false;
         }
