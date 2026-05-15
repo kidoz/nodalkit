@@ -31,6 +31,7 @@
 #include <nk/style/theme.h>
 #include <nk/text/font.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/canvas_widget.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
@@ -5190,5 +5191,28 @@ TEST_CASE("TextField secures text entry with bullets", "[app][text]") {
     };
     field->handle_text_input_event(ev);
     REQUIRE(field->text() == "passwordx");
+}
+
+TEST_CASE("CanvasWidget dispatches on_draw signal", "[app][canvas]") {
+    struct TestCanvas : nk::CanvasWidget {
+        static std::shared_ptr<TestCanvas> create() { return std::shared_ptr<TestCanvas>(new TestCanvas()); }
+        void public_snapshot(nk::SnapshotContext& ctx) const { snapshot(ctx); }
+    };
+
+    auto canvas = TestCanvas::create();
+    canvas->allocate({0, 0, 200, 200});
+    
+    bool drawn = false;
+    auto conn = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect bounds) {
+        drawn = true;
+        REQUIRE(bounds.width == 200.0F);
+        REQUIRE(bounds.height == 200.0F);
+        ctx.add_color_rect(bounds, nk::Color::from_rgb(255, 0, 0));
+    });
+    
+    nk::SnapshotContext snap;
+    canvas->public_snapshot(snap);
+    
+    REQUIRE(drawn);
 }
 

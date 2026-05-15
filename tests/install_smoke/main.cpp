@@ -189,6 +189,9 @@ void check_widgets() {
     auto text_field = nk::TextField::create("seed");
     check(text_field != nullptr && text_field->text() == "seed", "TextField::create");
 
+    auto canvas = nk::CanvasWidget::create();
+    check(canvas != nullptr, "CanvasWidget::create");
+
     auto scroll = nk::ScrollArea::create();
     check(scroll != nullptr, "ScrollArea::create");
     scroll->set_content(label);
