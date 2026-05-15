@@ -1,0 +1,7 @@
+# Enforce LF line endings for the whole repository on all platforms.
+* text=auto eol=lf
+
+# Known binary assets: never normalize.
+*.ppm binary
+*.png binary
+*.spv binary
