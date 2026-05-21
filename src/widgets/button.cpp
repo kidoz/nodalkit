@@ -19,25 +19,21 @@ FontDescriptor button_font() {
 
 } // namespace
 
-struct Button::Impl {
-    std::string label;
-    Signal<> clicked;
-    bool armed = false;
-};
+
 
 std::shared_ptr<Button> Button::create(std::string label) {
     return std::shared_ptr<Button>(new Button(std::move(label)));
 }
 
-Button::Button(std::string label) : impl_(std::make_unique<Impl>()) {
-    impl_->label = std::move(label);
+Button::Button(std::string label) : label_(std::move(label)) {
+    
     set_focusable(true);
     add_style_class("button");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Button);
-    accessible.set_name(impl_->label);
+    accessible.set_name(label_);
     accessible.add_action(AccessibleAction::Activate, [this]() {
-        impl_->clicked.emit();
+        clicked_.emit();
         return true;
     });
 }
@@ -45,24 +41,24 @@ Button::Button(std::string label) : impl_(std::make_unique<Impl>()) {
 Button::~Button() = default;
 
 std::string_view Button::label() const {
-    return impl_->label;
+    return label_;
 }
 
 void Button::set_label(std::string label) {
-    if (impl_->label != label) {
-        impl_->label = std::move(label);
-        ensure_accessible().set_name(impl_->label);
+    if (label_ != label) {
+        label_ = std::move(label);
+        ensure_accessible().set_name(label_);
         queue_layout();
         queue_redraw();
     }
 }
 
 Signal<>& Button::on_clicked() {
-    return impl_->clicked;
+    return clicked_;
 }
 
 SizeRequest Button::measure(const Constraints& /*constraints*/) const {
-    const auto measured = measure_text(impl_->label, button_font());
+    const auto measured = measure_text(label_, button_font());
     const float padding_x = theme_number("padding-x", 16.0F);
     const float min_width = theme_number("min-width", 82.0F);
     const float min_height = theme_number("min-height", 36.0F);
@@ -78,13 +74,13 @@ bool Button::handle_mouse_event(const MouseEvent& event) {
 
     switch (event.type) {
     case MouseEvent::Type::Press:
-        impl_->armed = allocation().contains({event.x, event.y});
-        return impl_->armed;
+        armed_ = allocation().contains({event.x, event.y});
+        return armed_;
     case MouseEvent::Type::Release: {
-        const bool activate = impl_->armed && allocation().contains({event.x, event.y});
-        impl_->armed = false;
+        const bool activate = armed_ && allocation().contains({event.x, event.y});
+        armed_ = false;
         if (activate) {
-            impl_->clicked.emit();
+            clicked_.emit();
         }
         return activate;
     }
@@ -107,7 +103,7 @@ bool Button::handle_key_event(const KeyEvent& event) {
     }
 
     if (event.key == KeyCode::Space || event.key == KeyCode::Return) {
-        impl_->clicked.emit();
+        clicked_.emit();
         return true;
     }
 
@@ -136,11 +132,11 @@ void Button::snapshot(SnapshotContext& ctx) const {
         body, theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}), 1.0F, corner_radius);
 
     const auto font = button_font();
-    const auto measured = measure_text(impl_->label, font);
+    const auto measured = measure_text(label_, font);
     const float text_x = body.x + std::max(0.0F, (body.width - measured.width) * 0.5F);
     const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
     ctx.add_text({text_x, text_y},
-                 std::string(impl_->label),
+                 std::string(label_),
                  theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
                  font);
 }

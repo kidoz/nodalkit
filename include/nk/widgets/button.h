@@ -37,8 +37,9 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::string label_;
+    Signal<> clicked_;
+    bool armed_ = false;
 };
 
 } // namespace nk

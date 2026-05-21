@@ -41,8 +41,11 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::string text_;
+    HAlign h_align_ = HAlign::Start;
+    bool wrapping_ = false;
+    mutable float cached_hfw_width_ = -1.0F;
+    mutable float cached_hfw_height_ = -1.0F;
 };
 
 } // namespace nk

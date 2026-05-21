@@ -35,38 +35,32 @@ Rect union_rect(Rect lhs, Rect rhs) {
 
 } // namespace
 
-struct Label::Impl {
-    std::string text;
-    HAlign h_align = HAlign::Start;
-    bool wrapping = false;
-    mutable float cached_hfw_width_ = -1.0F;
-    mutable float cached_hfw_height_ = -1.0F;
-};
+
 
 std::shared_ptr<Label> Label::create(std::string text) {
     // std::make_shared can't access protected ctor, so use raw new.
     return std::shared_ptr<Label>(new Label(std::move(text)));
 }
 
-Label::Label(std::string text) : impl_(std::make_unique<Impl>()) {
-    impl_->text = std::move(text);
+Label::Label(std::string text) : text_(std::move(text)) {
+    
     add_style_class("label");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Label);
-    accessible.set_name(impl_->text);
+    accessible.set_name(text_);
 }
 
 Label::~Label() = default;
 
 std::string_view Label::text() const {
-    return impl_->text;
+    return text_;
 }
 
 void Label::set_text(std::string text) {
-    if (impl_->text != text) {
-        const auto previous_text = impl_->text;
-        impl_->text = std::move(text);
-        ensure_accessible().set_name(impl_->text);
+    if (text_ != text) {
+        const auto previous_text = text_;
+        text_ = std::move(text);
+        ensure_accessible().set_name(text_);
         queue_layout();
 
         const auto a = allocation();
@@ -80,9 +74,9 @@ void Label::set_text(std::string text) {
             const auto measured = measure_text(content, font);
 
             float text_x = a.x;
-            if (impl_->h_align == HAlign::Center) {
+            if (h_align_ == HAlign::Center) {
                 text_x = a.x + std::max(0.0F, (a.width - measured.width) * 0.5F);
-            } else if (impl_->h_align == HAlign::End) {
+            } else if (h_align_ == HAlign::End) {
                 text_x = a.right() - measured.width;
             }
 
@@ -99,7 +93,7 @@ void Label::set_text(std::string text) {
         };
 
         const auto damage =
-            union_rect(text_damage_bounds(previous_text), text_damage_bounds(impl_->text));
+            union_rect(text_damage_bounds(previous_text), text_damage_bounds(text_));
         if (rect_is_empty(damage)) {
             queue_redraw();
         } else {
@@ -109,54 +103,54 @@ void Label::set_text(std::string text) {
 }
 
 HAlign Label::h_align() const {
-    return impl_->h_align;
+    return h_align_;
 }
 
 void Label::set_h_align(HAlign align) {
-    impl_->h_align = align;
+    h_align_ = align;
 }
 
 bool Label::wrapping() const {
-    return impl_->wrapping;
+    return wrapping_;
 }
 
 void Label::set_wrapping(bool enabled) {
-    if (impl_->wrapping != enabled) {
-        impl_->wrapping = enabled;
+    if (wrapping_ != enabled) {
+        wrapping_ = enabled;
         queue_layout();
         queue_redraw();
     }
 }
 
 bool Label::has_height_for_width() const {
-    return impl_->wrapping;
+    return wrapping_;
 }
 
 float Label::height_for_width(float width) const {
-    if (!impl_->wrapping || width <= 0.0F) {
+    if (!wrapping_ || width <= 0.0F) {
         return measure(Constraints::unbounded()).natural_height;
     }
-    if (std::abs(impl_->cached_hfw_width_ - width) < 0.1F) {
-        return impl_->cached_hfw_height_;
+    if (std::abs(cached_hfw_width_ - width) < 0.1F) {
+        return cached_hfw_height_;
     }
     const auto font = label_font(*this);
-    const auto measured = measure_text_wrapped(impl_->text, font, width);
+    const auto measured = measure_text_wrapped(text_, font, width);
     const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
                              has_style_class("heading") ? 28.0F : 20.0F);
-    impl_->cached_hfw_width_ = width;
-    impl_->cached_hfw_height_ = h;
+    cached_hfw_width_ = width;
+    cached_hfw_height_ = h;
     return h;
 }
 
 SizeRequest Label::measure(const Constraints& constraints) const {
     const auto font = label_font(*this);
-    if (impl_->wrapping && constraints.max_width > 0.0F && constraints.max_width < 1e6F) {
-        const auto measured = measure_text_wrapped(impl_->text, font, constraints.max_width);
+    if (wrapping_ && constraints.max_width > 0.0F && constraints.max_width < 1e6F) {
+        const auto measured = measure_text_wrapped(text_, font, constraints.max_width);
         const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
                                  has_style_class("heading") ? 28.0F : 20.0F);
         return {0, h, measured.width, h};
     }
-    const auto measured = measure_text(impl_->text, font);
+    const auto measured = measure_text(text_, font);
     const float w = measured.width;
     const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
                              has_style_class("heading") ? 28.0F : 20.0F);
@@ -167,12 +161,12 @@ void Label::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
     const auto font = label_font(*this);
-    const auto measured = measure_text(impl_->text, font);
+    const auto measured = measure_text(text_, font);
 
     float text_x = a.x;
-    if (impl_->h_align == HAlign::Center) {
+    if (h_align_ == HAlign::Center) {
         text_x = a.x + std::max(0.0F, (a.width - measured.width) * 0.5F);
-    } else if (impl_->h_align == HAlign::End) {
+    } else if (h_align_ == HAlign::End) {
         text_x = a.right() - measured.width;
     }
 
@@ -181,10 +175,10 @@ void Label::snapshot(SnapshotContext& ctx) const {
         available_height -= 6.0F;
     }
     const float text_y = a.y + std::max(0.0F, (available_height - measured.height) * 0.5F);
-    if (impl_->wrapping && a.width > 0.0F) {
-        ctx.add_wrapped_text({text_x, text_y}, std::string(impl_->text), text_color, font, a.width);
+    if (wrapping_ && a.width > 0.0F) {
+        ctx.add_wrapped_text({text_x, text_y}, std::string(text_), text_color, font, a.width);
     } else {
-        ctx.add_text({text_x, text_y}, std::string(impl_->text), text_color, font);
+        ctx.add_text({text_x, text_y}, std::string(text_), text_color, font);
     }
 
     if (has_style_class("heading")) {
