@@ -26,6 +26,7 @@
 #include <nk/platform/events.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/style/style_class.h>
 #include <nk/style/theme.h>
@@ -835,7 +836,7 @@ TEST_CASE("Win32 D3D11 renders clipped image content on the GPU and reuses image
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.image_texture_upload_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
@@ -847,7 +848,7 @@ TEST_CASE("Win32 D3D11 renders clipped image content on the GPU and reuses image
     window.request_frame();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.image_texture_cache_hit_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.image_texture_upload_count == 0);
@@ -869,7 +870,7 @@ TEST_CASE("Win32 D3D11 keeps mixed text and image content on the GPU", "[app][re
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.text_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.text_shape_count >= 1);
@@ -882,7 +883,7 @@ TEST_CASE("Win32 D3D11 keeps mixed text and image content on the GPU", "[app][re
     window.request_frame();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.text_node_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.text_shape_cache_hit_count >= 1);
@@ -909,7 +910,7 @@ TEST_CASE("Win32 D3D11 reduces mixed-content draw work for localized widget dama
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.text_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 3);
@@ -921,7 +922,7 @@ TEST_CASE("Win32 D3D11 reduces mixed-content draw work for localized widget dama
     widget->set_title("Localized text update");
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE_FALSE(second_frame.had_layout);
     REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
@@ -942,7 +943,7 @@ TEST_CASE("Win32 D3D11 reduces mixed-content draw work for localized widget dama
     widget->set_image_variant(1);
     REQUIRE(app.event_loop().poll());
 
-    const auto third_frame = window.last_frame_diagnostics();
+    const auto third_frame = window.inspector().last_frame_diagnostics();
     REQUIRE_FALSE(third_frame.had_layout);
     REQUIRE(third_frame.render_hotspot_counters.damage_region_count >= 1);
     REQUIRE(third_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
@@ -977,7 +978,7 @@ TEST_CASE("Win32 D3D11 forces a full copy on the first visible dirty frame",
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto frame = window.last_frame_diagnostics();
+    const auto frame = window.inspector().last_frame_diagnostics();
     REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(frame.render_hotspot_counters.gpu_draw_call_count >= 3);
     REQUIRE(frame.render_hotspot_counters.gpu_present_path ==
@@ -1000,14 +1001,14 @@ TEST_CASE("Win32 D3D11 merges nearby image damage slices into one textured repla
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.gpu_replayed_command_count >= 2);
 
     widget->queue_close_image_updates();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE_FALSE(second_frame.had_layout);
     REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 2);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count >= 2);
@@ -1110,7 +1111,7 @@ TEST_CASE("Win32 DPI changes update scale factor and framebuffer metrics",
             Catch::Approx(framebuffer.height / window.scale_factor()).margin(1.0));
 
     REQUIRE(app.event_loop().poll());
-    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+    REQUIRE(nk::has_frame_request_reason(window.inspector().last_frame_diagnostics(),
                                          nk::FrameRequestReason::ScaleFactorChanged));
 }
 #endif
@@ -1183,7 +1184,7 @@ TEST_CASE("Window frame requests are not starved by continuously ready timers", 
 
     window.present();
     REQUIRE(app.event_loop().poll());
-    const auto first_frame_id = window.last_frame_diagnostics().frame_id;
+    const auto first_frame_id = window.inspector().last_frame_diagnostics().frame_id;
 
     int timer_ticks = 0;
     nk::CallbackHandle interval{};
@@ -1201,8 +1202,8 @@ TEST_CASE("Window frame requests are not starved by continuously ready timers", 
     REQUIRE(app.event_loop().poll());
     REQUIRE(timer_ticks >= 1);
     REQUIRE(app.event_loop().poll());
-    REQUIRE(window.last_frame_diagnostics().frame_id > first_frame_id);
-    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+    REQUIRE(window.inspector().last_frame_diagnostics().frame_id > first_frame_id);
+    REQUIRE(nk::has_frame_request_reason(window.inspector().last_frame_diagnostics(),
                                          nk::FrameRequestReason::WidgetRedraw));
 }
 
@@ -1219,7 +1220,7 @@ TEST_CASE("Window reacts to system preference changes", "[app][prefs]") {
     window.set_child(nk::Label::create("prefs"));
     window.present();
     REQUIRE(app.event_loop().poll());
-    const auto baseline_frame_id = window.last_frame_diagnostics().frame_id;
+    const auto baseline_frame_id = window.inspector().last_frame_diagnostics().frame_id;
 
     nk::SystemPreferences next = app.system_preferences();
     next.color_scheme = (next.color_scheme == nk::ColorScheme::Dark) ? nk::ColorScheme::Light
@@ -1227,8 +1228,8 @@ TEST_CASE("Window reacts to system preference changes", "[app][prefs]") {
     app.on_system_preferences_changed().emit(next);
 
     REQUIRE(app.event_loop().poll());
-    REQUIRE(window.last_frame_diagnostics().frame_id > baseline_frame_id);
-    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+    REQUIRE(window.inspector().last_frame_diagnostics().frame_id > baseline_frame_id);
+    REQUIRE(nk::has_frame_request_reason(window.inspector().last_frame_diagnostics(),
                                          nk::FrameRequestReason::SystemPreferencesChanged));
 }
 
@@ -1246,7 +1247,7 @@ TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][r
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.text_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.text_texture_upload_count >= 1);
@@ -1255,7 +1256,7 @@ TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][r
     window.request_frame();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.text_node_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.text_shape_cache_hit_count >= 1);
@@ -1290,7 +1291,7 @@ TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 6);
     REQUIRE(first_frame.render_hotspot_counters.gpu_replayed_command_count >=
@@ -1310,7 +1311,7 @@ TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage",
     left->queue_redraw();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count <
@@ -1357,7 +1358,7 @@ TEST_CASE("macOS Metal redraws fewer GPU commands for localized widget damage", 
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Metal);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 6);
     REQUIRE(first_frame.render_hotspot_counters.gpu_present_region_count == 0);
@@ -1368,7 +1369,7 @@ TEST_CASE("macOS Metal redraws fewer GPU commands for localized widget damage", 
     left->queue_redraw();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_region_count <=
@@ -1412,7 +1413,7 @@ TEST_CASE("Window damage regions include previous widget bounds after movement",
     left->queue_redraw();
     REQUIRE(app.event_loop().poll());
 
-    const auto frame = window.last_frame_diagnostics();
+    const auto frame = window.inspector().last_frame_diagnostics();
     REQUIRE_FALSE(frame.had_layout);
     REQUIRE(frame.render_hotspot_counters.damage_region_count >= 2);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
@@ -1449,7 +1450,7 @@ TEST_CASE("Window layout reflow promotes sibling damage to full redraw", "[app][
     REQUIRE(second->debug_has_previous_allocation());
     REQUIRE(second->debug_previous_allocation() == second_original);
 
-    const auto frame = window.last_frame_diagnostics();
+    const auto frame = window.inspector().last_frame_diagnostics();
     REQUIRE(frame.had_layout);
     REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetLayout));
     REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
@@ -1481,7 +1482,7 @@ TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw",
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 6);
     REQUIRE(first_frame.render_hotspot_counters.gpu_replayed_command_count >= 6);
@@ -1495,7 +1496,7 @@ TEST_CASE("Win32 D3D11 uses partial present regions for localized redraw",
     left->queue_redraw();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count <
@@ -1525,7 +1526,7 @@ TEST_CASE("Win32 D3D11 renders linear gradients on the GPU scene", "[app][render
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count >= 3);
     REQUIRE(first_frame.render_hotspot_counters.gpu_replayed_command_count >= 3);
@@ -1538,7 +1539,7 @@ TEST_CASE("Win32 D3D11 renders linear gradients on the GPU scene", "[app][render
     gradient_widget->set_accent(nk::Color::from_rgb(51, 89, 170));
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count >= 2);
     REQUIRE(second_frame.render_hotspot_counters.gpu_replayed_command_count >= 1);
@@ -1564,7 +1565,7 @@ TEST_CASE("Win32 D3D11 falls back to software upload for unsupported semantic no
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_draw_call_count == 0);
     REQUIRE(first_frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
@@ -1577,7 +1578,7 @@ TEST_CASE("Win32 D3D11 falls back to software upload for unsupported semantic no
     fallback_widget->set_accent(nk::Color::from_rgb(51, 89, 170));
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.damage_region_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.gpu_draw_call_count == 0);
     REQUIRE(second_frame.render_hotspot_counters.gpu_swapchain_copy_count >= 1);
@@ -1613,7 +1614,7 @@ TEST_CASE("Linux Vulkan adapts large full redraws to copy-back scene preservatio
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
 
-    const auto frame = window.last_frame_diagnostics();
+    const auto frame = window.inspector().last_frame_diagnostics();
     REQUIRE(frame.render_hotspot_counters.damage_region_count == 0);
     REQUIRE(frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
     REQUIRE(frame.render_hotspot_counters.gpu_draw_call_count >= 12);
@@ -1655,7 +1656,10 @@ TEST_CASE("Application reports file-dialog capability explicitly", "[app]") {
         return;
     }
 
-    auto result = app.open_file_dialog();
+    nk::OpenFileDialogResult result = nk::Unexpected(nk::FileDialogError::Unavailable);
+    app.open_file_dialog_async("Open", {}, [&](nk::OpenFileDialogResult r) {
+        result = std::move(r);
+    });
     REQUIRE_FALSE(result);
     REQUIRE(result.error() == (app.has_platform_backend() ? nk::FileDialogError::Unsupported
                                                           : nk::FileDialogError::Unavailable));
@@ -1953,7 +1957,7 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
     window.set_child(root);
     window.present();
     REQUIRE(app.event_loop().poll());
-    REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") == std::string::npos);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") == std::string::npos);
 
     window.dispatch_mouse_event({
         .type = nk::MouseEvent::Type::Press,
@@ -1970,7 +1974,7 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
 
     REQUIRE(app.event_loop().poll());
 
-    const auto history = window.debug_frame_history();
+    const auto history = window.inspector().debug_frame_history();
     REQUIRE(history.size() >= 2);
     const auto& frame = history.back();
     REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetRedraw));
@@ -1979,7 +1983,7 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
-    REQUIRE(window.dump_selected_frame_render_snapshot().find("Popup Action") != std::string::npos);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") != std::string::npos);
 }
 
 TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds",
@@ -2018,7 +2022,7 @@ TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds
 
     REQUIRE(app.event_loop().poll());
 
-    const auto history = window.debug_frame_history();
+    const auto history = window.inspector().debug_frame_history();
     REQUIRE(history.size() >= 2);
     const auto& frame = history.back();
     REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetRedraw));
@@ -2027,7 +2031,7 @@ TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
-    REQUIRE(window.dump_selected_frame_render_snapshot().find("Famicom") != std::string::npos);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Famicom") != std::string::npos);
 }
 
 TEST_CASE("ComboBox popup scrolls to keep the highlighted item visible with many items",
@@ -2305,7 +2309,7 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
     REQUIRE(app.event_loop().poll());
 
     const auto centered_snapshot_result =
-        nk::parse_render_snapshot_json(window.dump_selected_frame_render_snapshot_json());
+        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
     REQUIRE(centered_snapshot_result);
     const auto* centered_title =
         find_render_snapshot_node(centered_snapshot_result.value(), "Text", "Centered Dialog");
@@ -2330,7 +2334,7 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
     REQUIRE(app.event_loop().poll());
 
     const auto sheet_snapshot_result =
-        nk::parse_render_snapshot_json(window.dump_selected_frame_render_snapshot_json());
+        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
     REQUIRE(sheet_snapshot_result);
     const auto* sheet_title =
         find_render_snapshot_node(sheet_snapshot_result.value(), "Text", "Sheet Dialog");
@@ -2364,7 +2368,7 @@ TEST_CASE("Dialog overlay layout changes promote damage to full redraw", "[app][
     dialog->present(window);
     REQUIRE(app.event_loop().poll());
 
-    const auto present_frame = window.last_frame_diagnostics();
+    const auto present_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(has_frame_request_reason(present_frame, nk::FrameRequestReason::OverlayChanged));
     REQUIRE(present_frame.had_layout);
     REQUIRE(present_frame.render_hotspot_counters.damage_region_count == 0);
@@ -2377,7 +2381,7 @@ TEST_CASE("Dialog overlay layout changes promote damage to full redraw", "[app][
     });
     REQUIRE(app.event_loop().poll());
 
-    const auto dismiss_frame = window.last_frame_diagnostics();
+    const auto dismiss_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(has_frame_request_reason(dismiss_frame, nk::FrameRequestReason::OverlayChanged));
     REQUIRE(dismiss_frame.had_layout);
     REQUIRE(dismiss_frame.render_hotspot_counters.damage_region_count == 0);
@@ -2564,27 +2568,27 @@ TEST_CASE("Window captures frame diagnostics and widget debug dumps", "[app][deb
     root->append(child);
 
     window.set_child(root);
-    window.set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds |
+    window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds |
                                    nk::DebugOverlayFlags::DirtyWidgets |
                                    nk::DebugOverlayFlags::FrameHud);
     window.present();
 
     REQUIRE(app.event_loop().poll());
 
-    const auto& diagnostics = window.last_frame_diagnostics();
+    const auto& diagnostics = window.inspector().last_frame_diagnostics();
     REQUIRE(diagnostics.frame_id >= 1);
     REQUIRE(diagnostics.widget_count >= 2);
     REQUIRE(diagnostics.render_node_count >= 3);
     REQUIRE(diagnostics.total_ms >= 0.0);
 
-    const auto tree = window.debug_tree();
+    const auto tree = window.inspector().debug_tree();
     REQUIRE(tree.type_name == "Window");
     REQUIRE(tree.children.size() == 1);
     REQUIRE(tree.children.front().debug_name == "root");
     REQUIRE(tree.children.front().children.size() == 1);
     REQUIRE(tree.children.front().children.front().debug_name == "leaf");
 
-    const auto dump = window.dump_widget_tree();
+    const auto dump = window.inspector().dump_widget_tree();
     REQUIRE(dump.find("Window \"Debug\"") != std::string::npos);
     REQUIRE(dump.find("root-surface") != std::string::npos);
     REQUIRE(dump.find("\"leaf\"") != std::string::npos);
@@ -2607,7 +2611,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     root->append(child);
 
     window.set_child(root);
-    window.set_debug_overlay_flags(nk::DebugOverlayFlags::FrameHud);
+    window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::FrameHud);
     window.present();
     REQUIRE(app.event_loop().poll());
 
@@ -2617,7 +2621,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     child->queue_layout();
     REQUIRE(app.event_loop().poll());
 
-    const auto history = window.debug_frame_history();
+    const auto history = window.inspector().debug_frame_history();
     REQUIRE(history.size() >= 3);
     REQUIRE(has_frame_request_reason(history.front(), nk::FrameRequestReason::Present));
     REQUIRE(has_frame_request_reason(history[history.size() - 2],
@@ -2626,19 +2630,19 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(history.back().started_at_ms >= history.front().requested_at_ms);
     REQUIRE(history.back().render_snapshot_node_count >= 3);
 
-    const auto selected_snapshot = window.debug_selected_frame_render_snapshot();
+    const auto selected_snapshot = window.inspector().debug_selected_frame_render_snapshot();
     REQUIRE(selected_snapshot.kind == "Container");
     REQUIRE_FALSE(selected_snapshot.children.empty());
 
-    const auto snapshot_dump = window.dump_selected_frame_render_snapshot();
+    const auto snapshot_dump = window.inspector().dump_selected_frame_render_snapshot();
     REQUIRE(snapshot_dump.find("Container") != std::string::npos);
 
-    const auto snapshot_json = window.dump_selected_frame_render_snapshot_json();
+    const auto snapshot_json = window.inspector().dump_selected_frame_render_snapshot_json();
     REQUIRE(snapshot_json.find("\"kind\":\"Container\"") != std::string::npos);
     REQUIRE(snapshot_json.find("trace-label") != std::string::npos);
 
-    window.set_debug_selected_widget(child.get());
-    const auto selected_widget_info = window.debug_selected_widget_info();
+    window.inspector().set_debug_selected_widget(child.get());
+    const auto selected_widget_info = window.inspector().debug_selected_widget_info();
     REQUIRE(selected_widget_info.hotspot_counters.measure_count >= 1);
     REQUIRE(selected_widget_info.hotspot_counters.allocate_count >= 1);
     REQUIRE(selected_widget_info.hotspot_counters.snapshot_count >= 1);
@@ -2653,7 +2657,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE_FALSE(selected_widget_info.focused);
     REQUIRE_FALSE(selected_widget_info.pending_redraw);
     REQUIRE_FALSE(selected_widget_info.pending_layout);
-    const auto widget_selected_render = window.debug_selected_render_node();
+    const auto widget_selected_render = window.inspector().debug_selected_render_node();
     REQUIRE(widget_selected_render.kind == "Text");
     REQUIRE(widget_selected_render.source_widget_label == "trace-label");
     REQUIRE(widget_selected_render.detail.find("Trace") != std::string::npos);
@@ -2663,26 +2667,26 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
         .key = nk::KeyCode::I,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+    REQUIRE(nk::has_debug_overlay_flag(window.inspector().debug_overlay_flags(),
                                        nk::DebugOverlayFlags::InspectorPanel));
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::PageDown,
     });
-    const auto selected_render = window.debug_selected_render_node();
+    const auto selected_render = window.inspector().debug_selected_render_node();
     REQUIRE_FALSE(selected_render.kind.empty());
     REQUIRE(selected_render.children.size() < selected_snapshot.children.size());
 
-    const auto selected_frame_summary = window.dump_selected_frame_summary();
+    const auto selected_frame_summary = window.inspector().dump_selected_frame_summary();
     REQUIRE(selected_frame_summary.find("Frame ") != std::string::npos);
     REQUIRE(selected_frame_summary.find("render nodes:") != std::string::npos);
 
-    const auto selected_render_details = window.dump_selected_render_node_details();
+    const auto selected_render_details = window.inspector().dump_selected_render_node_details();
     REQUIRE(selected_render_details.find("render node:") != std::string::npos);
     REQUIRE(selected_render_details.find(selected_render.kind) != std::string::npos);
 
-    const auto selected_widget_details = window.dump_selected_widget_details();
+    const auto selected_widget_details = window.inspector().dump_selected_widget_details();
     REQUIRE(selected_widget_details.find("trace-label") != std::string::npos);
     REQUIRE(selected_widget_details.find("measure ") != std::string::npos);
     REQUIRE(selected_widget_details.find("size: h Preferred") != std::string::npos);
@@ -2693,7 +2697,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
     REQUIRE(selected_widget_details.find("constraints: min") != std::string::npos);
     REQUIRE(selected_widget_details.find("request: min") != std::string::npos);
 
-    const auto selected_widget_json = window.dump_selected_widget_details_json();
+    const auto selected_widget_json = window.inspector().dump_selected_widget_details_json();
     REQUIRE(selected_widget_json.find("\"format\":\"nk-widget-debug-v1\"") != std::string::npos);
     REQUIRE(selected_widget_json.find("\"debug_name\":\"trace-label\"") != std::string::npos);
     REQUIRE(selected_widget_json.find("\"accessible_role\":\"label\"") != std::string::npos);
@@ -2727,7 +2731,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 
     const auto widget_details_path =
         std::filesystem::temp_directory_path() / "nodalkit_widget_details.txt";
-    REQUIRE(window.save_selected_widget_details_file(widget_details_path.string()));
+    REQUIRE(window.inspector().save_selected_widget_details_file(widget_details_path.string()));
     {
         std::ifstream widget_in(widget_details_path);
         REQUIRE(widget_in.is_open());
@@ -2740,7 +2744,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 
     const auto widget_details_json_path =
         std::filesystem::temp_directory_path() / "nodalkit_widget_details.json";
-    REQUIRE(window.save_selected_widget_details_json_file(widget_details_json_path.string()));
+    REQUIRE(window.inspector().save_selected_widget_details_json_file(widget_details_json_path.string()));
     const auto loaded_selected_widget =
         nk::load_widget_debug_json_file(widget_details_json_path.string());
     REQUIRE(loaded_selected_widget);
@@ -2750,7 +2754,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 
     const auto render_details_path =
         std::filesystem::temp_directory_path() / "nodalkit_render_details.txt";
-    REQUIRE(window.save_selected_render_node_details_file(render_details_path.string()));
+    REQUIRE(window.inspector().save_selected_render_node_details_file(render_details_path.string()));
     {
         std::ifstream render_in(render_details_path);
         REQUIRE(render_in.is_open());
@@ -2763,7 +2767,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 
     const auto frame_summary_path =
         std::filesystem::temp_directory_path() / "nodalkit_frame_summary.txt";
-    REQUIRE(window.save_selected_frame_summary_file(frame_summary_path.string()));
+    REQUIRE(window.inspector().save_selected_frame_summary_file(frame_summary_path.string()));
     {
         std::ifstream frame_in(frame_summary_path);
         REQUIRE(frame_in.is_open());
@@ -2793,7 +2797,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
         bundle_window.set_child(bundle_root);
         bundle_window.present();
         REQUIRE(app.event_loop().poll());
-        bundle_window.set_debug_selected_widget(bundle_child.get());
+        bundle_window.inspector().set_debug_selected_widget(bundle_child.get());
         REQUIRE(app.event_loop().poll());
 
         const auto bundle_dir =
@@ -2801,7 +2805,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
         std::error_code cleanup_error;
         std::filesystem::remove_all(bundle_dir, cleanup_error);
 
-        REQUIRE(bundle_window.save_debug_bundle(bundle_dir.string()));
+        REQUIRE(bundle_window.inspector().save_debug_bundle(bundle_dir.string()));
         REQUIRE(std::filesystem::exists(bundle_dir / "manifest.json"));
         REQUIRE(std::filesystem::exists(bundle_dir / "widget_tree.txt"));
         REQUIRE(std::filesystem::exists(bundle_dir / "widget_tree.json"));
@@ -2858,21 +2862,21 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
         std::filesystem::remove_all(bundle_dir, cleanup_error);
     }
 
-    window.set_debug_selected_widget(nullptr);
+    window.inspector().set_debug_selected_widget(nullptr);
     bool found_provenance_selected_render = false;
     for (int step = 0; step < 8; ++step) {
         window.dispatch_key_event({
             .type = nk::KeyEvent::Type::Press,
             .key = nk::KeyCode::PageDown,
         });
-        const auto render_node = window.debug_selected_render_node();
+        const auto render_node = window.inspector().debug_selected_render_node();
         if (render_node.source_widget_label == "trace-label") {
             found_provenance_selected_render = true;
             break;
         }
     }
     REQUIRE(found_provenance_selected_render);
-    REQUIRE(window.debug_selected_widget() == child.get());
+    REQUIRE(window.inspector().debug_selected_widget() == child.get());
 
     bool frame_requested_from_post = false;
     app.event_loop().post([&] {
@@ -2903,7 +2907,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
                         runtime_trace.end(),
                         [](const nk::TraceEvent& event) { return event.name == "idle"; }));
 
-    const auto updated_history = window.debug_frame_history();
+    const auto updated_history = window.inspector().debug_frame_history();
     const auto redraw_frame_it = std::find_if(
         updated_history.rbegin(), updated_history.rend(), [](const nk::FrameDiagnostics& frame) {
             return nk::has_frame_request_reason(frame, nk::FrameRequestReason::WidgetRedraw);
@@ -2926,7 +2930,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
         });
     }
 
-    auto selected_runtime_events = window.debug_selected_frame_runtime_events();
+    auto selected_runtime_events = window.inspector().debug_selected_frame_runtime_events();
     bool found_posted_task =
         std::any_of(selected_runtime_events.begin(),
                     selected_runtime_events.end(),
@@ -2936,7 +2940,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
             .type = nk::KeyEvent::Type::Press,
             .key = nk::KeyCode::Left,
         });
-        selected_runtime_events = window.debug_selected_frame_runtime_events();
+        selected_runtime_events = window.inspector().debug_selected_frame_runtime_events();
         found_posted_task =
             std::any_of(selected_runtime_events.begin(),
                         selected_runtime_events.end(),
@@ -2955,7 +2959,7 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
                             }));
     }
 
-    const auto trace = window.dump_frame_trace_json();
+    const auto trace = window.inspector().dump_frame_trace_json();
     REQUIRE(trace.find("\"traceEvents\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"widget-redraw\"") != std::string::npos);
     REQUIRE(trace.find("\"name\":\"layout\"") != std::string::npos);
@@ -2998,12 +3002,12 @@ TEST_CASE("Render snapshots support fixture import and file round-trip", "[app][
     window.present();
     REQUIRE(app.event_loop().poll());
 
-    const auto selected_snapshot = window.debug_selected_frame_render_snapshot();
+    const auto selected_snapshot = window.inspector().debug_selected_frame_render_snapshot();
     REQUIRE(selected_snapshot.kind == "Container");
     REQUIRE(selected_snapshot != *fixture_snapshot);
 
     const auto parsed_dump =
-        nk::parse_render_snapshot_json(window.dump_selected_frame_render_snapshot_json());
+        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
     REQUIRE(parsed_dump);
     REQUIRE(*parsed_dump == selected_snapshot);
 
@@ -3081,7 +3085,7 @@ TEST_CASE("Frame diagnostics capture text, image, and model-view hotspot counter
     window.present();
     REQUIRE(app.event_loop().poll());
 
-    const auto first_frame = window.last_frame_diagnostics();
+    const auto first_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(first_frame.widget_hotspot_totals.text_measure_count >= 1);
     REQUIRE(first_frame.widget_hotspot_totals.image_snapshot_count >= 1);
     REQUIRE(first_frame.widget_hotspot_totals.model_sync_count >= 1);
@@ -3091,15 +3095,15 @@ TEST_CASE("Frame diagnostics capture text, image, and model-view hotspot counter
     REQUIRE(first_frame.render_hotspot_counters.image_node_count >= 1);
     REQUIRE(first_frame.render_hotspot_counters.image_source_pixel_count >= 16);
 
-    window.set_debug_selected_widget(list_view.get());
-    const auto selected_list = window.debug_selected_widget_info();
+    window.inspector().set_debug_selected_widget(list_view.get());
+    const auto selected_list = window.inspector().debug_selected_widget_info();
     REQUIRE(selected_list.hotspot_counters.model_sync_count >= 1);
     REQUIRE(selected_list.hotspot_counters.model_row_materialize_count >= 1);
 
     window.request_frame();
     REQUIRE(app.event_loop().poll());
 
-    const auto second_frame = window.last_frame_diagnostics();
+    const auto second_frame = window.inspector().last_frame_diagnostics();
     REQUIRE(second_frame.render_hotspot_counters.text_node_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.text_shape_cache_hit_count >= 1);
     REQUIRE(second_frame.render_hotspot_counters.image_node_count >= 1);
@@ -3125,7 +3129,7 @@ TEST_CASE("Window debug picker selects widgets and honors inspector shortcuts", 
         .key = nk::KeyCode::I,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+    REQUIRE(nk::has_debug_overlay_flag(window.inspector().debug_overlay_flags(),
                                        nk::DebugOverlayFlags::InspectorPanel));
 
     window.dispatch_key_event({
@@ -3133,10 +3137,10 @@ TEST_CASE("Window debug picker selects widgets and honors inspector shortcuts", 
         .key = nk::KeyCode::P,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.debug_picker_enabled());
+    REQUIRE(window.inspector().debug_picker_enabled());
 
     window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 20.0F, .y = 20.0F});
-    REQUIRE(window.debug_selected_widget() == first.get());
+    REQUIRE(window.inspector().debug_selected_widget() == first.get());
     REQUIRE(window.current_cursor_shape() == nk::CursorShape::Default);
 
     window.dispatch_mouse_event({
@@ -3145,45 +3149,45 @@ TEST_CASE("Window debug picker selects widgets and honors inspector shortcuts", 
         .y = 20.0F,
         .button = 1,
     });
-    REQUIRE_FALSE(window.debug_picker_enabled());
-    REQUIRE(window.debug_selected_widget() == first.get());
+    REQUIRE_FALSE(window.inspector().debug_picker_enabled());
+    REQUIRE(window.inspector().debug_selected_widget() == first.get());
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::Down,
     });
-    REQUIRE(window.debug_selected_widget() == second.get());
+    REQUIRE(window.inspector().debug_selected_widget() == second.get());
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::Home,
     });
-    REQUIRE(window.debug_selected_widget() == first.get());
+    REQUIRE(window.inspector().debug_selected_widget() == first.get());
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::P,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.debug_picker_enabled());
+    REQUIRE(window.inspector().debug_picker_enabled());
     window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 120.0F, .y = 20.0F});
-    REQUIRE(window.debug_selected_widget() == second.get());
+    REQUIRE(window.inspector().debug_selected_widget() == second.get());
 
-    const auto selected = window.debug_selected_widget_info();
+    const auto selected = window.inspector().debug_selected_widget_info();
     REQUIRE(selected.debug_name == "second");
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::Escape,
     });
-    REQUIRE_FALSE(window.debug_picker_enabled());
+    REQUIRE_FALSE(window.inspector().debug_picker_enabled());
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::I,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE_FALSE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+    REQUIRE_FALSE(nk::has_debug_overlay_flag(window.inspector().debug_overlay_flags(),
                                              nk::DebugOverlayFlags::InspectorPanel));
 }
 
@@ -3203,20 +3207,20 @@ TEST_CASE("Window cycles inspector presentation modes and only docked shrinks co
     const auto viewport_size = window.size();
     REQUIRE(root->allocation().x == Catch::Approx(0.0F));
     REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
-    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
+    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
 
-    window.set_debug_overlay_flags(nk::DebugOverlayFlags::InspectorPanel);
-    window.set_debug_inspector_presentation(nk::DebugInspectorPresentation::DockedRight);
+    window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::InspectorPanel);
+    window.inspector().set_debug_inspector_presentation(nk::DebugInspectorPresentation::DockedRight);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width < viewport_size.width);
-    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
+    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::D,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::Detached);
+    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::Detached);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
 
@@ -3225,7 +3229,7 @@ TEST_CASE("Window cycles inspector presentation modes and only docked shrinks co
         .key = nk::KeyCode::D,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
+    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
 
@@ -3234,7 +3238,7 @@ TEST_CASE("Window cycles inspector presentation modes and only docked shrinks co
         .key = nk::KeyCode::D,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
+    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width < viewport_size.width);
 }
@@ -3260,37 +3264,37 @@ TEST_CASE("Window widget-tree filter matches debug name, class, and type", "[app
         .key = nk::KeyCode::I,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(nk::has_debug_overlay_flag(window.debug_overlay_flags(),
+    REQUIRE(nk::has_debug_overlay_flag(window.inspector().debug_overlay_flags(),
                                        nk::DebugOverlayFlags::InspectorPanel));
 
-    window.set_debug_selected_widget(first.get());
-    window.set_debug_widget_filter("second");
-    REQUIRE(window.debug_widget_filter() == "second");
-    REQUIRE(window.debug_selected_widget() == second.get());
+    window.inspector().set_debug_selected_widget(first.get());
+    window.inspector().set_debug_widget_filter("second");
+    REQUIRE(window.inspector().debug_widget_filter() == "second");
+    REQUIRE(window.inspector().debug_selected_widget() == second.get());
 
-    window.set_debug_widget_filter("beta");
-    REQUIRE(window.debug_selected_widget() == second.get());
+    window.inspector().set_debug_widget_filter("beta");
+    REQUIRE(window.inspector().debug_selected_widget() == second.get());
 
-    window.set_debug_widget_filter("focusprobewidget");
-    REQUIRE(window.debug_selected_widget() != nullptr);
+    window.inspector().set_debug_widget_filter("focusprobewidget");
+    REQUIRE(window.inspector().debug_selected_widget() != nullptr);
 
-    window.set_debug_widget_filter("missing");
-    REQUIRE(window.debug_selected_widget() == nullptr);
+    window.inspector().set_debug_widget_filter("missing");
+    REQUIRE(window.inspector().debug_selected_widget() == nullptr);
 
-    window.set_debug_widget_filter({});
-    REQUIRE(window.debug_widget_filter().empty());
+    window.inspector().set_debug_widget_filter({});
+    REQUIRE(window.inspector().debug_widget_filter().empty());
 
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::S});
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::E});
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::C});
-    REQUIRE(window.debug_widget_filter() == "sec");
-    REQUIRE(window.debug_selected_widget() == second.get());
+    REQUIRE(window.inspector().debug_widget_filter() == "sec");
+    REQUIRE(window.inspector().debug_selected_widget() == second.get());
 
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace});
-    REQUIRE(window.debug_widget_filter() == "se");
+    REQUIRE(window.inspector().debug_widget_filter() == "se");
 
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
-    REQUIRE(window.debug_widget_filter().empty());
+    REQUIRE(window.inspector().debug_widget_filter().empty());
 }
 
 TEST_CASE("Widget accessibility ownership tracks default roles and widget state",
@@ -5124,7 +5128,7 @@ TEST_CASE("WindowEvent::Resize updates size, fires signal, and requests a Resize
     });
     (void)resize_conn;
 
-    const auto baseline_frame = window.last_frame_diagnostics().frame_id;
+    const auto baseline_frame = window.inspector().last_frame_diagnostics().frame_id;
     window.dispatch_window_event(
         {.type = nk::WindowEvent::Type::Resize, .width = 300, .height = 220});
     REQUIRE(app.event_loop().poll());
@@ -5136,8 +5140,8 @@ TEST_CASE("WindowEvent::Resize updates size, fires signal, and requests a Resize
     // has been called, so its value reflects the compositor-reported size
     // rather than the event width/height. The resize signal payload is the
     // authoritative observable for the Resize event contract.
-    REQUIRE(window.last_frame_diagnostics().frame_id > baseline_frame);
-    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+    REQUIRE(window.inspector().last_frame_diagnostics().frame_id > baseline_frame);
+    REQUIRE(nk::has_frame_request_reason(window.inspector().last_frame_diagnostics(),
                                          nk::FrameRequestReason::Resize));
 }
 
@@ -5160,15 +5164,15 @@ TEST_CASE("WindowEvent::ScaleFactorChanged fires signal and requests a ScaleFact
     });
     (void)scale_conn;
 
-    const auto baseline_frame = window.last_frame_diagnostics().frame_id;
+    const auto baseline_frame = window.inspector().last_frame_diagnostics().frame_id;
     window.dispatch_window_event(
         {.type = nk::WindowEvent::Type::ScaleFactorChanged, .scale_factor = 2.0F});
     REQUIRE(app.event_loop().poll());
 
     REQUIRE(scale_events == 1);
     REQUIRE(observed_scale == Catch::Approx(2.0F));
-    REQUIRE(window.last_frame_diagnostics().frame_id > baseline_frame);
-    REQUIRE(nk::has_frame_request_reason(window.last_frame_diagnostics(),
+    REQUIRE(window.inspector().last_frame_diagnostics().frame_id > baseline_frame);
+    REQUIRE(nk::has_frame_request_reason(window.inspector().last_frame_diagnostics(),
                                          nk::FrameRequestReason::ScaleFactorChanged));
 }
 

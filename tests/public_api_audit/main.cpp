@@ -44,6 +44,7 @@
 #include <nk/platform/spell_checker.h>
 #include <nk/platform/system_preferences.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/render/image_node.h>
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
@@ -413,8 +414,9 @@ void force_symbol_references() {
         &nk::Application::platform_backend);
     (void)static_cast<bool (nk::Application::*)() const>(
         &nk::Application::supports_open_file_dialog);
-    (void)static_cast<nk::OpenFileDialogResult (nk::Application::*)(
-        std::string_view, const std::vector<std::string>&)>(&nk::Application::open_file_dialog);
+    (void)static_cast<void (nk::Application::*)(
+        std::string_view, const std::vector<std::string>&,
+        nk::Application::OpenFileDialogCallback)>(&nk::Application::open_file_dialog_async);
     (void)static_cast<bool (nk::Application::*)() const>(&nk::Application::supports_clipboard_text);
     (void)static_cast<std::string (nk::Application::*)() const>(&nk::Application::clipboard_text);
     (void)static_cast<void (nk::Application::*)(std::string)>(&nk::Application::set_clipboard_text);
@@ -457,9 +459,10 @@ void force_symbol_references() {
         &nk::PlatformBackend::run_event_loop);
     (void)static_cast<void (nk::PlatformBackend::*)()>(&nk::PlatformBackend::wake_event_loop);
     (void)static_cast<void (nk::PlatformBackend::*)(int)>(&nk::PlatformBackend::request_quit);
-    (void)static_cast<nk::OpenFileDialogResult (nk::PlatformBackend::*)(
-        std::string_view, const std::vector<std::string>&)>(
-        &nk::PlatformBackend::show_open_file_dialog);
+    (void)static_cast<void (nk::PlatformBackend::*)(
+        std::string_view, const std::vector<std::string>&,
+        nk::PlatformBackend::OpenFileDialogCallback)>(
+        &nk::PlatformBackend::show_open_file_dialog_async);
     (void)static_cast<nk::SystemPreferences (nk::PlatformBackend::*)() const>(
         &nk::PlatformBackend::system_preferences);
     (void)&nk::PlatformBackend::create;
@@ -502,72 +505,66 @@ void force_symbol_references() {
         &nk::Window::current_text_input_caret_rect);
     (void)static_cast<std::optional<nk::WindowTextInputState> (nk::Window::*)() const>(
         &nk::Window::current_text_input_state);
-    (void)static_cast<void (nk::Window::*)(nk::DebugOverlayFlags)>(
-        &nk::Window::set_debug_overlay_flags);
-    (void)static_cast<nk::DebugOverlayFlags (nk::Window::*)() const>(
-        &nk::Window::debug_overlay_flags);
-    (void)static_cast<void (nk::Window::*)(nk::DebugInspectorPresentation)>(
-        &nk::Window::set_debug_inspector_presentation);
-    (void)static_cast<nk::DebugInspectorPresentation (nk::Window::*)() const>(
-        &nk::Window::debug_inspector_presentation);
-    (void)static_cast<const nk::FrameDiagnostics& (nk::Window::*)() const>(
-        &nk::Window::last_frame_diagnostics);
-    (void)static_cast<std::span<const nk::FrameDiagnostics> (nk::Window::*)() const>(
-        &nk::Window::debug_frame_history);
-    (void)static_cast<nk::WidgetDebugNode (nk::Window::*)() const>(&nk::Window::debug_tree);
-    (void)static_cast<std::string (nk::Window::*)() const>(&nk::Window::dump_widget_tree);
-    (void)static_cast<std::string (nk::Window::*)() const>(&nk::Window::dump_widget_tree_json);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_widget_tree_json_file);
-    (void)static_cast<std::string (nk::Window::*)() const>(&nk::Window::dump_frame_trace_json);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_frame_diagnostics_artifact_json_file);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_frame_trace_json_file);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_debug_bundle);
-    (void)static_cast<std::vector<nk::TraceEvent> (nk::Window::*)() const>(
-        &nk::Window::debug_selected_frame_runtime_events);
-    (void)static_cast<std::string (nk::Window::*)() const>(
-        &nk::Window::dump_selected_frame_summary);
-    (void)static_cast<nk::Result<void> (nk::Window::*)() const>(
-        &nk::Window::copy_selected_frame_summary_to_clipboard);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_selected_frame_summary_file);
-    (void)static_cast<nk::RenderSnapshotNode (nk::Window::*)() const>(
-        &nk::Window::debug_selected_frame_render_snapshot);
-    (void)static_cast<nk::RenderSnapshotNode (nk::Window::*)() const>(
-        &nk::Window::debug_selected_render_node);
-    (void)static_cast<std::string (nk::Window::*)() const>(
-        &nk::Window::dump_selected_frame_render_snapshot);
-    (void)static_cast<std::string (nk::Window::*)() const>(
-        &nk::Window::dump_selected_frame_render_snapshot_json);
-    (void)static_cast<std::string (nk::Window::*)() const>(
-        &nk::Window::dump_selected_render_node_details);
-    (void)static_cast<nk::Result<void> (nk::Window::*)() const>(
-        &nk::Window::copy_selected_render_node_details_to_clipboard);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_selected_render_node_details_file);
-    (void)static_cast<void (nk::Window::*)(bool)>(&nk::Window::set_debug_picker_enabled);
-    (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::debug_picker_enabled);
-    (void)static_cast<nk::Widget* (nk::Window::*)() const>(&nk::Window::debug_selected_widget);
-    (void)static_cast<void (nk::Window::*)(nk::Widget*)>(&nk::Window::set_debug_selected_widget);
-    (void)static_cast<void (nk::Window::*)(std::string_view)>(&nk::Window::set_debug_widget_filter);
-    (void)static_cast<std::string_view (nk::Window::*)() const>(&nk::Window::debug_widget_filter);
-    (void)static_cast<nk::WidgetDebugNode (nk::Window::*)() const>(
-        &nk::Window::debug_selected_widget_info);
-    (void)static_cast<std::string (nk::Window::*)() const>(
-        &nk::Window::dump_selected_widget_details);
-    (void)static_cast<std::string (nk::Window::*)() const>(
-        &nk::Window::dump_selected_widget_details_json);
-    (void)static_cast<nk::Result<void> (nk::Window::*)() const>(
-        &nk::Window::copy_selected_widget_details_to_clipboard);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_selected_widget_details_file);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_selected_widget_details_json_file);
-    (void)static_cast<nk::Result<void> (nk::Window::*)(std::string_view) const>(
-        &nk::Window::save_debug_screenshot_ppm_file);
+    (void)static_cast<void (nk::WindowInspector::*)(nk::DebugOverlayFlags)>(&nk::WindowInspector::set_debug_overlay_flags);
+    (void)static_cast<nk::DebugOverlayFlags (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_overlay_flags);
+    (void)static_cast<void (nk::WindowInspector::*)(nk::DebugInspectorPresentation)>(&nk::WindowInspector::set_debug_inspector_presentation);
+    (void)static_cast<nk::DebugInspectorPresentation (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_inspector_presentation);
+    (void)static_cast<const nk::FrameDiagnostics& (nk::WindowInspector::*)() const>(&nk::WindowInspector::last_frame_diagnostics);
+    (void)static_cast<std::span<const nk::FrameDiagnostics> (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_frame_history);
+    (void)static_cast<nk::WidgetDebugNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_tree);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_widget_tree);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_widget_tree_json);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_widget_tree_json_file);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_frame_trace_json);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_frame_diagnostics_artifact_json_file);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_frame_trace_json_file);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_debug_bundle);
+    (void)static_cast<std::vector<nk::TraceEvent> (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_selected_frame_runtime_events);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_frame_summary);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::copy_selected_frame_summary_to_clipboard);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_selected_frame_summary_file);
+    (void)static_cast<nk::RenderSnapshotNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_frame_render_snapshot);
+    (void)static_cast<nk::RenderSnapshotNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_render_node);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_frame_render_snapshot);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_frame_render_snapshot_json);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_render_node_details);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::copy_selected_render_node_details_to_clipboard);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_selected_render_node_details_file);
+    (void)static_cast<void (nk::WindowInspector::*)(bool)>(&nk::WindowInspector::set_debug_picker_enabled);
+    (void)static_cast<bool (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_picker_enabled);
+    (void)static_cast<nk::Widget* (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_widget);
+    (void)static_cast<void (nk::WindowInspector::*)(nk::Widget*)>(&nk::WindowInspector::set_debug_selected_widget);
+    (void)static_cast<void (nk::WindowInspector::*)(std::string_view)>(&nk::WindowInspector::set_debug_widget_filter);
+    (void)static_cast<std::string_view (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_widget_filter);
+    (void)static_cast<nk::WidgetDebugNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_widget_info);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_widget_details);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_widget_details_json);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::copy_selected_widget_details_to_clipboard);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_selected_widget_details_file);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_selected_widget_details_json_file);
+    (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
+        &nk::WindowInspector::save_debug_screenshot_ppm_file);
+    (void)static_cast<void (nk::WindowInspector::*)()>(
+        &nk::WindowInspector::sync_debug_selected_render_path);
+    (void)static_cast<nk::Widget* (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_selected_render_widget);
+    (void)static_cast<void (nk::WindowInspector::*)()>(
+        &nk::WindowInspector::sync_debug_selected_widget_from_render_selection);
+    (void)static_cast<nk::WindowInspector& (nk::Window::*)()>(&nk::Window::inspector);
+    (void)static_cast<const nk::WindowInspector& (nk::Window::*)() const>(&nk::Window::inspector);
     (void)static_cast<nk::Signal<>& (nk::Window::*)()>(&nk::Window::on_close_requested);
     (void)static_cast<nk::Signal<int, int>& (nk::Window::*)()>(&nk::Window::on_resize);
     (void)static_cast<nk::Signal<float>& (nk::Window::*)()>(&nk::Window::on_scale_factor_changed);
