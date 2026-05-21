@@ -25,14 +25,11 @@ FontDescriptor tree_font() {
 
 Rect tree_inner_rect(const TreeView& view) {
     auto body = view.allocation();
-    if (has_flag(view.state_flags(), StateFlags::Focused)) {
-        body = {body.x + 2.0F, body.y + 2.0F, body.width - 4.0F, body.height - 4.0F};
-    }
     return {
-        body.x + 1.0F,
-        body.y + 1.0F,
-        std::max(0.0F, body.width - 2.0F),
-        std::max(0.0F, body.height - 2.0F),
+        body.x + 2.0F,
+        body.y + 2.0F,
+        std::max(0.0F, body.width - 4.0F),
+        std::max(0.0F, body.height - 4.0F),
     };
 }
 

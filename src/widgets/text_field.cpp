@@ -1050,7 +1050,7 @@ Rect TextField::inner_body_rect() const {
 }
 
 Rect TextField::text_rect() const {
-    const auto body = inner_body_rect();
+    const auto body = allocation();
     return {body.x + 12.0F,
             body.y + 4.0F,
             std::max(0.0F, body.width - 24.0F),
