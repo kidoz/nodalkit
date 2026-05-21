@@ -15,6 +15,7 @@
 #include <nk/platform/events.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
@@ -79,6 +80,7 @@ struct Window::Impl {
     bool window_focused = false;
     bool needs_layout = true;
     bool frame_pending = false;
+    std::unique_ptr<WindowInspector> inspector;
 
     Signal<> close_requested;
     Signal<int, int> resize_signal;
@@ -1936,7 +1938,7 @@ std::unique_ptr<RenderNode> Window::build_window_debug_render_tree(Size viewport
             Rect render_rect = selected_render_node->bounds;
             if ((render_rect.width <= 0.0F || render_rect.height <= 0.0F) &&
                 !selected_render_node->source_widget_label.empty()) {
-                if (auto* source_widget = debug_selected_render_widget();
+                if (auto* source_widget = inspector().debug_selected_render_widget();
                     source_widget != nullptr) {
                     render_rect = source_widget->allocation();
                 }
@@ -2407,7 +2409,7 @@ void Window::request_frame(FrameRequestReason reason) {
                 selected_it == impl_->frame_history.end()) {
                 impl_->debug_selected_frame_id = frame.frame_id;
             }
-            sync_debug_selected_render_path();
+            inspector().sync_debug_selected_render_path();
             impl_->pending_frame_reasons.clear();
             for (auto* widget : impl_->dirty_widgets) {
                 if (widget != nullptr) {
@@ -2429,42 +2431,42 @@ void Window::invalidate_layout() {
     request_frame(FrameRequestReason::LayoutInvalidation);
 }
 
-void Window::sync_debug_selected_render_path() {
-    if (impl_->debug_selected_widget == nullptr) {
-        impl_->debug_selected_render_path.clear();
+void WindowInspector::sync_debug_selected_render_path() {
+    if (window_.impl_->debug_selected_widget == nullptr) {
+        window_.impl_->debug_selected_render_path.clear();
         return;
     }
     const auto* frame =
-        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+        selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
     if (frame == nullptr) {
-        impl_->debug_selected_render_path.clear();
+        window_.impl_->debug_selected_render_path.clear();
         return;
     }
-    const auto widget_path = impl_->debug_selected_widget->debug_tree_path();
+    const auto widget_path = window_.impl_->debug_selected_widget->debug_tree_path();
     std::vector<std::size_t> current_path;
     std::vector<std::size_t> result_path;
     if (find_render_path_for_widget(
             frame->render_snapshot, widget_path, current_path, result_path)) {
-        impl_->debug_selected_render_path = std::move(result_path);
+        window_.impl_->debug_selected_render_path = std::move(result_path);
     } else {
-        impl_->debug_selected_render_path.clear();
+        window_.impl_->debug_selected_render_path.clear();
     }
 }
 
-Widget* Window::debug_selected_render_widget() const {
+Widget* WindowInspector::debug_selected_render_widget() const {
     const auto* frame =
-        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+        selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
     const auto* render_node =
-        selected_render_node_from_frame(frame, impl_->debug_selected_render_path);
+        selected_render_node_from_frame(frame, window_.impl_->debug_selected_render_path);
     if (render_node == nullptr || render_node->source_widget_label.empty()) {
         return nullptr;
     }
     if (auto* widget =
-            find_widget_by_debug_tree_path(impl_->child.get(), render_node->source_widget_path);
+            find_widget_by_debug_tree_path(window_.impl_->child.get(), render_node->source_widget_path);
         widget != nullptr) {
         return widget;
     }
-    for (const auto& overlay : impl_->overlays) {
+    for (const auto& overlay : window_.impl_->overlays) {
         if (auto* widget = find_widget_by_debug_tree_path(overlay.widget.get(),
                                                           render_node->source_widget_path);
             widget != nullptr) {
@@ -2474,12 +2476,12 @@ Widget* Window::debug_selected_render_widget() const {
     return nullptr;
 }
 
-void Window::sync_debug_selected_widget_from_render_selection() {
-    if (impl_->debug_selected_render_path.empty()) {
+void WindowInspector::sync_debug_selected_widget_from_render_selection() {
+    if (window_.impl_->debug_selected_render_path.empty()) {
         return;
     }
     if (auto* widget = debug_selected_render_widget(); widget != nullptr) {
-        impl_->debug_selected_widget = widget;
+        window_.impl_->debug_selected_widget = widget;
     }
 }
 
@@ -2622,111 +2624,126 @@ std::optional<WindowTextInputState> Window::current_text_input_state() const {
     return state;
 }
 
-void Window::set_debug_overlay_flags(DebugOverlayFlags flags) {
-    if (impl_->debug_overlay_flags == flags) {
+
+WindowInspector& Window::inspector() {
+    if (!impl_->inspector) {
+        impl_->inspector = std::make_unique<WindowInspector>(*this);
+    }
+    return *impl_->inspector;
+}
+
+const WindowInspector& Window::inspector() const {
+    return *impl_->inspector;
+}
+
+WindowInspector::WindowInspector(Window& window) : window_(window) {}
+WindowInspector::~WindowInspector() = default;
+
+void WindowInspector::set_debug_overlay_flags(DebugOverlayFlags flags) {
+    if (window_.impl_->debug_overlay_flags == flags) {
         return;
     }
-    impl_->debug_overlay_flags = flags;
+    window_.impl_->debug_overlay_flags = flags;
     if (!has_debug_overlay_flag(flags, DebugOverlayFlags::InspectorPanel)) {
-        impl_->debug_picker_enabled = false;
+        window_.impl_->debug_picker_enabled = false;
     }
-    request_frame(FrameRequestReason::DebugOverlayChanged);
+    window_.request_frame(FrameRequestReason::DebugOverlayChanged);
 }
 
-DebugOverlayFlags Window::debug_overlay_flags() const {
-    return impl_->debug_overlay_flags;
+DebugOverlayFlags WindowInspector::debug_overlay_flags() const {
+    return window_.impl_->debug_overlay_flags;
 }
 
-void Window::set_debug_inspector_presentation(DebugInspectorPresentation presentation) {
-    if (impl_->debug_inspector_presentation == presentation) {
+void WindowInspector::set_debug_inspector_presentation(DebugInspectorPresentation presentation) {
+    if (window_.impl_->debug_inspector_presentation == presentation) {
         return;
     }
-    impl_->debug_inspector_presentation = presentation;
+    window_.impl_->debug_inspector_presentation = presentation;
     if (presentation == DebugInspectorPresentation::Detached &&
-        !impl_->debug_detached_inspector_origin_initialized) {
-        const auto viewport = size();
+        !window_.impl_->debug_detached_inspector_origin_initialized) {
+        const auto viewport = window_.size();
         const float panel_width = std::min(600.0F, std::max(460.0F, viewport.width * 0.54F));
-        impl_->debug_detached_inspector_origin = {
+        window_.impl_->debug_detached_inspector_origin = {
             std::max(12.0F, viewport.width - panel_width - 24.0F),
             24.0F,
         };
-        impl_->debug_detached_inspector_origin_initialized = true;
+        window_.impl_->debug_detached_inspector_origin_initialized = true;
     }
-    impl_->debug_detached_inspector_drag_active = false;
-    impl_->needs_layout = true;
-    request_frame(FrameRequestReason::DebugOverlayChanged);
+    window_.impl_->debug_detached_inspector_drag_active = false;
+    window_.impl_->needs_layout = true;
+    window_.request_frame(FrameRequestReason::DebugOverlayChanged);
 }
 
-DebugInspectorPresentation Window::debug_inspector_presentation() const {
-    return impl_->debug_inspector_presentation;
+DebugInspectorPresentation WindowInspector::debug_inspector_presentation() const {
+    return window_.impl_->debug_inspector_presentation;
 }
 
-const FrameDiagnostics& Window::last_frame_diagnostics() const {
-    return impl_->last_frame_diagnostics;
+const FrameDiagnostics& WindowInspector::last_frame_diagnostics() const {
+    return window_.impl_->last_frame_diagnostics;
 }
 
-std::span<const FrameDiagnostics> Window::debug_frame_history() const {
-    return impl_->frame_history;
+std::span<const FrameDiagnostics> WindowInspector::debug_frame_history() const {
+    return window_.impl_->frame_history;
 }
 
-WidgetDebugNode Window::debug_tree() const {
+WidgetDebugNode WindowInspector::debug_tree() const {
     WidgetDebugNode root;
     root.type_name = "Window";
-    root.debug_name = impl_->config.title;
-    root.allocation = {0.0F, 0.0F, size().width, size().height};
-    root.visible = impl_->visible;
+    root.debug_name = window_.impl_->config.title;
+    root.allocation = {0.0F, 0.0F, window_.size().width, window_.size().height};
+    root.visible = window_.impl_->visible;
     root.sensitive = true;
     root.focusable = false;
-    if (impl_->child != nullptr) {
-        root.children.push_back(build_widget_debug_node(*impl_->child,
+    if (window_.impl_->child != nullptr) {
+        root.children.push_back(build_widget_debug_node(*window_.impl_->child,
                                                         {0},
-                                                        impl_->focused_widget,
-                                                        impl_->hovered_widget,
-                                                        impl_->pressed_widget));
+                                                        window_.impl_->focused_widget,
+                                                        window_.impl_->hovered_widget,
+                                                        window_.impl_->pressed_widget));
     }
-    for (std::size_t overlay_index = 0; overlay_index < impl_->overlays.size(); ++overlay_index) {
-        const auto& overlay = impl_->overlays[overlay_index];
+    for (std::size_t overlay_index = 0; overlay_index < window_.impl_->overlays.size(); ++overlay_index) {
+        const auto& overlay = window_.impl_->overlays[overlay_index];
         if (overlay.widget != nullptr) {
             root.children.push_back(build_widget_debug_node(*overlay.widget,
                                                             {overlay_index + 1},
-                                                            impl_->focused_widget,
-                                                            impl_->hovered_widget,
-                                                            impl_->pressed_widget));
+                                                            window_.impl_->focused_widget,
+                                                            window_.impl_->hovered_widget,
+                                                            window_.impl_->pressed_widget));
         }
     }
     return root;
 }
 
-std::string Window::dump_widget_tree() const {
+std::string WindowInspector::dump_widget_tree() const {
     return format_widget_debug_tree(debug_tree());
 }
 
-std::string Window::dump_widget_tree_json() const {
+std::string WindowInspector::dump_widget_tree_json() const {
     return format_widget_debug_json(debug_tree());
 }
 
-Result<void> Window::save_widget_tree_json_file(std::string_view path) const {
+Result<void> WindowInspector::save_widget_tree_json_file(std::string_view path) const {
     return save_widget_debug_json_file(debug_tree(), path);
 }
 
-std::string Window::dump_frame_trace_json() const {
+std::string WindowInspector::dump_frame_trace_json() const {
     if (auto* app = Application::instance()) {
-        return format_frame_diagnostics_trace_json(impl_->frame_history,
+        return format_frame_diagnostics_trace_json(window_.impl_->frame_history,
                                                    app->event_loop().debug_trace_events());
     }
-    return format_frame_diagnostics_trace_json(impl_->frame_history);
+    return format_frame_diagnostics_trace_json(window_.impl_->frame_history);
 }
 
-Result<void> Window::save_frame_diagnostics_artifact_json_file(std::string_view path) const {
+Result<void> WindowInspector::save_frame_diagnostics_artifact_json_file(std::string_view path) const {
     return nk::save_frame_diagnostics_artifact_json_file(
-        FrameDiagnosticsArtifact{.frames = impl_->frame_history}, path);
+        FrameDiagnosticsArtifact{.frames = window_.impl_->frame_history}, path);
 }
 
-Result<void> Window::save_frame_trace_json_file(std::string_view path) const {
+Result<void> WindowInspector::save_frame_trace_json_file(std::string_view path) const {
     return save_text_file(path, dump_frame_trace_json());
 }
 
-Result<void> Window::save_debug_bundle(std::string_view directory_path) const {
+Result<void> WindowInspector::save_debug_bundle(std::string_view directory_path) const {
     const auto ensure_dir = ensure_directory_exists(directory_path);
     if (!ensure_dir) {
         return ensure_dir;
@@ -2778,8 +2795,8 @@ Result<void> Window::save_debug_bundle(std::string_view directory_path) const {
     std::ostringstream manifest;
     manifest << "{\n";
     manifest << "  \"format\": \"nk-debug-bundle-v1\",\n";
-    manifest << "  \"title\": \"" << impl_->config.title << "\",\n";
-    manifest << "  \"renderer_backend\": \"" << renderer_backend_name(renderer_backend())
+    manifest << "  \"title\": \"" << window_.impl_->config.title << "\",\n";
+    manifest << "  \"renderer_backend\": \"" << renderer_backend_name(window_.renderer_backend())
              << "\",\n";
     manifest << "  \"files\": {\n";
     manifest << "    \"widget_tree\": \"" << widget_tree_path.filename().string() << "\",\n";
@@ -2799,9 +2816,9 @@ Result<void> Window::save_debug_bundle(std::string_view directory_path) const {
     return save_text_file(manifest_path.string(), manifest.str());
 }
 
-std::vector<TraceEvent> Window::debug_selected_frame_runtime_events() const {
+std::vector<TraceEvent> WindowInspector::debug_selected_frame_runtime_events() const {
     const auto* frame =
-        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+        selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
     if (frame == nullptr) {
         return {};
     }
@@ -2811,9 +2828,9 @@ std::vector<TraceEvent> Window::debug_selected_frame_runtime_events() const {
     return {};
 }
 
-std::string Window::dump_selected_frame_summary() const {
+std::string WindowInspector::dump_selected_frame_summary() const {
     const auto* frame =
-        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+        selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
     if (frame == nullptr) {
         return "No frame selected";
     }
@@ -2823,29 +2840,29 @@ std::string Window::dump_selected_frame_summary() const {
     return format_selected_frame_summary_text(*frame, {});
 }
 
-Result<void> Window::copy_selected_frame_summary_to_clipboard() const {
+Result<void> WindowInspector::copy_selected_frame_summary_to_clipboard() const {
     return copy_text_to_application_clipboard(dump_selected_frame_summary());
 }
 
-Result<void> Window::save_selected_frame_summary_file(std::string_view path) const {
+Result<void> WindowInspector::save_selected_frame_summary_file(std::string_view path) const {
     return save_text_file(path, dump_selected_frame_summary());
 }
 
-RenderSnapshotNode Window::debug_selected_frame_render_snapshot() const {
+RenderSnapshotNode WindowInspector::debug_selected_frame_render_snapshot() const {
     if (const auto* frame =
-            selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+            selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
         frame != nullptr) {
         return frame->render_snapshot;
     }
     return {};
 }
 
-RenderSnapshotNode Window::debug_selected_render_node() const {
+RenderSnapshotNode WindowInspector::debug_selected_render_node() const {
     if (const auto* frame =
-            selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+            selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
         frame != nullptr) {
         if (const auto* node =
-                selected_render_node_from_frame(frame, impl_->debug_selected_render_path);
+                selected_render_node_from_frame(frame, window_.impl_->debug_selected_render_path);
             node != nullptr) {
             return *node;
         }
@@ -2853,74 +2870,74 @@ RenderSnapshotNode Window::debug_selected_render_node() const {
     return {};
 }
 
-std::string Window::dump_selected_frame_render_snapshot() const {
+std::string WindowInspector::dump_selected_frame_render_snapshot() const {
     if (const auto* frame =
-            selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+            selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
         frame != nullptr) {
         return format_render_snapshot_tree(frame->render_snapshot);
     }
     return {};
 }
 
-std::string Window::dump_selected_frame_render_snapshot_json() const {
+std::string WindowInspector::dump_selected_frame_render_snapshot_json() const {
     if (const auto* frame =
-            selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+            selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
         frame != nullptr) {
         return format_render_snapshot_json(frame->render_snapshot);
     }
     return {};
 }
 
-std::string Window::dump_selected_render_node_details() const {
+std::string WindowInspector::dump_selected_render_node_details() const {
     const auto* frame =
-        selected_history_frame(impl_->frame_history, impl_->debug_selected_frame_id);
+        selected_history_frame(window_.impl_->frame_history, window_.impl_->debug_selected_frame_id);
     if (frame == nullptr) {
         return "No frame selected";
     }
     return format_selected_render_node_text(
-        selected_render_node_from_frame(frame, impl_->debug_selected_render_path));
+        selected_render_node_from_frame(frame, window_.impl_->debug_selected_render_path));
 }
 
-Result<void> Window::copy_selected_render_node_details_to_clipboard() const {
+Result<void> WindowInspector::copy_selected_render_node_details_to_clipboard() const {
     return copy_text_to_application_clipboard(dump_selected_render_node_details());
 }
 
-Result<void> Window::save_selected_render_node_details_file(std::string_view path) const {
+Result<void> WindowInspector::save_selected_render_node_details_file(std::string_view path) const {
     return save_text_file(path, dump_selected_render_node_details());
 }
 
-void Window::set_debug_picker_enabled(bool enabled) {
-    if (impl_->debug_picker_enabled == enabled) {
+void WindowInspector::set_debug_picker_enabled(bool enabled) {
+    if (window_.impl_->debug_picker_enabled == enabled) {
         return;
     }
-    impl_->debug_picker_enabled = enabled;
+    window_.impl_->debug_picker_enabled = enabled;
     if (enabled) {
-        impl_->debug_overlay_flags |= DebugOverlayFlags::InspectorPanel;
+        window_.impl_->debug_overlay_flags |= DebugOverlayFlags::InspectorPanel;
     }
-    if (impl_->surface != nullptr) {
-        impl_->surface->set_cursor_shape(enabled ? CursorShape::PointingHand
-                                                 : impl_->current_cursor_shape);
+    if (window_.impl_->surface != nullptr) {
+        window_.impl_->surface->set_cursor_shape(enabled ? CursorShape::PointingHand
+                                                 : window_.impl_->current_cursor_shape);
     }
-    request_frame(FrameRequestReason::PickerChanged);
+    window_.request_frame(FrameRequestReason::PickerChanged);
 }
 
-bool Window::debug_picker_enabled() const {
-    return impl_->debug_picker_enabled;
+bool WindowInspector::debug_picker_enabled() const {
+    return window_.impl_->debug_picker_enabled;
 }
 
-Widget* Window::debug_selected_widget() const {
-    return impl_->debug_selected_widget;
+Widget* WindowInspector::debug_selected_widget() const {
+    return window_.impl_->debug_selected_widget;
 }
 
-void Window::set_debug_selected_widget(Widget* widget) {
+void WindowInspector::set_debug_selected_widget(Widget* widget) {
     auto is_attached_to_window = [this](const Widget* candidate) {
         if (candidate == nullptr) {
             return false;
         }
-        if (is_attached_to_window_root(candidate, impl_->child)) {
+        if (is_attached_to_window_root(candidate, window_.impl_->child)) {
             return true;
         }
-        for (const auto& overlay : impl_->overlays) {
+        for (const auto& overlay : window_.impl_->overlays) {
             if (overlay.widget != nullptr && is_descendant_of(candidate, overlay.widget.get())) {
                 return true;
             }
@@ -2931,86 +2948,86 @@ void Window::set_debug_selected_widget(Widget* widget) {
     if (widget != nullptr && !is_attached_to_window(widget)) {
         widget = nullptr;
     }
-    if (impl_->debug_selected_widget == widget) {
+    if (window_.impl_->debug_selected_widget == widget) {
         return;
     }
-    impl_->debug_selected_widget = widget;
+    window_.impl_->debug_selected_widget = widget;
     sync_debug_selected_render_path();
-    request_frame(FrameRequestReason::DebugSelectionChanged);
+    window_.request_frame(FrameRequestReason::DebugSelectionChanged);
 }
 
-void Window::set_debug_widget_filter(std::string_view filter) {
+void WindowInspector::set_debug_widget_filter(std::string_view filter) {
     const std::string normalized = lowercase_copy(filter);
-    if (impl_->debug_widget_filter == normalized) {
+    if (window_.impl_->debug_widget_filter == normalized) {
         return;
     }
-    impl_->debug_widget_filter = normalized;
+    window_.impl_->debug_widget_filter = normalized;
 
     std::vector<std::shared_ptr<Widget>> overlay_widgets;
-    overlay_widgets.reserve(impl_->overlays.size());
-    for (const auto& overlay : impl_->overlays) {
+    overlay_widgets.reserve(window_.impl_->overlays.size());
+    for (const auto& overlay : window_.impl_->overlays) {
         overlay_widgets.push_back(overlay.widget);
     }
     const auto entries =
-        build_inspector_entries(impl_->child.get(), overlay_widgets, impl_->debug_widget_filter);
-    impl_->debug_selected_widget =
-        normalized_selected_widget(entries, impl_->debug_selected_widget);
+        build_inspector_entries(window_.impl_->child.get(), overlay_widgets, window_.impl_->debug_widget_filter);
+    window_.impl_->debug_selected_widget =
+        normalized_selected_widget(entries, window_.impl_->debug_selected_widget);
     sync_debug_selected_render_path();
-    request_frame(FrameRequestReason::DebugSelectionChanged);
+    window_.request_frame(FrameRequestReason::DebugSelectionChanged);
 }
 
-std::string_view Window::debug_widget_filter() const {
-    return impl_->debug_widget_filter;
+std::string_view WindowInspector::debug_widget_filter() const {
+    return window_.impl_->debug_widget_filter;
 }
 
-WidgetDebugNode Window::debug_selected_widget_info() const {
-    return impl_->debug_selected_widget != nullptr
-               ? build_widget_debug_node(*impl_->debug_selected_widget,
-                                         impl_->debug_selected_widget->debug_tree_path(),
-                                         impl_->focused_widget,
-                                         impl_->hovered_widget,
-                                         impl_->pressed_widget)
+WidgetDebugNode WindowInspector::debug_selected_widget_info() const {
+    return window_.impl_->debug_selected_widget != nullptr
+               ? build_widget_debug_node(*window_.impl_->debug_selected_widget,
+                                         window_.impl_->debug_selected_widget->debug_tree_path(),
+                                         window_.impl_->focused_widget,
+                                         window_.impl_->hovered_widget,
+                                         window_.impl_->pressed_widget)
                : WidgetDebugNode{};
 }
 
-std::string Window::dump_selected_widget_details() const {
-    return format_widget_panel_text(impl_->debug_selected_widget,
-                                    impl_->focused_widget,
-                                    impl_->hovered_widget,
-                                    impl_->pressed_widget);
+std::string WindowInspector::dump_selected_widget_details() const {
+    return format_widget_panel_text(window_.impl_->debug_selected_widget,
+                                    window_.impl_->focused_widget,
+                                    window_.impl_->hovered_widget,
+                                    window_.impl_->pressed_widget);
 }
 
-std::string Window::dump_selected_widget_details_json() const {
+std::string WindowInspector::dump_selected_widget_details_json() const {
     return format_widget_debug_json(debug_selected_widget_info());
 }
 
-Result<void> Window::copy_selected_widget_details_to_clipboard() const {
+Result<void> WindowInspector::copy_selected_widget_details_to_clipboard() const {
     return copy_text_to_application_clipboard(dump_selected_widget_details());
 }
 
-Result<void> Window::save_selected_widget_details_file(std::string_view path) const {
+Result<void> WindowInspector::save_selected_widget_details_file(std::string_view path) const {
     return save_text_file(path, dump_selected_widget_details());
 }
 
-Result<void> Window::save_selected_widget_details_json_file(std::string_view path) const {
+Result<void> WindowInspector::save_selected_widget_details_json_file(std::string_view path) const {
     return save_widget_debug_json_file(debug_selected_widget_info(), path);
 }
 
-Result<void> Window::save_debug_screenshot_ppm_file(std::string_view path) const {
-    const auto* renderer = dynamic_cast<const SoftwareRenderer*>(impl_->renderer.get());
+Result<void> WindowInspector::save_debug_screenshot_ppm_file(std::string_view path) const {
+    const auto* renderer = dynamic_cast<const SoftwareRenderer*>(window_.impl_->renderer.get());
     if (renderer == nullptr) {
-        if (impl_->child == nullptr) {
+        if (window_.impl_->child == nullptr) {
             return Unexpected(std::string("debug screenshot capture requires a root widget"));
         }
 
-        const auto viewport_size = size();
+        const auto viewport_size = window_.size();
         const float scale_factor =
-            impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
+            window_.impl_->surface != nullptr ? window_.impl_->surface->scale_factor() : 1.0F;
         const auto content_area = compute_debug_content_area(
-            viewport_size, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
+            viewport_size, window_.impl_->debug_overlay_flags, window_.impl_->debug_inspector_presentation);
 
-        auto* self = const_cast<Window*>(this);
-        if (impl_->needs_layout) {
+        auto* self = const_cast<Window*>(&window_);
+        if (window_.impl_->needs_layout) {
             self->perform_window_layout(content_area);
         }
 
@@ -3020,8 +3037,8 @@ Result<void> Window::save_debug_screenshot_ppm_file(std::string_view path) const
         if (software == nullptr) {
             return Unexpected(std::string("failed to create software renderer for screenshot"));
         }
-        if (impl_->text_shaper != nullptr) {
-            software->set_text_shaper(impl_->text_shaper.get());
+        if (window_.impl_->text_shaper != nullptr) {
+            software->set_text_shaper(window_.impl_->text_shaper.get());
         }
         software->begin_frame(viewport_size, scale_factor);
         if (root_node) {
@@ -3242,7 +3259,7 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
                 auto* target = resolve_target();
                 set_hovered_widget(target);
                 update_cursor_shape(target);
-                set_debug_selected_widget(target);
+                inspector().set_debug_selected_widget(target);
             } else {
                 set_hovered_widget(nullptr);
                 update_cursor_shape(nullptr);
@@ -3253,7 +3270,7 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         set_hovered_widget(target);
         update_cursor_shape(target);
         if (impl_->debug_picker_enabled) {
-            set_debug_selected_widget(target);
+            inspector().set_debug_selected_widget(target);
             break;
         }
         if (impl_->pressed_widget != nullptr) {
@@ -3286,15 +3303,15 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
                     };
                 } else if (selected_timeline_frame_id != 0) {
                     impl_->debug_selected_frame_id = selected_timeline_frame_id;
-                    sync_debug_selected_render_path();
+                    inspector().sync_debug_selected_render_path();
                     request_frame(FrameRequestReason::DebugSelectionChanged);
                 } else if (const auto* render_entry = render_entry_at_point();
                            render_entry != nullptr) {
                     impl_->debug_selected_render_path = render_entry->path;
-                    sync_debug_selected_widget_from_render_selection();
+                    inspector().sync_debug_selected_widget_from_render_selection();
                     request_frame(FrameRequestReason::DebugSelectionChanged);
                 } else {
-                    set_debug_selected_widget(inspector_entry_at_point());
+                    inspector().set_debug_selected_widget(inspector_entry_at_point());
                 }
             }
             break;
@@ -3303,8 +3320,8 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         set_hovered_widget(target);
         update_cursor_shape(target);
         if (impl_->debug_picker_enabled && event.button == 1) {
-            set_debug_selected_widget(target);
-            set_debug_picker_enabled(false);
+            inspector().set_debug_selected_widget(target);
+            inspector().set_debug_picker_enabled(false);
             break;
         }
         impl_->pressed_widget = target;
@@ -3379,7 +3396,7 @@ void Window::dispatch_key_event(const KeyEvent& event) {
                               : std::vector<RenderInspectorEntry>{};
     auto move_debug_selection = [this, &inspector_entries](int delta) {
         if (inspector_entries.empty()) {
-            set_debug_selected_widget(nullptr);
+            inspector().set_debug_selected_widget(nullptr);
             return;
         }
         const auto normalized_selected =
@@ -3388,14 +3405,14 @@ void Window::dispatch_key_event(const KeyEvent& event) {
         const auto last_index = last_navigable_entry_index(inspector_entries);
         if (normalized_selected == nullptr) {
             const std::size_t initial_index = delta < 0 ? last_index : first_index;
-            set_debug_selected_widget(inspector_entries[initial_index].widget);
+            inspector().set_debug_selected_widget(inspector_entries[initial_index].widget);
             return;
         }
         const auto current_index = selected_entry_index(inspector_entries, normalized_selected);
         const int next_index = std::clamp(static_cast<int>(current_index) + delta,
                                           static_cast<int>(first_index),
                                           static_cast<int>(last_index));
-        set_debug_selected_widget(inspector_entries[static_cast<std::size_t>(next_index)].widget);
+        inspector().set_debug_selected_widget(inspector_entries[static_cast<std::size_t>(next_index)].widget);
     };
     auto move_selected_frame = [this](int delta) {
         if (impl_->frame_history.empty()) {
@@ -3412,7 +3429,7 @@ void Window::dispatch_key_event(const KeyEvent& event) {
             return;
         }
         impl_->debug_selected_frame_id = next_frame_id;
-        sync_debug_selected_render_path();
+        inspector().sync_debug_selected_render_path();
         request_frame(FrameRequestReason::DebugSelectionChanged);
     };
     auto move_selected_render = [this, &render_entries](int delta) {
@@ -3439,7 +3456,7 @@ void Window::dispatch_key_event(const KeyEvent& event) {
         }
         impl_->debug_selected_render_path =
             render_entries[static_cast<std::size_t>(next_index)].path;
-        sync_debug_selected_widget_from_render_selection();
+        inspector().sync_debug_selected_widget_from_render_selection();
         request_frame(FrameRequestReason::DebugSelectionChanged);
     };
 
@@ -3464,7 +3481,7 @@ void Window::dispatch_key_event(const KeyEvent& event) {
                                         DebugOverlayFlags::InspectorPanel)) {
                 impl_->debug_overlay_flags |= DebugOverlayFlags::InspectorPanel;
             }
-            set_debug_picker_enabled(!impl_->debug_picker_enabled);
+            inspector().set_debug_picker_enabled(!impl_->debug_picker_enabled);
             return;
         }
         if (event.modifiers == ctrl_shift && event.key == KeyCode::D) {
@@ -3479,48 +3496,48 @@ void Window::dispatch_key_event(const KeyEvent& event) {
                                DebugInspectorPresentation::DockedRight
                            ? DebugInspectorPresentation::Detached
                            : DebugInspectorPresentation::Overlay);
-            set_debug_inspector_presentation(next_presentation);
+            inspector().set_debug_inspector_presentation(next_presentation);
             return;
         }
         if (event.modifiers == ctrl_shift && event.key == KeyCode::W &&
             has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             !impl_->debug_picker_enabled) {
-            (void)copy_selected_widget_details_to_clipboard();
+            (void)inspector().copy_selected_widget_details_to_clipboard();
             return;
         }
         if (event.modifiers == ctrl_shift && event.key == KeyCode::R &&
             has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             !impl_->debug_picker_enabled) {
-            (void)copy_selected_render_node_details_to_clipboard();
+            (void)inspector().copy_selected_render_node_details_to_clipboard();
             return;
         }
         if (event.modifiers == ctrl_shift && event.key == KeyCode::F &&
             has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel) &&
             !impl_->debug_picker_enabled) {
-            (void)copy_selected_frame_summary_to_clipboard();
+            (void)inspector().copy_selected_frame_summary_to_clipboard();
             return;
         }
         if (impl_->debug_picker_enabled && event.key == KeyCode::Escape) {
-            set_debug_picker_enabled(false);
+            inspector().set_debug_picker_enabled(false);
             return;
         }
         if (!impl_->debug_picker_enabled &&
             has_debug_overlay_flag(impl_->debug_overlay_flags, DebugOverlayFlags::InspectorPanel)) {
             if (event.key == KeyCode::Escape && !impl_->debug_widget_filter.empty()) {
-                set_debug_widget_filter({});
+                inspector().set_debug_widget_filter({});
                 return;
             }
             if (event.key == KeyCode::Backspace && !impl_->debug_widget_filter.empty()) {
                 auto next_filter = impl_->debug_widget_filter;
                 next_filter.pop_back();
-                set_debug_widget_filter(next_filter);
+                inspector().set_debug_widget_filter(next_filter);
                 return;
             }
             if (const auto typed = debug_filter_character(event.key, event.modifiers);
                 typed.has_value()) {
                 auto next_filter = impl_->debug_widget_filter;
                 next_filter += *typed;
-                set_debug_widget_filter(next_filter);
+                inspector().set_debug_widget_filter(next_filter);
                 return;
             }
             if (event.key == KeyCode::Up) {
@@ -3548,12 +3565,12 @@ void Window::dispatch_key_event(const KeyEvent& event) {
                 return;
             }
             if (event.key == KeyCode::Home && !inspector_entries.empty()) {
-                set_debug_selected_widget(
+                inspector().set_debug_selected_widget(
                     inspector_entries[first_navigable_entry_index(inspector_entries)].widget);
                 return;
             }
             if (event.key == KeyCode::End && !inspector_entries.empty()) {
-                set_debug_selected_widget(
+                inspector().set_debug_selected_widget(
                     inspector_entries[last_navigable_entry_index(inspector_entries)].widget);
                 return;
             }

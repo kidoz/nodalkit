@@ -9,6 +9,7 @@
 #include <nk/model/selection_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/render/renderer.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
@@ -944,7 +945,7 @@ int main(int argc, char** argv) {
         (void)app.event_loop().poll();
     }
 
-    const auto history = window.debug_frame_history();
+    const auto history = window.inspector().debug_frame_history();
     const auto trace_events = app.event_loop().debug_trace_events();
     if (history.empty()) {
         std::cerr << "expected at least one captured frame for scenario "
@@ -958,13 +959,13 @@ int main(int argc, char** argv) {
     }
 
     const auto artifact_save =
-        window.save_frame_diagnostics_artifact_json_file(artifact_path.string());
+        window.inspector().save_frame_diagnostics_artifact_json_file(artifact_path.string());
     if (!artifact_save) {
         std::cerr << artifact_save.error() << "\n";
         return 1;
     }
 
-    const auto trace_save = window.save_frame_trace_json_file(trace_path.string());
+    const auto trace_save = window.inspector().save_frame_trace_json_file(trace_path.string());
     if (!trace_save) {
         std::cerr << trace_save.error() << "\n";
         return 1;

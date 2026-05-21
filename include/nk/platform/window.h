@@ -24,6 +24,7 @@ class TextShaper;
 class Widget;
 class Dialog;
 class RenderNode;
+class WindowInspector;
 struct MouseEvent;
 struct KeyEvent;
 struct TextInputEvent;
@@ -157,108 +158,9 @@ public:
     /// Full text-input state for the currently focused editable text widget, when one exists.
     [[nodiscard]] std::optional<WindowTextInputState> current_text_input_state() const;
 
-    /// Configure built-in debug overlays for layout, dirtiness, and frame HUD output.
-    void set_debug_overlay_flags(DebugOverlayFlags flags);
-    [[nodiscard]] DebugOverlayFlags debug_overlay_flags() const;
-
-    /// Choose whether the inspector is drawn as a floating overlay, a docked side pane,
-    /// or a detachable sidecar-style pane.
-    void set_debug_inspector_presentation(DebugInspectorPresentation presentation);
-    [[nodiscard]] DebugInspectorPresentation debug_inspector_presentation() const;
-
-    /// Frame diagnostics captured for the most recently rendered frame.
-    [[nodiscard]] const FrameDiagnostics& last_frame_diagnostics() const;
-
-    /// Recent frame diagnostics retained for the in-process inspector timeline.
-    [[nodiscard]] std::span<const FrameDiagnostics> debug_frame_history() const;
-
-    /// Build a debug snapshot of the current widget tree and overlays.
-    [[nodiscard]] WidgetDebugNode debug_tree() const;
-
-    /// Format the current widget tree into a readable text dump.
-    [[nodiscard]] std::string dump_widget_tree() const;
-
-    /// Format the current widget tree into versioned JSON.
-    [[nodiscard]] std::string dump_widget_tree_json() const;
-
-    /// Save the current widget tree as a versioned JSON file.
-    [[nodiscard]] Result<void> save_widget_tree_json_file(std::string_view path) const;
-
-    /// Export recent frame history as Chrome Trace JSON.
-    [[nodiscard]] std::string dump_frame_trace_json() const;
-
-    /// Save recent frame history as a versioned diagnostics artifact JSON file.
-    [[nodiscard]] Result<void>
-    save_frame_diagnostics_artifact_json_file(std::string_view path) const;
-
-    /// Save recent frame history and runtime events as a trace JSON file.
-    [[nodiscard]] Result<void> save_frame_trace_json_file(std::string_view path) const;
-
-    /// Save a one-shot diagnostics bundle containing trace, widget tree, render snapshot,
-    /// screenshot, and supporting summaries into a directory.
-    [[nodiscard]] Result<void> save_debug_bundle(std::string_view directory_path) const;
-
-    /// Runtime trace events correlated to the currently selected inspector frame.
-    [[nodiscard]] std::vector<TraceEvent> debug_selected_frame_runtime_events() const;
-
-    /// Format the currently selected inspector frame as a readable summary.
-    [[nodiscard]] std::string dump_selected_frame_summary() const;
-
-    /// Copy the selected-frame summary to the clipboard.
-    [[nodiscard]] Result<void> copy_selected_frame_summary_to_clipboard() const;
-
-    /// Save the selected-frame summary to a text file.
-    [[nodiscard]] Result<void> save_selected_frame_summary_file(std::string_view path) const;
-
-    /// Render-tree snapshot for the currently selected inspector frame.
-    [[nodiscard]] RenderSnapshotNode debug_selected_frame_render_snapshot() const;
-
-    /// Currently selected render node within the selected frame snapshot.
-    [[nodiscard]] RenderSnapshotNode debug_selected_render_node() const;
-
-    /// Format the selected frame's render snapshot as a readable tree dump.
-    [[nodiscard]] std::string dump_selected_frame_render_snapshot() const;
-
-    /// Format the selected frame's render snapshot as JSON.
-    [[nodiscard]] std::string dump_selected_frame_render_snapshot_json() const;
-
-    /// Format the selected render node as a readable summary.
-    [[nodiscard]] std::string dump_selected_render_node_details() const;
-
-    /// Copy the selected render-node summary to the clipboard.
-    [[nodiscard]] Result<void> copy_selected_render_node_details_to_clipboard() const;
-
-    /// Save the selected render-node summary to a text file.
-    [[nodiscard]] Result<void> save_selected_render_node_details_file(std::string_view path) const;
-
-    /// Enable a live widget picker that selects widgets under the pointer.
-    void set_debug_picker_enabled(bool enabled);
-    [[nodiscard]] bool debug_picker_enabled() const;
-
-    /// Currently selected widget in the live inspector, if any.
-    [[nodiscard]] Widget* debug_selected_widget() const;
-    void set_debug_selected_widget(Widget* widget);
-    void set_debug_widget_filter(std::string_view filter);
-    [[nodiscard]] std::string_view debug_widget_filter() const;
-    [[nodiscard]] WidgetDebugNode debug_selected_widget_info() const;
-
-    /// Format the selected widget as a readable summary.
-    [[nodiscard]] std::string dump_selected_widget_details() const;
-
-    /// Format the selected widget as versioned JSON.
-    [[nodiscard]] std::string dump_selected_widget_details_json() const;
-
-    /// Copy the selected widget summary to the clipboard.
-    [[nodiscard]] Result<void> copy_selected_widget_details_to_clipboard() const;
-
-    /// Save the selected widget summary to a text file.
-    [[nodiscard]] Result<void> save_selected_widget_details_file(std::string_view path) const;
-
-    /// Save the selected widget details as a versioned JSON file.
-    [[nodiscard]] Result<void> save_selected_widget_details_json_file(std::string_view path) const;
-
-    /// Save the currently rendered debug surface to a PPM file when readback is available.
-    [[nodiscard]] Result<void> save_debug_screenshot_ppm_file(std::string_view path) const;
+    /// Get the inspector for this window.
+    [[nodiscard]] WindowInspector& inspector();
+    [[nodiscard]] const WindowInspector& inspector() const;
 
     // --- Signals ---
 
@@ -280,15 +182,13 @@ public:
 private:
     friend class Widget;
     friend class Dialog;
+    friend class WindowInspector;
 
     [[nodiscard]] TextShaper* text_shaper() const;
     void request_frame(FrameRequestReason reason);
     void perform_window_layout(Rect content_area);
     [[nodiscard]] std::unique_ptr<RenderNode> build_window_debug_render_tree(Size viewport_size,
                                                                              Rect content_area);
-    void sync_debug_selected_render_path();
-    [[nodiscard]] Widget* debug_selected_render_widget() const;
-    void sync_debug_selected_widget_from_render_selection();
     void focus_widget(Widget* widget);
     void handle_widget_state_change(Widget& widget);
     void handle_widget_detached(Widget& widget);

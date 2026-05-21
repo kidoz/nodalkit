@@ -302,6 +302,7 @@ protected:
 
 private:
     friend class Window;
+    friend class WindowInspector;
 
     [[nodiscard]] std::vector<std::size_t> debug_tree_path() const;
     [[nodiscard]] std::string debug_snapshot_label() const;

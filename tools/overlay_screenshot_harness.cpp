@@ -7,6 +7,7 @@
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/text_field.h>
@@ -104,72 +105,72 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    window.set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds);
+    window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds);
     if (!app.event_loop().poll()) {
         std::cerr << "failed to render layout-bounds overlay frame\n";
         return 1;
     }
-    const auto save_layout = window.save_debug_screenshot_ppm_file(layout_path.string());
+    const auto save_layout = window.inspector().save_debug_screenshot_ppm_file(layout_path.string());
     if (!save_layout) {
         std::cerr << save_layout.error() << "\n";
         return 1;
     }
 
     title->queue_redraw();
-    window.set_debug_overlay_flags(nk::DebugOverlayFlags::DirtyWidgets);
+    window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::DirtyWidgets);
     if (!app.event_loop().poll()) {
         std::cerr << "failed to render dirty-widgets overlay frame\n";
         return 1;
     }
-    const auto save_dirty = window.save_debug_screenshot_ppm_file(dirty_path.string());
+    const auto save_dirty = window.inspector().save_debug_screenshot_ppm_file(dirty_path.string());
     if (!save_dirty) {
         std::cerr << save_dirty.error() << "\n";
         return 1;
     }
 
-    window.set_debug_selected_widget(button.get());
-    window.set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds |
+    window.inspector().set_debug_selected_widget(button.get());
+    window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds |
                                    nk::DebugOverlayFlags::InspectorPanel);
     if (!app.event_loop().poll()) {
         std::cerr << "failed to render inspector overlay frame\n";
         return 1;
     }
-    const auto save_inspector = window.save_debug_screenshot_ppm_file(inspector_path.string());
+    const auto save_inspector = window.inspector().save_debug_screenshot_ppm_file(inspector_path.string());
     if (!save_inspector) {
         std::cerr << save_inspector.error() << "\n";
         return 1;
     }
 
-    window.set_debug_inspector_presentation(nk::DebugInspectorPresentation::DockedRight);
+    window.inspector().set_debug_inspector_presentation(nk::DebugInspectorPresentation::DockedRight);
     if (!app.event_loop().poll()) {
         std::cerr << "failed to render docked inspector frame\n";
         return 1;
     }
-    const auto save_docked = window.save_debug_screenshot_ppm_file(docked_path.string());
+    const auto save_docked = window.inspector().save_debug_screenshot_ppm_file(docked_path.string());
     if (!save_docked) {
         std::cerr << save_docked.error() << "\n";
         return 1;
     }
 
-    window.set_debug_widget_filter("button");
+    window.inspector().set_debug_widget_filter("button");
     if (!app.event_loop().poll()) {
         std::cerr << "failed to render filtered inspector frame\n";
         return 1;
     }
-    const auto save_filter = window.save_debug_screenshot_ppm_file(filter_path.string());
+    const auto save_filter = window.inspector().save_debug_screenshot_ppm_file(filter_path.string());
     if (!save_filter) {
         std::cerr << save_filter.error() << "\n";
         return 1;
     }
 
-    window.set_debug_widget_filter({});
+    window.inspector().set_debug_widget_filter({});
     window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::PageDown});
     if (!app.event_loop().poll()) {
         std::cerr << "failed to render focused render-node frame\n";
         return 1;
     }
     const auto save_render_focus =
-        window.save_debug_screenshot_ppm_file(render_focus_path.string());
+        window.inspector().save_debug_screenshot_ppm_file(render_focus_path.string());
     if (!save_render_focus) {
         std::cerr << save_render_focus.error() << "\n";
         return 1;

@@ -2,6 +2,7 @@
 /// @brief macOS Cocoa native surface implementation.
 
 #include "macos_window.h"
+#include <nk/platform/window_inspector.h>
 
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
@@ -535,7 +536,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     if (!_surface) {
         return @[];
     }
-    return build_accessibility_children(_surface->owner().debug_tree(), self, self);
+    return build_accessibility_children(_surface->owner().inspector().debug_tree(), self, self);
 }
 
 - (id)accessibilityFocusedUIElement {
@@ -898,7 +899,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
                                     std::max(1.0F, caret_rect->width),
                                     std::max(20.0F, caret_rect->height));
         } else {
-            const auto tree = _surface->owner().debug_tree();
+            const auto tree = _surface->owner().inspector().debug_tree();
             if (const auto* focused = find_focused_debug_node(tree); focused != nullptr) {
                 local_rect = NSMakeRect(focused->allocation.x,
                                         focused->allocation.y,

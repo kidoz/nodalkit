@@ -16,6 +16,7 @@
 #include <nk/platform/application.h>
 #include <nk/platform/native_toolbar.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/style/theme_selection.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
@@ -482,7 +483,7 @@ int run_showcase(int argc, char** argv) {
         const auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
         const auto bundle_dir = std::filesystem::temp_directory_path() /
                                 ("nodalkit-showcase-debug-bundle-" + std::to_string(timestamp));
-        const auto result = window.save_debug_bundle(bundle_dir.string());
+        const auto result = window.inspector().save_debug_bundle(bundle_dir.string());
         if (result) {
             const auto bundle_label = bundle_dir.filename().string();
             status_bar->set_segment(0, "Diagnostics bundle exported");
