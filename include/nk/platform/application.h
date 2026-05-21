@@ -119,8 +119,12 @@ public:
     /// \param filters Optional file extension filters (e.g., {"*.png", "*.jpg"}).
     /// \return The selected file path, or a FileDialogError indicating why it failed
     ///         (such as Cancelled or Unsupported).
-    [[nodiscard]] OpenFileDialogResult
-    open_file_dialog(std::string_view title = "Open", const std::vector<std::string>& filters = {});
+    /// Callback type for asynchronous file dialogs.
+    using OpenFileDialogCallback = std::function<void(OpenFileDialogResult)>;
+
+    void open_file_dialog_async(std::string_view title,
+                                const std::vector<std::string>& filters,
+                                OpenFileDialogCallback callback);
 
     /// Whether clipboard text is bridged to the active platform backend.
     [[nodiscard]] bool supports_clipboard_text() const;

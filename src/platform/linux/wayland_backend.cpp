@@ -23,6 +23,7 @@
 #include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/logging.h>
 #include <nk/runtime/event_loop.h>
+#include <nk/platform/application.h>
 #include <nk/ui_core/widget.h>
 #include <optional>
 #include <poll.h>
@@ -1706,25 +1707,36 @@ bool WaylandBackend::supports_open_file_dialog() const {
     return supported;
 }
 
-OpenFileDialogResult
-WaylandBackend::show_open_file_dialog(std::string_view title,
-                                      const std::vector<std::string>& filters) {
-    GDBusConnection* connection = portal_session_bus_connection();
-    if (connection == nullptr) {
-        return Unexpected(FileDialogError::Failed);
-    }
+void WaylandBackend::show_open_file_dialog_async(std::string_view title,
+                                                 const std::vector<std::string>& filters,
+                                                 OpenFileDialogCallback callback) {
+    std::string title_str = std::string(title);
+    std::thread([title_str, filters, callback = std::move(callback)]() mutable {
+        GDBusConnection* connection = portal_session_bus_connection();
+        if (connection == nullptr) {
+            Application::instance().event_loop().post([callback = std::move(callback)]() {
+                if (callback) callback(Unexpected(FileDialogError::Failed));
+            });
+            return;
+        }
 
-    if (!session_bus_name_has_owner(connection, PortalBusName)) {
-        g_object_unref(connection);
-        return Unexpected(FileDialogError::Unsupported);
-    }
+        if (!session_bus_name_has_owner(connection, PortalBusName)) {
+            g_object_unref(connection);
+            Application::instance().event_loop().post([callback = std::move(callback)]() {
+                if (callback) callback(Unexpected(FileDialogError::Unsupported));
+            });
+            return;
+        }
 
-    const auto handle_token = make_portal_handle_token();
-    auto request_path =
-        detail::portal_request_path(g_dbus_connection_get_unique_name(connection), handle_token);
+        GMainContext* context = g_main_context_new();
+        g_main_context_push_thread_default(context);
 
-    PortalRequestState state;
-    state.loop = g_main_loop_new(nullptr, FALSE);
+        const auto handle_token = make_portal_handle_token();
+        auto request_path =
+            detail::portal_request_path(g_dbus_connection_get_unique_name(connection), handle_token);
+
+        PortalRequestState state;
+        state.loop = g_main_loop_new(context, FALSE);
 
     auto subscribe_to_request = [&](const std::string& path) {
         return g_dbus_connection_signal_subscribe(connection,
@@ -1786,16 +1798,23 @@ WaylandBackend::show_open_file_dialog(std::string_view title,
         -1,
         nullptr,
         &error);
-    if (reply == nullptr) {
-        if (error != nullptr) {
-            NK_LOG_ERROR("Wayland", error->message);
-            g_error_free(error);
+        if (reply == nullptr) {
+            if (error != nullptr) {
+                NK_LOG_ERROR("Wayland", error->message);
+                g_error_free(error);
+            }
+            g_dbus_connection_signal_unsubscribe(connection, subscription_id);
+            g_main_loop_unref(state.loop);
+            g_object_unref(connection);
+            
+            g_main_context_pop_thread_default(context);
+            g_main_context_unref(context);
+            
+            Application::instance().event_loop().post([callback = std::move(callback)]() {
+                if (callback) callback(Unexpected(FileDialogError::Failed));
+            });
+            return;
         }
-        g_dbus_connection_signal_unsubscribe(connection, subscription_id);
-        g_main_loop_unref(state.loop);
-        g_object_unref(connection);
-        return Unexpected(FileDialogError::Failed);
-    }
 
     const char* returned_request_path = nullptr;
     g_variant_get(reply, "(&o)", &returned_request_path);
@@ -1816,9 +1835,13 @@ WaylandBackend::show_open_file_dialog(std::string_view title,
         state.response, first_path_from_portal_results(state.results));
 
     if (state.results != nullptr) {
-        g_variant_unref(state.results);
-    }
-    return result;
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+
+        Application::instance().event_loop().post([callback = std::move(callback), result = std::move(result)]() {
+            if (callback) callback(result);
+        });
+    }).detach();
 }
 
 bool WaylandBackend::supports_clipboard_text() const {

@@ -29,8 +29,7 @@ public:
     [[nodiscard]] SpellChecker* spell_checker() override;
 
     [[nodiscard]] bool supports_open_file_dialog() const override;
-    [[nodiscard]] OpenFileDialogResult
-    show_open_file_dialog(std::string_view title, const std::vector<std::string>& filters) override;
+    void show_open_file_dialog_async(std::string_view title, const std::vector<std::string>& filters, OpenFileDialogCallback callback) override;
     [[nodiscard]] bool supports_clipboard_text() const override;
     [[nodiscard]] std::string clipboard_text() const override;
     void set_clipboard_text(std::string_view text) override;

@@ -139,8 +139,12 @@ public:
     [[nodiscard]] virtual bool supports_open_file_dialog() const { return false; }
 
     /// Show a native "open file" dialog.
-    [[nodiscard]] virtual OpenFileDialogResult
-    show_open_file_dialog(std::string_view title, const std::vector<std::string>& filters) = 0;
+    /// Callback for asynchronous file dialog completion.
+    using OpenFileDialogCallback = std::function<void(OpenFileDialogResult)>;
+
+    virtual void show_open_file_dialog_async(std::string_view title,
+                                             const std::vector<std::string>& filters,
+                                             OpenFileDialogCallback callback) = 0;
 
     /// Whether the backend implements clipboard text integration.
     [[nodiscard]] virtual bool supports_clipboard_text() const { return false; }

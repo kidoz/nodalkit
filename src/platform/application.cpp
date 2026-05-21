@@ -237,15 +237,18 @@ bool Application::supports_open_file_dialog() const {
     return impl_->backend != nullptr && impl_->backend->supports_open_file_dialog();
 }
 
-OpenFileDialogResult Application::open_file_dialog(std::string_view title,
-                                                   const std::vector<std::string>& filters) {
+void Application::open_file_dialog_async(std::string_view title,
+                                         const std::vector<std::string>& filters,
+                                         OpenFileDialogCallback callback) {
     if (!impl_->backend) {
-        return Unexpected(FileDialogError::Unavailable);
+        if (callback) callback(Unexpected(FileDialogError::Unavailable));
+        return;
     }
     if (!impl_->backend->supports_open_file_dialog()) {
-        return Unexpected(FileDialogError::Unsupported);
+        if (callback) callback(Unexpected(FileDialogError::Unsupported));
+        return;
     }
-    return impl_->backend->show_open_file_dialog(title, filters);
+    impl_->backend->show_open_file_dialog_async(title, filters, std::move(callback));
 }
 
 bool Application::supports_clipboard_text() const {

@@ -8,6 +8,7 @@
 #include <nk/foundation/logging.h>
 #include <nk/platform/window.h>
 #include <nk/runtime/event_loop.h>
+#include <nk/platform/application.h>
 #include <string>
 #include <vector>
 
@@ -938,26 +939,36 @@ bool Win32Backend::supports_open_file_dialog() const {
     return true;
 }
 
-OpenFileDialogResult Win32Backend::show_open_file_dialog(std::string_view title,
-                                                         const std::vector<std::string>& filters) {
-    std::array<wchar_t, MAX_PATH> file_buffer{};
-    auto filter = build_open_file_dialog_filter(filters);
-    auto wide_title = utf8_to_wide(title);
+void Win32Backend::show_open_file_dialog_async(std::string_view title,
+                                               const std::vector<std::string>& filters,
+                                               OpenFileDialogCallback callback) {
+    std::string title_str = std::string(title);
+    std::thread([this, title_str, filters, callback = std::move(callback)]() mutable {
+        std::array<wchar_t, MAX_PATH> file_buffer{};
+        auto filter = build_open_file_dialog_filter(filters);
+        auto wide_title = utf8_to_wide(title_str);
 
-    OPENFILENAMEW open_file{};
-    open_file.lStructSize = sizeof(open_file);
-    open_file.lpstrFile = file_buffer.data();
-    open_file.nMaxFile = static_cast<DWORD>(file_buffer.size());
-    open_file.lpstrFilter = filter.c_str();
-    open_file.nFilterIndex = 1;
-    open_file.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
-    open_file.lpstrTitle = wide_title.empty() ? nullptr : wide_title.c_str();
+        OPENFILENAMEW open_file{};
+        open_file.lStructSize = sizeof(open_file);
+        open_file.lpstrFile = file_buffer.data();
+        open_file.nMaxFile = static_cast<DWORD>(file_buffer.size());
+        open_file.lpstrFilter = filter.c_str();
+        open_file.nFilterIndex = 1;
+        open_file.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+        open_file.lpstrTitle = wide_title.empty() ? nullptr : wide_title.c_str();
 
-    if (!GetOpenFileNameW(&open_file)) {
-        const DWORD error = CommDlgExtendedError();
-        return Unexpected(error == 0 ? FileDialogError::Cancelled : FileDialogError::Failed);
-    }
-    return wide_to_utf8(file_buffer.data());
+        OpenFileDialogResult result;
+        if (!GetOpenFileNameW(&open_file)) {
+            const DWORD error = CommDlgExtendedError();
+            result = Unexpected(error == 0 ? FileDialogError::Cancelled : FileDialogError::Failed);
+        } else {
+            result = wide_to_utf8(file_buffer.data());
+        }
+
+        Application::instance().event_loop().post([callback = std::move(callback), result = std::move(result)]() {
+            if (callback) callback(result);
+        });
+    }).detach();
 }
 
 bool Win32Backend::supports_clipboard_text() const {

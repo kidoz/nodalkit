@@ -438,8 +438,9 @@ bool MacosBackend::supports_open_file_dialog() const {
     return true;
 }
 
-OpenFileDialogResult MacosBackend::show_open_file_dialog(std::string_view title,
-                                                         const std::vector<std::string>& filters) {
+void MacosBackend::show_open_file_dialog_async(std::string_view title,
+                                               const std::vector<std::string>& filters,
+                                               OpenFileDialogCallback callback) {
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
         [panel setCanChooseFiles:YES];
@@ -478,11 +479,13 @@ OpenFileDialogResult MacosBackend::show_open_file_dialog(std::string_view title,
             }
         }
 
-        NSModalResponse response = [panel runModal];
-        if (response == NSModalResponseOK && panel.URL) {
-            return std::string(panel.URL.path.UTF8String);
-        }
-        return Unexpected(FileDialogError::Cancelled);
+        [panel beginWithCompletionHandler:^(NSModalResponse response) {
+            if (response == NSModalResponseOK && panel.URL) {
+                if (callback) callback(std::string(panel.URL.path.UTF8String));
+            } else {
+                if (callback) callback(Unexpected(FileDialogError::Cancelled));
+            }
+        }];
     }
 }
 
