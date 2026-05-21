@@ -24,6 +24,9 @@ struct CallbackHandle {
 /// callbacks, and posted tasks. One EventLoop per Application.
 class EventLoop {
 public:
+    /// Return the EventLoop bound to the current thread, if any.
+    [[nodiscard]] static EventLoop* current();
+
     EventLoop();
     ~EventLoop();
 

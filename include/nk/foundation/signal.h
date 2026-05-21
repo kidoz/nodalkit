@@ -1,3 +1,4 @@
+#include <type_traits>
 #pragma once
 
 /// @file signal.h
@@ -9,7 +10,10 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <vector>
+#include <nk/runtime/event_loop.h>
 
 namespace nk {
 
@@ -91,26 +95,44 @@ public:
     /// Connect a slot. Returns a Connection handle.
     [[nodiscard]] Connection connect(SlotType slot) {
         auto state = std::make_shared<detail::ConnectionState>();
-        state->id = next_id_++;
-        slots_.push_back({state, std::move(slot)});
+        std::lock_guard lock(shared_->mutex);
+        state->id = shared_->next_id++;
+        shared_->slots.push_back({
+            state,
+            std::move(slot),
+            EventLoop::current(),
+            std::this_thread::get_id()
+        });
         return Connection(std::move(state));
     }
 
     /// Emit the signal, invoking all connected slots.
     void emit(const Args&... args) {
-        // Take a snapshot size so newly connected slots during emission
-        // are not called in this round.
-        const auto n = slots_.size();
-        ++emit_depth_;
-        for (std::size_t i = 0; i < n; ++i) {
-            if (slots_[i].state->connected.load(std::memory_order_relaxed)) {
-                slots_[i].callback(args...);
-            }
-        }
-        --emit_depth_;
-
-        if (emit_depth_ == 0) {
+        std::vector<Slot> local_slots;
+        {
+            std::lock_guard lock(shared_->mutex);
             purge_disconnected();
+            local_slots = shared_->slots;
+        }
+
+        const auto current_thread = std::this_thread::get_id();
+        for (const auto& s : local_slots) {
+            if (s.state->connected.load(std::memory_order_relaxed)) {
+                if (s.target_thread == current_thread || !s.target_loop) {
+                    s.callback(args...);
+                } else {
+                    if constexpr (std::conjunction_v<std::is_copy_constructible<std::decay_t<Args>>...>) {
+                        auto cb = s.callback;
+                        s.target_loop->post([cb, args...]() mutable {
+                            cb(args...);
+                        }, "signal-cross-thread");
+                    } else {
+                        // Fallback to direct invocation if arguments are not copyable,
+                        // even though it is not thread-safe.
+                        s.callback(args...);
+                    }
+                }
+            }
         }
     }
 
@@ -119,8 +141,9 @@ public:
 
     /// Number of currently connected slots.
     [[nodiscard]] std::size_t connection_count() const {
+        std::lock_guard lock(shared_->mutex);
         std::size_t count = 0;
-        for (const auto& s : slots_) {
+        for (const auto& s : shared_->slots) {
             if (s.state->connected.load(std::memory_order_relaxed)) {
                 ++count;
             }
@@ -130,29 +153,34 @@ public:
 
     /// Disconnect all slots.
     void disconnect_all() {
-        for (auto& s : slots_) {
+        std::lock_guard lock(shared_->mutex);
+        for (auto& s : shared_->slots) {
             s.state->connected.store(false, std::memory_order_relaxed);
         }
-        if (emit_depth_ == 0) {
-            slots_.clear();
-        }
+        shared_->slots.clear();
     }
 
 private:
     struct Slot {
         std::shared_ptr<detail::ConnectionState> state;
         SlotType callback;
+        EventLoop* target_loop;
+        std::thread::id target_thread;
     };
 
+    struct SharedState {
+        std::mutex mutex;
+        std::vector<Slot> slots;
+        uint64_t next_id = 1;
+    };
+
+    std::unique_ptr<SharedState> shared_{std::make_unique<SharedState>()};
+
     void purge_disconnected() {
-        std::erase_if(slots_, [](const Slot& s) {
+        std::erase_if(shared_->slots, [](const Slot& s) {
             return !s.state->connected.load(std::memory_order_relaxed);
         });
     }
-
-    std::vector<Slot> slots_;
-    int emit_depth_ = 0;
-    uint64_t next_id_ = 1;
 };
 
 } // namespace nk

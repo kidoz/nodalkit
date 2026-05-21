@@ -50,7 +50,10 @@ struct EventLoop::Impl {
 
 namespace {
 
+thread_local EventLoop* current_event_loop = nullptr;
+
 constexpr std::size_t kTraceEventHistoryLimit = 256;
+
 
 double elapsed_ms(std::chrono::steady_clock::time_point start,
                   std::chrono::steady_clock::time_point end) {
@@ -83,9 +86,22 @@ void append_trace_event(std::vector<TraceEvent>& trace_events,
 
 } // namespace
 
-EventLoop::EventLoop() : impl_(std::make_unique<Impl>()) {}
+EventLoop::EventLoop() : impl_(std::make_unique<Impl>()) {
+    if (!current_event_loop) {
+        current_event_loop = this;
+    }
+}
 
-EventLoop::~EventLoop() = default;
+EventLoop::~EventLoop() {
+    if (current_event_loop == this) {
+        current_event_loop = nullptr;
+    }
+}
+
+EventLoop* EventLoop::current() {
+    return current_event_loop;
+}
+
 
 int EventLoop::run() {
     impl_->running = true;
