@@ -26,6 +26,7 @@
 #include <nk/model/tree_model.h>
 #include <nk/style/theme.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/canvas_widget.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
