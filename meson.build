@@ -37,6 +37,8 @@ nk_sources = files(
     'src/accessibility/accessible.cpp',
     'src/accessibility/atspi_bridge.cpp',
     'src/model/abstract_list_model.cpp',
+    'src/model/abstract_table_model.cpp',
+    'src/model/abstract_tree_model.cpp',
     'src/model/list_model_adapters.cpp',
     'src/model/selection_model.cpp',
     'src/model/tree_model.cpp',
