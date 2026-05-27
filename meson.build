@@ -14,6 +14,7 @@ nk_sources = files(
     'src/animation/timed_animation.cpp',
     'src/foundation/signal.cpp',
     'src/foundation/logging.cpp',
+    'src/foundation/service_locator.cpp',
     'src/runtime/event_loop.cpp',
     'src/platform/application.cpp',
     'src/platform/window.cpp',
