@@ -40,6 +40,12 @@ test_service_locator = executable('test_service_locator',
 )
 test('service_locator', test_service_locator)
 
+test_state_store = executable('test_state_store',
+    'state_store_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('state_store', test_state_store)
+
 # Public API link audit: references every public symbol declared in
 # include/nk/**/*.h and fails the build if any symbol has no implementation
 # in libNodalKit (Shortcut-class bugs). Intentionally headless — catches
