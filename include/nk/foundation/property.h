@@ -48,6 +48,16 @@ public:
         return ScopedConnection(source.on_changed().connect([this](const T& v) { set(v); }));
     }
 
+    /// Two-way binding: this property and `other` track each other.
+    /// Returns a pair of ScopedConnections — the binding stays alive as long as they do.
+    [[nodiscard]] std::pair<ScopedConnection, ScopedConnection> bind_bidirectional(Property<T>& other) {
+        set(other.get());
+        return {
+            ScopedConnection(other.on_changed().connect([this](const T& v) { set(v); })),
+            ScopedConnection(on_changed().connect([&other](const T& v) { other.set(v); }))
+        };
+    }
+
 private:
     T value_;
     Signal<T> changed_;

@@ -48,3 +48,24 @@ TEST_CASE("Property one-way binding tracks the source", "[property]") {
     source.set(200);
     REQUIRE(target.get() == 99);
 }
+
+TEST_CASE("Property two-way binding synchronizes both ways", "[property]") {
+    nk::Property<int> a{10};
+    nk::Property<int> b{20};
+
+    auto binding = a.bind_bidirectional(b);
+
+    // Initial state: a should be updated to b's value
+    REQUIRE(a.get() == 20);
+    REQUIRE(b.get() == 20);
+
+    // Change a -> b should update
+    a.set(30);
+    REQUIRE(b.get() == 30);
+    REQUIRE(a.get() == 30);
+
+    // Change b -> a should update
+    b.set(40);
+    REQUIRE(a.get() == 40);
+    REQUIRE(b.get() == 40);
+}
