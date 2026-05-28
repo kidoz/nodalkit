@@ -127,7 +127,7 @@ test('frame_diag_diff_ok',
 test('frame_diag_diff_regression',
     frame_diag_diff,
     args : [frame_diag_baseline, frame_diag_candidate_bad] + frame_diag_diff_args,
-    should_fail : true,
+    expected_fail : true,
 )
 
 test('debug_bundle_view',
@@ -203,7 +203,7 @@ test('trace_diff_ok',
 test('trace_diff_regression',
     trace_diff,
     args : [trace_baseline, trace_candidate_bad] + trace_diff_args,
-    should_fail : true,
+    expected_fail : true,
 )
 
 test('trace_view',

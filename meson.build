@@ -1,5 +1,6 @@
 project('NodalKit', 'cpp',
         version : '0.1.0',
+        meson_version : '>=1.11.0',
         default_options : ['warning_level=3', 'werror=true', 'cpp_std=c++23'])
 
 nk_inc = include_directories('include')

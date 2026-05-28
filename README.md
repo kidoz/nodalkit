@@ -31,7 +31,7 @@ The current 0.x support policy is:
 ## Quick Start
 
 ```bash
-# Requirements: Meson >= 1.10, a C++23 compiler
+# Requirements: Meson >= 1.11, a C++23 compiler
 meson setup buildDir
 meson compile -C buildDir
 meson test -C buildDir
