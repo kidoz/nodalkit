@@ -4,7 +4,7 @@
 /// @brief Formal state container for Unidirectional Data Flow (MVI/MVVM).
 
 #include <nk/foundation/property.h>
-#include <mutex>
+#include <utility>
 
 namespace nk {
 
@@ -14,13 +14,19 @@ namespace nk {
 /// Instead, views call `dispatch()` with an Intent (action/event).
 /// The concrete store processes the intent and updates the state.
 ///
+/// StateStore is not thread-safe. Construct it, dispatch intents, and observe
+/// state() on the thread that owns the store (normally the UI thread). Async
+/// work must post its result back to that thread before touching the store,
+/// e.g. via EventLoop::current()->post().
+///
+/// Re-entrant dispatch is supported: an on_changed() observer may dispatch
+/// another intent, and the nested update completes before control returns.
+///
 /// @tparam State A value type representing the UI state.
 /// @tparam Intent An enum or variant representing actions that can occur.
-template <typename State, typename Intent>
-class StateStore {
+template <typename State, typename Intent> class StateStore {
 public:
-    explicit StateStore(State initial_state)
-        : state_(std::move(initial_state)) {}
+    explicit StateStore(State initial_state) : state_(std::move(initial_state)) {}
 
     virtual ~StateStore() = default;
 
@@ -40,21 +46,15 @@ public:
 
 protected:
     /// Protected helper to mutate state and notify observers.
-    /// Should only be called within dispatch() or async callbacks triggered by dispatch().
-    void update_state(State new_state) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        state_.set(std::move(new_state));
-    }
+    /// Should only be called within dispatch() or callbacks that have been
+    /// posted back to the owning thread.
+    void update_state(State new_state) { state_.set(std::move(new_state)); }
 
-    /// Access the current state value securely for mutation logic.
-    [[nodiscard]] State current_state() const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return state_.get();
-    }
+    /// Returns a copy of the current state value for mutation logic.
+    [[nodiscard]] State current_state() const { return state_.get(); }
 
 private:
     Property<State> state_;
-    mutable std::mutex mutex_;
 };
 
 } // namespace nk
