@@ -23,6 +23,7 @@
 #include <nk/foundation/logging.h>
 #include <nk/foundation/property.h>
 #include <nk/foundation/result.h>
+#include <nk/foundation/service_locator.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
 #include <nk/layout/box_layout.h>
@@ -31,8 +32,11 @@
 #include <nk/layout/layout_manager.h>
 #include <nk/layout/stack_layout.h>
 #include <nk/model/abstract_list_model.h>
+#include <nk/model/abstract_table_model.h>
+#include <nk/model/abstract_tree_model.h>
 #include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
+#include <nk/model/state_store.h>
 #include <nk/model/tree_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
@@ -175,6 +179,19 @@ void force_symbol_references() {
     (void)static_cast<void (nk::ScopedConnection::*)()>(&nk::ScopedConnection::disconnect);
     (void)static_cast<nk::Connection (nk::ScopedConnection::*)()>(&nk::ScopedConnection::release);
     (void)static_cast<bool (nk::ScopedConnection::*)() const>(&nk::ScopedConnection::connected);
+    (void)static_cast<const int& (nk::Property<int>::*)() const>(&nk::Property<int>::get);
+    (void)static_cast<void (nk::Property<int>::*)(int)>(&nk::Property<int>::set);
+    (void)static_cast<nk::Signal<int>& (nk::Property<int>::*)()>(&nk::Property<int>::on_changed);
+    (void)static_cast<nk::ScopedConnection (nk::Property<int>::*)(nk::Property<int>&)>(
+        &nk::Property<int>::bind_to);
+    (void)static_cast<std::pair<nk::ScopedConnection, nk::ScopedConnection> (nk::Property<int>::*)(
+        nk::Property<int>&)>(&nk::Property<int>::bind_bidirectional);
+    (void)static_cast<void (*)(std::shared_ptr<int>)>(
+        &nk::ServiceLocator::register_service<int, int>);
+    (void)static_cast<void (*)()>(&nk::ServiceLocator::register_service<int>);
+    (void)static_cast<std::shared_ptr<int> (*)()>(&nk::ServiceLocator::get<int>);
+    (void)static_cast<bool (*)()>(&nk::ServiceLocator::has<int>);
+    (void)static_cast<void (*)()>(&nk::ServiceLocator::clear);
     (void)static_cast<float (nk::BoxLayout::*)() const>(&nk::BoxLayout::spacing);
     (void)static_cast<void (nk::BoxLayout::*)(float)>(&nk::BoxLayout::set_spacing);
     (void)static_cast<bool (nk::BoxLayout::*)() const>(&nk::BoxLayout::homogeneous);
@@ -317,6 +334,66 @@ void force_symbol_references() {
     (void)static_cast<std::optional<std::size_t> (nk::TreeModel::*)(nk::TreeNodeId) const>(
         &nk::TreeModel::visible_row_for_node);
     (void)static_cast<nk::Signal<>& (nk::TreeModel::*)()>(&nk::TreeModel::on_model_reset);
+    (void)static_cast<std::size_t (nk::AbstractTableModel::*)() const>(
+        &nk::AbstractTableModel::row_count);
+    (void)static_cast<std::size_t (nk::AbstractTableModel::*)() const>(
+        &nk::AbstractTableModel::column_count);
+    (void)static_cast<std::any (nk::AbstractTableModel::*)(std::size_t, std::size_t) const>(
+        &nk::AbstractTableModel::data);
+    (void)static_cast<std::string (nk::AbstractTableModel::*)(std::size_t, std::size_t) const>(
+        &nk::AbstractTableModel::display_text);
+    (void)static_cast<std::string (nk::AbstractTableModel::*)(std::size_t) const>(
+        &nk::AbstractTableModel::header_text);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_rows_about_to_insert);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_rows_inserted);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_rows_about_to_remove);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_rows_removed);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_columns_about_to_insert);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_columns_inserted);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_columns_about_to_remove);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_columns_removed);
+    (void)static_cast<nk::Signal<std::size_t, std::size_t, std::size_t, std::size_t>& (
+        nk::AbstractTableModel::*)()>(&nk::AbstractTableModel::on_data_changed);
+    (void)static_cast<nk::Signal<>& (nk::AbstractTableModel::*)()>(
+        &nk::AbstractTableModel::on_model_reset);
+    (void)static_cast<bool (nk::TreeIndex::*)() const>(&nk::TreeIndex::is_valid);
+    (void)static_cast<std::size_t (nk::AbstractTreeModel::*)(const nk::TreeIndex&) const>(
+        &nk::AbstractTreeModel::children_count);
+    (void)static_cast<nk::TreeIndex (nk::AbstractTreeModel::*)(const nk::TreeIndex&, std::size_t)
+                          const>(&nk::AbstractTreeModel::child);
+    (void)static_cast<nk::TreeIndex (nk::AbstractTreeModel::*)(const nk::TreeIndex&) const>(
+        &nk::AbstractTreeModel::parent);
+    (void)static_cast<std::size_t (nk::AbstractTreeModel::*)(const nk::TreeIndex&) const>(
+        &nk::AbstractTreeModel::row_of);
+    (void)static_cast<std::any (nk::AbstractTreeModel::*)(const nk::TreeIndex&) const>(
+        &nk::AbstractTreeModel::data);
+    (void)static_cast<std::string (nk::AbstractTreeModel::*)(const nk::TreeIndex&) const>(
+        &nk::AbstractTreeModel::display_text);
+    (void)static_cast<nk::Signal<nk::TreeIndex, std::size_t, std::size_t>& (
+        nk::AbstractTreeModel::*)()>(&nk::AbstractTreeModel::on_nodes_about_to_insert);
+    (void)static_cast<nk::Signal<nk::TreeIndex, std::size_t, std::size_t>& (
+        nk::AbstractTreeModel::*)()>(&nk::AbstractTreeModel::on_nodes_inserted);
+    (void)static_cast<nk::Signal<nk::TreeIndex, std::size_t, std::size_t>& (
+        nk::AbstractTreeModel::*)()>(&nk::AbstractTreeModel::on_nodes_about_to_remove);
+    (void)static_cast<nk::Signal<nk::TreeIndex, std::size_t, std::size_t>& (
+        nk::AbstractTreeModel::*)()>(&nk::AbstractTreeModel::on_nodes_removed);
+    (void)static_cast<nk::Signal<nk::TreeIndex, std::size_t, std::size_t>& (
+        nk::AbstractTreeModel::*)()>(&nk::AbstractTreeModel::on_data_changed);
+    (void)static_cast<nk::Signal<>& (nk::AbstractTreeModel::*)()>(
+        &nk::AbstractTreeModel::on_model_reset);
+    (void)static_cast<const nk::Property<int>& (nk::StateStore<int, int>::*)() const>(
+        &nk::StateStore<int, int>::state);
+    (void)static_cast<nk::Property<int>& (nk::StateStore<int, int>::*)()>(
+        &nk::StateStore<int, int>::state);
+    (void)static_cast<void (nk::StateStore<int, int>::*)(int)>(&nk::StateStore<int, int>::dispatch);
     (void)&nk::DataTable::create;
     (void)static_cast<void (nk::DataTable::*)(std::shared_ptr<nk::AbstractListModel>)>(
         &nk::DataTable::set_model);
