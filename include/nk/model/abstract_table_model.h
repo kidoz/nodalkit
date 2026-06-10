@@ -10,8 +10,13 @@
 
 namespace nk {
 
-/// Abstract base for 2D table models. Provides data for widgets like
-/// DataTable or grid-like item views.
+/// Abstract base for 2D table models — the table counterpart of
+/// AbstractListModel.
+///
+/// This is the canonical contract for row-and-column data going forward, but
+/// no in-tree widget consumes it yet: DataTable currently consumes
+/// AbstractListModel plus per-column text providers and will migrate to this
+/// contract during 0.x.
 ///
 /// The model notifies views of changes through signals so that the
 /// view can update incrementally instead of rebuilding entirely.
@@ -85,7 +90,10 @@ protected:
     void begin_remove_columns(std::size_t first, std::size_t count);
     void end_remove_columns();
 
-    void notify_data_changed(std::size_t top_row, std::size_t left_column, std::size_t bottom_row, std::size_t right_column);
+    void notify_data_changed(std::size_t top_row,
+                             std::size_t left_column,
+                             std::size_t bottom_row,
+                             std::size_t right_column);
     void notify_model_reset();
 
 private:

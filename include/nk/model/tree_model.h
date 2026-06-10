@@ -20,6 +20,11 @@ using TreeNodeId = std::size_t;
 inline constexpr TreeNodeId InvalidTreeNodeId = static_cast<TreeNodeId>(-1);
 
 /// In-memory tree model for TreeView and outline-style widgets.
+///
+/// This is the batteries-included model: it owns node text and structure and
+/// currently also tracks expansion/visible-row state for TreeView. For
+/// exposing application-owned hierarchical data without copying it, see
+/// AbstractTreeModel — the generic contract TreeView migrates to during 0.x.
 class TreeModel {
 public:
     TreeModel();
