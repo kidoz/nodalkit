@@ -31,8 +31,13 @@ public:
     } // NOLINT(google-explicit-constructor)
 
     /// Set a new value. Emits on_changed() if the value actually differs.
+    ///
+    /// Values that compare unequal to themselves (e.g. floating-point NaN) are
+    /// treated as unchanged relative to each other, so two-way bindings cannot
+    /// ping-pong forever. For composite types, change detection is only exact
+    /// when operator== is an equivalence relation.
     void set(T value) {
-        if (!(value_ == value)) {
+        if (has_changed(value_, value)) {
             value_ = std::move(value);
             changed_.emit(value_);
         }
@@ -50,15 +55,25 @@ public:
 
     /// Two-way binding: this property and `other` track each other.
     /// Returns a pair of ScopedConnections — the binding stays alive as long as they do.
-    [[nodiscard]] std::pair<ScopedConnection, ScopedConnection> bind_bidirectional(Property<T>& other) {
+    [[nodiscard]] std::pair<ScopedConnection, ScopedConnection>
+    bind_bidirectional(Property<T>& other) {
         set(other.get());
-        return {
-            ScopedConnection(other.on_changed().connect([this](const T& v) { set(v); })),
-            ScopedConnection(on_changed().connect([&other](const T& v) { other.set(v); }))
-        };
+        return {ScopedConnection(other.on_changed().connect([this](const T& v) { set(v); })),
+                ScopedConnection(on_changed().connect([&other](const T& v) { other.set(v); }))};
     }
 
 private:
+    /// Change check that tolerates self-unequal values such as NaN: when both
+    /// the stored and the incoming value compare unequal to themselves, the
+    /// property is considered unchanged.
+    [[nodiscard]] static bool has_changed(const T& current, const T& incoming) {
+        if (current == incoming) {
+            return false;
+        }
+        // Changed, unless both values are self-unequal (NaN-like).
+        return (current == current) || (incoming == incoming); // NOLINT(misc-redundant-expression)
+    }
+
     T value_;
     Signal<T> changed_;
 };

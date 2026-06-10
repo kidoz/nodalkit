@@ -2,6 +2,8 @@
 /// @brief Tests for Property<T> and bindings.
 
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <limits>
 #include <nk/foundation/property.h>
 #include <string>
 
@@ -68,4 +70,30 @@ TEST_CASE("Property two-way binding synchronizes both ways", "[property]") {
     b.set(40);
     REQUIRE(a.get() == 40);
     REQUIRE(b.get() == 40);
+}
+
+TEST_CASE("Property two-way binding terminates on self-unequal values", "[property]") {
+    nk::Property<double> a{0.0};
+    nk::Property<double> b{0.0};
+
+    auto binding = a.bind_bidirectional(b);
+
+    int emit_count = 0;
+    auto conn = a.on_changed().connect([&](const double&) { emit_count++; });
+
+    // Without the self-unequal guard this recursed forever: NaN != NaN keeps
+    // both sides emitting until the stack overflows.
+    a.set(std::numeric_limits<double>::quiet_NaN());
+    REQUIRE(std::isnan(a.get()));
+    REQUIRE(std::isnan(b.get()));
+    REQUIRE(emit_count == 1);
+
+    // Setting NaN over NaN is treated as unchanged.
+    a.set(std::numeric_limits<double>::quiet_NaN());
+    REQUIRE(emit_count == 1);
+
+    // A real value still propagates after the NaN episode.
+    a.set(1.5);
+    REQUIRE(b.get() == 1.5);
+    REQUIRE(emit_count == 2);
 }
