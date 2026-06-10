@@ -1,4 +1,4 @@
-builddir := "build"
+builddir := "buildDir"
 
 # List available recipes
 default:
