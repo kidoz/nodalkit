@@ -8,6 +8,7 @@
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
+#include <nk/platform/drag_drop.h>
 #include <nk/platform/key_codes.h>
 #include <nk/platform/native_toolbar.h>
 #include <nk/render/renderer.h>
@@ -139,6 +140,13 @@ public:
     void dispatch_key_event(const KeyEvent& event);
     void dispatch_text_input_event(const TextInputEvent& event);
     void dispatch_window_event(const WindowEvent& event);
+    [[nodiscard]] DragOperation dispatch_drag_drop_event(DragDropEvent event);
+
+    /// Start an in-process drag operation. The payload remains alive until
+    /// the drag is dropped or cancelled.
+    void start_drag(DragPayload payload, DragOperation operation = DragOperation::Copy);
+    void cancel_drag();
+    [[nodiscard]] bool is_drag_active() const;
 
     /// Access the native surface (nullptr until present() is called).
     [[nodiscard]] NativeSurface* native_surface() const;
@@ -194,6 +202,7 @@ private:
     void handle_widget_detached(Widget& widget);
     void note_widget_redraw_request(Widget& widget);
     void note_widget_layout_request(Widget& widget);
+    [[nodiscard]] Widget* drag_target_at(Point point) const;
     void show_overlay(std::shared_ptr<Widget> overlay, bool modal);
     void dismiss_overlay(Widget& overlay);
 

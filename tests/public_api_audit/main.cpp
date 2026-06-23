@@ -39,6 +39,7 @@
 #include <nk/model/state_store.h>
 #include <nk/model/tree_model.h>
 #include <nk/platform/application.h>
+#include <nk/platform/drag_drop.h>
 #include <nk/platform/events.h>
 #include <nk/platform/file_dialog.h>
 #include <nk/platform/key_codes.h>
@@ -491,13 +492,14 @@ void force_symbol_references() {
         &nk::Application::platform_backend);
     (void)static_cast<bool (nk::Application::*)() const>(
         &nk::Application::supports_open_file_dialog);
-    (void)static_cast<void (nk::Application::*)(
-        std::string_view, const std::vector<std::string>&,
-        nk::Application::OpenFileDialogCallback)>(&nk::Application::open_file_dialog_async);
+    (void)static_cast<void (nk::Application::*)(std::string_view,
+                                                const std::vector<std::string>&,
+                                                nk::Application::OpenFileDialogCallback)>(
+        &nk::Application::open_file_dialog_async);
     (void)static_cast<bool (nk::Application::*)() const>(
         &nk::Application::supports_save_file_dialog);
-    (void)static_cast<void (nk::Application::*)(
-        nk::SaveFileDialogOptions, nk::Application::SaveFileDialogCallback)>(
+    (void)static_cast<void (nk::Application::*)(nk::SaveFileDialogOptions,
+                                                nk::Application::SaveFileDialogCallback)>(
         &nk::Application::save_file_dialog_async);
     (void)static_cast<bool (nk::Application::*)() const>(&nk::Application::supports_clipboard_text);
     (void)static_cast<std::string (nk::Application::*)() const>(&nk::Application::clipboard_text);
@@ -518,6 +520,17 @@ void force_symbol_references() {
         &nk::Application::on_theme_selection_changed);
     (void)static_cast<nk::Signal<std::string_view>& (nk::Application::*)()>(
         &nk::Application::on_native_app_menu_action);
+    (void)static_cast<nk::DragPayload (*)(std::string, std::string)>(&nk::DragPayload::from_text);
+    (void)static_cast<nk::DragPayload (*)(std::vector<std::filesystem::path>)>(
+        &nk::DragPayload::from_files);
+    (void)static_cast<nk::DragPayload (*)(std::string, std::any)>(
+        &nk::DragPayload::from_application_data);
+    (void)static_cast<bool (nk::DragPayload::*)() const>(&nk::DragPayload::has_text);
+    (void)static_cast<bool (nk::DragPayload::*)() const>(&nk::DragPayload::has_files);
+    (void)static_cast<bool (nk::DragPayload::*)() const>(&nk::DragPayload::has_application_data);
+    (void)static_cast<void (nk::DragDropEvent::*)(nk::DragOperation)>(&nk::DragDropEvent::accept);
+    (void)static_cast<void (nk::DragDropEvent::*)()>(&nk::DragDropEvent::reject);
+    (void)static_cast<bool (nk::DragDropEvent::*)() const>(&nk::DragDropEvent::is_accepted);
     (void)static_cast<void (nk::NativeSurface::*)()>(&nk::NativeSurface::show);
     (void)static_cast<void (nk::NativeSurface::*)()>(&nk::NativeSurface::hide);
     (void)static_cast<void (nk::NativeSurface::*)(std::string_view)>(&nk::NativeSurface::set_title);
@@ -541,14 +554,14 @@ void force_symbol_references() {
         &nk::PlatformBackend::run_event_loop);
     (void)static_cast<void (nk::PlatformBackend::*)()>(&nk::PlatformBackend::wake_event_loop);
     (void)static_cast<void (nk::PlatformBackend::*)(int)>(&nk::PlatformBackend::request_quit);
-    (void)static_cast<void (nk::PlatformBackend::*)(
-        std::string_view, const std::vector<std::string>&,
-        nk::PlatformBackend::OpenFileDialogCallback)>(
+    (void)static_cast<void (nk::PlatformBackend::*)(std::string_view,
+                                                    const std::vector<std::string>&,
+                                                    nk::PlatformBackend::OpenFileDialogCallback)>(
         &nk::PlatformBackend::show_open_file_dialog_async);
     (void)static_cast<bool (nk::PlatformBackend::*)() const>(
         &nk::PlatformBackend::supports_save_file_dialog);
-    (void)static_cast<void (nk::PlatformBackend::*)(
-        nk::SaveFileDialogOptions, nk::PlatformBackend::SaveFileDialogCallback)>(
+    (void)static_cast<void (nk::PlatformBackend::*)(nk::SaveFileDialogOptions,
+                                                    nk::PlatformBackend::SaveFileDialogCallback)>(
         &nk::PlatformBackend::show_save_file_dialog_async);
     (void)static_cast<nk::SystemPreferences (nk::PlatformBackend::*)() const>(
         &nk::PlatformBackend::system_preferences);
@@ -584,6 +597,12 @@ void force_symbol_references() {
         &nk::Window::dispatch_text_input_event);
     (void)static_cast<void (nk::Window::*)(const nk::WindowEvent&)>(
         &nk::Window::dispatch_window_event);
+    (void)static_cast<nk::DragOperation (nk::Window::*)(nk::DragDropEvent)>(
+        &nk::Window::dispatch_drag_drop_event);
+    (void)static_cast<void (nk::Window::*)(nk::DragPayload, nk::DragOperation)>(
+        &nk::Window::start_drag);
+    (void)static_cast<void (nk::Window::*)()>(&nk::Window::cancel_drag);
+    (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_drag_active);
     (void)static_cast<nk::NativeSurface* (nk::Window::*)() const>(&nk::Window::native_surface);
     (void)static_cast<nk::RendererBackend (nk::Window::*)() const>(&nk::Window::renderer_backend);
     (void)static_cast<nk::CursorShape (nk::Window::*)() const>(&nk::Window::current_cursor_shape);
@@ -592,19 +611,28 @@ void force_symbol_references() {
         &nk::Window::current_text_input_caret_rect);
     (void)static_cast<std::optional<nk::WindowTextInputState> (nk::Window::*)() const>(
         &nk::Window::current_text_input_state);
-    (void)static_cast<void (nk::WindowInspector::*)(nk::DebugOverlayFlags)>(&nk::WindowInspector::set_debug_overlay_flags);
-    (void)static_cast<nk::DebugOverlayFlags (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_overlay_flags);
-    (void)static_cast<void (nk::WindowInspector::*)(nk::DebugInspectorPresentation)>(&nk::WindowInspector::set_debug_inspector_presentation);
-    (void)static_cast<nk::DebugInspectorPresentation (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_inspector_presentation);
-    (void)static_cast<const nk::FrameDiagnostics& (nk::WindowInspector::*)() const>(&nk::WindowInspector::last_frame_diagnostics);
+    (void)static_cast<void (nk::WindowInspector::*)(nk::DebugOverlayFlags)>(
+        &nk::WindowInspector::set_debug_overlay_flags);
+    (void)static_cast<nk::DebugOverlayFlags (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_overlay_flags);
+    (void)static_cast<void (nk::WindowInspector::*)(nk::DebugInspectorPresentation)>(
+        &nk::WindowInspector::set_debug_inspector_presentation);
+    (void)static_cast<nk::DebugInspectorPresentation (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_inspector_presentation);
+    (void)static_cast<const nk::FrameDiagnostics& (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::last_frame_diagnostics);
     (void)static_cast<std::span<const nk::FrameDiagnostics> (nk::WindowInspector::*)() const>(
         &nk::WindowInspector::debug_frame_history);
-    (void)static_cast<nk::WidgetDebugNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_tree);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_widget_tree);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_widget_tree_json);
+    (void)static_cast<nk::WidgetDebugNode (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_tree);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_widget_tree);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_widget_tree_json);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
         &nk::WindowInspector::save_widget_tree_json_file);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_frame_trace_json);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_frame_trace_json);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
         &nk::WindowInspector::save_frame_diagnostics_artifact_json_file);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
@@ -613,29 +641,44 @@ void force_symbol_references() {
         &nk::WindowInspector::save_debug_bundle);
     (void)static_cast<std::vector<nk::TraceEvent> (nk::WindowInspector::*)() const>(
         &nk::WindowInspector::debug_selected_frame_runtime_events);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_frame_summary);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_selected_frame_summary);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)() const>(
         &nk::WindowInspector::copy_selected_frame_summary_to_clipboard);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
         &nk::WindowInspector::save_selected_frame_summary_file);
-    (void)static_cast<nk::RenderSnapshotNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_frame_render_snapshot);
-    (void)static_cast<nk::RenderSnapshotNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_render_node);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_frame_render_snapshot);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_frame_render_snapshot_json);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_render_node_details);
+    (void)static_cast<nk::RenderSnapshotNode (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_selected_frame_render_snapshot);
+    (void)static_cast<nk::RenderSnapshotNode (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_selected_render_node);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_selected_frame_render_snapshot);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_selected_frame_render_snapshot_json);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_selected_render_node_details);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)() const>(
         &nk::WindowInspector::copy_selected_render_node_details_to_clipboard);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
         &nk::WindowInspector::save_selected_render_node_details_file);
-    (void)static_cast<void (nk::WindowInspector::*)(bool)>(&nk::WindowInspector::set_debug_picker_enabled);
-    (void)static_cast<bool (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_picker_enabled);
-    (void)static_cast<nk::Widget* (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_widget);
-    (void)static_cast<void (nk::WindowInspector::*)(nk::Widget*)>(&nk::WindowInspector::set_debug_selected_widget);
-    (void)static_cast<void (nk::WindowInspector::*)(std::string_view)>(&nk::WindowInspector::set_debug_widget_filter);
-    (void)static_cast<std::string_view (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_widget_filter);
-    (void)static_cast<nk::WidgetDebugNode (nk::WindowInspector::*)() const>(&nk::WindowInspector::debug_selected_widget_info);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_widget_details);
-    (void)static_cast<std::string (nk::WindowInspector::*)() const>(&nk::WindowInspector::dump_selected_widget_details_json);
+    (void)static_cast<void (nk::WindowInspector::*)(bool)>(
+        &nk::WindowInspector::set_debug_picker_enabled);
+    (void)static_cast<bool (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_picker_enabled);
+    (void)static_cast<nk::Widget* (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_selected_widget);
+    (void)static_cast<void (nk::WindowInspector::*)(nk::Widget*)>(
+        &nk::WindowInspector::set_debug_selected_widget);
+    (void)static_cast<void (nk::WindowInspector::*)(std::string_view)>(
+        &nk::WindowInspector::set_debug_widget_filter);
+    (void)static_cast<std::string_view (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_widget_filter);
+    (void)static_cast<nk::WidgetDebugNode (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::debug_selected_widget_info);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_selected_widget_details);
+    (void)static_cast<std::string (nk::WindowInspector::*)() const>(
+        &nk::WindowInspector::dump_selected_widget_details_json);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)() const>(
         &nk::WindowInspector::copy_selected_widget_details_to_clipboard);
     (void)static_cast<nk::Result<void> (nk::WindowInspector::*)(std::string_view) const>(
@@ -709,8 +752,10 @@ void force_symbol_references() {
         &nk::SnapshotContext::add_line);
     (void)static_cast<void (nk::SnapshotContext::*)(nk::Path2D, nk::Color, float)>(
         &nk::SnapshotContext::add_path);
-    (void)static_cast<void (nk::SnapshotContext::*)(nk::Rect)>(&nk::SnapshotContext::push_container);
-    (void)static_cast<void (nk::SnapshotContext::*)(nk::Matrix3x2)>(&nk::SnapshotContext::push_transform);
+    (void)static_cast<void (nk::SnapshotContext::*)(nk::Rect)>(
+        &nk::SnapshotContext::push_container);
+    (void)static_cast<void (nk::SnapshotContext::*)(nk::Matrix3x2)>(
+        &nk::SnapshotContext::push_transform);
     (void)static_cast<void (nk::SnapshotContext::*)()>(&nk::SnapshotContext::pop_transform);
     (void)static_cast<void (nk::SnapshotContext::*)(bool)>(
         &nk::SnapshotContext::set_debug_annotations_enabled);
@@ -872,11 +917,20 @@ void force_symbol_references() {
     (void)static_cast<nk::Signal<>& (nk::Widget::*)()>(&nk::Widget::on_map);
     (void)static_cast<nk::Signal<>& (nk::Widget::*)()>(&nk::Widget::on_unmap);
     (void)static_cast<nk::Signal<>& (nk::Widget::*)()>(&nk::Widget::on_destroy);
+    (void)static_cast<nk::Signal<nk::DragDropEvent&>& (nk::Widget::*)()>(
+        &nk::Widget::on_drag_enter);
+    (void)static_cast<nk::Signal<nk::DragDropEvent&>& (nk::Widget::*)()>(
+        &nk::Widget::on_drag_motion);
+    (void)static_cast<nk::Signal<nk::DragDropEvent&>& (nk::Widget::*)()>(
+        &nk::Widget::on_drag_leave);
+    (void)static_cast<nk::Signal<nk::DragDropEvent&>& (nk::Widget::*)()>(&nk::Widget::on_drop);
     (void)static_cast<void (nk::Widget::*)(nk::SnapshotContext&) const>(&nk::Widget::snapshot);
     (void)static_cast<bool (nk::Widget::*)(const nk::MouseEvent&)>(&nk::Widget::handle_mouse_event);
     (void)static_cast<bool (nk::Widget::*)(const nk::KeyEvent&)>(&nk::Widget::handle_key_event);
     (void)static_cast<bool (nk::Widget::*)(const nk::TextInputEvent&)>(
         &nk::Widget::handle_text_input_event);
+    (void)static_cast<bool (nk::Widget::*)(nk::DragDropEvent&)>(
+        &nk::Widget::handle_drag_drop_event);
     (void)static_cast<bool (nk::Widget::*)(nk::Point) const>(&nk::Widget::hit_test);
     (void)static_cast<std::vector<nk::Rect> (nk::Widget::*)() const>(&nk::Widget::damage_regions);
     (void)static_cast<nk::CursorShape (nk::Widget::*)() const>(&nk::Widget::cursor_shape);

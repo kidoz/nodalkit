@@ -96,6 +96,10 @@ struct Widget::Impl {
     Signal<> on_map;
     Signal<> on_unmap;
     Signal<> on_destroy;
+    Signal<DragDropEvent&> on_drag_enter;
+    Signal<DragDropEvent&> on_drag_motion;
+    Signal<DragDropEvent&> on_drag_leave;
+    Signal<DragDropEvent&> on_drop;
 };
 
 Widget::Widget() : impl_(std::make_unique<Impl>()) {}
@@ -541,9 +545,9 @@ void Widget::dispatch_pointer_controllers(const MouseEvent& event) {
             pointer->on_released().emit(event.x, event.y, event.button);
             break;
         case MouseEvent::Type::Scroll:
-    case MouseEvent::Type::DragStart:
-    case MouseEvent::Type::DragUpdate:
-    case MouseEvent::Type::DragEnd:
+        case MouseEvent::Type::DragStart:
+        case MouseEvent::Type::DragUpdate:
+        case MouseEvent::Type::DragEnd:
             break;
         }
     }
@@ -601,6 +605,22 @@ Signal<>& Widget::on_unmap() {
 
 Signal<>& Widget::on_destroy() {
     return impl_->on_destroy;
+}
+
+Signal<DragDropEvent&>& Widget::on_drag_enter() {
+    return impl_->on_drag_enter;
+}
+
+Signal<DragDropEvent&>& Widget::on_drag_motion() {
+    return impl_->on_drag_motion;
+}
+
+Signal<DragDropEvent&>& Widget::on_drag_leave() {
+    return impl_->on_drag_leave;
+}
+
+Signal<DragDropEvent&>& Widget::on_drop() {
+    return impl_->on_drop;
 }
 
 // --- Child management ---
@@ -804,6 +824,24 @@ bool Widget::handle_key_event(const KeyEvent& /*event*/) {
 
 bool Widget::handle_text_input_event(const TextInputEvent& /*event*/) {
     return false;
+}
+
+bool Widget::handle_drag_drop_event(DragDropEvent& event) {
+    switch (event.type) {
+    case DragDropEventType::Enter:
+        impl_->on_drag_enter.emit(event);
+        break;
+    case DragDropEventType::Motion:
+        impl_->on_drag_motion.emit(event);
+        break;
+    case DragDropEventType::Leave:
+        impl_->on_drag_leave.emit(event);
+        break;
+    case DragDropEventType::Drop:
+        impl_->on_drop.emit(event);
+        break;
+    }
+    return event.is_accepted();
 }
 
 bool Widget::hit_test(Point point) const {

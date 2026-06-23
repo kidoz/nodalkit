@@ -52,6 +52,12 @@ test_model = executable('test_model',
 )
 test('model', test_model)
 
+test_drag_drop = executable('test_drag_drop',
+    'drag_drop_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('drag_drop', test_drag_drop)
+
 test_editor_scale_validation = executable('test_editor_scale_validation',
     'editor_scale_validation_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

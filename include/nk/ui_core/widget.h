@@ -8,6 +8,7 @@
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
 #include <nk/layout/constraints.h>
+#include <nk/platform/drag_drop.h>
 #include <nk/ui_core/cursor_shape.h>
 #include <nk/ui_core/state_flags.h>
 
@@ -222,6 +223,10 @@ public:
     Signal<>& on_map();
     Signal<>& on_unmap();
     Signal<>& on_destroy();
+    Signal<DragDropEvent&>& on_drag_enter();
+    Signal<DragDropEvent&>& on_drag_motion();
+    Signal<DragDropEvent&>& on_drag_leave();
+    Signal<DragDropEvent&>& on_drop();
 
     /// Produce render nodes into the snapshot context.
     /// Default implementation recursively snapshots children.
@@ -239,6 +244,11 @@ public:
     /// Handle a platform text-input event targeted at this widget.
     /// Returns true if the event was consumed.
     virtual bool handle_text_input_event(const TextInputEvent& event);
+
+    /// Handle a drag/drop event targeted at this widget.
+    /// Returns true when the event was accepted by the widget or one of its
+    /// drag/drop signal handlers.
+    virtual bool handle_drag_drop_event(DragDropEvent& event);
 
     /// Whether the widget wants to receive pointer events at the given point.
     /// Widgets with transient popup content may override this to extend the

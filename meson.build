@@ -18,6 +18,7 @@ nk_sources = files(
     'src/foundation/service_locator.cpp',
     'src/runtime/event_loop.cpp',
     'src/platform/application.cpp',
+    'src/platform/drag_drop.cpp',
     'src/platform/window.cpp',
     'src/platform/platform_backend.cpp',
     'src/platform/system_preferences.cpp',
