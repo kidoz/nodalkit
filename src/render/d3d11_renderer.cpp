@@ -1143,6 +1143,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         draw_commands_.push_back(
             {.kind = DrawCommandKind::Text, .command_index = text_commands_.size() - 1});
         return true;
+    }
     case RenderNodeKind::Shadow:
         // These nodes carry visual semantics that the D3D11 path does not yet implement.
         // Falling back preserves correctness until the GPU path supports them explicitly.
@@ -2194,7 +2195,6 @@ void D3D11Renderer::draw_primitive(const PrimitiveCommand& command,
     constants.params0[3] = static_cast<float>(command.clip_count);
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
-    constants.params0[0] = opacity;
     context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
     context_->PSSetShader(pixel_shader_.Get(), nullptr, 0);
     context_->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
@@ -2240,7 +2240,6 @@ void D3D11Renderer::draw_gradient(const GradientCommand& command, std::optional<
     constants.params0[3] = static_cast<float>(command.clip_count);
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
-    constants.params0[0] = opacity;
     context_->VSSetShader(gradient_vertex_shader_.Get(), nullptr, 0);
     context_->PSSetShader(gradient_pixel_shader_.Get(), nullptr, 0);
     context_->VSSetConstantBuffers(0, 1, gradient_constant_buffer_.GetAddressOf());
@@ -2323,7 +2322,7 @@ void D3D11Renderer::draw_text(const TextCommand& command,
     }
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
-    constants.params0[0] = opacity;
+    constants.params0[0] = 1.0F;
     context_->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
