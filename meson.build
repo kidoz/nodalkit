@@ -306,9 +306,9 @@ elif host_system == 'windows'
 
     user32_dep = cpp_compiler.find_library('user32', required : true)
     gdi32_dep = cpp_compiler.find_library('gdi32', required : true)
-    comdlg32_dep = cpp_compiler.find_library('comdlg32', required : true)
     advapi32_dep = cpp_compiler.find_library('advapi32', required : true)
     dwmapi_dep = cpp_compiler.find_library('dwmapi', required : true)
+    ole32_dep = cpp_compiler.find_library('ole32', required : true)
     shcore_dep = cpp_compiler.find_library('shcore', required : true)
     dwrite_dep = cpp_compiler.find_library('dwrite', required : true)
     d3d11_dep = cpp_compiler.find_library('d3d11', required : true)
@@ -324,7 +324,7 @@ elif host_system == 'windows'
         'src/text/windows/gdi_text_shaper.cpp',
     )
 
-    nk_deps += [user32_dep, gdi32_dep, comdlg32_dep, advapi32_dep, dwmapi_dep, shcore_dep, dwrite_dep, d3d11_dep, d3dcompiler_dep, dxgi_dep]
+    nk_deps += [user32_dep, gdi32_dep, advapi32_dep, dwmapi_dep, ole32_dep, shcore_dep, dwrite_dep, d3d11_dep, d3dcompiler_dep, dxgi_dep]
     if vulkan_dep.found() and glslang_validator.found()
         vulkan_primitive_vert_spv = custom_target('vulkan-primitive-vert-spv',
             input : 'src/render/shaders/vulkan_primitive.vert',

@@ -1,7 +1,6 @@
 #include "win32_backend.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -15,14 +14,18 @@
 // windows.h must precede the Windows-specific headers below.
 #include <windows.h>
 
-#include <commdlg.h>
 #include <dwmapi.h>
+#include <objbase.h>
+#include <shobjidl.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
+#include <wrl/client.h>
 
 namespace nk {
 
 namespace {
+
+using Microsoft::WRL::ComPtr;
 
 constexpr UINT kWakeMessage = WM_APP + 1;
 constexpr const wchar_t* kWindowClassName = L"NodalKitWindow";
@@ -279,31 +282,6 @@ SystemPreferences query_system_preferences() {
     return preferences;
 }
 
-std::wstring build_open_file_dialog_filter(const std::vector<std::string>& filters) {
-    std::wstring filter;
-    if (filters.empty()) {
-        filter = L"All Files";
-        filter.push_back(L'\0');
-        filter += L"*.*";
-        filter.push_back(L'\0');
-        filter.push_back(L'\0');
-        return filter;
-    }
-
-    for (const auto& item : filters) {
-        auto pattern = utf8_to_wide(item);
-        if (pattern.empty()) {
-            continue;
-        }
-        filter += pattern;
-        filter.push_back(L'\0');
-        filter += pattern;
-        filter.push_back(L'\0');
-    }
-    filter.push_back(L'\0');
-    return filter;
-}
-
 std::wstring default_extension_for_filters(const std::vector<std::string>& filters) {
     for (const auto& item : filters) {
         std::string_view ext = item;
@@ -322,6 +300,210 @@ std::wstring default_extension_for_filters(const std::vector<std::string>& filte
         return utf8_to_wide(ext);
     }
     return {};
+}
+
+struct FileDialogFilterStorage {
+    std::vector<std::wstring> labels;
+    std::vector<std::wstring> patterns;
+    std::vector<COMDLG_FILTERSPEC> specs;
+};
+
+FileDialogFilterStorage build_file_dialog_filters(const std::vector<std::string>& filters) {
+    FileDialogFilterStorage storage;
+    storage.labels.reserve(filters.size());
+    storage.patterns.reserve(filters.size());
+
+    for (const auto& item : filters) {
+        auto pattern = utf8_to_wide(item);
+        if (pattern.empty()) {
+            continue;
+        }
+        storage.labels.push_back(pattern);
+        storage.patterns.push_back(std::move(pattern));
+    }
+
+    storage.specs.reserve(storage.patterns.size());
+    for (std::size_t index = 0; index < storage.patterns.size(); ++index) {
+        storage.specs.push_back({
+            storage.labels[index].c_str(),
+            storage.patterns[index].c_str(),
+        });
+    }
+    return storage;
+}
+
+class ComApartment {
+public:
+    ComApartment()
+        : result_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))
+        , should_uninitialize_(SUCCEEDED(result_)) {}
+
+    ~ComApartment() {
+        if (should_uninitialize_) {
+            CoUninitialize();
+        }
+    }
+
+    [[nodiscard]] bool usable() const {
+        return SUCCEEDED(result_) || result_ == RPC_E_CHANGED_MODE;
+    }
+
+private:
+    HRESULT result_ = E_FAIL;
+    bool should_uninitialize_ = false;
+};
+
+FileDialogError file_dialog_error_from_hresult(HRESULT hr) {
+    return hr == HRESULT_FROM_WIN32(ERROR_CANCELLED) ? FileDialogError::Cancelled
+                                                     : FileDialogError::Failed;
+}
+
+template <typename Callback, typename Result>
+void post_file_dialog_result(Callback callback, Result result) {
+    if (!callback) {
+        return;
+    }
+
+    if (auto* app = Application::instance(); app != nullptr) {
+        app->event_loop().post([callback = std::move(callback), result = std::move(result)]() {
+            callback(std::move(result));
+        });
+        return;
+    }
+
+    callback(std::move(result));
+}
+
+OpenFileDialogResult show_modern_open_file_dialog(std::string_view title,
+                                                  const std::vector<std::string>& filters) {
+    ComApartment apartment;
+    if (!apartment.usable()) {
+        return Unexpected(FileDialogError::Failed);
+    }
+
+    void* raw_dialog = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog,
+                                  nullptr,
+                                  CLSCTX_INPROC_SERVER,
+                                  IID_IFileOpenDialog,
+                                  &raw_dialog);
+    if (FAILED(hr)) {
+        return Unexpected(FileDialogError::Failed);
+    }
+    ComPtr<IFileOpenDialog> dialog;
+    dialog.Attach(static_cast<IFileOpenDialog*>(raw_dialog));
+
+    DWORD options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&options))) {
+        (void)dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST |
+                                 FOS_PATHMUSTEXIST);
+    }
+
+    auto wide_title = utf8_to_wide(title);
+    if (!wide_title.empty()) {
+        (void)dialog->SetTitle(wide_title.c_str());
+    }
+
+    auto filter_storage = build_file_dialog_filters(filters);
+    if (!filter_storage.specs.empty()) {
+        (void)dialog->SetFileTypes(static_cast<UINT>(filter_storage.specs.size()),
+                                   filter_storage.specs.data());
+        (void)dialog->SetFileTypeIndex(1);
+    }
+
+    hr = dialog->Show(nullptr);
+    if (FAILED(hr)) {
+        return Unexpected(file_dialog_error_from_hresult(hr));
+    }
+
+    ComPtr<IShellItem> item;
+    hr = dialog->GetResult(&item);
+    if (FAILED(hr)) {
+        return Unexpected(FileDialogError::Failed);
+    }
+
+    PWSTR path = nullptr;
+    hr = item->GetDisplayName(SIGDN_FILESYSPATH, &path);
+    if (FAILED(hr) || path == nullptr) {
+        return Unexpected(FileDialogError::Failed);
+    }
+
+    auto result = wide_to_utf8(path);
+    CoTaskMemFree(path);
+    return result.empty() ? OpenFileDialogResult(Unexpected(FileDialogError::Failed))
+                          : OpenFileDialogResult(std::move(result));
+}
+
+SaveFileDialogResult show_modern_save_file_dialog(const SaveFileDialogOptions& options) {
+    ComApartment apartment;
+    if (!apartment.usable()) {
+        return Unexpected(FileDialogError::Failed);
+    }
+
+    void* raw_dialog = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileSaveDialog,
+                                  nullptr,
+                                  CLSCTX_INPROC_SERVER,
+                                  IID_IFileSaveDialog,
+                                  &raw_dialog);
+    if (FAILED(hr)) {
+        return Unexpected(FileDialogError::Failed);
+    }
+    ComPtr<IFileSaveDialog> dialog;
+    dialog.Attach(static_cast<IFileSaveDialog*>(raw_dialog));
+
+    DWORD dialog_options = 0;
+    if (SUCCEEDED(dialog->GetOptions(&dialog_options))) {
+        dialog_options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+        if (options.confirm_overwrite) {
+            dialog_options |= FOS_OVERWRITEPROMPT;
+        }
+        (void)dialog->SetOptions(dialog_options);
+    }
+
+    auto wide_title = utf8_to_wide(options.title);
+    if (!wide_title.empty()) {
+        (void)dialog->SetTitle(wide_title.c_str());
+    }
+
+    auto suggested_filename = utf8_to_wide(options.suggested_filename);
+    if (!suggested_filename.empty()) {
+        (void)dialog->SetFileName(suggested_filename.c_str());
+    }
+
+    auto filter_storage = build_file_dialog_filters(options.filters);
+    if (!filter_storage.specs.empty()) {
+        (void)dialog->SetFileTypes(static_cast<UINT>(filter_storage.specs.size()),
+                                   filter_storage.specs.data());
+        (void)dialog->SetFileTypeIndex(1);
+    }
+
+    auto default_extension = default_extension_for_filters(options.filters);
+    if (!default_extension.empty()) {
+        (void)dialog->SetDefaultExtension(default_extension.c_str());
+    }
+
+    hr = dialog->Show(nullptr);
+    if (FAILED(hr)) {
+        return Unexpected(file_dialog_error_from_hresult(hr));
+    }
+
+    ComPtr<IShellItem> item;
+    hr = dialog->GetResult(&item);
+    if (FAILED(hr)) {
+        return Unexpected(FileDialogError::Failed);
+    }
+
+    PWSTR path = nullptr;
+    hr = item->GetDisplayName(SIGDN_FILESYSPATH, &path);
+    if (FAILED(hr) || path == nullptr) {
+        return Unexpected(FileDialogError::Failed);
+    }
+
+    auto result = wide_to_utf8(path);
+    CoTaskMemFree(path);
+    return result.empty() ? SaveFileDialogResult(Unexpected(FileDialogError::Failed))
+                          : SaveFileDialogResult(std::move(result));
 }
 
 HCURSOR cursor_for_shape(CursorShape shape) {
@@ -964,30 +1146,8 @@ void Win32Backend::show_open_file_dialog_async(std::string_view title,
                                                OpenFileDialogCallback callback) {
     std::string title_str = std::string(title);
     std::thread([title_str, filters, callback = std::move(callback)]() mutable {
-        std::array<wchar_t, MAX_PATH> file_buffer{};
-        auto filter = build_open_file_dialog_filter(filters);
-        auto wide_title = utf8_to_wide(title_str);
-
-        OPENFILENAMEW open_file{};
-        open_file.lStructSize = sizeof(open_file);
-        open_file.lpstrFile = file_buffer.data();
-        open_file.nMaxFile = static_cast<DWORD>(file_buffer.size());
-        open_file.lpstrFilter = filter.c_str();
-        open_file.nFilterIndex = 1;
-        open_file.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
-        open_file.lpstrTitle = wide_title.empty() ? nullptr : wide_title.c_str();
-
-        OpenFileDialogResult result = Unexpected(FileDialogError::Failed);
-        if (!GetOpenFileNameW(&open_file)) {
-            const DWORD error = CommDlgExtendedError();
-            result = Unexpected(error == 0 ? FileDialogError::Cancelled : FileDialogError::Failed);
-        } else {
-            result = wide_to_utf8(file_buffer.data());
-        }
-
-        Application::instance()->event_loop().post([callback = std::move(callback), result = std::move(result)]() {
-            if (callback) callback(result);
-        });
+        auto result = show_modern_open_file_dialog(title_str, filters);
+        post_file_dialog_result(std::move(callback), std::move(result));
     }).detach();
 }
 
@@ -998,42 +1158,8 @@ bool Win32Backend::supports_save_file_dialog() const {
 void Win32Backend::show_save_file_dialog_async(SaveFileDialogOptions options,
                                                SaveFileDialogCallback callback) {
     std::thread([options = std::move(options), callback = std::move(callback)]() mutable {
-        std::array<wchar_t, MAX_PATH> file_buffer{};
-        const auto suggested = utf8_to_wide(options.suggested_filename);
-        if (!suggested.empty()) {
-            const auto count = std::min(suggested.size(), file_buffer.size() - 1);
-            std::copy_n(suggested.data(), count, file_buffer.data());
-        }
-
-        auto filter = build_open_file_dialog_filter(options.filters);
-        auto default_extension = default_extension_for_filters(options.filters);
-        auto wide_title = utf8_to_wide(options.title);
-
-        OPENFILENAMEW save_file{};
-        save_file.lStructSize = sizeof(save_file);
-        save_file.lpstrFile = file_buffer.data();
-        save_file.nMaxFile = static_cast<DWORD>(file_buffer.size());
-        save_file.lpstrFilter = filter.c_str();
-        save_file.nFilterIndex = 1;
-        save_file.Flags = OFN_PATHMUSTEXIST | OFN_EXPLORER;
-        if (options.confirm_overwrite) {
-            save_file.Flags |= OFN_OVERWRITEPROMPT;
-        }
-        save_file.lpstrTitle = wide_title.empty() ? nullptr : wide_title.c_str();
-        save_file.lpstrDefExt = default_extension.empty() ? nullptr : default_extension.c_str();
-
-        SaveFileDialogResult result = Unexpected(FileDialogError::Failed);
-        if (!GetSaveFileNameW(&save_file)) {
-            const DWORD error = CommDlgExtendedError();
-            result = Unexpected(error == 0 ? FileDialogError::Cancelled : FileDialogError::Failed);
-        } else {
-            result = wide_to_utf8(file_buffer.data());
-        }
-
-        Application::instance()->event_loop().post(
-            [callback = std::move(callback), result = std::move(result)]() {
-                if (callback) callback(result);
-            });
+        auto result = show_modern_save_file_dialog(options);
+        post_file_dialog_result(std::move(callback), std::move(result));
     }).detach();
 }
 
