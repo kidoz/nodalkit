@@ -963,7 +963,7 @@ void Win32Backend::show_open_file_dialog_async(std::string_view title,
                                                const std::vector<std::string>& filters,
                                                OpenFileDialogCallback callback) {
     std::string title_str = std::string(title);
-    std::thread([this, title_str, filters, callback = std::move(callback)]() mutable {
+    std::thread([title_str, filters, callback = std::move(callback)]() mutable {
         std::array<wchar_t, MAX_PATH> file_buffer{};
         auto filter = build_open_file_dialog_filter(filters);
         auto wide_title = utf8_to_wide(title_str);
@@ -985,7 +985,7 @@ void Win32Backend::show_open_file_dialog_async(std::string_view title,
             result = wide_to_utf8(file_buffer.data());
         }
 
-        Application::instance().event_loop().post([callback = std::move(callback), result = std::move(result)]() {
+        Application::instance()->event_loop().post([callback = std::move(callback), result = std::move(result)]() {
             if (callback) callback(result);
         });
     }).detach();
@@ -1030,7 +1030,7 @@ void Win32Backend::show_save_file_dialog_async(SaveFileDialogOptions options,
             result = wide_to_utf8(file_buffer.data());
         }
 
-        Application::instance().event_loop().post(
+        Application::instance()->event_loop().post(
             [callback = std::move(callback), result = std::move(result)]() {
                 if (callback) callback(result);
             });
