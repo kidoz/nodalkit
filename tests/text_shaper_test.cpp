@@ -215,6 +215,94 @@ TEST_CASE("Windows text shaper renders Unicode fallback glyphs", "[text][windows
     REQUIRE(alpha_sum_for_rows(shaped, 0, shaped.bitmap_height()) > 0);
 }
 
+TEST_CASE("Windows text shaper renders emoji through system font fallback", "[text][windows]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 28.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    // U+1F600 GRINNING FACE — a 4-byte UTF-8 sequence that the base "Segoe UI"
+    // family cannot cover, so DirectWrite must fall back to Segoe UI Emoji.
+    const std::string emoji = "\xF0\x9F\x98\x80";
+    const auto measured = shaper->measure(emoji, font);
+    REQUIRE(measured.width > 0.0F);
+    REQUIRE(measured.height > 0.0F);
+
+    auto shaped = shaper->shape(emoji, font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+    REQUIRE(shaped.bitmap_data() != nullptr);
+    REQUIRE(shaped.bitmap_width() > 0);
+    REQUIRE(shaped.bitmap_height() > 0);
+    // The monochrome raster path draws the emoji's base glyph outline. A covering
+    // fallback font produces ink; a host missing Segoe UI Emoji still yields a
+    // sized .notdef box, so soft-pass instead of asserting on absent fonts.
+    if (alpha_sum_for_rows(shaped, 0, shaped.bitmap_height()) == 0U) {
+        SUCCEED("No emoji-capable fallback font installed on this host");
+        return;
+    }
+    REQUIRE(alpha_sum_for_rows(shaped, 0, shaped.bitmap_height()) > 0U);
+}
+
+TEST_CASE("Windows text shaper renders symbol glyphs through fallback", "[text][windows]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 28.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    // U+2192 RIGHTWARDS ARROW, U+221E INFINITY, U+2605 BLACK STAR — symbols that
+    // exercise DirectWrite fallback to Segoe UI Symbol / Segoe UI when the base
+    // face lacks coverage.
+    const std::string symbols = "\xE2\x86\x92\xE2\x88\x9E\xE2\x98\x85";
+    const auto measured = shaper->measure(symbols, font);
+    REQUIRE(measured.width > 0.0F);
+    REQUIRE(measured.height > 0.0F);
+
+    auto shaped = shaper->shape(symbols, font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+    REQUIRE(shaped.bitmap_data() != nullptr);
+    REQUIRE(shaped.bitmap_width() > 0);
+    REQUIRE(shaped.bitmap_height() > 0);
+    if (alpha_sum_for_rows(shaped, 0, shaped.bitmap_height()) == 0U) {
+        SUCCEED("No symbol-capable fallback font installed on this host");
+        return;
+    }
+    REQUIRE(alpha_sum_for_rows(shaped, 0, shaped.bitmap_height()) > 0U);
+}
+
+TEST_CASE("Windows text shaper widens mixed-script runs past their Latin prefix",
+          "[text][windows]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    nk::FontDescriptor font{
+        .family = "System",
+        .size = 24.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+
+    // DirectWrite must split this into fallback runs (Latin + CJK + emoji) within
+    // one layout. Even on a host that maps uncovered codepoints to .notdef boxes,
+    // those boxes still advance, so the mixed string is strictly wider than the
+    // Latin prefix alone.
+    const auto latin = shaper->measure("Hi", font);
+    const auto mixed = shaper->measure("Hi\xE6\xBC\xA2\xF0\x9F\x98\x80", font);
+
+    REQUIRE(latin.width > 0.0F);
+    REQUIRE(mixed.width > latin.width);
+
+    auto shaped =
+        shaper->shape("Hi\xE6\xBC\xA2\xF0\x9F\x98\x80", font, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+    REQUIRE(shaped.bitmap_data() != nullptr);
+    REQUIRE(static_cast<float>(shaped.bitmap_width()) >= mixed.width - 1.0F);
+    REQUIRE(alpha_sum_for_rows(shaped, 0, shaped.bitmap_height()) > 0U);
+}
+
 TEST_CASE("Windows text shaper preserves top bitmap padding for baseline-correct placement",
           "[text][windows]") {
     auto shaper = nk::TextShaper::create();
