@@ -7,19 +7,25 @@ DragPayload DragPayload::from_text(std::string text, std::string mime_type) {
     return DragPayload{
         .mime_type = std::move(mime_type),
         .text = std::move(text),
+        .files = {},
+        .application_data = {},
     };
 }
 
 DragPayload DragPayload::from_files(std::vector<std::filesystem::path> files) {
     return DragPayload{
         .mime_type = "text/uri-list",
+        .text = {},
         .files = std::move(files),
+        .application_data = {},
     };
 }
 
 DragPayload DragPayload::from_application_data(std::string mime_type, std::any data) {
     return DragPayload{
         .mime_type = std::move(mime_type),
+        .text = {},
+        .files = {},
         .application_data = std::move(data),
     };
 }

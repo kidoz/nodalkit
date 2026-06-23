@@ -35,7 +35,7 @@ struct DataTableColumn {
     std::string title;
     float width = 140.0F;
     bool sortable = true;
-    DataTableCellText text;
+    DataTableCellText text{};
 };
 
 /// A model-backed data table with column headers, single-row navigation, and
