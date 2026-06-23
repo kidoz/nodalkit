@@ -1016,6 +1016,110 @@ TEST_CASE("Win32 D3D11 merges nearby image damage slices into one textured repla
     REQUIRE(second_frame.render_hotspot_counters.gpu_present_path ==
             nk::GpuPresentPath::PartialRedrawCopy);
 }
+
+TEST_CASE("Win32 D3D11 menu popups present localized damage beyond the menu bar bounds",
+          "[app][render][windows][menu]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "D3D11 menu popup", .width = 320, .height = 220});
+
+    auto root = TestContainer::create();
+    root->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical));
+
+    auto menu_bar = nk::MenuBar::create();
+    menu_bar->add_menu({
+        .title = "File",
+        .items =
+            {
+                nk::MenuItem::action("Popup Action", "app.popup.action"),
+            },
+    });
+    root->append(menu_bar);
+    root->append(nk::Label::create("Body"));
+
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
+
+    const auto first_frame = window.inspector().last_frame_diagnostics();
+    REQUIRE(first_frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::FullRedrawCopyBack);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") ==
+            std::string::npos);
+
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Press,
+        .x = 20.0F,
+        .y = 16.0F,
+        .button = 1,
+    });
+    window.dispatch_mouse_event({
+        .type = nk::MouseEvent::Type::Release,
+        .x = 20.0F,
+        .y = 16.0F,
+        .button = 1,
+    });
+    REQUIRE(app.event_loop().poll());
+
+    const auto history = window.inspector().debug_frame_history();
+    REQUIRE(history.size() >= 2);
+    const auto& frame = history.back();
+    REQUIRE(has_frame_request_reason(frame, nk::FrameRequestReason::WidgetRedraw));
+    REQUIRE_FALSE(frame.had_layout);
+    REQUIRE(frame.render_hotspot_counters.damage_region_count >= 2);
+    REQUIRE(frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::PartialRedrawCopy);
+    REQUIRE(frame.render_hotspot_counters.gpu_present_region_count >= 1);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
+    REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
+            frame.render_hotspot_counters.gpu_viewport_pixel_count);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") !=
+            std::string::npos);
+}
+
+TEST_CASE("Win32 D3D11 dialog geometry presents on the GPU with a full swapchain copy",
+          "[app][render][windows][dialog]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("d3d11") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "D3D11 dialog layout", .width = 480, .height = 320});
+    auto root = TestContainer::create();
+    root->append(nk::Label::create("Body"));
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
+
+    auto dialog = nk::Dialog::create("Centered Dialog", "Proceed?");
+    dialog->set_minimum_panel_width(420.0F);
+    dialog->present(window);
+    REQUIRE(app.event_loop().poll());
+
+    const auto snapshot_result =
+        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
+    REQUIRE(snapshot_result);
+    const auto* title =
+        find_render_snapshot_node(snapshot_result.value(), "Text", "Centered Dialog");
+    REQUIRE(title != nullptr);
+    const float panel_width = widest_render_snapshot_kind_containing(
+        snapshot_result.value(), {title->bounds.x + 1.0F, title->bounds.y + 1.0F}, "RoundedRect");
+    REQUIRE(panel_width >= 420.0F);
+
+    const auto frame = window.inspector().last_frame_diagnostics();
+    REQUIRE(frame.render_hotspot_counters.gpu_present_path ==
+            nk::GpuPresentPath::FullRedrawCopyBack);
+    REQUIRE(frame.render_hotspot_counters.gpu_swapchain_copy_count == 1);
+    REQUIRE(frame.render_hotspot_counters.gpu_draw_call_count >= 1);
+
+    const auto dialog_damage = dialog->debug_damage_regions();
+    REQUIRE(dialog_damage.size() == 1);
+    REQUIRE(dialog_damage.front().width < window.size().width);
+    REQUIRE(dialog_damage.front().height < window.size().height);
+}
 #endif
 
 TEST_CASE("Native Vulkan-capable surfaces expose interop handles", "[app][render]") {
