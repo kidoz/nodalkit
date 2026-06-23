@@ -2,16 +2,19 @@
 /// @brief macOS Cocoa native surface implementation.
 
 #include "macos_window.h"
-#include <nk/platform/window_inspector.h>
 
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
 #include <cstring>
+#include <filesystem>
+#include <memory>
 #include <nk/accessibility/accessible.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/ui_core/widget.h>
 #include <string_view>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // macOS virtual key code → nk::KeyCode mapping
@@ -273,6 +276,80 @@ static int macos_button_number(NSEvent* event) {
     }
 }
 
+static nk::DragOperation drag_operation_from_mask(NSDragOperation mask) {
+    if ((mask & NSDragOperationCopy) != 0) {
+        return nk::DragOperation::Copy;
+    }
+    if ((mask & NSDragOperationMove) != 0) {
+        return nk::DragOperation::Move;
+    }
+    if ((mask & NSDragOperationLink) != 0) {
+        return nk::DragOperation::Link;
+    }
+    return nk::DragOperation::None;
+}
+
+static NSDragOperation ns_drag_operation(nk::DragOperation operation, NSDragOperation mask) {
+    switch (operation) {
+    case nk::DragOperation::Copy:
+        return (mask & NSDragOperationCopy) != 0 ? NSDragOperationCopy : NSDragOperationNone;
+    case nk::DragOperation::Move:
+        return (mask & NSDragOperationMove) != 0 ? NSDragOperationMove : NSDragOperationNone;
+    case nk::DragOperation::Link:
+        return (mask & NSDragOperationLink) != 0 ? NSDragOperationLink : NSDragOperationNone;
+    case nk::DragOperation::None:
+    default:
+        return NSDragOperationNone;
+    }
+}
+
+static nk::Point drag_position_in_view(NSView* view, id<NSDraggingInfo> sender) {
+    const NSPoint loc = [view convertPoint:[sender draggingLocation] fromView:nil];
+    return {
+        static_cast<float>(loc.x),
+        static_cast<float>(loc.y),
+    };
+}
+
+static std::shared_ptr<const nk::DragPayload> file_drop_payload(id<NSDraggingInfo> sender) {
+    NSPasteboard* pasteboard = [sender draggingPasteboard];
+    if (pasteboard == nil) {
+        return nullptr;
+    }
+
+    NSDictionary* options = @{NSPasteboardURLReadingFileURLsOnlyKey : @YES};
+    NSArray<NSURL*>* urls = [pasteboard readObjectsForClasses:@[ [NSURL class] ] options:options];
+    if (urls == nil || urls.count == 0) {
+        return nullptr;
+    }
+
+    std::vector<std::filesystem::path> files;
+    files.reserve(static_cast<std::size_t>(urls.count));
+    for (NSURL* url in urls) {
+        if (url == nil || !url.isFileURL) {
+            continue;
+        }
+        NSString* path = url.path;
+        if (path == nil) {
+            continue;
+        }
+        const char* utf8 = [path fileSystemRepresentation];
+        if (utf8 != nullptr && utf8[0] != '\0') {
+            files.emplace_back(utf8);
+        }
+    }
+
+    if (files.empty()) {
+        return nullptr;
+    }
+    return std::make_shared<nk::DragPayload>(nk::DragPayload::from_files(std::move(files)));
+}
+
+static nk::Modifiers current_drag_modifiers() {
+    NSEvent* event = [NSApp currentEvent];
+    return event != nil ? macos_modifiers(event.modifierFlags) : nk::Modifiers::None;
+}
+
 static bool debug_node_is_accessible(const nk::WidgetDebugNode& node) {
     return !node.accessible_hidden && !node.accessible_role.empty() &&
            node.accessible_role != "none";
@@ -403,7 +480,7 @@ static nk::Widget* resolve_widget_by_tree_path(nk::Window& window,
 
 @class NKAccessibilityNode;
 
-@interface NKView : NSView <NSTextInputClient>
+@interface NKView : NSView <NSTextInputClient, NSDraggingDestination>
 @property(nonatomic, assign) nk::MacosSurface* surface;
 @end
 
@@ -497,6 +574,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
         _surface = surface;
         marked_range_ = NSMakeRange(NSNotFound, 0);
         selected_range_ = NSMakeRange(0, 0);
+        [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
         [self updateTrackingAreas];
     }
     return self;
@@ -772,6 +850,73 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     me.precise_scrolling = event.hasPreciseScrollingDeltas;
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+}
+
+// -- Drag destination events --
+
+- (NSDragOperation)dispatchDraggingInfo:(id<NSDraggingInfo>)sender
+                                   type:(nk::DragDropEventType)type {
+    if (!_surface) {
+        return NSDragOperationNone;
+    }
+
+    auto payload = file_drop_payload(sender);
+    if (payload == nullptr) {
+        return NSDragOperationNone;
+    }
+
+    const auto source_mask = [sender draggingSourceOperationMask];
+    const auto requested_operation = drag_operation_from_mask(source_mask);
+    if (requested_operation == nk::DragOperation::None) {
+        return NSDragOperationNone;
+    }
+
+    const auto accepted = _surface->owner().dispatch_drag_drop_event({
+        .type = type,
+        .position = drag_position_in_view(self, sender),
+        .payload = std::move(payload),
+        .requested_operation = requested_operation,
+        .modifiers = current_drag_modifiers(),
+        .external = true,
+    });
+    return ns_drag_operation(accepted, source_mask);
+}
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    return [self dispatchDraggingInfo:sender type:nk::DragDropEventType::Enter];
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+    return [self dispatchDraggingInfo:sender type:nk::DragDropEventType::Motion];
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)sender {
+    if (!_surface) {
+        return;
+    }
+
+    auto payload = file_drop_payload(sender);
+    if (payload == nullptr) {
+        return;
+    }
+
+    (void)_surface->owner().dispatch_drag_drop_event({
+        .type = nk::DragDropEventType::Leave,
+        .position = drag_position_in_view(self, sender),
+        .payload = std::move(payload),
+        .requested_operation = drag_operation_from_mask([sender draggingSourceOperationMask]),
+        .modifiers = current_drag_modifiers(),
+        .external = true,
+    });
+}
+
+- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)sender {
+    return file_drop_payload(sender) != nullptr;
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    return [self dispatchDraggingInfo:sender
+                                 type:nk::DragDropEventType::Drop] != NSDragOperationNone;
 }
 
 // -- Keyboard events --
