@@ -34,6 +34,12 @@ test_renderer = executable('test_renderer',
 )
 test('renderer', test_renderer)
 
+test_theme = executable('test_theme',
+    'theme_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('theme', test_theme)
+
 test_service_locator = executable('test_service_locator',
     'service_locator_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

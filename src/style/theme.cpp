@@ -321,6 +321,77 @@ void install_macos_overrides(Theme& theme) {
              {{"corner-radius", StyleValue{10.0F}}, {"content-radius", StyleValue{8.0F}}});
 }
 
+void install_windows_overrides(Theme& theme) {
+    // Windows 11 / WinUI control geometry: 4 px control corners, 32 px default
+    // control height, and rounded surface cards. These are deliberately distinct
+    // from the GNOME defaults so the Windows family no longer clones Linux.
+    add_rule(theme,
+             {"button"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{4.0F}},
+              {"min-height", StyleValue{32.0F}},
+              {"min-width", StyleValue{90.0F}},
+              {"padding-x", StyleValue{12.0F}},
+              {"padding-y", StyleValue{5.0F}}});
+    add_rule(theme,
+             {"text-field"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{4.0F}}, {"min-height", StyleValue{32.0F}}});
+    add_rule(theme,
+             {"combo-box"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{4.0F}},
+              {"popup-radius", StyleValue{8.0F}},
+              {"selection-radius", StyleValue{4.0F}},
+              {"min-height", StyleValue{32.0F}}});
+    add_rule(theme,
+             {"segmented-control"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{6.0F}},
+              {"selection-radius", StyleValue{4.0F}},
+              {"track-padding", StyleValue{2.0F}},
+              {"min-height", StyleValue{32.0F}}});
+    add_rule(theme, {"card"}, StateFlags::None, {{"corner-radius", StyleValue{8.0F}}});
+    add_rule(theme,
+             {"image-view"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{8.0F}}, {"content-radius", StyleValue{6.0F}}});
+
+    // Shell layer roles: route the command and status surfaces to their layer
+    // tokens so the title-bar/command/navigation/content/status vocabulary is
+    // actually consumed rather than only declared.
+    add_rule(theme,
+             {"menu-bar"},
+             StateFlags::None,
+             {{"background", StyleValue{std::string("layer-command-bg")}}});
+    add_rule(theme,
+             {"status-bar"},
+             StateFlags::None,
+             {{"background", StyleValue{std::string("layer-status-bg")}}});
+}
+
+void install_windows_layer_tokens(Theme& theme, bool dark) {
+    if (dark) {
+        set_color_token(theme, "layer-titlebar-bg", 32, 32, 32);
+        set_color_token(theme, "layer-titlebar-text", 255, 255, 255);
+        set_color_token(theme, "layer-titlebar-inactive-bg", 32, 32, 32);
+        set_color_token(theme, "layer-titlebar-inactive-text", 119, 119, 119);
+        set_color_token(theme, "layer-command-bg", 43, 43, 43);
+        set_color_token(theme, "layer-navigation-bg", 39, 39, 39);
+        set_color_token(theme, "layer-content-bg", 32, 32, 32);
+        set_color_token(theme, "layer-status-bg", 32, 32, 32);
+    } else {
+        set_color_token(theme, "layer-titlebar-bg", 243, 243, 243);
+        set_color_token(theme, "layer-titlebar-text", 26, 26, 26);
+        set_color_token(theme, "layer-titlebar-inactive-bg", 243, 243, 243);
+        set_color_token(theme, "layer-titlebar-inactive-text", 156, 156, 156);
+        set_color_token(theme, "layer-command-bg", 251, 251, 251);
+        set_color_token(theme, "layer-navigation-bg", 238, 238, 238);
+        set_color_token(theme, "layer-content-bg", 255, 255, 255);
+        set_color_token(theme, "layer-status-bg", 243, 243, 243);
+    }
+}
+
 std::shared_ptr<Theme>& active_theme_storage() {
     static std::shared_ptr<Theme> active_theme;
     return active_theme;
@@ -419,8 +490,11 @@ const StyleValue* Theme::resolve(std::string_view type_name,
             continue;
         }
 
+        // Use >= so that, on equal specificity, a later rule wins. This is the
+        // standard CSS source-order tie-break and lets per-family override rules
+        // (installed after the shared rules) take effect.
         const int spec = sel.specificity();
-        if (spec > best_specificity) {
+        if (spec >= best_specificity) {
             best_specificity = spec;
             best_match = &rule;
         }
@@ -540,8 +614,77 @@ std::unique_ptr<Theme> Theme::make_linux_gnome(ColorScheme color_scheme) {
 }
 
 std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
-    auto theme = Theme::make_linux_gnome(color_scheme);
+    const bool dark = color_scheme == ColorScheme::Dark;
+    auto theme = std::make_unique<Theme>(dark ? "Windows 11 Dark" : "Windows 11 Light");
     theme->set_token("theme-family", StyleValue{std::string("windows-11")});
+
+    if (dark) {
+        set_color_token(*theme, "window-bg", 32, 32, 32);
+        set_color_token(*theme, "surface-panel", 43, 43, 43);
+        set_color_token(*theme, "surface-card", 44, 44, 44);
+        set_color_token(*theme, "surface-raised", 50, 50, 50);
+        set_color_token(*theme, "surface-hover", 55, 55, 55);
+        set_color_token(*theme, "surface-pressed", 62, 62, 62);
+        set_color_token(*theme, "field-bg", 45, 45, 45);
+        set_color_token(*theme, "field-border", 76, 76, 76);
+        set_color_token(*theme, "border-subtle", 60, 60, 60);
+        set_color_token(*theme, "border-strong", 90, 90, 90);
+        set_color_token(*theme, "text-primary", 255, 255, 255);
+        set_color_token(*theme, "text-secondary", 180, 180, 180);
+        set_color_token(*theme, "text-disabled", 119, 119, 119);
+        set_color_token(*theme, "accent", 96, 205, 255);
+        set_color_token(*theme, "accent-hover", 120, 215, 255);
+        set_color_token(*theme, "accent-pressed", 80, 180, 235);
+        set_color_token(*theme, "accent-soft", 38, 80, 110);
+        set_color_token(*theme, "accent-contrast", 0, 0, 0);
+        set_color_token(*theme, "focus-ring", 96, 205, 255);
+        set_color_token(*theme, "focus-visible", 255, 255, 255);
+        set_color_token(*theme, "scrollbar-track", 46, 46, 46);
+        set_color_token(*theme, "scrollbar-thumb", 119, 119, 119);
+    } else {
+        set_color_token(*theme, "window-bg", 243, 243, 243);
+        set_color_token(*theme, "surface-panel", 238, 238, 238);
+        set_color_token(*theme, "surface-card", 251, 251, 251);
+        set_color_token(*theme, "surface-raised", 255, 255, 255);
+        set_color_token(*theme, "surface-hover", 234, 234, 234);
+        set_color_token(*theme, "surface-pressed", 226, 226, 226);
+        set_color_token(*theme, "field-bg", 255, 255, 255);
+        set_color_token(*theme, "field-border", 209, 209, 209);
+        set_color_token(*theme, "border-subtle", 229, 229, 229);
+        set_color_token(*theme, "border-strong", 200, 200, 200);
+        set_color_token(*theme, "text-primary", 26, 26, 26);
+        set_color_token(*theme, "text-secondary", 95, 95, 95);
+        set_color_token(*theme, "text-disabled", 156, 156, 156);
+        set_color_token(*theme, "accent", 0, 103, 192);
+        set_color_token(*theme, "accent-hover", 0, 90, 170);
+        set_color_token(*theme, "accent-pressed", 0, 78, 148);
+        set_color_token(*theme, "accent-soft", 219, 233, 247);
+        set_color_token(*theme, "accent-contrast", 255, 255, 255);
+        set_color_token(*theme, "focus-ring", 0, 103, 192);
+        set_color_token(*theme, "focus-visible", 26, 26, 26);
+        set_color_token(*theme, "scrollbar-track", 236, 236, 236);
+        set_color_token(*theme, "scrollbar-thumb", 195, 195, 195);
+    }
+
+    install_windows_layer_tokens(*theme, dark);
+
+    theme->set_token("accent-source", StyleValue{std::string("theme")});
+    theme->set_token("motion-mode", StyleValue{std::string("normal")});
+    theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
+    theme->set_token("density", StyleValue{std::string("standard")});
+
+    set_metric_token(*theme, "spacing-xs", 4.0F);
+    set_metric_token(*theme, "spacing-sm", 8.0F);
+    set_metric_token(*theme, "spacing-md", 12.0F);
+    set_metric_token(*theme, "spacing-lg", 16.0F);
+    set_metric_token(*theme, "spacing-xl", 24.0F);
+    set_metric_token(*theme, "control-height", 32.0F);
+    set_metric_token(*theme, "menu-height", 32.0F);
+    set_metric_token(*theme, "status-height", 26.0F);
+
+    install_shared_rules(*theme);
+    install_windows_overrides(*theme);
+
     return theme;
 }
 
