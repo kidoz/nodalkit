@@ -1651,18 +1651,38 @@ TEST_CASE("Window close requests are notification-only and hide the window", "[a
 TEST_CASE("Application reports file-dialog capability explicitly", "[app]") {
     nk::Application app(0, nullptr);
 
-    if (app.supports_open_file_dialog()) {
-        SUCCEED("Open-file dialogs are supported on this platform");
-        return;
+    const bool expected_open_support =
+        app.has_platform_backend() ? app.platform_backend().supports_open_file_dialog() : false;
+    const bool expected_save_support =
+        app.has_platform_backend() ? app.platform_backend().supports_save_file_dialog() : false;
+    REQUIRE(app.supports_open_file_dialog() == expected_open_support);
+    REQUIRE(app.supports_save_file_dialog() == expected_save_support);
+
+    if (!app.supports_open_file_dialog()) {
+        nk::OpenFileDialogResult result = nk::Unexpected(nk::FileDialogError::Unavailable);
+        app.open_file_dialog_async("Open", {}, [&](nk::OpenFileDialogResult r) {
+            result = std::move(r);
+        });
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error() == (app.has_platform_backend() ? nk::FileDialogError::Unsupported
+                                                              : nk::FileDialogError::Unavailable));
     }
 
-    nk::OpenFileDialogResult result = nk::Unexpected(nk::FileDialogError::Unavailable);
-    app.open_file_dialog_async("Open", {}, [&](nk::OpenFileDialogResult r) {
-        result = std::move(r);
-    });
-    REQUIRE_FALSE(result);
-    REQUIRE(result.error() == (app.has_platform_backend() ? nk::FileDialogError::Unsupported
-                                                          : nk::FileDialogError::Unavailable));
+    if (!app.supports_save_file_dialog()) {
+        nk::SaveFileDialogResult result = nk::Unexpected(nk::FileDialogError::Unavailable);
+        app.save_file_dialog_async(
+            {
+                .title = "Save",
+                .suggested_filename = "project.gridphonic",
+                .filters = {"*.gridphonic"},
+            },
+            [&](nk::SaveFileDialogResult r) {
+                result = std::move(r);
+            });
+        REQUIRE_FALSE(result);
+        REQUIRE(result.error() == (app.has_platform_backend() ? nk::FileDialogError::Unsupported
+                                                              : nk::FileDialogError::Unavailable));
+    }
 }
 
 TEST_CASE("Application reports native app-menu capability explicitly", "[app][menu]") {

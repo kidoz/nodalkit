@@ -494,6 +494,11 @@ void force_symbol_references() {
     (void)static_cast<void (nk::Application::*)(
         std::string_view, const std::vector<std::string>&,
         nk::Application::OpenFileDialogCallback)>(&nk::Application::open_file_dialog_async);
+    (void)static_cast<bool (nk::Application::*)() const>(
+        &nk::Application::supports_save_file_dialog);
+    (void)static_cast<void (nk::Application::*)(
+        nk::SaveFileDialogOptions, nk::Application::SaveFileDialogCallback)>(
+        &nk::Application::save_file_dialog_async);
     (void)static_cast<bool (nk::Application::*)() const>(&nk::Application::supports_clipboard_text);
     (void)static_cast<std::string (nk::Application::*)() const>(&nk::Application::clipboard_text);
     (void)static_cast<void (nk::Application::*)(std::string)>(&nk::Application::set_clipboard_text);
@@ -540,6 +545,11 @@ void force_symbol_references() {
         std::string_view, const std::vector<std::string>&,
         nk::PlatformBackend::OpenFileDialogCallback)>(
         &nk::PlatformBackend::show_open_file_dialog_async);
+    (void)static_cast<bool (nk::PlatformBackend::*)() const>(
+        &nk::PlatformBackend::supports_save_file_dialog);
+    (void)static_cast<void (nk::PlatformBackend::*)(
+        nk::SaveFileDialogOptions, nk::PlatformBackend::SaveFileDialogCallback)>(
+        &nk::PlatformBackend::show_save_file_dialog_async);
     (void)static_cast<nk::SystemPreferences (nk::PlatformBackend::*)() const>(
         &nk::PlatformBackend::system_preferences);
     (void)&nk::PlatformBackend::create;

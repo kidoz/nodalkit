@@ -304,6 +304,26 @@ std::wstring build_open_file_dialog_filter(const std::vector<std::string>& filte
     return filter;
 }
 
+std::wstring default_extension_for_filters(const std::vector<std::string>& filters) {
+    for (const auto& item : filters) {
+        std::string_view ext = item;
+        if (ext.empty() || ext.find('/') != std::string_view::npos) {
+            continue;
+        }
+        if (ext.starts_with("*.")) {
+            ext = ext.substr(2);
+        } else if (ext.starts_with(".")) {
+            ext = ext.substr(1);
+        }
+        if (ext.empty() || ext.find('*') != std::string_view::npos ||
+            ext.find('?') != std::string_view::npos) {
+            continue;
+        }
+        return utf8_to_wide(ext);
+    }
+    return {};
+}
+
 HCURSOR cursor_for_shape(CursorShape shape) {
     LPCWSTR id = IDC_ARROW;
     switch (shape) {
@@ -957,7 +977,7 @@ void Win32Backend::show_open_file_dialog_async(std::string_view title,
         open_file.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
         open_file.lpstrTitle = wide_title.empty() ? nullptr : wide_title.c_str();
 
-        OpenFileDialogResult result;
+        OpenFileDialogResult result = Unexpected(FileDialogError::Failed);
         if (!GetOpenFileNameW(&open_file)) {
             const DWORD error = CommDlgExtendedError();
             result = Unexpected(error == 0 ? FileDialogError::Cancelled : FileDialogError::Failed);
@@ -968,6 +988,52 @@ void Win32Backend::show_open_file_dialog_async(std::string_view title,
         Application::instance().event_loop().post([callback = std::move(callback), result = std::move(result)]() {
             if (callback) callback(result);
         });
+    }).detach();
+}
+
+bool Win32Backend::supports_save_file_dialog() const {
+    return true;
+}
+
+void Win32Backend::show_save_file_dialog_async(SaveFileDialogOptions options,
+                                               SaveFileDialogCallback callback) {
+    std::thread([options = std::move(options), callback = std::move(callback)]() mutable {
+        std::array<wchar_t, MAX_PATH> file_buffer{};
+        const auto suggested = utf8_to_wide(options.suggested_filename);
+        if (!suggested.empty()) {
+            const auto count = std::min(suggested.size(), file_buffer.size() - 1);
+            std::copy_n(suggested.data(), count, file_buffer.data());
+        }
+
+        auto filter = build_open_file_dialog_filter(options.filters);
+        auto default_extension = default_extension_for_filters(options.filters);
+        auto wide_title = utf8_to_wide(options.title);
+
+        OPENFILENAMEW save_file{};
+        save_file.lStructSize = sizeof(save_file);
+        save_file.lpstrFile = file_buffer.data();
+        save_file.nMaxFile = static_cast<DWORD>(file_buffer.size());
+        save_file.lpstrFilter = filter.c_str();
+        save_file.nFilterIndex = 1;
+        save_file.Flags = OFN_PATHMUSTEXIST | OFN_EXPLORER;
+        if (options.confirm_overwrite) {
+            save_file.Flags |= OFN_OVERWRITEPROMPT;
+        }
+        save_file.lpstrTitle = wide_title.empty() ? nullptr : wide_title.c_str();
+        save_file.lpstrDefExt = default_extension.empty() ? nullptr : default_extension.c_str();
+
+        SaveFileDialogResult result = Unexpected(FileDialogError::Failed);
+        if (!GetSaveFileNameW(&save_file)) {
+            const DWORD error = CommDlgExtendedError();
+            result = Unexpected(error == 0 ? FileDialogError::Cancelled : FileDialogError::Failed);
+        } else {
+            result = wide_to_utf8(file_buffer.data());
+        }
+
+        Application::instance().event_loop().post(
+            [callback = std::move(callback), result = std::move(result)]() {
+                if (callback) callback(result);
+            });
     }).detach();
 }
 

@@ -45,6 +45,9 @@ public:
 
     [[nodiscard]] bool supports_open_file_dialog() const override;
     void show_open_file_dialog_async(std::string_view title, const std::vector<std::string>& filters, OpenFileDialogCallback callback) override;
+    [[nodiscard]] bool supports_save_file_dialog() const override;
+    void show_save_file_dialog_async(SaveFileDialogOptions options,
+                                     SaveFileDialogCallback callback) override;
     [[nodiscard]] bool supports_clipboard_text() const override;
     [[nodiscard]] std::string clipboard_text() const override;
     void set_clipboard_text(std::string_view text) override;

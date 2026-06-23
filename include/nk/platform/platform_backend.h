@@ -146,6 +146,20 @@ public:
                                              const std::vector<std::string>& filters,
                                              OpenFileDialogCallback callback) = 0;
 
+    /// Whether the backend implements a native save-file dialog.
+    [[nodiscard]] virtual bool supports_save_file_dialog() const { return false; }
+
+    /// Show a native "save file" dialog.
+    using SaveFileDialogCallback = std::function<void(SaveFileDialogResult)>;
+
+    virtual void show_save_file_dialog_async(SaveFileDialogOptions options,
+                                             SaveFileDialogCallback callback) {
+        (void)options;
+        if (callback) {
+            callback(Unexpected(FileDialogError::Unsupported));
+        }
+    }
+
     /// Whether the backend implements clipboard text integration.
     [[nodiscard]] virtual bool supports_clipboard_text() const { return false; }
 

@@ -126,6 +126,20 @@ public:
                                 const std::vector<std::string>& filters,
                                 OpenFileDialogCallback callback);
 
+    /// Whether save-file dialogs are natively implemented by the active backend.
+    ///
+    /// Applications can use this to fall back to a custom path-entry UI when
+    /// native save dialogs are unavailable.
+    [[nodiscard]] bool supports_save_file_dialog() const;
+
+    /// Show a native "save file" dialog.
+    ///
+    /// If the active platform does not implement the dialog, this function
+    /// immediately returns `FileDialogError::Unsupported`.
+    using SaveFileDialogCallback = std::function<void(SaveFileDialogResult)>;
+
+    void save_file_dialog_async(SaveFileDialogOptions options, SaveFileDialogCallback callback);
+
     /// Whether clipboard text is bridged to the active platform backend.
     [[nodiscard]] bool supports_clipboard_text() const;
 

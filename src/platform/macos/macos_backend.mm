@@ -489,6 +489,63 @@ void MacosBackend::show_open_file_dialog_async(std::string_view title,
     }
 }
 
+bool MacosBackend::supports_save_file_dialog() const {
+    return true;
+}
+
+void MacosBackend::show_save_file_dialog_async(SaveFileDialogOptions options,
+                                               SaveFileDialogCallback callback) {
+    @autoreleasepool {
+        NSSavePanel* panel = [NSSavePanel savePanel];
+        [panel setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
+        [panel setCanCreateDirectories:YES];
+        (void)options.confirm_overwrite; // NSSavePanel provides native overwrite confirmation.
+
+        if (!options.suggested_filename.empty()) {
+            [panel setNameFieldStringValue:
+                       [NSString stringWithUTF8String:options.suggested_filename.c_str()]];
+        }
+
+        if (!options.filters.empty()) {
+            NSMutableArray<NSString*>* types = [NSMutableArray array];
+            for (const auto& ext : options.filters) {
+                std::string_view sv = ext;
+                if (sv.starts_with("*.")) {
+                    sv = sv.substr(2);
+                } else if (sv.starts_with(".")) {
+                    sv = sv.substr(1);
+                }
+                [types addObject:[NSString stringWithUTF8String:std::string(sv).c_str()]];
+            }
+            if (@available(macOS 11.0, *)) {
+                NSMutableArray<UTType*>* content_types = [NSMutableArray array];
+                for (NSString* ext in types) {
+                    UTType* ut = [UTType typeWithFilenameExtension:ext];
+                    if (ut) {
+                        [content_types addObject:ut];
+                    }
+                }
+                if (content_types.count > 0) {
+                    [panel setAllowedContentTypes:content_types];
+                }
+            } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                [panel setAllowedFileTypes:types];
+#pragma clang diagnostic pop
+            }
+        }
+
+        [panel beginWithCompletionHandler:^(NSModalResponse response) {
+            if (response == NSModalResponseOK && panel.URL) {
+                if (callback) callback(std::string(panel.URL.path.UTF8String));
+            } else {
+                if (callback) callback(Unexpected(FileDialogError::Cancelled));
+            }
+        }];
+    }
+}
+
 bool MacosBackend::supports_clipboard_text() const {
     return true;
 }

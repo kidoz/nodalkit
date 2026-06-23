@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <gio/gio.h>
 #include <mutex>
 #include <nk/accessibility/accessible.h>
@@ -32,6 +33,7 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <wayland-client.h>
 
 namespace nk {
@@ -73,6 +75,16 @@ struct PortalRequestState {
     uint32_t response = 2;
     bool completed = false;
 };
+
+using PortalFileDialogCallback = std::function<void(FileDialogResult)>;
+
+void on_portal_request_response(GDBusConnection* connection,
+                                const gchar* sender_name,
+                                const gchar* object_path,
+                                const gchar* interface_name,
+                                const gchar* signal_name,
+                                GVariant* parameters,
+                                gpointer user_data);
 
 GDBusNodeInfo* atspi_node_info() {
     static GDBusNodeInfo* node_info = []() {
@@ -197,6 +209,17 @@ GDBusConnection* portal_session_bus_connection() {
     return connection;
 }
 
+bool portal_file_chooser_available() {
+    GDBusConnection* connection = portal_session_bus_connection();
+    if (connection == nullptr) {
+        return false;
+    }
+
+    const bool supported = session_bus_name_has_owner(connection, PortalBusName);
+    g_object_unref(connection);
+    return supported;
+}
+
 std::optional<std::string> atspi_bus_address(GDBusConnection* session_connection) {
     if (session_connection == nullptr ||
         !session_bus_name_has_owner(session_connection, AtspiBusName)) {
@@ -300,6 +323,168 @@ std::optional<std::string> first_path_from_portal_results(GVariant* results) {
     std::string converted_path = path;
     g_free(path);
     return converted_path;
+}
+
+void add_portal_file_filters_option(GVariantBuilder& options_builder,
+                                    const std::vector<std::string>& filters) {
+    std::vector<std::pair<guint32, std::string>> filter_entries;
+    filter_entries.reserve(filters.size());
+    for (const auto& filter : filters) {
+        if (auto entry = portal_filter_value(filter)) {
+            filter_entries.push_back(std::move(*entry));
+        }
+    }
+
+    if (filter_entries.empty()) {
+        return;
+    }
+
+    GVariantBuilder filter_entry_builder;
+    g_variant_builder_init(&filter_entry_builder, G_VARIANT_TYPE("a(us)"));
+    for (const auto& [kind, value] : filter_entries) {
+        g_variant_builder_add(&filter_entry_builder, "(us)", kind, value.c_str());
+    }
+
+    GVariantBuilder filters_builder;
+    g_variant_builder_init(&filters_builder, G_VARIANT_TYPE("a(sa(us))"));
+    g_variant_builder_add(&filters_builder,
+                          "(s@a(us))",
+                          "Supported files",
+                          g_variant_builder_end(&filter_entry_builder));
+
+    g_variant_builder_add(
+        &options_builder, "{sv}", "filters", g_variant_builder_end(&filters_builder));
+}
+
+void post_portal_file_dialog_result(PortalFileDialogCallback callback, FileDialogResult result) {
+    auto* app = Application::instance();
+    if (app == nullptr) {
+        return;
+    }
+
+    app->event_loop().post(
+        [callback = std::move(callback), result = std::move(result)]() mutable {
+            if (callback) {
+                callback(std::move(result));
+            }
+        });
+}
+
+void show_portal_file_dialog_async(std::string method,
+                                   SaveFileDialogOptions options,
+                                   PortalFileDialogCallback callback) {
+    std::thread([method = std::move(method),
+                 options = std::move(options),
+                 callback = std::move(callback)]() mutable {
+        GDBusConnection* connection = portal_session_bus_connection();
+        if (connection == nullptr) {
+            post_portal_file_dialog_result(std::move(callback),
+                                           Unexpected(FileDialogError::Failed));
+            return;
+        }
+
+        if (!session_bus_name_has_owner(connection, PortalBusName)) {
+            g_object_unref(connection);
+            post_portal_file_dialog_result(std::move(callback),
+                                           Unexpected(FileDialogError::Unsupported));
+            return;
+        }
+
+        GMainContext* context = g_main_context_new();
+        g_main_context_push_thread_default(context);
+
+        const auto handle_token = make_portal_handle_token();
+        auto request_path =
+            detail::portal_request_path(g_dbus_connection_get_unique_name(connection), handle_token);
+
+        PortalRequestState state;
+        state.loop = g_main_loop_new(context, FALSE);
+
+        auto subscribe_to_request = [&](const std::string& path) {
+            return g_dbus_connection_signal_subscribe(connection,
+                                                      PortalBusName,
+                                                      PortalRequestInterface,
+                                                      "Response",
+                                                      path.c_str(),
+                                                      nullptr,
+                                                      G_DBUS_SIGNAL_FLAGS_NONE,
+                                                      on_portal_request_response,
+                                                      &state,
+                                                      nullptr);
+        };
+
+        guint subscription_id = subscribe_to_request(request_path);
+
+        GVariantBuilder options_builder;
+        g_variant_builder_init(&options_builder, G_VARIANT_TYPE_VARDICT);
+        g_variant_builder_add(
+            &options_builder, "{sv}", "handle_token", g_variant_new_string(handle_token.c_str()));
+        g_variant_builder_add(&options_builder, "{sv}", "modal", g_variant_new_boolean(TRUE));
+        if (!options.suggested_filename.empty()) {
+            g_variant_builder_add(&options_builder,
+                                  "{sv}",
+                                  "current_name",
+                                  g_variant_new_string(options.suggested_filename.c_str()));
+        }
+        add_portal_file_filters_option(options_builder, options.filters);
+        (void)options.confirm_overwrite; // XDG portals own overwrite confirmation behavior.
+
+        GError* error = nullptr;
+        GVariant* reply = g_dbus_connection_call_sync(connection,
+                                                      PortalBusName,
+                                                      PortalObjectPath,
+                                                      PortalFileChooserInterface,
+                                                      method.c_str(),
+                                                      g_variant_new("(ssa{sv})",
+                                                                    "",
+                                                                    options.title.c_str(),
+                                                                    &options_builder),
+                                                      G_VARIANT_TYPE("(o)"),
+                                                      G_DBUS_CALL_FLAGS_NONE,
+                                                      -1,
+                                                      nullptr,
+                                                      &error);
+        if (reply == nullptr) {
+            if (error != nullptr) {
+                NK_LOG_ERROR("Wayland", error->message);
+                g_error_free(error);
+            }
+            g_dbus_connection_signal_unsubscribe(connection, subscription_id);
+            g_main_loop_unref(state.loop);
+            g_object_unref(connection);
+            g_main_context_pop_thread_default(context);
+            g_main_context_unref(context);
+            post_portal_file_dialog_result(std::move(callback),
+                                           Unexpected(FileDialogError::Failed));
+            return;
+        }
+
+        const char* returned_request_path = nullptr;
+        g_variant_get(reply, "(&o)", &returned_request_path);
+        if (returned_request_path != nullptr && request_path != returned_request_path) {
+            g_dbus_connection_signal_unsubscribe(connection, subscription_id);
+            request_path = returned_request_path;
+            subscription_id = subscribe_to_request(request_path);
+        }
+        g_variant_unref(reply);
+
+        g_main_loop_run(state.loop);
+
+        g_dbus_connection_signal_unsubscribe(connection, subscription_id);
+        g_main_loop_unref(state.loop);
+        g_object_unref(connection);
+
+        const auto selected_path = first_path_from_portal_results(state.results);
+        auto result = detail::portal_result_from_response(state.response, selected_path);
+        if (state.results != nullptr) {
+            g_variant_unref(state.results);
+        }
+
+        g_main_context_pop_thread_default(context);
+        g_main_context_unref(context);
+
+        post_portal_file_dialog_result(std::move(callback), std::move(result));
+    }).detach();
 }
 
 void on_portal_request_response(GDBusConnection* /*connection*/,
@@ -1697,151 +1882,27 @@ void WaylandBackend::request_quit(int exit_code) {
 }
 
 bool WaylandBackend::supports_open_file_dialog() const {
-    GDBusConnection* connection = portal_session_bus_connection();
-    if (connection == nullptr) {
-        return false;
-    }
-
-    const bool supported = session_bus_name_has_owner(connection, PortalBusName);
-    g_object_unref(connection);
-    return supported;
+    return portal_file_chooser_available();
 }
 
 void WaylandBackend::show_open_file_dialog_async(std::string_view title,
                                                  const std::vector<std::string>& filters,
                                                  OpenFileDialogCallback callback) {
-    std::string title_str = std::string(title);
-    std::thread([title_str, filters, callback = std::move(callback)]() mutable {
-        GDBusConnection* connection = portal_session_bus_connection();
-        if (connection == nullptr) {
-            Application::instance().event_loop().post([callback = std::move(callback)]() {
-                if (callback) callback(Unexpected(FileDialogError::Failed));
-            });
-            return;
-        }
+    show_portal_file_dialog_async("OpenFile",
+                                  SaveFileDialogOptions{
+                                      .title = std::string(title),
+                                      .filters = filters,
+                                  },
+                                  std::move(callback));
+}
 
-        if (!session_bus_name_has_owner(connection, PortalBusName)) {
-            g_object_unref(connection);
-            Application::instance().event_loop().post([callback = std::move(callback)]() {
-                if (callback) callback(Unexpected(FileDialogError::Unsupported));
-            });
-            return;
-        }
+bool WaylandBackend::supports_save_file_dialog() const {
+    return portal_file_chooser_available();
+}
 
-        GMainContext* context = g_main_context_new();
-        g_main_context_push_thread_default(context);
-
-        const auto handle_token = make_portal_handle_token();
-        auto request_path =
-            detail::portal_request_path(g_dbus_connection_get_unique_name(connection), handle_token);
-
-        PortalRequestState state;
-        state.loop = g_main_loop_new(context, FALSE);
-
-    auto subscribe_to_request = [&](const std::string& path) {
-        return g_dbus_connection_signal_subscribe(connection,
-                                                  PortalBusName,
-                                                  PortalRequestInterface,
-                                                  "Response",
-                                                  path.c_str(),
-                                                  nullptr,
-                                                  G_DBUS_SIGNAL_FLAGS_NONE,
-                                                  on_portal_request_response,
-                                                  &state,
-                                                  nullptr);
-    };
-
-    guint subscription_id = subscribe_to_request(request_path);
-
-    GVariantBuilder options_builder;
-    g_variant_builder_init(&options_builder, G_VARIANT_TYPE_VARDICT);
-    g_variant_builder_add(
-        &options_builder, "{sv}", "handle_token", g_variant_new_string(handle_token.c_str()));
-    g_variant_builder_add(&options_builder, "{sv}", "modal", g_variant_new_boolean(TRUE));
-
-    std::vector<std::pair<guint32, std::string>> filter_entries;
-    filter_entries.reserve(filters.size());
-    for (const auto& filter : filters) {
-        if (auto entry = portal_filter_value(filter)) {
-            filter_entries.push_back(std::move(*entry));
-        }
-    }
-
-    if (!filter_entries.empty()) {
-        GVariantBuilder filter_entry_builder;
-        g_variant_builder_init(&filter_entry_builder, G_VARIANT_TYPE("a(us)"));
-        for (const auto& [kind, value] : filter_entries) {
-            g_variant_builder_add(&filter_entry_builder, "(us)", kind, value.c_str());
-        }
-
-        GVariantBuilder filters_builder;
-        g_variant_builder_init(&filters_builder, G_VARIANT_TYPE("a(sa(us))"));
-        g_variant_builder_add(&filters_builder,
-                              "(s@a(us))",
-                              "Supported files",
-                              g_variant_builder_end(&filter_entry_builder));
-
-        g_variant_builder_add(
-            &options_builder, "{sv}", "filters", g_variant_builder_end(&filters_builder));
-    }
-
-    GError* error = nullptr;
-    GVariant* reply = g_dbus_connection_call_sync(
-        connection,
-        PortalBusName,
-        PortalObjectPath,
-        PortalFileChooserInterface,
-        "OpenFile",
-        g_variant_new("(ssa{sv})", "", std::string(title).c_str(), &options_builder),
-        G_VARIANT_TYPE("(o)"),
-        G_DBUS_CALL_FLAGS_NONE,
-        -1,
-        nullptr,
-        &error);
-        if (reply == nullptr) {
-            if (error != nullptr) {
-                NK_LOG_ERROR("Wayland", error->message);
-                g_error_free(error);
-            }
-            g_dbus_connection_signal_unsubscribe(connection, subscription_id);
-            g_main_loop_unref(state.loop);
-            g_object_unref(connection);
-            
-            g_main_context_pop_thread_default(context);
-            g_main_context_unref(context);
-            
-            Application::instance().event_loop().post([callback = std::move(callback)]() {
-                if (callback) callback(Unexpected(FileDialogError::Failed));
-            });
-            return;
-        }
-
-    const char* returned_request_path = nullptr;
-    g_variant_get(reply, "(&o)", &returned_request_path);
-    if (returned_request_path != nullptr && request_path != returned_request_path) {
-        g_dbus_connection_signal_unsubscribe(connection, subscription_id);
-        request_path = returned_request_path;
-        subscription_id = subscribe_to_request(request_path);
-    }
-    g_variant_unref(reply);
-
-    g_main_loop_run(state.loop);
-
-    g_dbus_connection_signal_unsubscribe(connection, subscription_id);
-    g_main_loop_unref(state.loop);
-    g_object_unref(connection);
-
-    auto result = detail::portal_result_from_response(
-        state.response, first_path_from_portal_results(state.results));
-
-    if (state.results != nullptr) {
-        g_main_context_pop_thread_default(context);
-        g_main_context_unref(context);
-
-        Application::instance().event_loop().post([callback = std::move(callback), result = std::move(result)]() {
-            if (callback) callback(result);
-        });
-    }).detach();
+void WaylandBackend::show_save_file_dialog_async(SaveFileDialogOptions options,
+                                                 SaveFileDialogCallback callback) {
+    show_portal_file_dialog_async("SaveFile", std::move(options), std::move(callback));
 }
 
 bool WaylandBackend::supports_clipboard_text() const {
