@@ -3,7 +3,7 @@ project('nodalkit-install-smoke', 'cpp',
 
 nodalkit_dep = dependency('nodalkit', method : 'pkg-config')
 
-install_smoke = executable('install_smoke',
+install_smoke = executable('nk_sdk_consumer_smoke',
     'main.cpp',
     dependencies : nodalkit_dep,
 )

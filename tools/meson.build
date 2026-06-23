@@ -48,6 +48,17 @@ overlay_screenshot_harness = executable('nk_overlay_screenshot_harness',
     dependencies : nk_dep,
 )
 
+python = import('python').find_installation()
+
+run_target('install-smoke',
+    command : [
+        python,
+        meson.project_source_root() / 'tools' / 'run_install_smoke.py',
+        '--source-dir', meson.project_source_root(),
+        '--work-dir', meson.project_build_root() / 'install_smoke',
+    ],
+)
+
 frame_diag_baseline = meson.project_source_root() / 'tests' / 'fixtures' / 'frame_diag_baseline.json'
 frame_diag_candidate_ok = meson.project_source_root() / 'tests' / 'fixtures' / 'frame_diag_candidate_ok.json'
 frame_diag_candidate_bad = meson.project_source_root() / 'tests' / 'fixtures' / 'frame_diag_candidate_bad.json'

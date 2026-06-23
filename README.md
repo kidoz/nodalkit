@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 [![Meson](https://img.shields.io/badge/Build-Meson-blueviolet.svg)](https://mesonbuild.com/)
-[![Platform: Linux Wayland | macOS | Windows](https://img.shields.io/badge/Platform-Linux%20Wayland%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
+[![Platform status: Linux Wayland primary | macOS secondary | Windows experimental](https://img.shields.io/badge/Platform%20status-Linux%20Wayland%20primary%20%7C%20macOS%20secondary%20%7C%20Windows%20experimental-lightgrey.svg)]()
 
 A C++-first GUI toolkit for modern desktop applications.
 
@@ -50,6 +50,12 @@ Consume the installed SDK through `pkg-config`:
 ```bash
 export PKG_CONFIG_PATH="$PWD/.local/lib/pkgconfig"
 pkg-config --cflags --libs nodalkit
+```
+
+Verify that a downstream sample can consume the installed SDK:
+
+```bash
+meson compile -C buildDir install-smoke
 ```
 
 Run the examples:

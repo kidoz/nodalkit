@@ -38,6 +38,20 @@ NodalKit 0.x ships a single distribution surface: a `pkg-config` file named
 package config module in 0.x — if you need CMake integration, invoke
 `pkg-config` from your `CMakeLists.txt`.
 
+### Requirements
+
+- Meson 1.11 or newer.
+- A C++23 compiler.
+- `pkg-config` or `pkgconf` for downstream SDK consumption.
+- On Windows: a Windows SDK with Win32, DWM, Shell, DirectWrite, D3D11,
+  D3DCompiler, DXGI, and COM development libraries. The current Windows
+  development host uses `clang++` with `lld-link`, but consumers should rely
+  on the compiler and linker flags exported by `nodalkit.pc`.
+- Optional Vulkan support requires a Vulkan SDK or system package discoverable
+  by Meson plus `glslangValidator` at NodalKit build time. If either is
+  missing, the Windows build still installs the Win32, DirectWrite, and D3D11
+  SDK surface.
+
 After `meson install`, point `PKG_CONFIG_PATH` at the install prefix and use
 pkg-config like any other dependency:
 
@@ -55,6 +69,16 @@ nodalkit_dep = dependency('nodalkit', method : 'pkg-config')
 executable('my_app', 'main.cpp', dependencies : nodalkit_dep)
 ```
 
+To verify the installed SDK with NodalKit's downstream sample:
+
+```bash
+meson compile -C build install-smoke
+```
+
+That target configures a separate staged install, validates the generated
+`nodalkit.pc`, then builds and runs `tests/install_smoke` against the installed
+headers and library instead of the source tree.
+
 ### Platform notes
 
 - **Linux Wayland (primary target):** NodalKit installs as `libNodalKit.so`.
@@ -66,12 +90,14 @@ executable('my_app', 'main.cpp', dependencies : nodalkit_dep)
   UniformTypeIdentifiers Apple frameworks. Downstream applications pick these
   up automatically through the dylib.
 - **Windows (experimental):** NodalKit currently builds as a **static** library
-  (`NodalKit.lib`), not a DLL. Consumers must link statically and must also
-  link the same Win32 system libraries NodalKit depends on (`user32`, `gdi32`,
-  `comdlg32`, `advapi32`, `dwmapi`, `shcore`, `dwrite`, `d3d11`, `d3dcompiler`,
-  `dxgi`). This is a deliberate choice for the experimental phase — the
-  static/shared decision on Windows will be revisited before Windows graduates
-  from experimental status.
+  (the exact filename is toolchain-dependent; the current clang-based build
+  emits `libNodalKit.a`), not a DLL. Consumers should use `pkg-config` instead
+  of spelling the library list by hand. The generated `nodalkit.pc` includes
+  the required Windows system libraries: `user32`, `gdi32`, `advapi32`,
+  `dwmapi`, `ole32`, `shcore`, `dwrite`, `d3d11`, `d3dcompiler`, and `dxgi`.
+  Optional Vulkan link flags are present only when Vulkan support was detected
+  while building NodalKit. The static/shared decision on Windows will be
+  revisited before Windows graduates from experimental status.
 
 ## Minimal Application Skeleton
 
