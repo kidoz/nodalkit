@@ -1950,10 +1950,6 @@ TEST_CASE("MenuBar uses measured title widths for top-level menu hit testing", "
 
 TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar bounds",
           "[app][menu][render]") {
-#if defined(_WIN32)
-    SUCCEED("Win32 popup damage tracking is not hardened yet");
-    return;
-#endif
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("software") == 0);
 
@@ -2308,10 +2304,6 @@ TEST_CASE("Dialog present installs a modal overlay and routes Escape dismissal",
 
 TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geometry",
           "[app][dialog][render]") {
-#if defined(_WIN32)
-    SUCCEED("Win32 dialog snapshot geometry is not hardened yet");
-    return;
-#endif
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("software") == 0);
 
@@ -2615,10 +2607,6 @@ TEST_CASE("Window captures frame diagnostics and widget debug dumps", "[app][deb
 }
 
 TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]") {
-#if defined(_WIN32)
-    SUCCEED("Win32 frame-history debug export is not hardened yet");
-    return;
-#endif
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Trace", .width = 240, .height = 120});
     app.event_loop().clear_debug_trace_events();

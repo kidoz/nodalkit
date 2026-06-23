@@ -643,7 +643,14 @@ Win32Surface::Win32Surface(HINSTANCE instance, const WindowConfig& config, Windo
 
 Win32Surface::~Win32Surface() {
     if (hwnd_ != nullptr) {
+        // Detach the surface from the window procedure before destroying the HWND.
+        // DestroyWindow synchronously delivers WM_KILLFOCUS/WM_DESTROY, and forwarding
+        // those into the owning Window while it is being torn down would re-enter event
+        // dispatch on half-destroyed widgets and the text shaper. With the back pointer
+        // cleared, window_proc falls through to DefWindowProcW during teardown.
+        SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
         DestroyWindow(hwnd_);
+        hwnd_ = nullptr;
     }
 }
 

@@ -84,6 +84,10 @@ struct Window::Impl {
     bool window_focused = false;
     bool needs_layout = true;
     bool frame_pending = false;
+    // Liveness token shared with posted frame tasks. Cleared in ~Window so a frame
+    // task that outlives the Window (e.g. queued just before destruction) returns
+    // instead of dereferencing the freed Impl.
+    std::shared_ptr<bool> alive = std::make_shared<bool>(true);
     std::unique_ptr<WindowInspector> inspector;
 
     Signal<> close_requested;
@@ -1694,6 +1698,9 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
 }
 
 Window::~Window() {
+    if (impl_) {
+        *impl_->alive = false;
+    }
     NK_LOG_DEBUG("Window", "Window destroyed");
 }
 
@@ -2275,7 +2282,12 @@ void Window::request_frame(FrameRequestReason reason) {
     }
 
     app->event_loop().post(
-        [this] {
+        [this, alive = impl_->alive] {
+            // The Window may have been destroyed between posting and running this
+            // task; bail before touching the freed Impl.
+            if (!alive || !*alive) {
+                return;
+            }
             impl_->frame_pending = false;
 
             if (!impl_->visible || !impl_->child) {
