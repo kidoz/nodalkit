@@ -54,6 +54,98 @@ void apply_density(Theme& theme, ThemeDensity density) {
     }
 }
 
+void set_hc_color(Theme& theme, std::string name, uint8_t r, uint8_t g, uint8_t b) {
+    theme.set_token(std::move(name), StyleValue{Color::from_rgb(r, g, b)});
+}
+
+// Swap the palette to a Windows-style high-contrast theme: High Contrast Black
+// for dark scheme, High Contrast White for light scheme. Surfaces collapse to a
+// single background, every border and the primary text take the opposite
+// extreme, and a single bright highlight color drives accent/hover/selection so
+// system high-contrast guarantees are met rather than only flagged via a token.
+void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
+    theme.set_token("contrast-mode", StyleValue{std::string("high")});
+
+    const bool dark = color_scheme != ColorScheme::Light;
+    if (dark) {
+        // Background black, foreground white, cyan highlight (#26EBFF).
+        for (const auto* surface : {"window-bg",
+                                    "surface-panel",
+                                    "surface-card",
+                                    "surface-raised",
+                                    "field-bg",
+                                    "scrollbar-track",
+                                    "layer-titlebar-bg",
+                                    "layer-titlebar-inactive-bg",
+                                    "layer-command-bg",
+                                    "layer-navigation-bg",
+                                    "layer-content-bg",
+                                    "layer-status-bg"}) {
+            set_hc_color(theme, surface, 0, 0, 0);
+        }
+        for (const auto* ink : {"border-subtle",
+                                "border-strong",
+                                "field-border",
+                                "text-primary",
+                                "text-secondary",
+                                "scrollbar-thumb",
+                                "focus-visible",
+                                "layer-titlebar-text"}) {
+            set_hc_color(theme, ink, 255, 255, 255);
+        }
+        for (const auto* highlight : {"surface-hover",
+                                      "surface-pressed",
+                                      "accent",
+                                      "accent-hover",
+                                      "accent-pressed",
+                                      "accent-soft",
+                                      "focus-ring"}) {
+            set_hc_color(theme, highlight, 38, 235, 255);
+        }
+        set_hc_color(theme, "accent-contrast", 0, 0, 0);
+        set_hc_color(theme, "text-disabled", 160, 160, 160);
+        set_hc_color(theme, "layer-titlebar-inactive-text", 160, 160, 160);
+    } else {
+        // Background white, foreground black, dark-blue highlight (#00009F).
+        for (const auto* surface : {"window-bg",
+                                    "surface-panel",
+                                    "surface-card",
+                                    "surface-raised",
+                                    "field-bg",
+                                    "scrollbar-track",
+                                    "layer-titlebar-bg",
+                                    "layer-titlebar-inactive-bg",
+                                    "layer-command-bg",
+                                    "layer-navigation-bg",
+                                    "layer-content-bg",
+                                    "layer-status-bg"}) {
+            set_hc_color(theme, surface, 255, 255, 255);
+        }
+        for (const auto* ink : {"border-subtle",
+                                "border-strong",
+                                "field-border",
+                                "text-primary",
+                                "text-secondary",
+                                "scrollbar-thumb",
+                                "focus-visible",
+                                "layer-titlebar-text"}) {
+            set_hc_color(theme, ink, 0, 0, 0);
+        }
+        for (const auto* highlight : {"surface-hover",
+                                      "surface-pressed",
+                                      "accent",
+                                      "accent-hover",
+                                      "accent-pressed",
+                                      "accent-soft",
+                                      "focus-ring"}) {
+            set_hc_color(theme, highlight, 0, 0, 159);
+        }
+        set_hc_color(theme, "accent-contrast", 255, 255, 255);
+        set_hc_color(theme, "text-disabled", 96, 96, 96);
+        set_hc_color(theme, "layer-titlebar-inactive-text", 96, 96, 96);
+    }
+}
+
 void apply_accent_override(Theme& theme,
                            ColorScheme color_scheme,
                            const std::optional<Color>& accent_color) {
@@ -156,7 +248,7 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
     }
 
     if (selection.high_contrast) {
-        theme->set_token("contrast-mode", StyleValue{std::string("high")});
+        apply_high_contrast(*theme, selection.color_scheme);
     }
     if (!selection.transparency_allowed) {
         theme->set_token("transparency-mode", StyleValue{std::string("reduced")});
@@ -166,7 +258,11 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
     }
 
     apply_density(*theme, selection.density);
-    apply_accent_override(*theme, selection.color_scheme, selection.accent_color);
+    // High contrast mandates system colors; a custom accent override would defeat
+    // the contrast guarantee, so it is intentionally skipped in that mode.
+    if (!selection.high_contrast) {
+        apply_accent_override(*theme, selection.color_scheme, selection.accent_color);
+    }
 
     return std::shared_ptr<Theme>(theme.release());
 }

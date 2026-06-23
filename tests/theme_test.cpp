@@ -147,6 +147,74 @@ TEST_CASE("Per-family override rules win the cascade tie-break", "[theme]") {
     REQUIRE(resolved_metric(*gnome, {"button"}, "corner-radius") == Catch::Approx(10.0F));
 }
 
+TEST_CASE("High contrast swaps the palette to maximal-contrast system colors", "[theme]") {
+    nk::SystemPreferences prefs;
+    prefs.platform_family = nk::PlatformFamily::Windows;
+
+    nk::ThemeSelection selection;
+    selection.family = nk::ThemeFamily::Windows11;
+    selection.force_high_contrast = true;
+
+    SECTION("dark scheme yields High Contrast Black") {
+        prefs.color_scheme = nk::ColorScheme::Dark;
+        selection.color_scheme_override = nk::ColorScheme::Dark;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        REQUIRE(resolved.high_contrast);
+
+        auto theme = nk::make_theme(resolved, prefs);
+        REQUIRE(string_token(*theme, "contrast-mode") == "high");
+
+        const auto bg = color_token(*theme, "window-bg");
+        const auto text = color_token(*theme, "text-primary");
+        REQUIRE(channel(bg.r) == 0);
+        REQUIRE(channel(bg.g) == 0);
+        REQUIRE(channel(bg.b) == 0);
+        REQUIRE(channel(text.r) == 255);
+        REQUIRE(channel(text.g) == 255);
+        REQUIRE(channel(text.b) == 255);
+        // Borders must stay visible against the black background.
+        REQUIRE(channel(color_token(*theme, "border-subtle").r) == 255);
+        // Cyan highlight with black foreground.
+        REQUIRE(channel(color_token(*theme, "accent").b) == 255);
+        REQUIRE(channel(color_token(*theme, "accent-contrast").r) == 0);
+    }
+
+    SECTION("light scheme yields High Contrast White") {
+        prefs.color_scheme = nk::ColorScheme::Light;
+        selection.color_scheme_override = nk::ColorScheme::Light;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+
+        auto theme = nk::make_theme(resolved, prefs);
+        const auto bg = color_token(*theme, "window-bg");
+        const auto text = color_token(*theme, "text-primary");
+        REQUIRE(channel(bg.r) == 255);
+        REQUIRE(channel(text.r) == 0);
+        REQUIRE(channel(color_token(*theme, "border-subtle").r) == 0);
+        REQUIRE(channel(color_token(*theme, "accent-contrast").r) == 255);
+    }
+}
+
+TEST_CASE("High contrast ignores a custom accent override", "[theme]") {
+    nk::SystemPreferences prefs;
+    prefs.platform_family = nk::PlatformFamily::Windows;
+    prefs.color_scheme = nk::ColorScheme::Dark;
+
+    nk::ThemeSelection selection;
+    selection.family = nk::ThemeFamily::Windows11;
+    selection.color_scheme_override = nk::ColorScheme::Dark;
+    selection.force_high_contrast = true;
+    selection.accent_color_override = nk::Color::from_rgb(255, 0, 0);
+
+    const auto resolved = nk::resolve_theme_selection(selection, prefs);
+    auto theme = nk::make_theme(resolved, prefs);
+
+    // The system high-contrast highlight must win over the red override.
+    const auto accent = color_token(*theme, "accent");
+    REQUIRE(channel(accent.r) == 38);
+    REQUIRE(channel(accent.b) == 255);
+    REQUIRE(string_token(*theme, "accent-source") == "theme");
+}
+
 TEST_CASE("make_theme builds the Windows family with density applied", "[theme][windows]") {
     nk::SystemPreferences prefs;
     prefs.platform_family = nk::PlatformFamily::Windows;
