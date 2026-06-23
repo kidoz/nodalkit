@@ -13,6 +13,7 @@
 #include <nk/widgets/canvas_widget.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/grid_view.h>
+#include <nk/widgets/scroll_area.h>
 #include <string>
 
 namespace {
@@ -89,6 +90,55 @@ public:
 
 private:
     SnapshotCanvasWidget() = default;
+};
+
+class SnapshotScrollArea : public nk::ScrollArea {
+public:
+    static std::shared_ptr<SnapshotScrollArea> create() {
+        return std::shared_ptr<SnapshotScrollArea>(new SnapshotScrollArea());
+    }
+
+    void snapshot_for_test(nk::SnapshotContext& ctx) const { snapshot(ctx); }
+
+private:
+    SnapshotScrollArea() = default;
+};
+
+class EditorSurfaceWidget : public nk::Widget {
+public:
+    static std::shared_ptr<EditorSurfaceWidget> create(float width, float height) {
+        return std::shared_ptr<EditorSurfaceWidget>(new EditorSurfaceWidget(width, height));
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        ++measure_queries_;
+        return {width_, height_, width_, height_};
+    }
+
+    void queue_cell_damage(nk::Rect damage) { queue_redraw(damage); }
+
+    [[nodiscard]] std::size_t measure_queries() const { return measure_queries_; }
+
+    [[nodiscard]] std::size_t snapshot_calls() const { return snapshot_calls_; }
+
+    void reset_counters() const {
+        measure_queries_ = 0;
+        snapshot_calls_ = 0;
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        ++snapshot_calls_;
+        ctx.add_color_rect(allocation(), nk::Color::from_rgb(245, 247, 250));
+    }
+
+private:
+    EditorSurfaceWidget(float width, float height) : width_(width), height_(height) {}
+
+    float width_ = 0.0F;
+    float height_ = 0.0F;
+    mutable std::size_t measure_queries_ = 0;
+    mutable std::size_t snapshot_calls_ = 0;
 };
 
 } // namespace
@@ -219,4 +269,40 @@ TEST_CASE("CanvasWidget supports custom snapshots and explicit sub-rect damage",
     REQUIRE(full_canvas_damage.front().y == 18.0F);
     REQUIRE(full_canvas_damage.front().width == 640.0F);
     REQUIRE(full_canvas_damage.front().height == 360.0F);
+}
+
+TEST_CASE("ScrollArea composes a stable editor surface with localized content damage",
+          "[editor-scale][scroll]") {
+    auto scroll_area = SnapshotScrollArea::create();
+    scroll_area->set_h_scroll_policy(nk::ScrollPolicy::Automatic);
+    scroll_area->set_v_scroll_policy(nk::ScrollPolicy::Automatic);
+
+    auto surface = EditorSurfaceWidget::create(4096.0F, 120000.0F);
+    scroll_area->set_content(surface);
+    scroll_area->allocate({0.0F, 0.0F, 320.0F, 180.0F});
+
+    scroll_area->scroll_to(1024.0F, 64000.0F);
+    scroll_area->allocate({0.0F, 0.0F, 320.0F, 180.0F});
+
+    REQUIRE(scroll_area->h_offset() == 1024.0F);
+    REQUIRE(scroll_area->v_offset() == 64000.0F);
+    REQUIRE(surface->allocation().x == -1024.0F);
+    REQUIRE(surface->allocation().y == -64000.0F);
+    REQUIRE(surface->allocation().width == 4096.0F);
+    REQUIRE(surface->allocation().height == 120000.0F);
+
+    surface->reset_counters();
+    nk::SnapshotContext ctx;
+    scroll_area->snapshot_for_test(ctx);
+
+    REQUIRE(surface->snapshot_calls() == 1);
+    REQUIRE(surface->measure_queries() <= 8);
+
+    surface->queue_cell_damage({1032.0F, 64012.0F, 16.0F, 12.0F});
+    const auto damage = surface->debug_damage_regions();
+    REQUIRE(damage.size() == 1);
+    REQUIRE(damage.front().x == 8.0F);
+    REQUIRE(damage.front().y == 12.0F);
+    REQUIRE(damage.front().width == 16.0F);
+    REQUIRE(damage.front().height == 12.0F);
 }
