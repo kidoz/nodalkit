@@ -52,6 +52,12 @@ test_model = executable('test_model',
 )
 test('model', test_model)
 
+test_editor_scale_validation = executable('test_editor_scale_validation',
+    'editor_scale_validation_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('editor_scale_validation', test_editor_scale_validation)
+
 # Public API link audit: references every public symbol declared in
 # include/nk/**/*.h and fails the build if any symbol has no implementation
 # in libNodalKit (Shortcut-class bugs). Intentionally headless — catches
