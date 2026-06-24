@@ -688,6 +688,130 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
     return theme;
 }
 
+namespace {
+
+void install_windows_10_overrides(Theme& theme) {
+    // Windows 10 control geometry: near-square corners and the same 32 px control
+    // height, distinct from the rounded Windows 11 family.
+    add_rule(theme,
+             {"button"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{2.0F}},
+              {"min-height", StyleValue{32.0F}},
+              {"min-width", StyleValue{90.0F}},
+              {"padding-x", StyleValue{12.0F}},
+              {"padding-y", StyleValue{5.0F}}});
+    add_rule(theme,
+             {"text-field"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{2.0F}}, {"min-height", StyleValue{32.0F}}});
+    add_rule(theme,
+             {"combo-box"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{2.0F}},
+              {"popup-radius", StyleValue{2.0F}},
+              {"selection-radius", StyleValue{0.0F}},
+              {"min-height", StyleValue{32.0F}}});
+    add_rule(theme,
+             {"segmented-control"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{2.0F}},
+              {"selection-radius", StyleValue{0.0F}},
+              {"track-padding", StyleValue{2.0F}},
+              {"min-height", StyleValue{32.0F}}});
+    add_rule(theme, {"card"}, StateFlags::None, {{"corner-radius", StyleValue{2.0F}}});
+    add_rule(theme,
+             {"image-view"},
+             StateFlags::None,
+             {{"corner-radius", StyleValue{2.0F}}, {"content-radius", StyleValue{0.0F}}});
+
+    add_rule(theme,
+             {"menu-bar"},
+             StateFlags::None,
+             {{"background", StyleValue{std::string("layer-command-bg")}}});
+    add_rule(theme,
+             {"status-bar"},
+             StateFlags::None,
+             {{"background", StyleValue{std::string("layer-status-bg")}}});
+}
+
+} // namespace
+
+std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
+    const bool dark = color_scheme == ColorScheme::Dark;
+    auto theme = std::make_unique<Theme>(dark ? "Windows 10 Dark" : "Windows 10 Light");
+    theme->set_token("theme-family", StyleValue{std::string("windows-10")});
+
+    if (dark) {
+        set_color_token(*theme, "window-bg", 31, 31, 31);
+        set_color_token(*theme, "surface-panel", 44, 44, 44);
+        set_color_token(*theme, "surface-card", 43, 43, 43);
+        set_color_token(*theme, "surface-raised", 51, 51, 51);
+        set_color_token(*theme, "surface-hover", 60, 60, 60);
+        set_color_token(*theme, "surface-pressed", 68, 68, 68);
+        set_color_token(*theme, "field-bg", 45, 45, 45);
+        set_color_token(*theme, "field-border", 100, 100, 100);
+        set_color_token(*theme, "border-subtle", 61, 61, 61);
+        set_color_token(*theme, "border-strong", 92, 92, 92);
+        set_color_token(*theme, "text-primary", 255, 255, 255);
+        set_color_token(*theme, "text-secondary", 180, 180, 180);
+        set_color_token(*theme, "text-disabled", 122, 122, 122);
+        set_color_token(*theme, "accent", 0, 120, 215);
+        set_color_token(*theme, "accent-hover", 38, 140, 225);
+        set_color_token(*theme, "accent-pressed", 0, 103, 184);
+        set_color_token(*theme, "accent-soft", 0, 55, 100);
+        set_color_token(*theme, "accent-contrast", 255, 255, 255);
+        set_color_token(*theme, "focus-ring", 76, 194, 255);
+        set_color_token(*theme, "focus-visible", 255, 255, 255);
+        set_color_token(*theme, "scrollbar-track", 46, 46, 46);
+        set_color_token(*theme, "scrollbar-thumb", 104, 104, 104);
+    } else {
+        set_color_token(*theme, "window-bg", 255, 255, 255);
+        set_color_token(*theme, "surface-panel", 242, 242, 242);
+        set_color_token(*theme, "surface-card", 255, 255, 255);
+        set_color_token(*theme, "surface-raised", 251, 251, 251);
+        set_color_token(*theme, "surface-hover", 240, 240, 240);
+        set_color_token(*theme, "surface-pressed", 224, 224, 224);
+        set_color_token(*theme, "field-bg", 255, 255, 255);
+        set_color_token(*theme, "field-border", 138, 138, 138);
+        set_color_token(*theme, "border-subtle", 213, 213, 213);
+        set_color_token(*theme, "border-strong", 160, 160, 160);
+        set_color_token(*theme, "text-primary", 0, 0, 0);
+        set_color_token(*theme, "text-secondary", 96, 96, 96);
+        set_color_token(*theme, "text-disabled", 160, 160, 160);
+        set_color_token(*theme, "accent", 0, 120, 215);
+        set_color_token(*theme, "accent-hover", 0, 108, 195);
+        set_color_token(*theme, "accent-pressed", 0, 96, 170);
+        set_color_token(*theme, "accent-soft", 205, 232, 255);
+        set_color_token(*theme, "accent-contrast", 255, 255, 255);
+        set_color_token(*theme, "focus-ring", 0, 120, 215);
+        set_color_token(*theme, "focus-visible", 0, 0, 0);
+        set_color_token(*theme, "scrollbar-track", 240, 240, 240);
+        set_color_token(*theme, "scrollbar-thumb", 205, 205, 205);
+    }
+
+    install_windows_layer_tokens(*theme, dark);
+
+    theme->set_token("accent-source", StyleValue{std::string("theme")});
+    theme->set_token("motion-mode", StyleValue{std::string("normal")});
+    theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
+    theme->set_token("density", StyleValue{std::string("standard")});
+
+    set_metric_token(*theme, "spacing-xs", 4.0F);
+    set_metric_token(*theme, "spacing-sm", 8.0F);
+    set_metric_token(*theme, "spacing-md", 12.0F);
+    set_metric_token(*theme, "spacing-lg", 16.0F);
+    set_metric_token(*theme, "spacing-xl", 24.0F);
+    set_metric_token(*theme, "control-height", 32.0F);
+    set_metric_token(*theme, "menu-height", 28.0F);
+    set_metric_token(*theme, "status-height", 24.0F);
+
+    install_shared_rules(*theme);
+    install_windows_10_overrides(*theme);
+
+    return theme;
+}
+
 std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
     const bool dark = color_scheme == ColorScheme::Dark;
     auto theme = std::make_unique<Theme>(dark ? "macOS Dark" : "macOS Light");

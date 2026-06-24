@@ -808,6 +808,7 @@ void force_symbol_references() {
     (void)&nk::Theme::make_dark;
     (void)&nk::Theme::make_linux_gnome;
     (void)&nk::Theme::make_windows_11;
+    (void)&nk::Theme::make_windows_10;
     (void)&nk::Theme::make_macos_26;
     (void)&nk::resolve_theme_selection;
     (void)&nk::make_theme;

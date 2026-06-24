@@ -19,6 +19,7 @@
 #include <shobjidl.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
+#include <winternl.h>
 #include <wrl/client.h>
 
 namespace nk {
@@ -276,6 +277,22 @@ SystemPreferences query_system_preferences() {
     if (SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations_enabled, 0) &&
         animations_enabled == FALSE) {
         preferences.motion = MotionPreference::Reduced;
+    }
+
+    // Read the real OS version through RtlGetVersion. GetVersionEx is shimmed by
+    // application compatibility and would misreport the build on Windows 10/11.
+    using RtlGetVersionFn = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+    if (HMODULE ntdll = GetModuleHandleW(L"ntdll.dll"); ntdll != nullptr) {
+        auto rtl_get_version =
+            reinterpret_cast<RtlGetVersionFn>(GetProcAddress(ntdll, "RtlGetVersion"));
+        if (rtl_get_version != nullptr) {
+            RTL_OSVERSIONINFOW version_info{};
+            version_info.dwOSVersionInfoSize = sizeof(version_info);
+            if (rtl_get_version(&version_info) == 0) {
+                preferences.os_version_major = static_cast<int>(version_info.dwMajorVersion);
+                preferences.os_version_build = static_cast<int>(version_info.dwBuildNumber);
+            }
+        }
     }
 
     preferences.accent_color = query_accent_color();

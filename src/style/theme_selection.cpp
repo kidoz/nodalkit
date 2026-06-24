@@ -171,7 +171,12 @@ void apply_accent_override(Theme& theme,
 ThemeFamily default_theme_family_for(const SystemPreferences& system_preferences) {
     switch (system_preferences.platform_family) {
     case PlatformFamily::Windows:
-        return ThemeFamily::Windows11;
+        // Windows 11 ships as build 22000 and later. A known older build maps to
+        // the Windows 10 fallback; an unknown build (0) assumes the modern family.
+        return (system_preferences.os_version_build != 0 &&
+                system_preferences.os_version_build < 22000)
+                   ? ThemeFamily::Windows10
+                   : ThemeFamily::Windows11;
     case PlatformFamily::MacOS:
         return ThemeFamily::MacOS26;
     case PlatformFamily::Linux:
@@ -237,6 +242,9 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
         break;
     case ThemeFamily::Windows11:
         theme = Theme::make_windows_11(selection.color_scheme);
+        break;
+    case ThemeFamily::Windows10:
+        theme = Theme::make_windows_10(selection.color_scheme);
         break;
     case ThemeFamily::MacOS26:
         theme = Theme::make_macos_26(selection.color_scheme);

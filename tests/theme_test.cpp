@@ -215,6 +215,53 @@ TEST_CASE("High contrast ignores a custom accent override", "[theme]") {
     REQUIRE(string_token(*theme, "accent-source") == "theme");
 }
 
+TEST_CASE("Windows 10 fallback is a squared, opaque-accent family", "[theme][windows]") {
+    auto win10 = nk::Theme::make_windows_10(nk::ColorScheme::Light);
+    auto win11 = nk::Theme::make_windows_11(nk::ColorScheme::Light);
+
+    REQUIRE(string_token(*win10, "theme-family") == "windows-10");
+
+    // Windows 10 uses the classic #0078D7 accent, not the Windows 11 #0067C0.
+    const auto accent = color_token(*win10, "accent");
+    REQUIRE(channel(accent.r) == 0);
+    REQUIRE(channel(accent.g) == 120);
+    REQUIRE(channel(accent.b) == 215);
+
+    // Near-square controls (2 px) versus the rounded Windows 11 family (4 px).
+    REQUIRE(resolved_metric(*win10, {"button"}, "corner-radius") == Catch::Approx(2.0F));
+    REQUIRE(resolved_metric(*win11, {"button"}, "corner-radius") == Catch::Approx(4.0F));
+
+    // The shell layer vocabulary is shared with the Windows 11 family.
+    REQUIRE(win10->token("layer-command-bg") != nullptr);
+    REQUIRE(resolved_string(*win10, {"status-bar"}, "background") == "layer-status-bg");
+}
+
+TEST_CASE("OS build selects the Windows 11 or Windows 10 family", "[theme][windows]") {
+    nk::SystemPreferences prefs;
+    prefs.platform_family = nk::PlatformFamily::Windows;
+
+    SECTION("Windows 11 build") {
+        prefs.os_version_build = 22631;
+        REQUIRE(nk::default_theme_family_for(prefs) == nk::ThemeFamily::Windows11);
+    }
+    SECTION("Windows 10 build") {
+        prefs.os_version_build = 19045;
+        REQUIRE(nk::default_theme_family_for(prefs) == nk::ThemeFamily::Windows10);
+    }
+    SECTION("Unknown build assumes the modern family") {
+        prefs.os_version_build = 0;
+        REQUIRE(nk::default_theme_family_for(prefs) == nk::ThemeFamily::Windows11);
+    }
+
+    nk::ThemeSelection selection;
+    selection.family = nk::ThemeFamily::SystemDefault;
+    prefs.os_version_build = 19045;
+    const auto resolved = nk::resolve_theme_selection(selection, prefs);
+    REQUIRE(resolved.family == nk::ThemeFamily::Windows10);
+    auto theme = nk::make_theme(resolved, prefs);
+    REQUIRE(string_token(*theme, "theme-family") == "windows-10");
+}
+
 TEST_CASE("make_theme builds the Windows family with density applied", "[theme][windows]") {
     nk::SystemPreferences prefs;
     prefs.platform_family = nk::PlatformFamily::Windows;

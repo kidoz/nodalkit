@@ -16,6 +16,7 @@ enum class ThemeFamily {
     SystemDefault,
     LinuxGnome,
     Windows11,
+    Windows10,
     MacOS26,
 };
 

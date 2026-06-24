@@ -56,8 +56,12 @@ public:
     /// Create the current GNOME-first Linux theme family.
     static std::unique_ptr<Theme> make_linux_gnome(ColorScheme color_scheme);
 
-    /// Create a Windows 11 placeholder theme family using shared tokens.
+    /// Create the Windows 11 theme family (Mica-neutral, rounded controls).
     static std::unique_ptr<Theme> make_windows_11(ColorScheme color_scheme);
+
+    /// Create the Windows 10 fallback theme family (opaque surfaces, squared
+    /// controls, classic accent) for hosts older than Windows 11.
+    static std::unique_ptr<Theme> make_windows_10(ColorScheme color_scheme);
 
     /// Create a macOS 26 placeholder theme family using shared tokens.
     static std::unique_ptr<Theme> make_macos_26(ColorScheme color_scheme);

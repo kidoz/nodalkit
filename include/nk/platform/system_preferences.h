@@ -57,6 +57,11 @@ struct SystemPreferences {
     TransparencyPreference transparency = TransparencyPreference::Allowed;
     float text_scale_factor = 1.0F;
     std::optional<Color> accent_color;
+    // OS version, when known. Zero means "unknown" and callers should assume the
+    // most modern behavior. On Windows, os_version_build distinguishes Windows 11
+    // (build >= 22000) from Windows 10.
+    int os_version_major = 0;
+    int os_version_build = 0;
 
     constexpr bool operator==(const SystemPreferences&) const = default;
 };
