@@ -65,6 +65,7 @@ struct ResolvedThemeSelection {
     bool reduced_motion = false;
     bool transparency_allowed = true;
     BackdropCapability backdrop = BackdropCapability::Opaque;
+    float text_scale = 1.0F;
 
     constexpr bool operator==(const ResolvedThemeSelection&) const = default;
 };

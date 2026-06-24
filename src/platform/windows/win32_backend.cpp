@@ -314,6 +314,21 @@ SystemPreferences query_system_preferences() {
         preferences.transparency = TransparencyPreference::Reduced;
     }
 
+    // Accessibility text scaling (Settings > Accessibility > Text size) is stored
+    // as a percentage from 100 to 225.
+    DWORD text_scale = 100;
+    DWORD text_scale_size = sizeof(text_scale);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+                     L"Software\\Microsoft\\Accessibility",
+                     L"TextScaleFactor",
+                     RRF_RT_REG_DWORD,
+                     nullptr,
+                     &text_scale,
+                     &text_scale_size) == ERROR_SUCCESS &&
+        text_scale >= 100) {
+        preferences.text_scale_factor = static_cast<float>(text_scale) / 100.0F;
+    }
+
     preferences.accent_color = query_accent_color();
     return preferences;
 }

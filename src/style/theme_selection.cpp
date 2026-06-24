@@ -172,6 +172,26 @@ std::string_view backdrop_mode_token(BackdropCapability backdrop) {
     }
 }
 
+void scale_metric_token(Theme& theme, std::string name, float scale) {
+    if (const auto* value = theme.token(name);
+        value != nullptr && std::holds_alternative<float>(*value)) {
+        theme.set_token(std::move(name), StyleValue{std::get<float>(*value) * scale});
+    }
+}
+
+// Propagate the accessibility text scale into the theme: expose it as a token
+// for text-rendering paths and grow the control-height metrics so layout keeps
+// room for the larger text.
+void apply_text_scale(Theme& theme, float text_scale) {
+    theme.set_token("text-scale", StyleValue{text_scale});
+    if (text_scale == 1.0F) {
+        return;
+    }
+    scale_metric_token(theme, "control-height", text_scale);
+    scale_metric_token(theme, "menu-height", text_scale);
+    scale_metric_token(theme, "status-height", text_scale);
+}
+
 void apply_accent_override(Theme& theme,
                            ColorScheme color_scheme,
                            const std::optional<Color>& accent_color) {
@@ -258,6 +278,9 @@ ResolvedThemeSelection resolve_theme_selection(const ThemeSelection& selection,
     resolved.backdrop = resolve_backdrop(
         system_preferences.backdrop, resolved.transparency_allowed, resolved.high_contrast);
 
+    // Windows accessibility text scaling ranges from 100% to 225%.
+    resolved.text_scale = std::clamp(system_preferences.text_scale_factor, 1.0F, 2.25F);
+
     return resolved;
 }
 
@@ -297,6 +320,7 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
                      StyleValue{std::string(backdrop_mode_token(selection.backdrop))});
 
     apply_density(*theme, selection.density);
+    apply_text_scale(*theme, selection.text_scale);
     // High contrast mandates system colors; a custom accent override would defeat
     // the contrast guarantee, so it is intentionally skipped in that mode.
     if (!selection.high_contrast) {

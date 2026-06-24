@@ -306,6 +306,40 @@ TEST_CASE("Backdrop capability resolves into a backdrop-mode token", "[theme]") 
     }
 }
 
+TEST_CASE("Text scale propagates into a token and control metrics", "[theme]") {
+    nk::SystemPreferences prefs;
+    prefs.platform_family = nk::PlatformFamily::Windows;
+    prefs.os_version_build = 22631;
+
+    nk::ThemeSelection selection;
+    selection.family = nk::ThemeFamily::Windows11;
+
+    SECTION("125% scale grows control heights") {
+        prefs.text_scale_factor = 1.25F;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        REQUIRE(resolved.text_scale == Catch::Approx(1.25F));
+
+        auto theme = nk::make_theme(resolved, prefs);
+        REQUIRE(metric_token(*theme, "text-scale") == Catch::Approx(1.25F));
+        // Windows 11 standard control height is 32 px.
+        REQUIRE(metric_token(*theme, "control-height") == Catch::Approx(32.0F * 1.25F));
+    }
+
+    SECTION("default scale leaves metrics untouched") {
+        prefs.text_scale_factor = 1.0F;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        auto theme = nk::make_theme(resolved, prefs);
+        REQUIRE(metric_token(*theme, "text-scale") == Catch::Approx(1.0F));
+        REQUIRE(metric_token(*theme, "control-height") == Catch::Approx(32.0F));
+    }
+
+    SECTION("scale is clamped to the Windows 225% ceiling") {
+        prefs.text_scale_factor = 3.0F;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        REQUIRE(resolved.text_scale == Catch::Approx(2.25F));
+    }
+}
+
 TEST_CASE("make_theme builds the Windows family with density applied", "[theme][windows]") {
     nk::SystemPreferences prefs;
     prefs.platform_family = nk::PlatformFamily::Windows;
