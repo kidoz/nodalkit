@@ -146,6 +146,32 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
     }
 }
 
+BackdropCapability resolve_backdrop(BackdropCapability capability,
+                                    bool transparency_allowed,
+                                    bool high_contrast) {
+    if (capability == BackdropCapability::None) {
+        return BackdropCapability::None;
+    }
+    // A material backdrop needs transparency effects; reduced transparency or
+    // high contrast collapses it to the opaque fallback.
+    if (!transparency_allowed || high_contrast) {
+        return BackdropCapability::Opaque;
+    }
+    return capability;
+}
+
+std::string_view backdrop_mode_token(BackdropCapability backdrop) {
+    switch (backdrop) {
+    case BackdropCapability::None:
+        return "none";
+    case BackdropCapability::Material:
+        return "material";
+    case BackdropCapability::Opaque:
+    default:
+        return "opaque";
+    }
+}
+
 void apply_accent_override(Theme& theme,
                            ColorScheme color_scheme,
                            const std::optional<Color>& accent_color) {
@@ -229,6 +255,9 @@ ResolvedThemeSelection resolve_theme_selection(const ThemeSelection& selection,
         break;
     }
 
+    resolved.backdrop = resolve_backdrop(
+        system_preferences.backdrop, resolved.transparency_allowed, resolved.high_contrast);
+
     return resolved;
 }
 
@@ -264,6 +293,8 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
     if (selection.reduced_motion) {
         theme->set_token("motion-mode", StyleValue{std::string("reduced")});
     }
+    theme->set_token("backdrop-mode",
+                     StyleValue{std::string(backdrop_mode_token(selection.backdrop))});
 
     apply_density(*theme, selection.density);
     // High contrast mandates system colors; a custom accent override would defeat

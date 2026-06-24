@@ -295,6 +295,25 @@ SystemPreferences query_system_preferences() {
         }
     }
 
+    // Mica is a Windows 11 (build 22000+) system material; older builds fall back
+    // to an opaque surface fill. DWM composition is always available on the
+    // supported Windows versions, so no host reports the None capability here.
+    preferences.backdrop = preferences.os_version_build >= 22000 ? BackdropCapability::Material
+                                                                 : BackdropCapability::Opaque;
+
+    DWORD enable_transparency = 1;
+    DWORD transparency_size = sizeof(enable_transparency);
+    if (RegGetValueW(HKEY_CURRENT_USER,
+                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                     L"EnableTransparency",
+                     RRF_RT_REG_DWORD,
+                     nullptr,
+                     &enable_transparency,
+                     &transparency_size) == ERROR_SUCCESS &&
+        enable_transparency == 0) {
+        preferences.transparency = TransparencyPreference::Reduced;
+    }
+
     preferences.accent_color = query_accent_color();
     return preferences;
 }

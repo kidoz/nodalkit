@@ -262,6 +262,50 @@ TEST_CASE("OS build selects the Windows 11 or Windows 10 family", "[theme][windo
     REQUIRE(string_token(*theme, "theme-family") == "windows-10");
 }
 
+TEST_CASE("Backdrop capability resolves into a backdrop-mode token", "[theme]") {
+    nk::SystemPreferences prefs;
+    prefs.platform_family = nk::PlatformFamily::Windows;
+    prefs.os_version_build = 22631;
+
+    nk::ThemeSelection selection;
+    selection.family = nk::ThemeFamily::Windows11;
+
+    SECTION("material-capable host with transparency allowed") {
+        prefs.backdrop = nk::BackdropCapability::Material;
+        prefs.transparency = nk::TransparencyPreference::Allowed;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        REQUIRE(resolved.backdrop == nk::BackdropCapability::Material);
+        auto theme = nk::make_theme(resolved, prefs);
+        REQUIRE(string_token(*theme, "backdrop-mode") == "material");
+    }
+
+    SECTION("reduced transparency collapses material to opaque") {
+        prefs.backdrop = nk::BackdropCapability::Material;
+        prefs.transparency = nk::TransparencyPreference::Reduced;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        REQUIRE(resolved.backdrop == nk::BackdropCapability::Opaque);
+        auto theme = nk::make_theme(resolved, prefs);
+        REQUIRE(string_token(*theme, "backdrop-mode") == "opaque");
+    }
+
+    SECTION("high contrast forces opaque even on a material host") {
+        prefs.backdrop = nk::BackdropCapability::Material;
+        selection.force_high_contrast = true;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        REQUIRE(resolved.backdrop == nk::BackdropCapability::Opaque);
+        auto theme = nk::make_theme(resolved, prefs);
+        REQUIRE(string_token(*theme, "backdrop-mode") == "opaque");
+    }
+
+    SECTION("a host without backdrop support stays none") {
+        prefs.backdrop = nk::BackdropCapability::None;
+        const auto resolved = nk::resolve_theme_selection(selection, prefs);
+        REQUIRE(resolved.backdrop == nk::BackdropCapability::None);
+        auto theme = nk::make_theme(resolved, prefs);
+        REQUIRE(string_token(*theme, "backdrop-mode") == "none");
+    }
+}
+
 TEST_CASE("make_theme builds the Windows family with density applied", "[theme][windows]") {
     nk::SystemPreferences prefs;
     prefs.platform_family = nk::PlatformFamily::Windows;

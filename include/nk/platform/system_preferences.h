@@ -47,6 +47,16 @@ enum class TransparencyPreference {
     Reduced,
 };
 
+/// Window backdrop capability of the host, from least to most capable.
+/// `None` means no backdrop blending at all, `Opaque` a solid fallback fill,
+/// and `Material` a system material such as Windows Mica/Acrylic or macOS
+/// vibrancy.
+enum class BackdropCapability {
+    None,
+    Opaque,
+    Material,
+};
+
 /// Visual preferences discovered from the current platform.
 struct SystemPreferences {
     PlatformFamily platform_family = PlatformFamily::Unknown;
@@ -55,6 +65,7 @@ struct SystemPreferences {
     ContrastPreference contrast = ContrastPreference::Normal;
     MotionPreference motion = MotionPreference::Normal;
     TransparencyPreference transparency = TransparencyPreference::Allowed;
+    BackdropCapability backdrop = BackdropCapability::Opaque;
     float text_scale_factor = 1.0F;
     std::optional<Color> accent_color;
     // OS version, when known. Zero means "unknown" and callers should assume the

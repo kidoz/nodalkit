@@ -64,6 +64,7 @@ struct ResolvedThemeSelection {
     bool high_contrast = false;
     bool reduced_motion = false;
     bool transparency_allowed = true;
+    BackdropCapability backdrop = BackdropCapability::Opaque;
 
     constexpr bool operator==(const ResolvedThemeSelection&) const = default;
 };
