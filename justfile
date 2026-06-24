@@ -16,6 +16,11 @@ reconfigure buildtype="debug":
 build *args="":
     meson compile -C {{builddir}} {{args}}
 
+# Build and run the showcase example (forwards extra args to the app)
+showcase *args="":
+    meson compile -C {{builddir}} showcase
+    {{builddir}}/examples/showcase {{args}}
+
 # Run all tests
 test *args="":
     meson test -C {{builddir}} {{args}}
