@@ -4,6 +4,15 @@ if not catch2_test_dep.found()
     catch2_test_dep = catch2_proj.get_variable('catch2_with_main_dep')
 endif
 
+# Point LeakSanitizer at our suppressions file for every test run. This is a no-op
+# for non-sanitizer builds (LSAN_OPTIONS is ignored) and, under -Db_sanitize, stops
+# the third-party libdbus/AT-SPI atk-bridge leaks from failing the suite while still
+# catching genuine NodalKit leaks. See lsan_suppressions.txt.
+add_test_setup('nodalkit',
+    env : {'LSAN_OPTIONS': 'suppressions=' + (meson.current_source_dir() / 'lsan_suppressions.txt')},
+    is_default : true,
+)
+
 test_signal = executable('test_signal',
     'signal_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

@@ -1,0 +1,15 @@
+# LeakSanitizer suppressions for NodalKit's test suite.
+#
+# When the toolkit runs inside a real desktop session, GLib auto-loads the
+# AT-SPI atk-bridge module, which opens a libdbus-1 connection to the
+# accessibility bus (org.a11y.Bus) and leaves that connection — plus the
+# message/loader globals libdbus allocates for it — reachable at process exit.
+# Those allocations live entirely inside libdbus-1 (and the dlopened bridge
+# module); no NodalKit frame appears in any of the backtraces. They cannot be
+# freed from our code, so we suppress them rather than mask real leaks.
+#
+# Scope is deliberately narrow: only libdbus's own internals are matched, so a
+# genuine NodalKit leak still fails the sanitizer suite.
+leak:libdbus-1
+leak:dbus_
+leak:_dbus_
