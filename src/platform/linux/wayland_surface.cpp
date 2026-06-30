@@ -230,13 +230,18 @@ void WaylandSurface::destroy_buffer(ShmBuffer& buf) {
         buf.fd = -1;
     }
     buf.pool_size = 0;
+    buf.width = 0;
+    buf.height = 0;
     buf.busy = false;
     buf.initialized = false;
 }
 
 void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
     const auto needed = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
-    if (buf.buffer && buf.pool_size == needed) {
+    // Reuse only when the wl_buffer's actual geometry matches: a resize that preserves total
+    // area (e.g. 800x600 -> 600x800) keeps `needed` constant, but the existing wl_buffer was
+    // created with the old width/height/stride, so reusing it would corrupt the presented image.
+    if (buf.buffer && buf.pool_size == needed && buf.width == w && buf.height == h) {
         return;
     }
 
@@ -265,6 +270,8 @@ void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
 
     wl_buffer_add_listener(buf.buffer, &buffer_listener, &buf.busy);
     buf.pool_size = needed;
+    buf.width = w;
+    buf.height = h;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,6 +417,11 @@ void WaylandSurface::present(const uint8_t* rgba,
         return; // Both buffers in use — skip this frame.
     }
 
+    // Capture the geometry change before (re)allocating: a resize that preserves the byte size
+    // (e.g. 800x600 -> 600x800) still requires a full re-upload, and comparing geometry avoids
+    // the `w * h * 4` int overflow the old byte-size check had.
+    const bool size_changed = buffers_[idx].width != w || buffers_[idx].height != h;
+
     ensure_buffer(buffers_[idx], w, h);
     if (!buffers_[idx].data) {
         return;
@@ -435,10 +447,10 @@ void WaylandSurface::present(const uint8_t* rgba,
         }
     };
 
-    const bool size_changed = buffers_[idx].pool_size != static_cast<size_t>(w * h * 4);
     const bool full_upload = damage_regions.empty() || !buffers_[idx].initialized || size_changed;
     if (!full_upload && last_presented_buffer_ >= 0 && last_presented_buffer_ != idx &&
         buffers_[last_presented_buffer_].data != nullptr &&
+        buffers_[last_presented_buffer_].width == w && buffers_[last_presented_buffer_].height == h &&
         buffers_[last_presented_buffer_].pool_size == buffers_[idx].pool_size) {
         std::memcpy(
             buffers_[idx].data, buffers_[last_presented_buffer_].data, buffers_[idx].pool_size);

@@ -67,6 +67,8 @@ private:
         uint8_t* data = nullptr;
         int fd = -1;
         size_t pool_size = 0;
+        int width = 0;
+        int height = 0;
         bool busy = false;
         bool initialized = false;
     };
