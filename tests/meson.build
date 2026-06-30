@@ -73,6 +73,18 @@ test_drag_drop = executable('test_drag_drop',
 )
 test('drag_drop', test_drag_drop)
 
+test_widget_controls = executable('test_widget_controls',
+    'widget_controls_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('widget_controls', test_widget_controls)
+
+test_widget_views = executable('test_widget_views',
+    'widget_views_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('widget_views', test_widget_views)
+
 test_editor_scale_validation = executable('test_editor_scale_validation',
     'editor_scale_validation_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],
