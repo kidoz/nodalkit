@@ -743,7 +743,6 @@ void WaylandInput::destroy_clipboard_offer() {
         wl_data_offer_destroy(clipboard_offer_);
         clipboard_offer_ = nullptr;
     }
-    clipboard_offer_mime_types_.clear();
 }
 
 void WaylandInput::destroy_clipboard_source() {
@@ -864,7 +863,6 @@ void WaylandInput::destroy_primary_selection_offer() {
         zwp_primary_selection_offer_v1_destroy(primary_selection_offer_);
         primary_selection_offer_ = nullptr;
     }
-    primary_selection_offer_mime_types_.clear();
 }
 
 void WaylandInput::destroy_primary_selection_source() {
@@ -1333,6 +1331,11 @@ void WaylandInput::clipboard_data_offer(void* data,
     if (offer == nullptr) {
         return;
     }
+    // A new offer object is being introduced; its mime types arrive via subsequent `offer`
+    // events before the `selection` event commits it. Reset the pending list here so each
+    // offer accumulates its own mime types (the committed offer's list must survive the
+    // destroy_clipboard_offer() that the selection handler runs on the previous offer).
+    self->clipboard_offer_mime_types_.clear();
     wl_data_offer_add_listener(offer, &clipboard_offer_listener, self);
 }
 
@@ -1440,6 +1443,9 @@ void WaylandInput::primary_selection_data_offer(void* data,
     if (offer == nullptr) {
         return;
     }
+    // See clipboard_data_offer: reset the pending mime list per new offer so the committed
+    // offer's types survive the destroy in primary_selection_selection().
+    self->primary_selection_offer_mime_types_.clear();
     zwp_primary_selection_offer_v1_add_listener(offer, &primary_selection_offer_listener, self);
 }
 
