@@ -147,6 +147,29 @@ TEST_CASE("Per-family override rules win the cascade tie-break", "[theme]") {
     REQUIRE(resolved_metric(*gnome, {"button"}, "corner-radius") == Catch::Approx(10.0F));
 }
 
+TEST_CASE("Shared rules resolve through the radius and control-height scale", "[theme]") {
+    auto gnome_light = nk::Theme::make_linux_gnome(nk::ColorScheme::Light);
+    auto gnome_dark = nk::Theme::make_linux_gnome(nk::ColorScheme::Dark);
+
+    // The radius scale is a single source of truth carried by every family.
+    REQUIRE(metric_token(*gnome_light, "radius-sm") == Catch::Approx(8.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-md") == Catch::Approx(10.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-lg") == Catch::Approx(12.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-xl") == Catch::Approx(14.0F));
+
+    // Shared rules express radii through the scale (button = md, card/list = lg, image = xl) and
+    // still resolve to a concrete number for callers that read metrics directly.
+    REQUIRE(resolved_metric(*gnome_light, {"button"}, "corner-radius") == Catch::Approx(10.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"list-view"}, "corner-radius") == Catch::Approx(12.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"image-view"}, "corner-radius") == Catch::Approx(14.0F));
+
+    // Control min-heights now come from the control-height token, so the dark family (34 px) no
+    // longer renders the light family's 36 px control height.
+    REQUIRE(resolved_metric(*gnome_light, {"button"}, "min-height") == Catch::Approx(36.0F));
+    REQUIRE(resolved_metric(*gnome_dark, {"button"}, "min-height") == Catch::Approx(34.0F));
+    REQUIRE(resolved_metric(*gnome_dark, {"text-field"}, "min-height") == Catch::Approx(34.0F));
+}
+
 TEST_CASE("High contrast swaps the palette to maximal-contrast system colors", "[theme]") {
     nk::SystemPreferences prefs;
     prefs.platform_family = nk::PlatformFamily::Windows;

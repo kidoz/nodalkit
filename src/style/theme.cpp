@@ -16,6 +16,18 @@ void set_metric_token(Theme& theme, std::string name, float value) {
     theme.set_token(std::move(name), StyleValue{value});
 }
 
+// Resolve a metric token's float value at theme-build time. Rules use this to express control
+// heights and corner radii in terms of the metric/radius scale (single source of truth) while
+// still storing a concrete float, so Theme::resolve keeps returning a number to callers that read
+// metrics directly. The token must already be set on the theme before install_shared_rules runs.
+float metric(const Theme& theme, std::string_view token_name) {
+    const auto* value = theme.token(token_name);
+    if (value != nullptr && std::holds_alternative<float>(*value)) {
+        return std::get<float>(*value);
+    }
+    return 0.0F;
+}
+
 void add_rule(Theme& theme,
               std::vector<std::string> classes,
               StateFlags pseudo_state,
@@ -54,7 +66,7 @@ void install_shared_rules(Theme& theme) {
                  {"background", StyleValue{std::string("surface-card")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"padding", StyleValue{18.0F}},
-                 {"corner-radius", StyleValue{12.0F}},
+                 {"corner-radius", StyleValue{metric(theme, "radius-lg")}},
              });
     add_rule(theme,
              {"page"},
@@ -71,7 +83,7 @@ void install_shared_rules(Theme& theme) {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"text-color", StyleValue{std::string("text-secondary")}},
-                 {"min-height", StyleValue{30.0F}},
+                 {"min-height", StyleValue{std::string("menu-height")}},
              });
 
     add_rule(theme,
@@ -97,8 +109,8 @@ void install_shared_rules(Theme& theme) {
                  {"padding-x", StyleValue{16.0F}},
                  {"padding-y", StyleValue{9.0F}},
                  {"min-width", StyleValue{82.0F}},
-                 {"min-height", StyleValue{36.0F}},
-                 {"corner-radius", StyleValue{10.0F}},
+                 {"min-height", StyleValue{metric(theme, "control-height")}},
+                 {"corner-radius", StyleValue{metric(theme, "radius-md")}},
              });
     add_rule(theme,
              {"button"},
@@ -164,9 +176,9 @@ void install_shared_rules(Theme& theme) {
                  {"text-color", StyleValue{std::string("text-primary")}},
                  {"placeholder-color", StyleValue{std::string("text-secondary")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"min-height", StyleValue{36.0F}},
+                 {"min-height", StyleValue{metric(theme, "control-height")}},
                  {"min-width", StyleValue{240.0F}},
-                 {"corner-radius", StyleValue{10.0F}},
+                 {"corner-radius", StyleValue{metric(theme, "radius-md")}},
              });
     add_rule(theme,
              {"text-field"},
@@ -195,11 +207,11 @@ void install_shared_rules(Theme& theme) {
                  {"popup-separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
                  {"popup-item-height", StyleValue{30.0F}},
-                 {"min-height", StyleValue{36.0F}},
+                 {"min-height", StyleValue{metric(theme, "control-height")}},
                  {"min-width", StyleValue{240.0F}},
-                 {"corner-radius", StyleValue{10.0F}},
-                 {"popup-radius", StyleValue{12.0F}},
-                 {"selection-radius", StyleValue{8.0F}},
+                 {"corner-radius", StyleValue{metric(theme, "radius-md")}},
+                 {"popup-radius", StyleValue{metric(theme, "radius-lg")}},
+                 {"selection-radius", StyleValue{metric(theme, "radius-sm")}},
              });
     add_rule(theme,
              {"combo-box"},
@@ -228,12 +240,12 @@ void install_shared_rules(Theme& theme) {
                  {"pressed-background", StyleValue{std::string("surface-pressed")}},
                  {"separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"min-height", StyleValue{36.0F}},
+                 {"min-height", StyleValue{metric(theme, "control-height")}},
                  {"min-segment-width", StyleValue{84.0F}},
                  {"padding-x", StyleValue{16.0F}},
                  {"track-padding", StyleValue{4.0F}},
-                 {"corner-radius", StyleValue{12.0F}},
-                 {"selection-radius", StyleValue{10.0F}},
+                 {"corner-radius", StyleValue{metric(theme, "radius-lg")}},
+                 {"selection-radius", StyleValue{metric(theme, "radius-md")}},
                  {"separator-inset", StyleValue{8.0F}},
              });
     add_rule(theme,
@@ -257,8 +269,8 @@ void install_shared_rules(Theme& theme) {
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
                  {"scrollbar-track-color", StyleValue{std::string("scrollbar-track")}},
                  {"scrollbar-thumb-color", StyleValue{std::string("scrollbar-thumb")}},
-                 {"corner-radius", StyleValue{12.0F}},
-                 {"selection-radius", StyleValue{8.0F}},
+                 {"corner-radius", StyleValue{metric(theme, "radius-lg")}},
+                 {"selection-radius", StyleValue{metric(theme, "radius-sm")}},
              });
     add_rule(theme,
              {"list-view"},
@@ -272,8 +284,8 @@ void install_shared_rules(Theme& theme) {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"corner-radius", StyleValue{14.0F}},
-                 {"content-radius", StyleValue{12.0F}},
+                 {"corner-radius", StyleValue{metric(theme, "radius-xl")}},
+                 {"content-radius", StyleValue{metric(theme, "radius-lg")}},
                  {"min-height", StyleValue{168.0F}},
              });
 
@@ -558,6 +570,10 @@ std::unique_ptr<Theme> Theme::make_light() {
     set_metric_token(*theme, "control-height", 36.0F);
     set_metric_token(*theme, "menu-height", 30.0F);
     set_metric_token(*theme, "status-height", 28.0F);
+    set_metric_token(*theme, "radius-sm", 8.0F);
+    set_metric_token(*theme, "radius-md", 10.0F);
+    set_metric_token(*theme, "radius-lg", 12.0F);
+    set_metric_token(*theme, "radius-xl", 14.0F);
 
     install_shared_rules(*theme);
 
@@ -601,6 +617,10 @@ std::unique_ptr<Theme> Theme::make_dark() {
     set_metric_token(*theme, "control-height", 34.0F);
     set_metric_token(*theme, "menu-height", 32.0F);
     set_metric_token(*theme, "status-height", 28.0F);
+    set_metric_token(*theme, "radius-sm", 8.0F);
+    set_metric_token(*theme, "radius-md", 10.0F);
+    set_metric_token(*theme, "radius-lg", 12.0F);
+    set_metric_token(*theme, "radius-xl", 14.0F);
 
     install_shared_rules(*theme);
 
@@ -681,6 +701,12 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
     set_metric_token(*theme, "control-height", 32.0F);
     set_metric_token(*theme, "menu-height", 32.0F);
     set_metric_token(*theme, "status-height", 26.0F);
+    // Shared baseline radius scale; the Windows 11 override rules below re-tune control/card
+    // radii to the rounded Fluent geometry.
+    set_metric_token(*theme, "radius-sm", 8.0F);
+    set_metric_token(*theme, "radius-md", 10.0F);
+    set_metric_token(*theme, "radius-lg", 12.0F);
+    set_metric_token(*theme, "radius-xl", 14.0F);
 
     install_shared_rules(*theme);
     install_windows_overrides(*theme);
@@ -805,6 +831,12 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
     set_metric_token(*theme, "control-height", 32.0F);
     set_metric_token(*theme, "menu-height", 28.0F);
     set_metric_token(*theme, "status-height", 24.0F);
+    // Shared baseline radius scale; the Windows 10 override rules below re-tune control/card
+    // radii to the squared classic geometry.
+    set_metric_token(*theme, "radius-sm", 8.0F);
+    set_metric_token(*theme, "radius-md", 10.0F);
+    set_metric_token(*theme, "radius-lg", 12.0F);
+    set_metric_token(*theme, "radius-xl", 14.0F);
 
     install_shared_rules(*theme);
     install_windows_10_overrides(*theme);
@@ -876,6 +908,11 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
     set_metric_token(*theme, "control-height", 28.0F);
     set_metric_token(*theme, "menu-height", 28.0F);
     set_metric_token(*theme, "status-height", 24.0F);
+    // Shared baseline radius scale; the macOS override rules below re-tune control/card radii.
+    set_metric_token(*theme, "radius-sm", 8.0F);
+    set_metric_token(*theme, "radius-md", 10.0F);
+    set_metric_token(*theme, "radius-lg", 12.0F);
+    set_metric_token(*theme, "radius-xl", 14.0F);
 
     install_shared_rules(*theme);
     install_macos_overrides(*theme);
