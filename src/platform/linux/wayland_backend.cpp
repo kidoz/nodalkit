@@ -1389,19 +1389,32 @@ void atspi_method_call(GDBusConnection* connection,
             gint32 action_index = -1;
             g_variant_get(parameters, "(i)", &action_index);
             bool success = false;
+            // This handler runs on the accessibility worker thread, which must NOT touch the
+            // widget tree or impl->surfaces (both owned by the main/UI thread). Decide the reply
+            // from the thread-safe cached snapshot, then marshal the actual widget resolution and
+            // perform_action() onto the main thread via the event loop.
             if (action_index >= 0 &&
                 static_cast<std::size_t>(action_index) < node->action_names.size()) {
-                if (auto* widget = find_live_atspi_widget(*impl, object_path);
-                    widget != nullptr && widget->accessible() != nullptr) {
-                    const auto action_name =
-                        node->action_names[static_cast<std::size_t>(action_index)];
-                    if (action_name == "activate") {
-                        success = widget->accessible()->perform_action(AccessibleAction::Activate);
-                    } else if (action_name == "focus") {
-                        success = widget->accessible()->perform_action(AccessibleAction::Focus);
-                    } else if (action_name == "toggle") {
-                        success = widget->accessible()->perform_action(AccessibleAction::Toggle);
-                    }
+                const auto action_name =
+                    node->action_names[static_cast<std::size_t>(action_index)];
+                if (auto* app = Application::instance(); app != nullptr) {
+                    app->event_loop().post(
+                        [impl, path = std::string(object_path), action_name]() {
+                            // Runs on the main thread: widget tree and surfaces map are safe here.
+                            auto* widget = find_live_atspi_widget(*impl, path);
+                            if (widget == nullptr || widget->accessible() == nullptr) {
+                                return;
+                            }
+                            if (action_name == "activate") {
+                                (void)widget->accessible()->perform_action(
+                                    AccessibleAction::Activate);
+                            } else if (action_name == "focus") {
+                                (void)widget->accessible()->perform_action(AccessibleAction::Focus);
+                            } else if (action_name == "toggle") {
+                                (void)widget->accessible()->perform_action(AccessibleAction::Toggle);
+                            }
+                        });
+                    success = true;
                 }
             }
             g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", success));
