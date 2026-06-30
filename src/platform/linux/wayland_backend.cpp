@@ -19,6 +19,7 @@
 #include <cstring>
 #include <functional>
 #include <gio/gio.h>
+#include <atomic>
 #include <mutex>
 #include <nk/accessibility/accessible.h>
 #include <nk/accessibility/atspi_bridge.h>
@@ -601,8 +602,10 @@ struct WaylandBackend::Impl {
 
     int wake_fd = -1;
     EventLoop* current_loop = nullptr;
-    int exit_code = 0;
-    bool quit_requested = false;
+    // request_quit()/wake_event_loop() may be invoked from a thread other than the one running
+    // the event loop, so these are atomic to avoid a data race on the loop's exit condition.
+    std::atomic<int> exit_code{0};
+    std::atomic<bool> quit_requested{false};
 
     std::unordered_map<wl_surface*, WaylandSurface*> surfaces;
 
