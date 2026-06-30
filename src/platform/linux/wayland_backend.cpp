@@ -25,6 +25,7 @@
 #include <nk/foundation/logging.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/platform/application.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/ui_core/widget.h>
 #include <optional>
 #include <poll.h>
@@ -1153,7 +1154,7 @@ AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl) 
                                         "window" + std::to_string(window_index++),
                                         title,
                                         {0.0F, 0.0F, size.width, size.height},
-                                        surface->owner().debug_tree());
+                                        surface->owner().inspector().debug_tree());
         if (!window_snapshot.nodes.empty()) {
             snapshot.application.child_paths.push_back(window_snapshot.nodes.front().object_path);
         }
@@ -1223,7 +1224,7 @@ Widget* find_live_atspi_widget(WaylandBackend::Impl& impl, std::string_view obje
                                                           "window" + std::to_string(window_index++),
                                                           title,
                                                           {0.0F, 0.0F, size.width, size.height},
-                                                          surface->owner().debug_tree());
+                                                          surface->owner().inspector().debug_tree());
         if (const auto* node = find_atspi_accessible_node(snapshot, object_path); node != nullptr) {
             return resolve_widget_by_tree_path(surface->owner(), node->tree_path);
         }
@@ -1891,6 +1892,7 @@ void WaylandBackend::show_open_file_dialog_async(std::string_view title,
     show_portal_file_dialog_async("OpenFile",
                                   SaveFileDialogOptions{
                                       .title = std::string(title),
+                                      .suggested_filename = {},
                                       .filters = filters,
                                   },
                                   std::move(callback));
