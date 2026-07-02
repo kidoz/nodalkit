@@ -800,8 +800,8 @@ void force_symbol_references() {
     (void)static_cast<const nk::StyleValue* (nk::Theme::*)(std::string_view,
                                                            const std::vector<std::string>&,
                                                            nk::StateFlags,
-                                                           std::string_view) const>(
-        &nk::Theme::resolve);
+                                                           std::string_view,
+                                                           int) const>(&nk::Theme::resolve);
     (void)&nk::Theme::set_active;
     (void)&nk::Theme::active;
     (void)&nk::Theme::make_light;

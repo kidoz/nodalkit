@@ -184,8 +184,7 @@ void Popover::snapshot(SnapshotContext& ctx) const {
         popup, theme_color("background", Color{0.98F, 0.98F, 0.99F, 1.0F}), corner_radius);
 
     // Border.
-    ctx.add_border(
-        popup, theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F}), 1.0F, corner_radius);
+    ctx.add_border(popup, theme_color("border-color"), 1.0F, corner_radius);
 
     // Child content.
     if (impl_->child) {

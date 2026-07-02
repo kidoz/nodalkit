@@ -6,6 +6,7 @@
 #include <cmath>
 #include <nk/platform/system_preferences.h>
 #include <nk/style/theme.h>
+#include <nk/style/theme_defaults.h>
 #include <nk/style/theme_selection.h>
 #include <string>
 #include <variant>
@@ -38,13 +39,61 @@ int channel(float component) {
     return static_cast<int>(std::lround(component * 255.0F));
 }
 
+// Chase token aliases the way resolve_widget_rule does, so tests observe the
+// same value a widget would.
+const nk::StyleValue* deref_aliases(const nk::Theme& theme, const nk::StyleValue* value) {
+    int depth = 0;
+    while (value != nullptr && std::holds_alternative<std::string>(*value) && depth < 4) {
+        value = theme.token(std::get<std::string>(*value));
+        ++depth;
+    }
+    return value;
+}
+
 float resolved_metric(const nk::Theme& theme,
                       const std::vector<std::string>& classes,
                       std::string_view property) {
-    const auto* value = theme.resolve("", classes, nk::StateFlags::None, property);
+    const auto* value =
+        deref_aliases(theme, theme.resolve("", classes, nk::StateFlags::None, property));
     REQUIRE(value != nullptr);
     REQUIRE(std::holds_alternative<float>(*value));
     return std::get<float>(*value);
+}
+
+nk::Color resolved_color(const nk::Theme& theme,
+                         const std::vector<std::string>& classes,
+                         std::string_view property) {
+    const auto* value =
+        deref_aliases(theme, theme.resolve("", classes, nk::StateFlags::None, property));
+    REQUIRE(value != nullptr);
+    REQUIRE(std::holds_alternative<nk::Color>(*value));
+    return std::get<nk::Color>(*value);
+}
+
+nk::Color aliased_color_token(const nk::Theme& theme, std::string_view name) {
+    const auto* value = deref_aliases(theme, theme.token(name));
+    REQUIRE(value != nullptr);
+    REQUIRE(std::holds_alternative<nk::Color>(*value));
+    return std::get<nk::Color>(*value);
+}
+
+// WCAG 2.2 relative luminance and contrast ratio.
+float linear_channel(float component) {
+    return component <= 0.04045F ? component / 12.92F
+                                 : std::pow((component + 0.055F) / 1.055F, 2.4F);
+}
+
+float relative_luminance(nk::Color color) {
+    return (0.2126F * linear_channel(color.r)) + (0.7152F * linear_channel(color.g)) +
+           (0.0722F * linear_channel(color.b));
+}
+
+float contrast_ratio(nk::Color a, nk::Color b) {
+    const float la = relative_luminance(a);
+    const float lb = relative_luminance(b);
+    const float lighter = std::max(la, lb);
+    const float darker = std::min(la, lb);
+    return (lighter + 0.05F) / (darker + 0.05F);
 }
 
 std::string resolved_string(const nk::Theme& theme,
@@ -131,43 +180,85 @@ TEST_CASE("Windows 11 dark theme uses dark-on-light accent contrast", "[theme][w
     REQUIRE(channel(light_accent_contrast.r) == 255);
 }
 
-TEST_CASE("Per-family override rules win the cascade tie-break", "[theme]") {
-    // Shared rules give buttons a 10 px corner radius; the Windows and macOS
-    // override rules are installed afterwards with equal specificity, so the
-    // source-order tie-break must let them win.
+TEST_CASE("Family geometry personality lives in radius-role tokens", "[theme]") {
+    // Control geometry is no longer duplicated in per-family override rules:
+    // the shared rules alias radius-role tokens and each family sets its own
+    // values, so rounded-vs-squared is a token decision.
     auto windows = nk::Theme::make_windows_11(nk::ColorScheme::Light);
     REQUIRE(resolved_metric(*windows, {"button"}, "corner-radius") == Catch::Approx(4.0F));
     REQUIRE(resolved_metric(*windows, {"button"}, "min-height") == Catch::Approx(32.0F));
+    REQUIRE(resolved_metric(*windows, {"button"}, "min-width") == Catch::Approx(90.0F));
+    REQUIRE(resolved_metric(*windows, {"button"}, "padding-x") == Catch::Approx(12.0F));
 
     auto macos = nk::Theme::make_macos_26(nk::ColorScheme::Light);
     REQUIRE(resolved_metric(*macos, {"button"}, "corner-radius") == Catch::Approx(6.0F));
+    REQUIRE(resolved_metric(*macos, {"button"}, "min-height") == Catch::Approx(28.0F));
+    REQUIRE(resolved_metric(*macos, {"combo-box"}, "popup-radius") == Catch::Approx(10.0F));
 
-    // A family without overrides keeps the shared radius.
     auto gnome = nk::Theme::make_linux_gnome(nk::ColorScheme::Light);
     REQUIRE(resolved_metric(*gnome, {"button"}, "corner-radius") == Catch::Approx(10.0F));
+    REQUIRE(resolved_metric(*gnome, {"button"}, "min-width") == Catch::Approx(82.0F));
+
+    // Widgets that previously had no per-family override rule now follow the
+    // family automatically instead of cloning the GNOME geometry.
+    REQUIRE(resolved_metric(*windows, {"list-view"}, "corner-radius") == Catch::Approx(8.0F));
+    REQUIRE(resolved_metric(*windows, {"list-view"}, "selection-radius") == Catch::Approx(4.0F));
+    REQUIRE(resolved_metric(*macos, {"list-view"}, "corner-radius") == Catch::Approx(10.0F));
+    REQUIRE(resolved_metric(*macos, {"image-view"}, "content-radius") == Catch::Approx(8.0F));
 }
 
-TEST_CASE("Shared rules resolve through the radius and control-height scale", "[theme]") {
+TEST_CASE("Shared rules resolve through the radius roles and metric tokens", "[theme]") {
     auto gnome_light = nk::Theme::make_linux_gnome(nk::ColorScheme::Light);
     auto gnome_dark = nk::Theme::make_linux_gnome(nk::ColorScheme::Dark);
 
-    // The radius scale is a single source of truth carried by every family.
-    REQUIRE(metric_token(*gnome_light, "radius-sm") == Catch::Approx(8.0F));
-    REQUIRE(metric_token(*gnome_light, "radius-md") == Catch::Approx(10.0F));
-    REQUIRE(metric_token(*gnome_light, "radius-lg") == Catch::Approx(12.0F));
-    REQUIRE(metric_token(*gnome_light, "radius-xl") == Catch::Approx(14.0F));
+    // The radius roles are a single source of truth carried by every family.
+    REQUIRE(metric_token(*gnome_light, "radius-control") == Catch::Approx(10.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-card") == Catch::Approx(12.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-popup") == Catch::Approx(12.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-selection") == Catch::Approx(8.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-segment") == Catch::Approx(12.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-image") == Catch::Approx(14.0F));
+    REQUIRE(metric_token(*gnome_light, "radius-image-content") == Catch::Approx(12.0F));
 
-    // Shared rules express radii through the scale (button = md, card/list = lg, image = xl) and
-    // still resolve to a concrete number for callers that read metrics directly.
     REQUIRE(resolved_metric(*gnome_light, {"button"}, "corner-radius") == Catch::Approx(10.0F));
     REQUIRE(resolved_metric(*gnome_light, {"list-view"}, "corner-radius") == Catch::Approx(12.0F));
     REQUIRE(resolved_metric(*gnome_light, {"image-view"}, "corner-radius") == Catch::Approx(14.0F));
 
-    // Control min-heights now come from the control-height token, so the dark family (34 px) no
-    // longer renders the light family's 36 px control height.
+    // Spacing-shaped rule values resolve through named metric tokens instead of
+    // magic literals.
+    REQUIRE(resolved_metric(*gnome_light, {"button"}, "padding-x") == Catch::Approx(16.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"button"}, "padding-y") == Catch::Approx(9.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"card"}, "padding") == Catch::Approx(18.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"page"}, "padding") == Catch::Approx(28.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"status-bar"}, "segment-gap") == Catch::Approx(18.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"text-field"}, "min-width") == Catch::Approx(240.0F));
+    REQUIRE(resolved_metric(*gnome_light, {"segmented-control"}, "separator-inset") ==
+            Catch::Approx(8.0F));
+
+    // Control min-heights come from the control-height token, so the dark
+    // family (34 px) no longer renders the light family's 36 px control height.
     REQUIRE(resolved_metric(*gnome_light, {"button"}, "min-height") == Catch::Approx(36.0F));
     REQUIRE(resolved_metric(*gnome_dark, {"button"}, "min-height") == Catch::Approx(34.0F));
     REQUIRE(resolved_metric(*gnome_dark, {"text-field"}, "min-height") == Catch::Approx(34.0F));
+}
+
+TEST_CASE("Deprecated surface token names alias their canonical replacements", "[theme]") {
+    // C1 migration: `surface-*` for surfaces, `border-*` for borders, `*-bg`
+    // reserved for shell layers. The old names keep resolving via aliases.
+    for (auto scheme : {nk::ColorScheme::Light, nk::ColorScheme::Dark}) {
+        for (const auto& theme : {nk::Theme::make_linux_gnome(scheme),
+                                  nk::Theme::make_windows_11(scheme),
+                                  nk::Theme::make_windows_10(scheme),
+                                  nk::Theme::make_macos_26(scheme)}) {
+            const auto canonical_field = color_token(*theme, "surface-field");
+            const auto canonical_border = color_token(*theme, "border-field");
+            REQUIRE(aliased_color_token(*theme, "field-bg") == canonical_field);
+            REQUIRE(aliased_color_token(*theme, "field-border") == canonical_border);
+            // The text-field rule consumes the canonical name.
+            REQUIRE(resolved_color(*theme, {"text-field"}, "background") == canonical_field);
+            REQUIRE(resolved_color(*theme, {"text-field"}, "border-color") == canonical_border);
+        }
+    }
 }
 
 TEST_CASE("High contrast swaps the palette to maximal-contrast system colors", "[theme]") {
@@ -383,4 +474,302 @@ TEST_CASE("make_theme builds the Windows family with density applied", "[theme][
     REQUIRE(string_token(*theme, "theme-family") == "windows-11");
     REQUIRE(string_token(*theme, "density") == "compact");
     REQUIRE(metric_token(*theme, "control-height") == Catch::Approx(30.0F));
+}
+
+TEST_CASE("Widget fallback defaults equal the light-theme tokens", "[theme]") {
+    // The central fallback table (theme_defaults.h) is only a safety net; every
+    // entry must stay byte-equal to the light-theme token it aliases so a
+    // missing token degrades invisibly (consistency backlog C5).
+    auto light = nk::Theme::make_light();
+    for (const auto& entry : nk::ThemeColorDefaults) {
+        INFO("fallback for property '" << entry.property << "' diverged from light token '"
+                                       << entry.token << "'");
+        REQUIRE(aliased_color_token(*light, entry.token) == entry.value);
+    }
+}
+
+TEST_CASE("Every family defines the full token vocabulary", "[theme]") {
+    static constexpr const char* CommonColorTokens[] = {
+        "window-bg",       "surface-panel",  "surface-card",    "surface-raised", "surface-hover",
+        "surface-pressed", "surface-field",  "border-field",    "border-subtle",  "border-strong",
+        "text-primary",    "text-secondary", "text-disabled",   "accent",         "accent-hover",
+        "accent-pressed",  "accent-soft",    "accent-contrast", "focus-ring",     "scrollbar-track",
+        "scrollbar-thumb", "surface-osd",    "text-osd",        "field-bg",       "field-border",
+    };
+    static constexpr const char* CommonMetricTokens[] = {
+        "spacing-xs",
+        "spacing-sm",
+        "spacing-md",
+        "spacing-lg",
+        "spacing-xl",
+        "control-height",
+        "menu-height",
+        "status-height",
+        "radius-control",
+        "radius-card",
+        "radius-popup",
+        "radius-selection",
+        "radius-segment",
+        "radius-image",
+        "radius-image-content",
+        "padding-control-x",
+        "padding-control-y",
+        "control-min-width",
+        "segment-track-padding",
+        "padding-card",
+        "padding-page",
+        "segment-gap",
+        "field-min-width",
+        "popup-item-height",
+        "segment-min-width",
+        "image-min-height",
+    };
+    static constexpr const char* PolicyTokens[] = {
+        "accent-source",
+        "motion-mode",
+        "transparency-mode",
+        "density",
+    };
+    static constexpr const char* WindowsOnlyTokens[] = {
+        "focus-visible",
+        "layer-titlebar-bg",
+        "layer-titlebar-text",
+        "layer-titlebar-inactive-bg",
+        "layer-titlebar-inactive-text",
+        "layer-command-bg",
+        "layer-navigation-bg",
+        "layer-content-bg",
+        "layer-status-bg",
+    };
+
+    struct Family {
+        const char* name;
+        std::unique_ptr<nk::Theme> theme;
+        bool windows;
+    };
+
+    for (auto scheme : {nk::ColorScheme::Light, nk::ColorScheme::Dark}) {
+        Family families[] = {
+            {"light/dark base",
+             scheme == nk::ColorScheme::Dark ? nk::Theme::make_dark() : nk::Theme::make_light(),
+             false},
+            {"linux-gnome", nk::Theme::make_linux_gnome(scheme), false},
+            {"windows-11", nk::Theme::make_windows_11(scheme), true},
+            {"windows-10", nk::Theme::make_windows_10(scheme), true},
+            {"macos-26", nk::Theme::make_macos_26(scheme), false},
+        };
+        for (const auto& family : families) {
+            for (const auto* token : CommonColorTokens) {
+                INFO(family.name << " is missing color token " << token);
+                const auto* value = deref_aliases(*family.theme, family.theme->token(token));
+                REQUIRE(value != nullptr);
+                REQUIRE(std::holds_alternative<nk::Color>(*value));
+            }
+            for (const auto* token : CommonMetricTokens) {
+                INFO(family.name << " is missing metric token " << token);
+                const auto* value = family.theme->token(token);
+                REQUIRE(value != nullptr);
+                REQUIRE(std::holds_alternative<float>(*value));
+            }
+            for (const auto* token : PolicyTokens) {
+                INFO(family.name << " is missing policy token " << token);
+                REQUIRE(family.theme->token(token) != nullptr);
+            }
+            if (family.windows) {
+                for (const auto* token : WindowsOnlyTokens) {
+                    INFO(family.name << " is missing Windows token " << token);
+                    REQUIRE(family.theme->token(token) != nullptr);
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("Text and focus colors meet WCAG 2.2 contrast in every palette", "[theme][contrast]") {
+    static constexpr const char* RestingSurfaces[] = {
+        "window-bg",
+        "surface-panel",
+        "surface-card",
+        "surface-raised",
+        "surface-field",
+    };
+
+    struct Palette {
+        const char* name;
+        std::unique_ptr<nk::Theme> theme;
+    };
+
+    for (auto scheme : {nk::ColorScheme::Light, nk::ColorScheme::Dark}) {
+        Palette palettes[] = {
+            {"linux-gnome", nk::Theme::make_linux_gnome(scheme)},
+            {"windows-11", nk::Theme::make_windows_11(scheme)},
+            {"windows-10", nk::Theme::make_windows_10(scheme)},
+            {"macos-26", nk::Theme::make_macos_26(scheme)},
+        };
+        for (const auto& palette : palettes) {
+            const auto text_primary = color_token(*palette.theme, "text-primary");
+            const auto text_secondary = color_token(*palette.theme, "text-secondary");
+            const auto focus_ring = color_token(*palette.theme, "focus-ring");
+            for (const auto* surface : RestingSurfaces) {
+                const auto bg = aliased_color_token(*palette.theme, surface);
+                INFO(palette.name << " text on " << surface);
+                REQUIRE(contrast_ratio(text_primary, bg) >= 4.5F);
+                REQUIRE(contrast_ratio(text_secondary, bg) >= 4.5F);
+            }
+            // Focus indicators are non-text UI: WCAG 2.2 requires >= 3:1.
+            INFO(palette.name << " focus ring");
+            REQUIRE(contrast_ratio(focus_ring, color_token(*palette.theme, "window-bg")) >= 3.0F);
+            if (palette.theme->token("focus-visible") != nullptr) {
+                REQUIRE(contrast_ratio(color_token(*palette.theme, "focus-visible"),
+                                       color_token(*palette.theme, "window-bg")) >= 3.0F);
+            }
+        }
+
+        // The high-contrast swap must hold the same guarantees with margin.
+        nk::SystemPreferences prefs;
+        prefs.platform_family = nk::PlatformFamily::Windows;
+        prefs.color_scheme = scheme;
+        nk::ThemeSelection selection;
+        selection.family = nk::ThemeFamily::Windows11;
+        selection.color_scheme_override = scheme;
+        selection.force_high_contrast = true;
+        auto hc = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        const auto hc_bg = color_token(*hc, "window-bg");
+        REQUIRE(contrast_ratio(color_token(*hc, "text-primary"), hc_bg) >= 7.0F);
+        REQUIRE(contrast_ratio(color_token(*hc, "text-secondary"), hc_bg) >= 7.0F);
+        REQUIRE(contrast_ratio(color_token(*hc, "focus-ring"), hc_bg) >= 3.0F);
+        REQUIRE(contrast_ratio(aliased_color_token(*hc, "surface-field"),
+                               color_token(*hc, "text-primary")) >= 7.0F);
+    }
+}
+
+TEST_CASE("Every resolved preference moves the theme it builds", "[theme][selection]") {
+    nk::SystemPreferences prefs;
+    prefs.platform_family = nk::PlatformFamily::Linux;
+
+    nk::ThemeSelection selection;
+    selection.family = nk::ThemeFamily::LinuxGnome;
+
+    SECTION("color scheme swaps the palette") {
+        selection.color_scheme_override = nk::ColorScheme::Light;
+        auto light = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        selection.color_scheme_override = nk::ColorScheme::Dark;
+        auto dark = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        REQUIRE(!(color_token(*light, "window-bg") == color_token(*dark, "window-bg")));
+    }
+
+    SECTION("density moves control metrics through the rules, not layout logic") {
+        selection.density = nk::ThemeDensity::Compact;
+        auto compact = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        REQUIRE(string_token(*compact, "density") == "compact");
+        REQUIRE(metric_token(*compact, "control-height") == Catch::Approx(30.0F));
+        // Rules alias the tokens, so the density change reaches resolved rule
+        // values instead of going stale against a baked-in number.
+        REQUIRE(resolved_metric(*compact, {"button"}, "min-height") == Catch::Approx(30.0F));
+        REQUIRE(resolved_metric(*compact, {"segmented-control"}, "separator-inset") ==
+                Catch::Approx(6.0F));
+
+        selection.density = nk::ThemeDensity::Comfortable;
+        auto comfy = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        REQUIRE(resolved_metric(*comfy, {"button"}, "min-height") == Catch::Approx(38.0F));
+    }
+
+    SECTION("text scale grows resolved control metrics") {
+        prefs.text_scale_factor = 1.25F;
+        auto scaled = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        REQUIRE(metric_token(*scaled, "text-scale") == Catch::Approx(1.25F));
+        REQUIRE(resolved_metric(*scaled, {"button"}, "min-height") == Catch::Approx(36.0F * 1.25F));
+        REQUIRE(resolved_metric(*scaled, {"menu-bar"}, "min-height") ==
+                Catch::Approx(30.0F * 1.25F));
+    }
+
+    SECTION("reduced motion and transparency set their policy tokens") {
+        selection.motion_policy = nk::MotionPolicy::Reduced;
+        selection.transparency_policy = nk::TransparencyPolicy::Reduced;
+        auto theme = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        REQUIRE(string_token(*theme, "motion-mode") == "reduced");
+        REQUIRE(string_token(*theme, "transparency-mode") == "reduced");
+    }
+
+    SECTION("accent override recolors the accent ramp and resolved rules") {
+        selection.accent_color_override = nk::Color::from_rgb(200, 40, 40);
+        auto theme = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
+        REQUIRE(string_token(*theme, "accent-source") == "override");
+        REQUIRE(color_token(*theme, "accent") == nk::Color::from_rgb(200, 40, 40));
+        // Rules alias the accent token, so the override reaches suggested buttons.
+        REQUIRE(resolved_color(*theme, {"button", "suggested"}, "background") ==
+                nk::Color::from_rgb(200, 40, 40));
+    }
+}
+
+TEST_CASE("No widget class leaks light-theme colors into the dark theme", "[theme]") {
+    // Every widget style class must resolve its key color through the cascade
+    // (class rule or base wildcard rule), so switching the scheme actually
+    // changes what the widget draws. A class whose resolved color is identical
+    // in both schemes is rendering a light-theme constant.
+    struct ClassProbe {
+        const char* style_class;
+        const char* property;
+    };
+
+    static constexpr ClassProbe Probes[] = {
+        {"avatar", "background"},
+        {"badge", "background"},
+        {"breadcrumb", "link-color"},
+        {"button", "background"},
+        {"calendar", "background"},
+        {"check-box", "background"},
+        {"color-well", "border-color"},
+        {"combo-box", "background"},
+        {"command-palette", "background"},
+        {"context-menu", "popup-background"},
+        {"data-table", "background"},
+        {"dialog", "dialog-background"},
+        {"expander", "header-background"},
+        {"grid-view", "background"},
+        {"image-view", "background"},
+        {"info-bar", "text-color"},
+        {"label", "text-color"},
+        {"list-view", "background"},
+        {"menu-bar", "background"},
+        {"popover", "background"},
+        {"progress-bar", "track-color"},
+        {"radio-button", "background"},
+        {"scroll-area", "scrollbar-track-color"},
+        {"search-field", "background"},
+        {"segmented-control", "background"},
+        {"separator", "color"},
+        {"slider", "track-background"},
+        {"spin-button", "background"},
+        {"spinner", "color"},
+        {"split-view", "divider-color"},
+        {"status-bar", "background"},
+        {"switch", "inactive-track-color"},
+        {"tab-bar", "background"},
+        {"text-area", "background"},
+        {"text-field", "background"},
+        {"toolbar", "background"},
+        {"tooltip", "background"},
+        {"tree-view", "background"},
+    };
+
+    auto light = nk::Theme::make_linux_gnome(nk::ColorScheme::Light);
+    auto dark = nk::Theme::make_linux_gnome(nk::ColorScheme::Dark);
+    for (const auto& probe : Probes) {
+        INFO("style class '" << probe.style_class << "' property '" << probe.property
+                             << "' resolves the same color in light and dark");
+        const auto light_color = resolved_color(*light, {probe.style_class}, probe.property);
+        const auto dark_color = resolved_color(*dark, {probe.style_class}, probe.property);
+        REQUIRE(!(light_color == dark_color));
+    }
+
+    // The base wildcard rules cover generic properties for classes with no
+    // dedicated rule block, and dim any disabled widget's text.
+    const auto base_text = resolved_color(*dark, {"some-custom-widget"}, "text-color");
+    REQUIRE(base_text == color_token(*dark, "text-primary"));
+    const auto* disabled_text =
+        dark->resolve("", {"some-custom-widget"}, nk::StateFlags::Disabled, "text-color");
+    REQUIRE(disabled_text != nullptr);
+    REQUIRE(std::holds_alternative<std::string>(*disabled_text));
+    REQUIRE(std::get<std::string>(*disabled_text) == "text-disabled");
 }

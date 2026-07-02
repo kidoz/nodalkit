@@ -353,8 +353,7 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
     // Background.
     ctx.add_rounded_rect(
         a, theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}), corner_radius);
-    ctx.add_border(
-        a, theme_color("border-color", Color{0.86F, 0.88F, 0.91F, 1.0F}), 1.0F, corner_radius);
+    ctx.add_border(a, theme_color("border-color"), 1.0F, corner_radius);
 
     const auto header_font = calendar_header_font();
     const auto font = calendar_font();
@@ -385,14 +384,11 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
     const auto title_measured = measure_text(title, header_font);
     const float title_x = a.x + (a.width - title_measured.width) * 0.5F;
     const float title_y = a.y + (header_height - title_measured.height) * 0.5F;
-    ctx.add_text({title_x, title_y},
-                 std::string(title),
-                 theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
-                 header_font);
+    ctx.add_text({title_x, title_y}, std::string(title), theme_color("text-color"), header_font);
 
     // Day-of-week header.
     static constexpr const char* dow_labels[] = {"S", "M", "T", "W", "T", "F", "S"};
-    const Color dow_color = theme_color("secondary-text-color", Color{0.5F, 0.5F, 0.5F, 1.0F});
+    const Color dow_color = theme_color("secondary-text-color");
     for (int i = 0; i < 7; ++i) {
         const auto m = measure_text(dow_labels[i], font);
         const float cx = a.x + static_cast<float>(i) * cell_size + (cell_size - m.width) * 0.5F;
@@ -405,9 +401,9 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
     const int total_days = days_in_month(impl_->display_year, impl_->display_month);
     const float grid_top = a.y + header_height + dow_height;
 
-    const Color accent_bg = theme_color("accent-color", Color{0.3F, 0.56F, 0.9F, 1.0F});
+    const Color accent_bg = theme_color("accent-color");
     const Color hover_bg = theme_color("hover-color", Color{0.9F, 0.92F, 0.95F, 1.0F});
-    const Color day_text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+    const Color day_text_color = theme_color("text-color");
     const Color selected_text_color =
         theme_color("selected-text-color", Color{1.0F, 1.0F, 1.0F, 1.0F});
 
@@ -451,10 +447,7 @@ void Calendar::snapshot(SnapshotContext& ctx) const {
 
     // Focus ring.
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_border(a,
-                       theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                       2.0F,
-                       corner_radius);
+        ctx.add_border(a, theme_color("focus-ring-color"), 2.0F, corner_radius);
     }
 }
 

@@ -35,15 +35,13 @@ Rect union_rect(Rect lhs, Rect rhs) {
 
 } // namespace
 
-
-
 std::shared_ptr<Label> Label::create(std::string text) {
     // std::make_shared can't access protected ctor, so use raw new.
     return std::shared_ptr<Label>(new Label(std::move(text)));
 }
 
 Label::Label(std::string text) : text_(std::move(text)) {
-    
+
     add_style_class("label");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Label);
@@ -159,7 +157,7 @@ SizeRequest Label::measure(const Constraints& constraints) const {
 
 void Label::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
-    const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+    const auto text_color = theme_color("text-color");
     const auto font = label_font(*this);
     const auto measured = measure_text(text_, font);
 
@@ -183,8 +181,7 @@ void Label::snapshot(SnapshotContext& ctx) const {
 
     if (has_style_class("heading")) {
         const float line_y = text_y + measured.height + 3.0F;
-        ctx.add_color_rect({text_x, line_y, 24.0F, 2.0F},
-                           theme_color("accent-color", Color{0.2F, 0.45F, 0.85F, 1.0F}));
+        ctx.add_color_rect({text_x, line_y, 24.0F, 2.0F}, theme_color("accent-color"));
     }
 }
 

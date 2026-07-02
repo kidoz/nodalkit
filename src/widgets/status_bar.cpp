@@ -185,12 +185,11 @@ SizeRequest StatusBar::measure(const Constraints& constraints) const {
 void StatusBar::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     ctx.add_color_rect(a, theme_color("background", Color{0.94F, 0.95F, 0.97F, 1.0F}));
-    ctx.add_color_rect({a.x, a.y, a.width, 1},
-                       theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F}));
+    ctx.add_color_rect({a.x, a.y, a.width, 1}, theme_color("border-color"));
 
     const float gap = theme_number("segment-gap", 16.0F);
     const auto text_color = theme_color("text-color", Color{0.35F, 0.37F, 0.42F, 1.0F});
-    const auto separator_color = theme_color("separator-color", Color{0.82F, 0.84F, 0.88F, 1.0F});
+    const auto separator_color = theme_color("separator-color");
     const auto font = status_font();
 
     float x_offset = 16.0F;

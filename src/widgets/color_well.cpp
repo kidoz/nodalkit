@@ -106,9 +106,7 @@ void ColorWell::snapshot(SnapshotContext& ctx) const {
 
     // Focus ring.
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 

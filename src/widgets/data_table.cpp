@@ -577,25 +577,23 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
     const float corner_radius = theme_number("corner-radius", 8.0F);
     auto body = a;
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        const auto focus_ring = theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F});
+        const auto focus_ring = theme_color("focus-ring-color");
         ctx.add_rounded_rect(
             a, Color{focus_ring.r, focus_ring.g, focus_ring.b, 0.08F}, corner_radius + 1.0F);
         body = {a.x + 1.5F, a.y + 1.5F, a.width - 3.0F, a.height - 3.0F};
     }
 
     const auto background = theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F});
-    const auto border = theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F});
+    const auto border = theme_color("border-color");
     const auto header_bg = theme_color("header-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
-    const auto separator = theme_color("row-separator-color", Color{0.88F, 0.89F, 0.92F, 1.0F});
-    const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    const auto muted_text = theme_color("muted-text-color", Color{0.42F, 0.45F, 0.50F, 1.0F});
-    const auto selected_bg = theme_color("selected-background", Color{0.86F, 0.92F, 0.99F, 1.0F});
+    const auto separator = theme_color("row-separator-color");
+    const auto text_color = theme_color("text-color");
+    const auto muted_text = theme_color("muted-text-color");
+    const auto selected_bg = theme_color("selected-background");
     const auto selected_text = theme_color("selected-text-color", text_color);
-    const auto focus_ring = theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F});
-    const auto scrollbar_track =
-        theme_color("scrollbar-track-color", Color{0.88F, 0.90F, 0.93F, 1.0F});
-    const auto scrollbar_thumb =
-        theme_color("scrollbar-thumb-color", Color{0.67F, 0.71F, 0.76F, 1.0F});
+    const auto focus_ring = theme_color("focus-ring-color");
+    const auto scrollbar_track = theme_color("scrollbar-track-color");
+    const auto scrollbar_thumb = theme_color("scrollbar-thumb-color");
 
     ctx.add_rounded_rect(body, background, corner_radius);
     ctx.add_border(body, border, 1.0F, corner_radius);

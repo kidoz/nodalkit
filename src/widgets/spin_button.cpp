@@ -208,9 +208,7 @@ void SpinButton::snapshot(SnapshotContext& ctx) const {
     auto body = a;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 
@@ -224,7 +222,7 @@ void SpinButton::snapshot(SnapshotContext& ctx) const {
     const auto border_color = theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F});
     const auto button_bg = theme_color("button-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
     const auto armed_bg = theme_color("armed-background", Color{0.88F, 0.9F, 0.93F, 1.0F});
-    const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+    const auto text_color = theme_color("text-color");
     const auto button_text_color =
         theme_color("button-text-color", Color{0.25F, 0.27F, 0.3F, 1.0F});
 

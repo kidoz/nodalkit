@@ -272,6 +272,11 @@ protected:
     /// tokens. Falls back when the property is unset or has a different type.
     [[nodiscard]] Color theme_color(std::string_view property_name, Color fallback) const;
 
+    /// Resolve a themed color using the central fallback table
+    /// (nk/style/theme_defaults.h). The property must be listed there; use the
+    /// two-argument overload for properties with per-widget defaults.
+    [[nodiscard]] Color theme_color(std::string_view property_name) const;
+
     /// Resolve a themed numeric metric for the widget from style rules or
     /// semantic tokens. Falls back when the property is unset or has a
     /// different type.

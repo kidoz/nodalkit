@@ -197,7 +197,7 @@ void Breadcrumb::snapshot(SnapshotContext& ctx) const {
     const float separator_spacing = theme_number("separator-spacing", 4.0F);
     const float min_height = theme_number("min-height", 32.0F);
 
-    const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+    const auto text_color = theme_color("text-color");
     const auto link_color = theme_color("link-color", Color{0.2F, 0.4F, 0.8F, 1.0F});
     const auto hover_color = theme_color("hover-color", Color{0.15F, 0.35F, 0.7F, 1.0F});
     const auto sep_color = theme_color("separator-color", Color{0.5F, 0.5F, 0.5F, 1.0F});

@@ -447,9 +447,7 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
     auto body = a;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 
@@ -471,10 +469,7 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
     if (!text.empty()) {
         const auto measured = measure_text(text, font);
         const float text_y = inner.y + std::max(0.0F, (inner.height - measured.height) * 0.5F);
-        ctx.add_text({inner.x + 12.0F, text_y},
-                     std::string(text),
-                     theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
-                     font);
+        ctx.add_text({inner.x + 12.0F, text_y}, std::string(text), theme_color("text-color"), font);
     }
 
     const auto chevron_font = FontDescriptor{
@@ -521,10 +516,9 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
         std::max(0.0F, popup.bounds.height - 2.0F),
     };
 
-    const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    const auto hover_bg = theme_color("popup-hover-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
-    const auto selected_bg =
-        theme_color("popup-selected-background", Color{0.86F, 0.92F, 0.99F, 1.0F});
+    const auto text_color = theme_color("text-color");
+    const auto hover_bg = theme_color("popup-hover-background");
+    const auto selected_bg = theme_color("popup-selected-background");
 
     float row_y = popup_inner.y;
     const int item_count = static_cast<int>(impl_->items.size());

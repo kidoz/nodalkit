@@ -261,9 +261,7 @@ void SearchField::snapshot(SnapshotContext& ctx) const {
 
     // Focus ring
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 
@@ -300,15 +298,14 @@ void SearchField::snapshot(SnapshotContext& ctx) const {
     if (impl_->text.empty()) {
         // Placeholder text
         if (!impl_->placeholder.empty()) {
-            const auto placeholder_color =
-                theme_color("placeholder-color", Color{0.55F, 0.58F, 0.62F, 1.0F});
+            const auto placeholder_color = theme_color("placeholder-color");
             const auto measured = measure_text(impl_->placeholder, font);
             const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
             ctx.add_text({text_left, text_y}, impl_->placeholder, placeholder_color, font);
         }
     } else {
         // Actual text
-        const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+        const auto text_color = theme_color("text-color");
         const auto measured = measure_text(impl_->text, font);
         const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
         ctx.add_text({text_left, text_y}, impl_->text, text_color, font);

@@ -19,14 +19,12 @@ FontDescriptor button_font() {
 
 } // namespace
 
-
-
 std::shared_ptr<Button> Button::create(std::string label) {
     return std::shared_ptr<Button>(new Button(std::move(label)));
 }
 
 Button::Button(std::string label) : label_(std::move(label)) {
-    
+
     set_focusable(true);
     add_style_class("button");
     auto& accessible = ensure_accessible();
@@ -120,9 +118,7 @@ void Button::snapshot(SnapshotContext& ctx) const {
     auto body = a;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 
@@ -135,10 +131,7 @@ void Button::snapshot(SnapshotContext& ctx) const {
     const auto measured = measure_text(label_, font);
     const float text_x = body.x + std::max(0.0F, (body.width - measured.width) * 0.5F);
     const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
-    ctx.add_text({text_x, text_y},
-                 std::string(label_),
-                 theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
-                 font);
+    ctx.add_text({text_x, text_y}, std::string(label_), theme_color("text-color"), font);
 }
 
 } // namespace nk

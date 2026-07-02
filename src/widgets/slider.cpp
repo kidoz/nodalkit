@@ -207,9 +207,7 @@ void Slider::snapshot(SnapshotContext& ctx) const {
         range > 0.0 ? static_cast<float>((impl_->value - impl_->min_val) / range) : 0.0F;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             thumb_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), thumb_radius + 2.0F);
     }
 
     if (impl_->orientation == Orientation::Horizontal) {

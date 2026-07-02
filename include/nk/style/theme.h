@@ -35,10 +35,13 @@ public:
     [[nodiscard]] const StyleValue* token(std::string_view name) const;
 
     /// Resolve a property for a widget given its type, classes, and state.
+    /// `min_specificity` filters out weaker rules; pass 1 to skip the
+    /// selector-less base defaults so class-specific inheritance can win.
     [[nodiscard]] const StyleValue* resolve(std::string_view type_name,
                                             const std::vector<std::string>& classes,
                                             StateFlags state,
-                                            std::string_view property_name) const;
+                                            std::string_view property_name,
+                                            int min_specificity = 0) const;
 
     /// Set the process-wide active theme used by widget snapshot helpers.
     static void set_active(std::shared_ptr<Theme> theme);

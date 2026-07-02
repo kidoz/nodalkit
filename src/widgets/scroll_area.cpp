@@ -426,8 +426,8 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
     const bool show_h_scrollbar =
         should_show_h_scrollbar(impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport);
 
-    const auto raw_track = theme_color("scrollbar-track-color", Color{0.88F, 0.90F, 0.93F, 1.0F});
-    const auto raw_thumb = theme_color("scrollbar-thumb-color", Color{0.67F, 0.71F, 0.76F, 1.0F});
+    const auto raw_track = theme_color("scrollbar-track-color");
+    const auto raw_thumb = theme_color("scrollbar-thumb-color");
     const auto track_color = Color{raw_track.r, raw_track.g, raw_track.b, 0.72F};
     const auto thumb_color = Color{raw_thumb.r, raw_thumb.g, raw_thumb.b, 0.86F};
 

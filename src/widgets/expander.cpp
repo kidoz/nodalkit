@@ -186,10 +186,7 @@ void Expander::snapshot(SnapshotContext& ctx) const {
         header, theme_color("header-background", Color{0.94F, 0.95F, 0.97F, 1.0F}), corner_radius);
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_border(header,
-                       theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                       1.5F,
-                       corner_radius);
+        ctx.add_border(header, theme_color("focus-ring-color"), 1.5F, corner_radius);
     }
 
     // Arrow indicator.
@@ -211,10 +208,7 @@ void Expander::snapshot(SnapshotContext& ctx) const {
     const auto title_size = measure_text(impl_->title, font);
     const float title_x = a.x + padding_x + arrow_space;
     const float title_y = a.y + std::max(0.0F, (header_height - title_size.height) * 0.5F);
-    ctx.add_text({title_x, title_y},
-                 std::string(impl_->title),
-                 theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
-                 font);
+    ctx.add_text({title_x, title_y}, std::string(impl_->title), theme_color("text-color"), font);
 
     // Child content.
     if (impl_->expanded && impl_->child) {

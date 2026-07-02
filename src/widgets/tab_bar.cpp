@@ -272,8 +272,7 @@ void TabBar::snapshot(SnapshotContext& ctx) const {
     ctx.add_color_rect(a, theme_color("background", Color{0.95F, 0.96F, 0.98F, 1.0F}));
 
     // Bottom border line
-    ctx.add_color_rect({a.x, a.y + a.height - 1.0F, a.width, 1.0F},
-                       theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F}));
+    ctx.add_color_rect({a.x, a.y + a.height - 1.0F, a.width, 1.0F}, theme_color("border-color"));
 
     if (impl_->tabs.empty()) {
         return;
@@ -281,7 +280,7 @@ void TabBar::snapshot(SnapshotContext& ctx) const {
 
     const float tab_width = a.width / static_cast<float>(impl_->tabs.size());
     const auto font = tab_font();
-    const auto accent_color = theme_color("accent-color", Color{0.2F, 0.45F, 0.85F, 1.0F});
+    const auto accent_color = theme_color("accent-color");
     const auto hover_bg = theme_color("hover-background", Color{0.92F, 0.93F, 0.95F, 1.0F});
 
     for (std::size_t index = 0; index < impl_->tabs.size(); ++index) {
@@ -302,7 +301,7 @@ void TabBar::snapshot(SnapshotContext& ctx) const {
             tab_rect.y + std::max(0.0F, (tab_rect.height - measured.height) * 0.5F);
         ctx.add_text({text_x, text_y},
                      impl_->tabs[index],
-                     selected ? theme_color("selected-text-color", Color{0.1F, 0.1F, 0.12F, 1.0F})
+                     selected ? theme_color("selected-text-color")
                               : theme_color("text-color", Color{0.38F, 0.4F, 0.45F, 1.0F}),
                      font);
 
@@ -318,10 +317,7 @@ void TabBar::snapshot(SnapshotContext& ctx) const {
     if (has_flag(state_flags(), StateFlags::Focused) && impl_->selected_index >= 0) {
         const auto selected_rect = Rect{
             a.x + tab_width * static_cast<float>(impl_->selected_index), a.y, tab_width, a.height};
-        ctx.add_border(selected_rect,
-                       theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                       2.0F,
-                       0.0F);
+        ctx.add_border(selected_rect, theme_color("focus-ring-color"), 2.0F, 0.0F);
     }
 }
 

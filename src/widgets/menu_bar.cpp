@@ -771,8 +771,7 @@ void MenuBar::on_focus_changed(bool focused) {
 void MenuBar::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     ctx.add_color_rect(a, theme_color("background", Color{0.95F, 0.96F, 0.98F, 1.0F}));
-    ctx.add_color_rect({a.x, a.y + a.height - 1, a.width, 1},
-                       theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F}));
+    ctx.add_color_rect({a.x, a.y + a.height - 1, a.width, 1}, theme_color("border-color"));
 
     const auto text_color = theme_color("text-color", Color{0.15F, 0.15F, 0.15F, 1.0F});
     const auto font = menu_font();
@@ -800,12 +799,11 @@ void MenuBar::snapshot(SnapshotContext& ctx) const {
         return;
     }
 
-    const auto popup_bg = theme_color("popup-background", Color{1.0F, 1.0F, 1.0F, 1.0F});
-    const auto popup_border = theme_color("popup-border-color", Color{0.8F, 0.82F, 0.86F, 1.0F});
-    const auto popup_hover =
-        theme_color("popup-hover-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
-    const auto popup_text = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    const auto disabled_text = theme_color("disabled-text-color", Color{0.55F, 0.58F, 0.62F, 1.0F});
+    const auto popup_bg = theme_color("popup-background");
+    const auto popup_border = theme_color("popup-border-color");
+    const auto popup_hover = theme_color("popup-hover-background");
+    const auto popup_text = theme_color("text-color");
+    const auto disabled_text = theme_color("disabled-text-color");
 
     const auto& menu = impl_->menus[static_cast<std::size_t>(impl_->open_menu)];
     std::function<void(const std::vector<MenuItem>&, Rect, bool, std::size_t, MenuPath)>

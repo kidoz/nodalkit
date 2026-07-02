@@ -117,7 +117,7 @@ void Switch::snapshot(SnapshotContext& ctx) const {
                               track_rect.y - 2.0F,
                               track_rect.width + 4.0F,
                               track_rect.height + 4.0F},
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
+                             theme_color("focus-ring-color"),
                              track_radius + 2.0F);
     }
 

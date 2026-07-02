@@ -73,7 +73,8 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
                                     "surface-panel",
                                     "surface-card",
                                     "surface-raised",
-                                    "field-bg",
+                                    "surface-field",
+                                    "surface-osd",
                                     "scrollbar-track",
                                     "layer-titlebar-bg",
                                     "layer-titlebar-inactive-bg",
@@ -85,9 +86,10 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
         }
         for (const auto* ink : {"border-subtle",
                                 "border-strong",
-                                "field-border",
+                                "border-field",
                                 "text-primary",
                                 "text-secondary",
+                                "text-osd",
                                 "scrollbar-thumb",
                                 "focus-visible",
                                 "layer-titlebar-text"}) {
@@ -111,7 +113,8 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
                                     "surface-panel",
                                     "surface-card",
                                     "surface-raised",
-                                    "field-bg",
+                                    "surface-field",
+                                    "surface-osd",
                                     "scrollbar-track",
                                     "layer-titlebar-bg",
                                     "layer-titlebar-inactive-bg",
@@ -123,9 +126,10 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
         }
         for (const auto* ink : {"border-subtle",
                                 "border-strong",
-                                "field-border",
+                                "border-field",
                                 "text-primary",
                                 "text-secondary",
+                                "text-osd",
                                 "scrollbar-thumb",
                                 "focus-visible",
                                 "layer-titlebar-text"}) {
@@ -146,9 +150,8 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
     }
 }
 
-BackdropCapability resolve_backdrop(BackdropCapability capability,
-                                    bool transparency_allowed,
-                                    bool high_contrast) {
+BackdropCapability
+resolve_backdrop(BackdropCapability capability, bool transparency_allowed, bool high_contrast) {
     if (capability == BackdropCapability::None) {
         return BackdropCapability::None;
     }

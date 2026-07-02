@@ -1,4 +1,5 @@
 #include <nk/style/theme.h>
+#include <nk/style/theme_defaults.h>
 
 namespace nk {
 
@@ -12,20 +13,49 @@ void set_color_token(Theme& theme, std::string name, uint8_t r, uint8_t g, uint8
     theme.set_token(std::move(name), StyleValue{rgb(r, g, b)});
 }
 
+void set_color_token(Theme& theme, std::string name, uint8_t r, uint8_t g, uint8_t b, float alpha) {
+    auto color = rgb(r, g, b);
+    color.a = alpha;
+    theme.set_token(std::move(name), StyleValue{color});
+}
+
 void set_metric_token(Theme& theme, std::string name, float value) {
     theme.set_token(std::move(name), StyleValue{value});
 }
 
-// Resolve a metric token's float value at theme-build time. Rules use this to express control
-// heights and corner radii in terms of the metric/radius scale (single source of truth) while
-// still storing a concrete float, so Theme::resolve keeps returning a number to callers that read
-// metrics directly. The token must already be set on the theme before install_shared_rules runs.
-float metric(const Theme& theme, std::string_view token_name) {
-    const auto* value = theme.token(token_name);
-    if (value != nullptr && std::holds_alternative<float>(*value)) {
-        return std::get<float>(*value);
-    }
-    return 0.0F;
+// A rule property value that aliases a token by name. The alias is dereferenced
+// at widget-read time (resolve_widget_rule / the global token fallback), so
+// post-build token mutations — density, text scale, high contrast, accent
+// override — propagate into resolved rule values instead of going stale.
+StyleValue token_ref(std::string_view token_name) {
+    return StyleValue{std::string(token_name)};
+}
+
+// Register a deprecated token name that resolves to its canonical replacement.
+void set_alias_token(Theme& theme, std::string name, std::string_view target) {
+    theme.set_token(std::move(name), token_ref(target));
+}
+
+// Deprecated token names kept as aliases while the C1 surface-naming migration
+// settles: surfaces are `surface-*`, borders are `border-*`, and the `*-bg`
+// suffix is reserved for the window/shell-layer backgrounds.
+void install_legacy_token_aliases(Theme& theme) {
+    set_alias_token(theme, "field-bg", "surface-field");
+    set_alias_token(theme, "field-border", "border-field");
+}
+
+// Named metric tokens whose value is currently the same in every family. The
+// per-family personality lives in the spacing scale, control heights, radius
+// roles, and control padding set by each factory; everything here exists so no
+// rule property needs a magic literal.
+void install_shared_metric_tokens(Theme& theme) {
+    set_metric_token(theme, "padding-card", 18.0F);
+    set_metric_token(theme, "padding-page", 28.0F);
+    set_metric_token(theme, "segment-gap", 18.0F);
+    set_metric_token(theme, "field-min-width", 240.0F);
+    set_metric_token(theme, "popup-item-height", 30.0F);
+    set_metric_token(theme, "segment-min-width", 84.0F);
+    set_metric_token(theme, "image-min-height", 168.0F);
 }
 
 void add_rule(Theme& theme,
@@ -42,7 +72,34 @@ void add_rule(Theme& theme,
     theme.add_rule(std::move(rule));
 }
 
+// Base rules: lowest-specificity wildcard mappings so every widget — including
+// the ones without a dedicated rule block — resolves the generic text, border,
+// focus, and selection vocabulary from semantic tokens instead of leaking
+// light-theme fallback literals into dark, high-contrast, or accent-overridden
+// themes. The property → token pairs are the central fallback table itself
+// (theme_defaults.h), so the safety net and the live cascade cannot drift
+// apart. Any class rule (specificity 10+) overrides these (specificity 0).
+void install_base_rules(Theme& theme) {
+    StyleRule base;
+    for (const auto& entry : ThemeColorDefaults) {
+        base.properties.emplace(std::string(entry.property), token_ref(entry.token));
+    }
+    theme.add_rule(std::move(base));
+
+    // Disabled widgets dim their text everywhere; a widget's own :Disabled
+    // rule (specificity 110) still overrides this (specificity 100).
+    add_rule(theme,
+             {},
+             StateFlags::Disabled,
+             {
+                 {"text-color", token_ref("text-disabled")},
+                 {"selected-text-color", token_ref("text-disabled")},
+             });
+}
+
 void install_shared_rules(Theme& theme) {
+    install_base_rules(theme);
+
     add_rule(theme,
              {"label"},
              StateFlags::None,
@@ -65,15 +122,15 @@ void install_shared_rules(Theme& theme) {
              {
                  {"background", StyleValue{std::string("surface-card")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
-                 {"padding", StyleValue{18.0F}},
-                 {"corner-radius", StyleValue{metric(theme, "radius-lg")}},
+                 {"padding", token_ref("padding-card")},
+                 {"corner-radius", token_ref("radius-card")},
              });
     add_rule(theme,
              {"page"},
              StateFlags::None,
              {
                  {"background", StyleValue{std::string("window-bg")}},
-                 {"padding", StyleValue{28.0F}},
+                 {"padding", token_ref("padding-page")},
              });
 
     add_rule(theme,
@@ -95,7 +152,7 @@ void install_shared_rules(Theme& theme) {
                  {"text-color", StyleValue{std::string("text-secondary")}},
                  {"separator-color", StyleValue{std::string("border-subtle")}},
                  {"min-height", StyleValue{std::string("status-height")}},
-                 {"segment-gap", StyleValue{18.0F}},
+                 {"segment-gap", token_ref("segment-gap")},
              });
 
     add_rule(theme,
@@ -106,11 +163,11 @@ void install_shared_rules(Theme& theme) {
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"text-color", StyleValue{std::string("text-primary")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"padding-x", StyleValue{16.0F}},
-                 {"padding-y", StyleValue{9.0F}},
-                 {"min-width", StyleValue{82.0F}},
-                 {"min-height", StyleValue{metric(theme, "control-height")}},
-                 {"corner-radius", StyleValue{metric(theme, "radius-md")}},
+                 {"padding-x", token_ref("padding-control-x")},
+                 {"padding-y", token_ref("padding-control-y")},
+                 {"min-width", token_ref("control-min-width")},
+                 {"min-height", token_ref("control-height")},
+                 {"corner-radius", token_ref("radius-control")},
              });
     add_rule(theme,
              {"button"},
@@ -171,14 +228,14 @@ void install_shared_rules(Theme& theme) {
              {"text-field"},
              StateFlags::None,
              {
-                 {"background", StyleValue{std::string("field-bg")}},
-                 {"border-color", StyleValue{std::string("field-border")}},
+                 {"background", StyleValue{std::string("surface-field")}},
+                 {"border-color", StyleValue{std::string("border-field")}},
                  {"text-color", StyleValue{std::string("text-primary")}},
                  {"placeholder-color", StyleValue{std::string("text-secondary")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"min-height", StyleValue{metric(theme, "control-height")}},
-                 {"min-width", StyleValue{240.0F}},
-                 {"corner-radius", StyleValue{metric(theme, "radius-md")}},
+                 {"min-height", token_ref("control-height")},
+                 {"min-width", token_ref("field-min-width")},
+                 {"corner-radius", token_ref("radius-control")},
              });
     add_rule(theme,
              {"text-field"},
@@ -196,8 +253,8 @@ void install_shared_rules(Theme& theme) {
              {"combo-box"},
              StateFlags::None,
              {
-                 {"background", StyleValue{std::string("field-bg")}},
-                 {"border-color", StyleValue{std::string("field-border")}},
+                 {"background", StyleValue{std::string("surface-field")}},
+                 {"border-color", StyleValue{std::string("border-field")}},
                  {"text-color", StyleValue{std::string("text-primary")}},
                  {"chevron-color", StyleValue{std::string("text-secondary")}},
                  {"popup-background", StyleValue{std::string("surface-card")}},
@@ -206,12 +263,12 @@ void install_shared_rules(Theme& theme) {
                  {"popup-selected-background", StyleValue{std::string("accent-soft")}},
                  {"popup-separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"popup-item-height", StyleValue{30.0F}},
-                 {"min-height", StyleValue{metric(theme, "control-height")}},
-                 {"min-width", StyleValue{240.0F}},
-                 {"corner-radius", StyleValue{metric(theme, "radius-md")}},
-                 {"popup-radius", StyleValue{metric(theme, "radius-lg")}},
-                 {"selection-radius", StyleValue{metric(theme, "radius-sm")}},
+                 {"popup-item-height", token_ref("popup-item-height")},
+                 {"min-height", token_ref("control-height")},
+                 {"min-width", token_ref("field-min-width")},
+                 {"corner-radius", token_ref("radius-control")},
+                 {"popup-radius", token_ref("radius-popup")},
+                 {"selection-radius", token_ref("radius-selection")},
              });
     add_rule(theme,
              {"combo-box"},
@@ -240,13 +297,13 @@ void install_shared_rules(Theme& theme) {
                  {"pressed-background", StyleValue{std::string("surface-pressed")}},
                  {"separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"min-height", StyleValue{metric(theme, "control-height")}},
-                 {"min-segment-width", StyleValue{84.0F}},
-                 {"padding-x", StyleValue{16.0F}},
-                 {"track-padding", StyleValue{4.0F}},
-                 {"corner-radius", StyleValue{metric(theme, "radius-lg")}},
-                 {"selection-radius", StyleValue{metric(theme, "radius-md")}},
-                 {"separator-inset", StyleValue{8.0F}},
+                 {"min-height", token_ref("control-height")},
+                 {"min-segment-width", token_ref("segment-min-width")},
+                 {"padding-x", token_ref("padding-control-x")},
+                 {"track-padding", token_ref("segment-track-padding")},
+                 {"corner-radius", token_ref("radius-segment")},
+                 {"selection-radius", token_ref("radius-control")},
+                 {"separator-inset", token_ref("spacing-sm")},
              });
     add_rule(theme,
              {"segmented-control"},
@@ -269,8 +326,8 @@ void install_shared_rules(Theme& theme) {
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
                  {"scrollbar-track-color", StyleValue{std::string("scrollbar-track")}},
                  {"scrollbar-thumb-color", StyleValue{std::string("scrollbar-thumb")}},
-                 {"corner-radius", StyleValue{metric(theme, "radius-lg")}},
-                 {"selection-radius", StyleValue{metric(theme, "radius-sm")}},
+                 {"corner-radius", token_ref("radius-card")},
+                 {"selection-radius", token_ref("radius-selection")},
              });
     add_rule(theme,
              {"list-view"},
@@ -284,10 +341,221 @@ void install_shared_rules(Theme& theme) {
                  {"background", StyleValue{std::string("surface-panel")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
-                 {"corner-radius", StyleValue{metric(theme, "radius-xl")}},
-                 {"content-radius", StyleValue{metric(theme, "radius-lg")}},
-                 {"min-height", StyleValue{168.0F}},
+                 {"corner-radius", token_ref("radius-image")},
+                 {"content-radius", token_ref("radius-image-content")},
+                 {"min-height", token_ref("image-min-height")},
              });
+
+    // --- Coverage rules ---
+    // Every remaining widget class maps its color properties to semantic
+    // tokens here so no widget renders light-theme fallback literals in dark,
+    // high-contrast, or accent-overridden themes. Generic properties
+    // (text-color, border-color, focus-ring-color, …) already resolve through
+    // the base rules; these blocks carry backgrounds and widget-specific
+    // roles. Known gap: the info-bar severity backgrounds stay widget-computed
+    // until severity tokens exist.
+
+    add_rule(theme,
+             {"avatar"},
+             StateFlags::None,
+             {
+                 // Neutral placeholder swatch behind initials.
+                 {"background", token_ref("border-strong")},
+                 {"text-color", token_ref("accent-contrast")},
+             });
+
+    add_rule(theme,
+             {"badge"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("accent")},
+                 {"text-color", token_ref("accent-contrast")},
+             });
+
+    add_rule(theme,
+             {"breadcrumb"},
+             StateFlags::None,
+             {
+                 {"link-color", token_ref("accent")},
+                 {"hover-color", token_ref("accent-hover")},
+                 {"separator-color", token_ref("text-disabled")},
+             });
+
+    add_rule(theme,
+             {"calendar"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-field")},
+                 {"hover-color", token_ref("surface-hover")},
+                 {"selected-text-color", token_ref("accent-contrast")},
+             });
+
+    add_rule(theme,
+             {"check-box"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-field")},
+                 {"border-color", token_ref("border-field")},
+                 {"checked-background", token_ref("accent")},
+                 {"check-color", token_ref("accent-contrast")},
+             });
+
+    add_rule(
+        theme, {"color-well"}, StateFlags::None, {{"border-color", token_ref("border-strong")}});
+
+    add_rule(theme,
+             {"command-palette"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-card")},
+                 {"search-background", token_ref("surface-panel")},
+                 {"search-border-color", token_ref("border-subtle")},
+             });
+
+    add_rule(theme,
+             {"data-table"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-card")},
+                 {"header-background", token_ref("surface-panel")},
+                 {"cell-border-color", token_ref("border-subtle")},
+             });
+
+    add_rule(theme,
+             {"dialog"},
+             StateFlags::None,
+             {
+                 {"dialog-background", token_ref("surface-card")},
+                 {"dialog-border-color", token_ref("border-subtle")},
+                 {"dialog-title-color", token_ref("text-primary")},
+                 {"dialog-text-color", token_ref("text-secondary")},
+                 {"dialog-button-background", token_ref("surface-raised")},
+                 {"dialog-button-border", token_ref("border-subtle")},
+                 {"dialog-button-text", token_ref("text-primary")},
+             });
+
+    add_rule(theme,
+             {"expander"},
+             StateFlags::None,
+             {
+                 {"header-background", token_ref("surface-panel")},
+                 {"arrow-color", token_ref("text-secondary")},
+             });
+
+    add_rule(theme,
+             {"grid-view"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-card")},
+                 {"cell-border-color", token_ref("border-subtle")},
+             });
+
+    add_rule(theme, {"info-bar"}, StateFlags::None, {{"close-color", token_ref("text-secondary")}});
+
+    add_rule(theme, {"popover"}, StateFlags::None, {{"background", token_ref("surface-card")}});
+
+    add_rule(theme,
+             {"progress-bar"},
+             StateFlags::None,
+             {
+                 {"fill-color", token_ref("accent")},
+                 {"track-color", token_ref("scrollbar-track")},
+             });
+
+    add_rule(theme,
+             {"radio-button"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-field")},
+                 {"border-color", token_ref("border-field")},
+                 {"selected-color", token_ref("accent")},
+             });
+
+    add_rule(theme,
+             {"search-field"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-field")},
+                 {"border-color", token_ref("border-field")},
+                 {"icon-color", token_ref("text-secondary")},
+             });
+    add_rule(
+        theme, {"search-field"}, StateFlags::Focused, {{"border-color", token_ref("focus-ring")}});
+
+    add_rule(theme, {"separator"}, StateFlags::None, {{"color", token_ref("border-subtle")}});
+
+    add_rule(theme,
+             {"slider"},
+             StateFlags::None,
+             {
+                 {"fill-color", token_ref("accent")},
+                 {"track-background", token_ref("border-subtle")},
+                 // Knob stays light in both GNOME schemes, like the switch thumb.
+                 {"thumb-color", token_ref("accent-contrast")},
+                 {"thumb-border-color", token_ref("border-strong")},
+             });
+
+    add_rule(theme,
+             {"spin-button"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-field")},
+                 {"border-color", token_ref("border-field")},
+                 {"button-background", token_ref("surface-hover")},
+                 {"armed-background", token_ref("surface-pressed")},
+                 {"button-text-color", token_ref("text-secondary")},
+             });
+
+    add_rule(theme, {"spinner"}, StateFlags::None, {{"color", token_ref("text-secondary")}});
+
+    add_rule(
+        theme, {"split-view"}, StateFlags::None, {{"divider-color", token_ref("border-subtle")}});
+
+    add_rule(theme,
+             {"switch"},
+             StateFlags::None,
+             {
+                 {"active-track-color", token_ref("accent")},
+                 {"inactive-track-color", token_ref("border-strong")},
+                 {"thumb-color", token_ref("accent-contrast")},
+             });
+
+    add_rule(theme,
+             {"tab-bar"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-panel")},
+                 {"text-color", token_ref("text-secondary")},
+             });
+
+    add_rule(theme,
+             {"text-area"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-field")},
+                 {"border-color", token_ref("border-field")},
+             });
+    add_rule(
+        theme, {"text-area"}, StateFlags::Focused, {{"border-color", token_ref("focus-ring")}});
+    add_rule(theme,
+             {"text-area"},
+             StateFlags::Disabled,
+             {
+                 {"background", token_ref("surface-panel")},
+                 {"text-color", token_ref("text-disabled")},
+             });
+
+    add_rule(theme, {"toolbar"}, StateFlags::None, {{"background", token_ref("surface-panel")}});
+
+    add_rule(theme,
+             {"tooltip"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-osd")},
+                 {"text-color", token_ref("text-osd")},
+             });
+
+    add_rule(theme, {"tree-view"}, StateFlags::None, {{"background", token_ref("surface-card")}});
 
     // --- Inactive-window rules: dim text when window loses focus ---
     add_rule(theme,
@@ -301,77 +569,13 @@ void install_shared_rules(Theme& theme) {
               {"border-color", StyleValue{std::string("border-subtle")}}});
 }
 
-void install_macos_overrides(Theme& theme) {
-    add_rule(theme,
-             {"button"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{6.0F}},
-              {"min-height", StyleValue{28.0F}},
-              {"padding-x", StyleValue{12.0F}},
-              {"padding-y", StyleValue{4.0F}}});
-    add_rule(theme,
-             {"text-field"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{6.0F}}, {"min-height", StyleValue{28.0F}}});
-    add_rule(theme,
-             {"combo-box"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{6.0F}},
-              {"popup-radius", StyleValue{10.0F}},
-              {"min-height", StyleValue{28.0F}}});
-    add_rule(theme,
-             {"segmented-control"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{8.0F}},
-              {"selection-radius", StyleValue{6.0F}},
-              {"track-padding", StyleValue{2.0F}},
-              {"min-height", StyleValue{28.0F}}});
-    add_rule(theme, {"card"}, StateFlags::None, {{"corner-radius", StyleValue{10.0F}}});
-    add_rule(theme,
-             {"image-view"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{10.0F}}, {"content-radius", StyleValue{8.0F}}});
-}
-
-void install_windows_overrides(Theme& theme) {
-    // Windows 11 / WinUI control geometry: 4 px control corners, 32 px default
-    // control height, and rounded surface cards. These are deliberately distinct
-    // from the GNOME defaults so the Windows family no longer clones Linux.
-    add_rule(theme,
-             {"button"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{4.0F}},
-              {"min-height", StyleValue{32.0F}},
-              {"min-width", StyleValue{90.0F}},
-              {"padding-x", StyleValue{12.0F}},
-              {"padding-y", StyleValue{5.0F}}});
-    add_rule(theme,
-             {"text-field"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{4.0F}}, {"min-height", StyleValue{32.0F}}});
-    add_rule(theme,
-             {"combo-box"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{4.0F}},
-              {"popup-radius", StyleValue{8.0F}},
-              {"selection-radius", StyleValue{4.0F}},
-              {"min-height", StyleValue{32.0F}}});
-    add_rule(theme,
-             {"segmented-control"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{6.0F}},
-              {"selection-radius", StyleValue{4.0F}},
-              {"track-padding", StyleValue{2.0F}},
-              {"min-height", StyleValue{32.0F}}});
-    add_rule(theme, {"card"}, StateFlags::None, {{"corner-radius", StyleValue{8.0F}}});
-    add_rule(theme,
-             {"image-view"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{8.0F}}, {"content-radius", StyleValue{6.0F}}});
-
-    // Shell layer roles: route the command and status surfaces to their layer
-    // tokens so the title-bar/command/navigation/content/status vocabulary is
-    // actually consumed rather than only declared.
+// Shell layer roles for the Windows families: route the command and status
+// surfaces to their layer tokens so the title-bar/command/navigation/content/
+// status vocabulary is actually consumed rather than only declared. Control
+// geometry (radii, heights, padding) is no longer overridden per family — each
+// family carries its personality in the radius-role and metric tokens instead,
+// so the shared rules resolve to native values without duplicated rules.
+void install_windows_shell_rules(Theme& theme) {
     add_rule(theme,
              {"menu-bar"},
              StateFlags::None,
@@ -458,7 +662,8 @@ const StyleValue* Theme::token(std::string_view name) const {
 const StyleValue* Theme::resolve(std::string_view type_name,
                                  const std::vector<std::string>& classes,
                                  StateFlags state,
-                                 std::string_view property_name) const {
+                                 std::string_view property_name,
+                                 int min_specificity) const {
 
     const StyleRule* best_match = nullptr;
     int best_specificity = -1;
@@ -506,6 +711,9 @@ const StyleValue* Theme::resolve(std::string_view type_name,
         // standard CSS source-order tie-break and lets per-family override rules
         // (installed after the shared rules) take effect.
         const int spec = sel.specificity();
+        if (spec < min_specificity) {
+            continue;
+        }
         if (spec >= best_specificity) {
             best_specificity = spec;
             best_match = &rule;
@@ -542,8 +750,8 @@ std::unique_ptr<Theme> Theme::make_light() {
     set_color_token(*theme, "surface-raised", 247, 248, 250);
     set_color_token(*theme, "surface-hover", 240, 243, 247);
     set_color_token(*theme, "surface-pressed", 232, 236, 242);
-    set_color_token(*theme, "field-bg", 255, 255, 255);
-    set_color_token(*theme, "field-border", 203, 209, 217);
+    set_color_token(*theme, "surface-field", 255, 255, 255);
+    set_color_token(*theme, "border-field", 203, 209, 217);
     set_color_token(*theme, "border-subtle", 224, 228, 234);
     set_color_token(*theme, "border-strong", 191, 198, 208);
     set_color_token(*theme, "text-primary", 37, 40, 46);
@@ -557,6 +765,11 @@ std::unique_ptr<Theme> Theme::make_light() {
     set_color_token(*theme, "focus-ring", 76, 144, 228);
     set_color_token(*theme, "scrollbar-track", 226, 231, 238);
     set_color_token(*theme, "scrollbar-thumb", 170, 180, 192);
+    // GNOME OSD role: tooltips and transient overlays stay dark in both
+    // schemes, matching the libadwaita osd style.
+    set_color_token(*theme, "surface-osd", 38, 38, 43, 0.95F);
+    set_color_token(*theme, "text-osd", 255, 255, 255);
+    install_legacy_token_aliases(*theme);
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
@@ -570,10 +783,19 @@ std::unique_ptr<Theme> Theme::make_light() {
     set_metric_token(*theme, "control-height", 36.0F);
     set_metric_token(*theme, "menu-height", 30.0F);
     set_metric_token(*theme, "status-height", 28.0F);
-    set_metric_token(*theme, "radius-sm", 8.0F);
-    set_metric_token(*theme, "radius-md", 10.0F);
-    set_metric_token(*theme, "radius-lg", 12.0F);
-    set_metric_token(*theme, "radius-xl", 14.0F);
+    // GNOME radius roles: generously rounded controls and cards.
+    set_metric_token(*theme, "radius-control", 10.0F);
+    set_metric_token(*theme, "radius-card", 12.0F);
+    set_metric_token(*theme, "radius-popup", 12.0F);
+    set_metric_token(*theme, "radius-selection", 8.0F);
+    set_metric_token(*theme, "radius-segment", 12.0F);
+    set_metric_token(*theme, "radius-image", 14.0F);
+    set_metric_token(*theme, "radius-image-content", 12.0F);
+    set_metric_token(*theme, "padding-control-x", 16.0F);
+    set_metric_token(*theme, "padding-control-y", 9.0F);
+    set_metric_token(*theme, "control-min-width", 82.0F);
+    set_metric_token(*theme, "segment-track-padding", 4.0F);
+    install_shared_metric_tokens(*theme);
 
     install_shared_rules(*theme);
 
@@ -589,8 +811,8 @@ std::unique_ptr<Theme> Theme::make_dark() {
     set_color_token(*theme, "surface-raised", 53, 58, 67);
     set_color_token(*theme, "surface-hover", 60, 66, 76);
     set_color_token(*theme, "surface-pressed", 71, 77, 88);
-    set_color_token(*theme, "field-bg", 43, 47, 55);
-    set_color_token(*theme, "field-border", 83, 89, 101);
+    set_color_token(*theme, "surface-field", 43, 47, 55);
+    set_color_token(*theme, "border-field", 83, 89, 101);
     set_color_token(*theme, "border-subtle", 73, 79, 90);
     set_color_token(*theme, "border-strong", 103, 109, 121);
     set_color_token(*theme, "text-primary", 239, 241, 245);
@@ -604,6 +826,11 @@ std::unique_ptr<Theme> Theme::make_dark() {
     set_color_token(*theme, "focus-ring", 131, 187, 255);
     set_color_token(*theme, "scrollbar-track", 61, 67, 76);
     set_color_token(*theme, "scrollbar-thumb", 111, 121, 136);
+    // GNOME OSD role: a step lighter than the dark surfaces so overlays read
+    // as elevated, matching the libadwaita osd style.
+    set_color_token(*theme, "surface-osd", 58, 58, 64, 0.98F);
+    set_color_token(*theme, "text-osd", 255, 255, 255);
+    install_legacy_token_aliases(*theme);
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
@@ -617,10 +844,19 @@ std::unique_ptr<Theme> Theme::make_dark() {
     set_metric_token(*theme, "control-height", 34.0F);
     set_metric_token(*theme, "menu-height", 32.0F);
     set_metric_token(*theme, "status-height", 28.0F);
-    set_metric_token(*theme, "radius-sm", 8.0F);
-    set_metric_token(*theme, "radius-md", 10.0F);
-    set_metric_token(*theme, "radius-lg", 12.0F);
-    set_metric_token(*theme, "radius-xl", 14.0F);
+    // GNOME radius roles: generously rounded controls and cards.
+    set_metric_token(*theme, "radius-control", 10.0F);
+    set_metric_token(*theme, "radius-card", 12.0F);
+    set_metric_token(*theme, "radius-popup", 12.0F);
+    set_metric_token(*theme, "radius-selection", 8.0F);
+    set_metric_token(*theme, "radius-segment", 12.0F);
+    set_metric_token(*theme, "radius-image", 14.0F);
+    set_metric_token(*theme, "radius-image-content", 12.0F);
+    set_metric_token(*theme, "padding-control-x", 16.0F);
+    set_metric_token(*theme, "padding-control-y", 9.0F);
+    set_metric_token(*theme, "control-min-width", 82.0F);
+    set_metric_token(*theme, "segment-track-padding", 4.0F);
+    install_shared_metric_tokens(*theme);
 
     install_shared_rules(*theme);
 
@@ -645,8 +881,8 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
         set_color_token(*theme, "surface-raised", 50, 50, 50);
         set_color_token(*theme, "surface-hover", 55, 55, 55);
         set_color_token(*theme, "surface-pressed", 62, 62, 62);
-        set_color_token(*theme, "field-bg", 45, 45, 45);
-        set_color_token(*theme, "field-border", 76, 76, 76);
+        set_color_token(*theme, "surface-field", 45, 45, 45);
+        set_color_token(*theme, "border-field", 76, 76, 76);
         set_color_token(*theme, "border-subtle", 60, 60, 60);
         set_color_token(*theme, "border-strong", 90, 90, 90);
         set_color_token(*theme, "text-primary", 255, 255, 255);
@@ -661,6 +897,9 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
         set_color_token(*theme, "focus-visible", 255, 255, 255);
         set_color_token(*theme, "scrollbar-track", 46, 46, 46);
         set_color_token(*theme, "scrollbar-thumb", 119, 119, 119);
+        // Fluent tooltips follow the theme scheme.
+        set_color_token(*theme, "surface-osd", 44, 44, 44);
+        set_color_token(*theme, "text-osd", 255, 255, 255);
     } else {
         set_color_token(*theme, "window-bg", 243, 243, 243);
         set_color_token(*theme, "surface-panel", 238, 238, 238);
@@ -668,8 +907,8 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
         set_color_token(*theme, "surface-raised", 255, 255, 255);
         set_color_token(*theme, "surface-hover", 234, 234, 234);
         set_color_token(*theme, "surface-pressed", 226, 226, 226);
-        set_color_token(*theme, "field-bg", 255, 255, 255);
-        set_color_token(*theme, "field-border", 209, 209, 209);
+        set_color_token(*theme, "surface-field", 255, 255, 255);
+        set_color_token(*theme, "border-field", 209, 209, 209);
         set_color_token(*theme, "border-subtle", 229, 229, 229);
         set_color_token(*theme, "border-strong", 200, 200, 200);
         set_color_token(*theme, "text-primary", 26, 26, 26);
@@ -684,9 +923,13 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
         set_color_token(*theme, "focus-visible", 26, 26, 26);
         set_color_token(*theme, "scrollbar-track", 236, 236, 236);
         set_color_token(*theme, "scrollbar-thumb", 195, 195, 195);
+        // Fluent tooltips follow the theme scheme.
+        set_color_token(*theme, "surface-osd", 249, 249, 249);
+        set_color_token(*theme, "text-osd", 26, 26, 26);
     }
 
     install_windows_layer_tokens(*theme, dark);
+    install_legacy_token_aliases(*theme);
 
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
@@ -701,67 +944,27 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
     set_metric_token(*theme, "control-height", 32.0F);
     set_metric_token(*theme, "menu-height", 32.0F);
     set_metric_token(*theme, "status-height", 26.0F);
-    // Shared baseline radius scale; the Windows 11 override rules below re-tune control/card
-    // radii to the rounded Fluent geometry.
-    set_metric_token(*theme, "radius-sm", 8.0F);
-    set_metric_token(*theme, "radius-md", 10.0F);
-    set_metric_token(*theme, "radius-lg", 12.0F);
-    set_metric_token(*theme, "radius-xl", 14.0F);
+    // Windows 11 / WinUI radius roles: 4 px control corners, rounded surface
+    // cards and popups — deliberately distinct from the GNOME defaults so the
+    // Windows family no longer clones Linux.
+    set_metric_token(*theme, "radius-control", 4.0F);
+    set_metric_token(*theme, "radius-card", 8.0F);
+    set_metric_token(*theme, "radius-popup", 8.0F);
+    set_metric_token(*theme, "radius-selection", 4.0F);
+    set_metric_token(*theme, "radius-segment", 6.0F);
+    set_metric_token(*theme, "radius-image", 8.0F);
+    set_metric_token(*theme, "radius-image-content", 6.0F);
+    set_metric_token(*theme, "padding-control-x", 12.0F);
+    set_metric_token(*theme, "padding-control-y", 5.0F);
+    set_metric_token(*theme, "control-min-width", 90.0F);
+    set_metric_token(*theme, "segment-track-padding", 2.0F);
+    install_shared_metric_tokens(*theme);
 
     install_shared_rules(*theme);
-    install_windows_overrides(*theme);
+    install_windows_shell_rules(*theme);
 
     return theme;
 }
-
-namespace {
-
-void install_windows_10_overrides(Theme& theme) {
-    // Windows 10 control geometry: near-square corners and the same 32 px control
-    // height, distinct from the rounded Windows 11 family.
-    add_rule(theme,
-             {"button"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{2.0F}},
-              {"min-height", StyleValue{32.0F}},
-              {"min-width", StyleValue{90.0F}},
-              {"padding-x", StyleValue{12.0F}},
-              {"padding-y", StyleValue{5.0F}}});
-    add_rule(theme,
-             {"text-field"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{2.0F}}, {"min-height", StyleValue{32.0F}}});
-    add_rule(theme,
-             {"combo-box"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{2.0F}},
-              {"popup-radius", StyleValue{2.0F}},
-              {"selection-radius", StyleValue{0.0F}},
-              {"min-height", StyleValue{32.0F}}});
-    add_rule(theme,
-             {"segmented-control"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{2.0F}},
-              {"selection-radius", StyleValue{0.0F}},
-              {"track-padding", StyleValue{2.0F}},
-              {"min-height", StyleValue{32.0F}}});
-    add_rule(theme, {"card"}, StateFlags::None, {{"corner-radius", StyleValue{2.0F}}});
-    add_rule(theme,
-             {"image-view"},
-             StateFlags::None,
-             {{"corner-radius", StyleValue{2.0F}}, {"content-radius", StyleValue{0.0F}}});
-
-    add_rule(theme,
-             {"menu-bar"},
-             StateFlags::None,
-             {{"background", StyleValue{std::string("layer-command-bg")}}});
-    add_rule(theme,
-             {"status-bar"},
-             StateFlags::None,
-             {{"background", StyleValue{std::string("layer-status-bg")}}});
-}
-
-} // namespace
 
 std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
     const bool dark = color_scheme == ColorScheme::Dark;
@@ -775,8 +978,8 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
         set_color_token(*theme, "surface-raised", 51, 51, 51);
         set_color_token(*theme, "surface-hover", 60, 60, 60);
         set_color_token(*theme, "surface-pressed", 68, 68, 68);
-        set_color_token(*theme, "field-bg", 45, 45, 45);
-        set_color_token(*theme, "field-border", 100, 100, 100);
+        set_color_token(*theme, "surface-field", 45, 45, 45);
+        set_color_token(*theme, "border-field", 100, 100, 100);
         set_color_token(*theme, "border-subtle", 61, 61, 61);
         set_color_token(*theme, "border-strong", 92, 92, 92);
         set_color_token(*theme, "text-primary", 255, 255, 255);
@@ -791,6 +994,9 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
         set_color_token(*theme, "focus-visible", 255, 255, 255);
         set_color_token(*theme, "scrollbar-track", 46, 46, 46);
         set_color_token(*theme, "scrollbar-thumb", 104, 104, 104);
+        // Classic tooltips follow the theme scheme.
+        set_color_token(*theme, "surface-osd", 43, 43, 43);
+        set_color_token(*theme, "text-osd", 255, 255, 255);
     } else {
         set_color_token(*theme, "window-bg", 255, 255, 255);
         set_color_token(*theme, "surface-panel", 242, 242, 242);
@@ -798,8 +1004,8 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
         set_color_token(*theme, "surface-raised", 251, 251, 251);
         set_color_token(*theme, "surface-hover", 240, 240, 240);
         set_color_token(*theme, "surface-pressed", 224, 224, 224);
-        set_color_token(*theme, "field-bg", 255, 255, 255);
-        set_color_token(*theme, "field-border", 138, 138, 138);
+        set_color_token(*theme, "surface-field", 255, 255, 255);
+        set_color_token(*theme, "border-field", 138, 138, 138);
         set_color_token(*theme, "border-subtle", 213, 213, 213);
         set_color_token(*theme, "border-strong", 160, 160, 160);
         set_color_token(*theme, "text-primary", 0, 0, 0);
@@ -814,9 +1020,13 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
         set_color_token(*theme, "focus-visible", 0, 0, 0);
         set_color_token(*theme, "scrollbar-track", 240, 240, 240);
         set_color_token(*theme, "scrollbar-thumb", 205, 205, 205);
+        // Classic tooltips follow the theme scheme.
+        set_color_token(*theme, "surface-osd", 255, 255, 255);
+        set_color_token(*theme, "text-osd", 0, 0, 0);
     }
 
     install_windows_layer_tokens(*theme, dark);
+    install_legacy_token_aliases(*theme);
 
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
@@ -831,15 +1041,23 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
     set_metric_token(*theme, "control-height", 32.0F);
     set_metric_token(*theme, "menu-height", 28.0F);
     set_metric_token(*theme, "status-height", 24.0F);
-    // Shared baseline radius scale; the Windows 10 override rules below re-tune control/card
-    // radii to the squared classic geometry.
-    set_metric_token(*theme, "radius-sm", 8.0F);
-    set_metric_token(*theme, "radius-md", 10.0F);
-    set_metric_token(*theme, "radius-lg", 12.0F);
-    set_metric_token(*theme, "radius-xl", 14.0F);
+    // Windows 10 radius roles: the near-square classic geometry, distinct from
+    // the rounded Windows 11 family.
+    set_metric_token(*theme, "radius-control", 2.0F);
+    set_metric_token(*theme, "radius-card", 2.0F);
+    set_metric_token(*theme, "radius-popup", 2.0F);
+    set_metric_token(*theme, "radius-selection", 0.0F);
+    set_metric_token(*theme, "radius-segment", 2.0F);
+    set_metric_token(*theme, "radius-image", 2.0F);
+    set_metric_token(*theme, "radius-image-content", 0.0F);
+    set_metric_token(*theme, "padding-control-x", 12.0F);
+    set_metric_token(*theme, "padding-control-y", 5.0F);
+    set_metric_token(*theme, "control-min-width", 90.0F);
+    set_metric_token(*theme, "segment-track-padding", 2.0F);
+    install_shared_metric_tokens(*theme);
 
     install_shared_rules(*theme);
-    install_windows_10_overrides(*theme);
+    install_windows_shell_rules(*theme);
 
     return theme;
 }
@@ -856,8 +1074,8 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
         set_color_token(*theme, "surface-raised", 52, 52, 52);
         set_color_token(*theme, "surface-hover", 62, 62, 62);
         set_color_token(*theme, "surface-pressed", 72, 72, 72);
-        set_color_token(*theme, "field-bg", 38, 38, 38);
-        set_color_token(*theme, "field-border", 70, 70, 70);
+        set_color_token(*theme, "surface-field", 38, 38, 38);
+        set_color_token(*theme, "border-field", 70, 70, 70);
         set_color_token(*theme, "border-subtle", 60, 60, 60);
         set_color_token(*theme, "border-strong", 85, 85, 85);
         set_color_token(*theme, "text-primary", 255, 255, 255);
@@ -871,6 +1089,9 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
         set_color_token(*theme, "focus-ring", 10, 132, 255);
         set_color_token(*theme, "scrollbar-track", 50, 50, 50);
         set_color_token(*theme, "scrollbar-thumb", 100, 100, 100);
+        // AppKit tooltips follow the theme scheme.
+        set_color_token(*theme, "surface-osd", 58, 58, 58, 0.98F);
+        set_color_token(*theme, "text-osd", 255, 255, 255);
     } else {
         set_color_token(*theme, "window-bg", 246, 246, 246);
         set_color_token(*theme, "surface-panel", 244, 244, 244);
@@ -878,8 +1099,8 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
         set_color_token(*theme, "surface-raised", 255, 255, 255);
         set_color_token(*theme, "surface-hover", 232, 232, 232);
         set_color_token(*theme, "surface-pressed", 220, 220, 220);
-        set_color_token(*theme, "field-bg", 255, 255, 255);
-        set_color_token(*theme, "field-border", 210, 210, 210);
+        set_color_token(*theme, "surface-field", 255, 255, 255);
+        set_color_token(*theme, "border-field", 210, 210, 210);
         set_color_token(*theme, "border-subtle", 218, 218, 218);
         set_color_token(*theme, "border-strong", 190, 190, 190);
         set_color_token(*theme, "text-primary", 0, 0, 0);
@@ -893,8 +1114,12 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
         set_color_token(*theme, "focus-ring", 0, 122, 255);
         set_color_token(*theme, "scrollbar-track", 230, 230, 230);
         set_color_token(*theme, "scrollbar-thumb", 170, 170, 170);
+        // AppKit tooltips follow the theme scheme.
+        set_color_token(*theme, "surface-osd", 246, 246, 246, 0.98F);
+        set_color_token(*theme, "text-osd", 0, 0, 0);
     }
 
+    install_legacy_token_aliases(*theme);
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
@@ -908,14 +1133,22 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
     set_metric_token(*theme, "control-height", 28.0F);
     set_metric_token(*theme, "menu-height", 28.0F);
     set_metric_token(*theme, "status-height", 24.0F);
-    // Shared baseline radius scale; the macOS override rules below re-tune control/card radii.
-    set_metric_token(*theme, "radius-sm", 8.0F);
-    set_metric_token(*theme, "radius-md", 10.0F);
-    set_metric_token(*theme, "radius-lg", 12.0F);
-    set_metric_token(*theme, "radius-xl", 14.0F);
+    // macOS radius roles: compact AppKit-style control rounding with softer
+    // cards and popups.
+    set_metric_token(*theme, "radius-control", 6.0F);
+    set_metric_token(*theme, "radius-card", 10.0F);
+    set_metric_token(*theme, "radius-popup", 10.0F);
+    set_metric_token(*theme, "radius-selection", 6.0F);
+    set_metric_token(*theme, "radius-segment", 8.0F);
+    set_metric_token(*theme, "radius-image", 10.0F);
+    set_metric_token(*theme, "radius-image-content", 8.0F);
+    set_metric_token(*theme, "padding-control-x", 12.0F);
+    set_metric_token(*theme, "padding-control-y", 4.0F);
+    set_metric_token(*theme, "control-min-width", 82.0F);
+    set_metric_token(*theme, "segment-track-padding", 2.0F);
+    install_shared_metric_tokens(*theme);
 
     install_shared_rules(*theme);
-    install_macos_overrides(*theme);
 
     return theme;
 }

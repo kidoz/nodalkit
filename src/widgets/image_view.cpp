@@ -201,8 +201,7 @@ void ImageView::snapshot(SnapshotContext& ctx) const {
                          corner_radius + 1.0F);
     ctx.add_rounded_rect(
         a, theme_color("background", Color{0.95F, 0.96F, 0.98F, 1.0F}), corner_radius);
-    ctx.add_border(
-        a, theme_color("border-color", Color{0.86F, 0.88F, 0.91F, 1.0F}), 1.0F, corner_radius);
+    ctx.add_border(a, theme_color("border-color"), 1.0F, corner_radius);
 
     Rect inner = {
         a.x + 1.0F,

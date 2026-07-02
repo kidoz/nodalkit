@@ -208,7 +208,7 @@ void RadioButton::snapshot(SnapshotContext& ctx) const {
                               circle_rect.y - 2.0F,
                               circle_rect.width + 4.0F,
                               circle_rect.height + 4.0F},
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
+                             theme_color("focus-ring-color"),
                              radius + 2.0F);
     }
 
@@ -234,10 +234,7 @@ void RadioButton::snapshot(SnapshotContext& ctx) const {
     const auto measured = measure_text(impl_->label, font);
     const float text_x = a.x + circle_size + gap;
     const float text_y = a.y + std::max(0.0F, (a.height - measured.height) * 0.5F);
-    ctx.add_text({text_x, text_y},
-                 std::string(impl_->label),
-                 theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F}),
-                 font);
+    ctx.add_text({text_x, text_y}, std::string(impl_->label), theme_color("text-color"), font);
 }
 
 } // namespace nk

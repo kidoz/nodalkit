@@ -308,11 +308,11 @@ void ContextMenu::snapshot(SnapshotContext& ctx) const {
         });
 
     const float popup_radius = theme_number("popup-radius", 12.0F);
-    const auto popup_bg = theme_color("popup-background", Color{1.0F, 1.0F, 1.0F, 1.0F});
-    const auto popup_border = theme_color("popup-border-color", Color{0.8F, 0.82F, 0.86F, 1.0F});
-    const auto hover_bg = theme_color("hover-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
-    const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
-    const auto separator_color = theme_color("separator-color", Color{0.84F, 0.86F, 0.9F, 1.0F});
+    const auto popup_bg = theme_color("popup-background");
+    const auto popup_border = theme_color("popup-border-color");
+    const auto hover_bg = theme_color("hover-background");
+    const auto text_color = theme_color("text-color");
+    const auto separator_color = theme_color("separator-color");
 
     ctx.push_overlay_container(geometry.bounds);
 

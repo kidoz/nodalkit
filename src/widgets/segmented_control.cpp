@@ -260,16 +260,13 @@ void SegmentedControl::snapshot(SnapshotContext& ctx) const {
     auto body = a;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 
     ctx.add_rounded_rect(
         body, theme_color("background", Color{0.95F, 0.96F, 0.98F, 1.0F}), corner_radius);
-    ctx.add_border(
-        body, theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F}), 1.0F, corner_radius);
+    ctx.add_border(body, theme_color("border-color"), 1.0F, corner_radius);
 
     if (impl_->segments.empty()) {
         return;
@@ -296,16 +293,12 @@ void SegmentedControl::snapshot(SnapshotContext& ctx) const {
             ctx.add_rounded_rect(fill_rect,
                                  theme_color("selected-background", Color{1.0F, 1.0F, 1.0F, 1.0F}),
                                  selection_radius);
-            ctx.add_border(
-                fill_rect,
-                theme_color("selected-border-color",
-                            theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F})),
-                1.0F,
-                selection_radius);
+            ctx.add_border(fill_rect,
+                           theme_color("selected-border-color", theme_color("border-color")),
+                           1.0F,
+                           selection_radius);
         } else if (armed) {
-            ctx.add_rounded_rect(fill_rect,
-                                 theme_color("pressed-background", Color{0.9F, 0.92F, 0.95F, 1.0F}),
-                                 selection_radius);
+            ctx.add_rounded_rect(fill_rect, theme_color("pressed-background"), selection_radius);
         } else if (hovered) {
             ctx.add_rounded_rect(fill_rect,
                                  theme_color("hover-background", Color{0.97F, 0.98F, 0.99F, 1.0F}),
@@ -320,7 +313,7 @@ void SegmentedControl::snapshot(SnapshotContext& ctx) const {
                                 body.y + separator_inset,
                                 1.0F,
                                 std::max(0.0F, body.height - separator_inset * 2.0F)},
-                               theme_color("separator-color", Color{0.84F, 0.86F, 0.9F, 1.0F}));
+                               theme_color("separator-color"));
         }
 
         const auto measured = measure_text(impl_->segments[index], font);
@@ -330,7 +323,7 @@ void SegmentedControl::snapshot(SnapshotContext& ctx) const {
             segment_rect.y + std::max(0.0F, (segment_rect.height - measured.height) * 0.5F);
         ctx.add_text({text_x, text_y},
                      impl_->segments[index],
-                     selected ? theme_color("selected-text-color", Color{0.1F, 0.1F, 0.12F, 1.0F})
+                     selected ? theme_color("selected-text-color")
                               : theme_color("text-color", Color{0.38F, 0.4F, 0.45F, 1.0F}),
                      font);
     }

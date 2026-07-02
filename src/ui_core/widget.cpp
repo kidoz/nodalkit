@@ -1,10 +1,12 @@
 #include <algorithm>
+#include <cassert>
 #include <nk/controllers/event_controller.h>
 #include <nk/layout/layout_manager.h>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/style/theme.h>
+#include <nk/style/theme_defaults.h>
 #include <nk/text/font.h>
 #include <nk/text/text_shaper.h>
 #include <nk/ui_core/widget.h>
@@ -14,11 +16,14 @@ namespace nk {
 namespace {
 
 /// Try widget-level rule resolution only (no global token fallback).
+/// `min_specificity` = 1 skips the selector-less base defaults so a parent's
+/// class-specific value can be inherited in preference to the generic default.
 const StyleValue* resolve_widget_rule(const Theme& theme,
                                       const std::vector<std::string>& classes,
                                       StateFlags state,
-                                      std::string_view property_name) {
-    const auto* value = theme.resolve({}, classes, state, property_name);
+                                      std::string_view property_name,
+                                      int min_specificity = 0) {
+    const auto* value = theme.resolve({}, classes, state, property_name, min_specificity);
 
     // Allow properties to alias semantic tokens by string name.
     int depth = 0;
@@ -685,18 +690,25 @@ Color Widget::theme_color(std::string_view property_name, Color fallback) const 
         return fallback;
     }
 
-    // 1. Try this widget's own rules.
-    const auto* value =
-        resolve_widget_rule(*theme, impl_->style_classes, impl_->state, property_name);
+    // 1. Try this widget's own rules. For inheritable properties the
+    //    selector-less base defaults are deferred so a parent's class-specific
+    //    value can still cascade in preference to the generic default.
+    const bool inheritable = is_inheritable_property(property_name);
+    const auto* value = resolve_widget_rule(
+        *theme, impl_->style_classes, impl_->state, property_name, inheritable ? 1 : 0);
 
-    // 2. Inheritable properties cascade from parent to child.
-    if (value == nullptr && is_inheritable_property(property_name)) {
+    // 2. Inheritable properties cascade from parent to child, then fall back
+    //    to this widget's base-rule default.
+    if (value == nullptr && inheritable) {
         for (const Widget* p = parent(); p != nullptr; p = p->parent()) {
             value = resolve_widget_rule(
-                *theme, p->impl_->style_classes, p->impl_->state, property_name);
+                *theme, p->impl_->style_classes, p->impl_->state, property_name, 1);
             if (value != nullptr) {
                 break;
             }
+        }
+        if (value == nullptr) {
+            value = resolve_widget_rule(*theme, impl_->style_classes, impl_->state, property_name);
         }
     }
 
@@ -716,24 +728,57 @@ Color Widget::theme_color(std::string_view property_name, Color fallback) const 
     return fallback;
 }
 
+Color Widget::theme_color(std::string_view property_name) const {
+    for (const auto& entry : ThemeColorDefaults) {
+        if (entry.property != property_name) {
+            continue;
+        }
+        // Prefer the entry's semantic token resolved against the active theme,
+        // so a property no rule covers still follows the current palette
+        // (dark, high contrast, accent override). The constexpr light value is
+        // only the last-resort safety net for a theme missing the token.
+        if (auto theme = Theme::active()) {
+            const StyleValue* value = theme->token(entry.token);
+            int depth = 0;
+            while (value != nullptr && std::holds_alternative<std::string>(*value) && depth < 4) {
+                value = theme->token(std::get<std::string>(*value));
+                ++depth;
+            }
+            if (value != nullptr && std::holds_alternative<Color>(*value)) {
+                return theme_color(property_name, std::get<Color>(*value));
+            }
+        }
+        return theme_color(property_name, entry.value);
+    }
+    assert(false && "property is missing from ThemeColorDefaults");
+    return theme_color(property_name, Color{});
+}
+
 float Widget::theme_number(std::string_view property_name, float fallback) const {
     auto theme = Theme::active();
     if (!theme) {
         return fallback;
     }
 
-    // 1. Try this widget's own rules.
-    const auto* value =
-        resolve_widget_rule(*theme, impl_->style_classes, impl_->state, property_name);
+    // 1. Try this widget's own rules. For inheritable properties the
+    //    selector-less base defaults are deferred so a parent's class-specific
+    //    value can still cascade in preference to the generic default.
+    const bool inheritable = is_inheritable_property(property_name);
+    const auto* value = resolve_widget_rule(
+        *theme, impl_->style_classes, impl_->state, property_name, inheritable ? 1 : 0);
 
-    // 2. Inheritable properties cascade from parent to child.
-    if (value == nullptr && is_inheritable_property(property_name)) {
+    // 2. Inheritable properties cascade from parent to child, then fall back
+    //    to this widget's base-rule default.
+    if (value == nullptr && inheritable) {
         for (const Widget* p = parent(); p != nullptr; p = p->parent()) {
             value = resolve_widget_rule(
-                *theme, p->impl_->style_classes, p->impl_->state, property_name);
+                *theme, p->impl_->style_classes, p->impl_->state, property_name, 1);
             if (value != nullptr) {
                 break;
             }
+        }
+        if (value == nullptr) {
+            value = resolve_widget_rule(*theme, impl_->style_classes, impl_->state, property_name);
         }
     }
 

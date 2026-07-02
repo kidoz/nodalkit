@@ -942,9 +942,7 @@ void TextField::snapshot(SnapshotContext& ctx) const {
     const float corner_radius = theme_number("corner-radius", 10.0F);
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
     }
 
     ctx.add_rounded_rect(
@@ -953,9 +951,8 @@ void TextField::snapshot(SnapshotContext& ctx) const {
         body, theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}), 1.0F, corner_radius);
 
     const auto display_text = composed_display_text();
-    Color text_color = impl_->text.empty()
-                           ? theme_color("placeholder-color", Color{0.55F, 0.58F, 0.62F, 1.0F})
-                           : theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+    Color text_color =
+        impl_->text.empty() ? theme_color("placeholder-color") : theme_color("text-color");
     if (!display_text.empty()) {
         const auto font = text_field_font();
         const auto measured = measure_text(display_text, font);

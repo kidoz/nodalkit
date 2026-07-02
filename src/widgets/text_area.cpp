@@ -312,9 +312,7 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
 
     auto body = a;
     if (has_flag(state_flags(), StateFlags::Focused)) {
-        ctx.add_rounded_rect(a,
-                             theme_color("focus-ring-color", Color{0.3F, 0.56F, 0.9F, 1.0F}),
-                             corner_radius + 2.0F);
+        ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
         body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
     }
 
@@ -333,7 +331,7 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
 
     if (impl_->text.empty() && !impl_->placeholder.empty()) {
         // Draw placeholder.
-        const auto ph_color = theme_color("placeholder-color", Color{0.55F, 0.58F, 0.62F, 1.0F});
+        const auto ph_color = theme_color("placeholder-color");
         ctx.add_text({text_area.x, text_area.y - impl_->scroll_offset},
                      std::string(impl_->placeholder),
                      ph_color,
@@ -341,7 +339,7 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
     } else {
         // Draw text lines.
         const auto lines = split_lines(impl_->text);
-        const auto text_color = theme_color("text-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+        const auto text_color = theme_color("text-color");
         float y_offset = text_area.y - impl_->scroll_offset;
         for (const auto& line : lines) {
             if (y_offset + line_height > body.y && y_offset < body.bottom()) {
@@ -352,7 +350,7 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
 
         // Draw cursor if focused.
         if (impl_->focused_state) {
-            const auto cursor_color = theme_color("caret-color", Color{0.1F, 0.1F, 0.1F, 1.0F});
+            const auto cursor_color = theme_color("caret-color");
             // Find cursor line and column.
             std::size_t pos = 0;
             std::size_t cursor_line = 0;

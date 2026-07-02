@@ -97,8 +97,7 @@ void Toolbar::snapshot(SnapshotContext& ctx) const {
     ctx.add_color_rect(a, theme_color("background", Color{0.95F, 0.96F, 0.98F, 1.0F}));
 
     // Bottom border
-    ctx.add_color_rect({a.x, a.y + a.height - 1.0F, a.width, 1.0F},
-                       theme_color("border-color", Color{0.82F, 0.84F, 0.88F, 1.0F}));
+    ctx.add_color_rect({a.x, a.y + a.height - 1.0F, a.width, 1.0F}, theme_color("border-color"));
 
     // Children are rendered by the base class
     Widget::snapshot(ctx);
