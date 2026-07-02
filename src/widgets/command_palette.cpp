@@ -442,8 +442,13 @@ void CommandPalette::snapshot(SnapshotContext& ctx) const {
                                std::max(0.0F, row_rect.width - 20.0F),
                                row_rect.height},
                               5.0F);
-        ctx.add_text(
-            {row_rect.x + 10.0F, row_rect.y + 7.0F}, command.title, command_text, title_font);
+        const float row_text_width = std::max(0.0F, row_rect.width - 20.0F);
+        add_text_elided(ctx,
+                        {row_rect.x + 10.0F, row_rect.y + 7.0F},
+                        command.title,
+                        row_text_width,
+                        command_text,
+                        title_font);
         std::string detail;
         if (!command.category.empty()) {
             detail += command.category;
@@ -461,8 +466,12 @@ void CommandPalette::snapshot(SnapshotContext& ctx) const {
             detail += "Disabled";
         }
         if (!detail.empty()) {
-            ctx.add_text(
-                {row_rect.x + 10.0F, row_rect.y + 26.0F}, detail, detail_color, detail_font);
+            add_text_elided(ctx,
+                            {row_rect.x + 10.0F, row_rect.y + 26.0F},
+                            detail,
+                            row_text_width,
+                            detail_color,
+                            detail_font);
         }
         ctx.pop_container();
         ctx.add_color_rect(

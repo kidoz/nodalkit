@@ -290,6 +290,27 @@ protected:
     [[nodiscard]] Size
     measure_text_wrapped(std::string_view text, const FontDescriptor& font, float max_width) const;
 
+    /// Draw text at `origin`, replacing the overflowing tail with an ellipsis
+    /// when it is wider than `max_width`. Text must never paint past its
+    /// widget's bounds; use this instead of a raw `add_text` wherever the
+    /// available width is not derived from the measured text.
+    void add_text_elided(SnapshotContext& ctx,
+                         Point origin,
+                         std::string_view text,
+                         float max_width,
+                         Color color,
+                         const FontDescriptor& font) const;
+
+    /// Overload for call sites that already measured the text; skips the
+    /// extra measurement when the text fits.
+    void add_text_elided(SnapshotContext& ctx,
+                         Point origin,
+                         std::string_view text,
+                         Size measured,
+                         float max_width,
+                         Color color,
+                         const FontDescriptor& font) const;
+
     /// Record a text-measure hotspot on this widget for the current frame.
     void note_text_measure_for_diagnostics() const;
 

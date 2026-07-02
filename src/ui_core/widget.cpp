@@ -945,6 +945,81 @@ Size Widget::measure_text_wrapped(std::string_view text,
     return {std::min(max_width, length * font.size * 0.55F), font.size * 1.35F * 2.0F};
 }
 
+void Widget::add_text_elided(SnapshotContext& ctx,
+                             Point origin,
+                             std::string_view text,
+                             float max_width,
+                             Color color,
+                             const FontDescriptor& font) const {
+    if (text.empty() || max_width <= 0.0F) {
+        return;
+    }
+    // No glyph advances more than one em per byte, so short runs are drawn
+    // without measuring at all.
+    if (static_cast<float>(text.size()) * font.size <= max_width) {
+        ctx.add_text(origin, std::string(text), color, font);
+        return;
+    }
+    add_text_elided(ctx, origin, text, measure_text(text, font), max_width, color, font);
+}
+
+void Widget::add_text_elided(SnapshotContext& ctx,
+                             Point origin,
+                             std::string_view text,
+                             Size measured,
+                             float max_width,
+                             Color color,
+                             const FontDescriptor& font) const {
+    if (text.empty() || max_width <= 0.0F) {
+        return;
+    }
+    if (measured.width <= max_width) {
+        ctx.add_text(origin, std::string(text), color, font);
+        return;
+    }
+
+    static constexpr std::string_view kEllipsis = "…";
+
+    // Byte offsets where UTF-8 code points start, so truncation never splits
+    // a multi-byte sequence.
+    std::vector<std::size_t> starts;
+    starts.reserve(text.size() + 1);
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        if ((static_cast<unsigned char>(text[i]) & 0xC0U) != 0x80U) {
+            starts.push_back(i);
+        }
+    }
+    starts.push_back(text.size());
+
+    const auto candidate_for = [&](std::size_t kept_chars) {
+        auto prefix = text.substr(0, starts[kept_chars]);
+        while (!prefix.empty() && prefix.back() == ' ') {
+            prefix.remove_suffix(1);
+        }
+        std::string candidate(prefix);
+        candidate += kEllipsis;
+        return candidate;
+    };
+
+    // Binary search for the longest prefix whose "prefix…" still fits.
+    std::size_t low = 0;
+    std::size_t high = starts.size() - 1;
+    while (low < high) {
+        const std::size_t mid = (low + high + 1) / 2;
+        if (measure_text(candidate_for(mid), font).width <= max_width) {
+            low = mid;
+        } else {
+            high = mid - 1;
+        }
+    }
+
+    const auto elided = candidate_for(low);
+    if (low == 0 && measure_text(elided, font).width > max_width) {
+        return;
+    }
+    ctx.add_text(origin, elided, color, font);
+}
+
 void Widget::note_text_measure_for_diagnostics() const {
     ++impl_->debug_hotspot_counters.text_measure_count;
 }

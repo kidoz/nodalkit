@@ -129,9 +129,15 @@ void Button::snapshot(SnapshotContext& ctx) const {
 
     const auto font = button_font();
     const auto measured = measure_text(label_, font);
-    const float text_x = body.x + std::max(0.0F, (body.width - measured.width) * 0.5F);
+    // When layout under-allocates the button, elide the label instead of
+    // painting past the body.
+    const float label_inset = theme_number("padding-x", 16.0F) * 0.5F;
+    const float max_label_width = std::max(0.0F, body.width - (label_inset * 2.0F));
+    const float label_width = std::min(measured.width, max_label_width);
+    const float text_x = body.x + std::max(label_inset, (body.width - label_width) * 0.5F);
     const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
-    ctx.add_text({text_x, text_y}, std::string(label_), theme_color("text-color"), font);
+    add_text_elided(
+        ctx, {text_x, text_y}, label_, measured, max_label_width, theme_color("text-color"), font);
 }
 
 } // namespace nk

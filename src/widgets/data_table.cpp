@@ -619,7 +619,14 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
         const auto& column = impl_->columns[column_index];
         const float width = std::max(1.0F, column.width);
         const Rect cell = {x, header.y, width, header.height};
-        ctx.add_text({cell.x + 10.0F, cell.y + 8.0F}, column.title, muted_text, header_font);
+        const bool sorted = impl_->sort_column && *impl_->sort_column == column_index;
+        const float title_width = std::max(0.0F, width - 10.0F - (sorted ? 22.0F : 12.0F));
+        add_text_elided(ctx,
+                        {cell.x + 10.0F, cell.y + 8.0F},
+                        column.title,
+                        title_width,
+                        muted_text,
+                        header_font);
         if (impl_->sort_column && *impl_->sort_column == column_index) {
             const float arrow_x = cell.right() - 18.0F;
             const float arrow_y = cell.y + 11.0F;
@@ -669,10 +676,13 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
             for (const auto& column : impl_->columns) {
                 const float width = std::max(1.0F, column.width);
                 const auto text = cell_text(column, *impl_->model, source_row);
-                ctx.add_text({cell_x + 10.0F, y + 7.0F},
-                             text,
-                             selected ? selected_text : text_color,
-                             cell_font);
+                // Keep a trailing gap to the next column and elide overflow.
+                add_text_elided(ctx,
+                                {cell_x + 10.0F, y + 7.0F},
+                                text,
+                                std::max(0.0F, width - 20.0F),
+                                selected ? selected_text : text_color,
+                                cell_font);
                 cell_x += width;
             }
             ctx.add_color_rect({rows.x, y + impl_->row_height - 1.0F, rows.width, 1.0F}, separator);

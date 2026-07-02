@@ -6,9 +6,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
-#include <string>
-
 #include <nk/foundation/types.h>
+#include <nk/render/render_node.h>
+#include <nk/render/snapshot_context.h>
+#include <nk/widgets/button.h>
 #include <nk/widgets/calendar.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/color_well.h>
@@ -18,6 +19,7 @@
 #include <nk/widgets/spin_button.h>
 #include <nk/widgets/switch_widget.h>
 #include <nk/widgets/text_area.h>
+#include <string>
 
 TEST_CASE("CheckBox toggles state and emits on change only", "[widgets][check_box]") {
     auto check = nk::CheckBox::create("Enable");
@@ -153,7 +155,8 @@ TEST_CASE("SpinButton clamps to range and reports precision", "[widgets][spin_bu
     conn.disconnect();
 }
 
-TEST_CASE("SearchField round-trips text and emits on programmatic change", "[widgets][search_field]") {
+TEST_CASE("SearchField round-trips text and emits on programmatic change",
+          "[widgets][search_field]") {
     auto field = nk::SearchField::create("Search files");
     REQUIRE(field->placeholder() == "Search files");
     REQUIRE(field->text().empty());
@@ -226,4 +229,65 @@ TEST_CASE("Calendar selects dates and navigates months with wraparound", "[widge
     cal->go_previous_month();
     REQUIRE(cal->displayed_year() == 2025);
     REQUIRE(cal->displayed_month() == 12);
+}
+
+namespace {
+
+class SnapshotButton : public nk::Button {
+public:
+    static std::shared_ptr<SnapshotButton> create(std::string label) {
+        return std::shared_ptr<SnapshotButton>(new SnapshotButton(std::move(label)));
+    }
+
+    void snapshot_for_test(nk::SnapshotContext& ctx) const { snapshot(ctx); }
+
+private:
+    explicit SnapshotButton(std::string label) : nk::Button(std::move(label)) {}
+};
+
+const nk::TextNode* find_text_node(const nk::RenderNode& node) {
+    if (node.kind() == nk::RenderNodeKind::Text) {
+        return static_cast<const nk::TextNode*>(&node);
+    }
+    for (const auto& child : node.children()) {
+        if (child) {
+            if (const auto* found = find_text_node(*child)) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("Button labels elide instead of painting past the body", "[widgets][button]") {
+    const std::string label = "Show Preferences Sheet";
+
+    SECTION("an under-allocated button truncates with an ellipsis") {
+        auto button = SnapshotButton::create(label);
+        button->allocate({0.0F, 0.0F, 80.0F, 36.0F});
+        nk::SnapshotContext ctx;
+        button->snapshot_for_test(ctx);
+
+        const auto root = ctx.take_root();
+        REQUIRE(root != nullptr);
+        const auto* text = find_text_node(*root);
+        REQUIRE(text != nullptr);
+        REQUIRE(text->text() != label);
+        REQUIRE(text->text().ends_with("…"));
+    }
+
+    SECTION("a naturally sized button keeps its full label") {
+        auto button = SnapshotButton::create(label);
+        button->allocate({0.0F, 0.0F, 400.0F, 36.0F});
+        nk::SnapshotContext ctx;
+        button->snapshot_for_test(ctx);
+
+        const auto root = ctx.take_root();
+        REQUIRE(root != nullptr);
+        const auto* text = find_text_node(*root);
+        REQUIRE(text != nullptr);
+        REQUIRE(text->text() == label);
+    }
 }
