@@ -719,8 +719,8 @@ TEST_CASE("Dialog OK pointer activation survives caller releasing setup referenc
     {
         auto dialog = nk::Dialog::create("About", "Dialog pointer regression");
         dialog->add_button("OK", nk::DialogResponse::Accept);
-        auto conn = dialog->on_response().connect(
-            [&](nk::DialogResponse value) { response = value; });
+        auto conn =
+            dialog->on_response().connect([&](nk::DialogResponse value) { response = value; });
         (void)conn;
         weak_dialog = dialog;
         dialog->present(window);
@@ -749,8 +749,8 @@ TEST_CASE("Dialog Escape cancellation survives caller releasing setup reference"
         auto dialog = nk::Dialog::create("Confirm", "Dismiss?");
         dialog->add_button("Cancel", nk::DialogResponse::Cancel);
         dialog->add_button("OK", nk::DialogResponse::Accept);
-        auto conn = dialog->on_response().connect(
-            [&](nk::DialogResponse value) { response = value; });
+        auto conn =
+            dialog->on_response().connect([&](nk::DialogResponse value) { response = value; });
         (void)conn;
         weak_dialog = dialog;
         dialog->present(window);
@@ -1099,8 +1099,8 @@ TEST_CASE("Win32 D3D11 dialog geometry presents on the GPU with a full swapchain
     dialog->present(window);
     REQUIRE(app.event_loop().poll());
 
-    const auto snapshot_result =
-        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
+    const auto snapshot_result = nk::parse_render_snapshot_json(
+        window.inspector().dump_selected_frame_render_snapshot_json());
     REQUIRE(snapshot_result);
     const auto* title =
         find_render_snapshot_node(snapshot_result.value(), "Text", "Centered Dialog");
@@ -1764,9 +1764,8 @@ TEST_CASE("Application reports file-dialog capability explicitly", "[app]") {
 
     if (!app.supports_open_file_dialog()) {
         nk::OpenFileDialogResult result = nk::Unexpected(nk::FileDialogError::Unavailable);
-        app.open_file_dialog_async("Open", {}, [&](nk::OpenFileDialogResult r) {
-            result = std::move(r);
-        });
+        app.open_file_dialog_async(
+            "Open", {}, [&](nk::OpenFileDialogResult r) { result = std::move(r); });
         REQUIRE_FALSE(result);
         REQUIRE(result.error() == (app.has_platform_backend() ? nk::FileDialogError::Unsupported
                                                               : nk::FileDialogError::Unavailable));
@@ -1780,9 +1779,7 @@ TEST_CASE("Application reports file-dialog capability explicitly", "[app]") {
                 .suggested_filename = "project.gridphonic",
                 .filters = {"*.gridphonic"},
             },
-            [&](nk::SaveFileDialogResult r) {
-                result = std::move(r);
-            });
+            [&](nk::SaveFileDialogResult r) { result = std::move(r); });
         REQUIRE_FALSE(result);
         REQUIRE(result.error() == (app.has_platform_backend() ? nk::FileDialogError::Unsupported
                                                               : nk::FileDialogError::Unavailable));
@@ -2077,7 +2074,8 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
     window.set_child(root);
     window.present();
     REQUIRE(app.event_loop().poll());
-    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") == std::string::npos);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") ==
+            std::string::npos);
 
     window.dispatch_mouse_event({
         .type = nk::MouseEvent::Type::Press,
@@ -2103,7 +2101,8 @@ TEST_CASE("Window menu popups use partial redraw damage beyond the menu bar boun
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
-    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") != std::string::npos);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Popup Action") !=
+            std::string::npos);
 }
 
 TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds",
@@ -2151,7 +2150,8 @@ TEST_CASE("Window combo popups use partial redraw damage beyond the field bounds
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count > 0);
     REQUIRE(frame.render_hotspot_counters.gpu_estimated_draw_pixel_count <
             frame.render_hotspot_counters.gpu_viewport_pixel_count);
-    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Famicom") != std::string::npos);
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Famicom") !=
+            std::string::npos);
 }
 
 TEST_CASE("ComboBox popup scrolls to keep the highlighted item visible with many items",
@@ -2424,8 +2424,8 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
     centered->present(window);
     REQUIRE(app.event_loop().poll());
 
-    const auto centered_snapshot_result =
-        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
+    const auto centered_snapshot_result = nk::parse_render_snapshot_json(
+        window.inspector().dump_selected_frame_render_snapshot_json());
     REQUIRE(centered_snapshot_result);
     const auto* centered_title =
         find_render_snapshot_node(centered_snapshot_result.value(), "Text", "Centered Dialog");
@@ -2449,8 +2449,8 @@ TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geo
     sheet->present(window);
     REQUIRE(app.event_loop().poll());
 
-    const auto sheet_snapshot_result =
-        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
+    const auto sheet_snapshot_result = nk::parse_render_snapshot_json(
+        window.inspector().dump_selected_frame_render_snapshot_json());
     REQUIRE(sheet_snapshot_result);
     const auto* sheet_title =
         find_render_snapshot_node(sheet_snapshot_result.value(), "Text", "Sheet Dialog");
@@ -2685,8 +2685,8 @@ TEST_CASE("Window captures frame diagnostics and widget debug dumps", "[app][deb
 
     window.set_child(root);
     window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::LayoutBounds |
-                                   nk::DebugOverlayFlags::DirtyWidgets |
-                                   nk::DebugOverlayFlags::FrameHud);
+                                               nk::DebugOverlayFlags::DirtyWidgets |
+                                               nk::DebugOverlayFlags::FrameHud);
     window.present();
 
     REQUIRE(app.event_loop().poll());
@@ -2856,7 +2856,8 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 
     const auto widget_details_json_path =
         std::filesystem::temp_directory_path() / "nodalkit_widget_details.json";
-    REQUIRE(window.inspector().save_selected_widget_details_json_file(widget_details_json_path.string()));
+    REQUIRE(window.inspector().save_selected_widget_details_json_file(
+        widget_details_json_path.string()));
     const auto loaded_selected_widget =
         nk::load_widget_debug_json_file(widget_details_json_path.string());
     REQUIRE(loaded_selected_widget);
@@ -2866,7 +2867,8 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
 
     const auto render_details_path =
         std::filesystem::temp_directory_path() / "nodalkit_render_details.txt";
-    REQUIRE(window.inspector().save_selected_render_node_details_file(render_details_path.string()));
+    REQUIRE(
+        window.inspector().save_selected_render_node_details_file(render_details_path.string()));
     {
         std::ifstream render_in(render_details_path);
         REQUIRE(render_in.is_open());
@@ -3118,8 +3120,8 @@ TEST_CASE("Render snapshots support fixture import and file round-trip", "[app][
     REQUIRE(selected_snapshot.kind == "Container");
     REQUIRE(selected_snapshot != *fixture_snapshot);
 
-    const auto parsed_dump =
-        nk::parse_render_snapshot_json(window.inspector().dump_selected_frame_render_snapshot_json());
+    const auto parsed_dump = nk::parse_render_snapshot_json(
+        window.inspector().dump_selected_frame_render_snapshot_json());
     REQUIRE(parsed_dump);
     REQUIRE(*parsed_dump == selected_snapshot);
 
@@ -3319,20 +3321,24 @@ TEST_CASE("Window cycles inspector presentation modes and only docked shrinks co
     const auto viewport_size = window.size();
     REQUIRE(root->allocation().x == Catch::Approx(0.0F));
     REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
-    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
+    REQUIRE(window.inspector().debug_inspector_presentation() ==
+            nk::DebugInspectorPresentation::Overlay);
 
     window.inspector().set_debug_overlay_flags(nk::DebugOverlayFlags::InspectorPanel);
-    window.inspector().set_debug_inspector_presentation(nk::DebugInspectorPresentation::DockedRight);
+    window.inspector().set_debug_inspector_presentation(
+        nk::DebugInspectorPresentation::DockedRight);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width < viewport_size.width);
-    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
+    REQUIRE(window.inspector().debug_inspector_presentation() ==
+            nk::DebugInspectorPresentation::DockedRight);
 
     window.dispatch_key_event({
         .type = nk::KeyEvent::Type::Press,
         .key = nk::KeyCode::D,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::Detached);
+    REQUIRE(window.inspector().debug_inspector_presentation() ==
+            nk::DebugInspectorPresentation::Detached);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
 
@@ -3341,7 +3347,8 @@ TEST_CASE("Window cycles inspector presentation modes and only docked shrinks co
         .key = nk::KeyCode::D,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::Overlay);
+    REQUIRE(window.inspector().debug_inspector_presentation() ==
+            nk::DebugInspectorPresentation::Overlay);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width == Catch::Approx(viewport_size.width));
 
@@ -3350,7 +3357,8 @@ TEST_CASE("Window cycles inspector presentation modes and only docked shrinks co
         .key = nk::KeyCode::D,
         .modifiers = nk::Modifiers::Ctrl | nk::Modifiers::Shift,
     });
-    REQUIRE(window.inspector().debug_inspector_presentation() == nk::DebugInspectorPresentation::DockedRight);
+    REQUIRE(window.inspector().debug_inspector_presentation() ==
+            nk::DebugInspectorPresentation::DockedRight);
     REQUIRE(app.event_loop().poll());
     REQUIRE(root->allocation().width < viewport_size.width);
 }
@@ -4701,10 +4709,8 @@ TEST_CASE("CommandPalette filters, navigates, and activates enabled commands", "
                                   .subtitle = "Write current file",
                                   .category = "File",
                                   .enabled = false},
-        nk::CommandPaletteCommand{.id = "view.sidebar",
-                                  .title = "Toggle Sidebar",
-                                  .subtitle = "",
-                                  .category = "View"},
+        nk::CommandPaletteCommand{
+            .id = "view.sidebar", .title = "Toggle Sidebar", .subtitle = "", .category = "View"},
     });
     palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
 
@@ -4775,10 +4781,8 @@ TEST_CASE("CommandPalette pointer activation and escape behavior", "[app][comman
 TEST_CASE("CommandPalette exposes accessibility details and empty state", "[app][command]") {
     auto palette = nk::CommandPalette::create();
     palette->set_commands({
-        nk::CommandPaletteCommand{.id = "file.open",
-                                  .title = "Open File",
-                                  .subtitle = "",
-                                  .category = "File"},
+        nk::CommandPaletteCommand{
+            .id = "file.open", .title = "Open File", .subtitle = "", .category = "File"},
         nk::CommandPaletteCommand{.id = "file.save",
                                   .title = "Save File",
                                   .subtitle = "",
@@ -5295,29 +5299,29 @@ TEST_CASE("TextField secures text entry with bullets", "[app][text]") {
 
     field->set_secure_text_entry(true);
     REQUIRE(field->is_secure_text_entry());
-    
+
     nk::SnapshotContext snap;
     field->allocate({0, 0, 100, 30});
     field->on_focus_changed(true);
-    
+
     // Simulate commit
-    nk::TextInputEvent ev{
-        .type = nk::TextInputEvent::Type::Commit,
-        .text = "x"
-    };
+    nk::TextInputEvent ev{.type = nk::TextInputEvent::Type::Commit, .text = "x"};
     field->handle_text_input_event(ev);
     REQUIRE(field->text() == "passwordx");
 }
 
 TEST_CASE("CanvasWidget dispatches on_draw signal", "[app][canvas]") {
     struct TestCanvas : nk::CanvasWidget {
-        static std::shared_ptr<TestCanvas> create() { return std::shared_ptr<TestCanvas>(new TestCanvas()); }
+        static std::shared_ptr<TestCanvas> create() {
+            return std::shared_ptr<TestCanvas>(new TestCanvas());
+        }
+
         void public_snapshot(nk::SnapshotContext& ctx) const { snapshot(ctx); }
     };
 
     auto canvas = TestCanvas::create();
     canvas->allocate({0, 0, 200, 200});
-    
+
     bool drawn = false;
     auto conn = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect bounds) {
         drawn = true;
@@ -5325,31 +5329,81 @@ TEST_CASE("CanvasWidget dispatches on_draw signal", "[app][canvas]") {
         REQUIRE(bounds.height == 200.0F);
         ctx.add_color_rect(bounds, nk::Color::from_rgb(255, 0, 0));
     });
-    
+
     nk::SnapshotContext snap;
     canvas->public_snapshot(snap);
-    
+
     REQUIRE(drawn);
 }
 
 TEST_CASE("SnapshotContext constructs new graph primitives", "[app][render]") {
     nk::SnapshotContext snap;
     snap.add_line({0, 0}, {100, 100}, nk::Color{1, 0, 0, 1}, 2.0F);
-    
+
     nk::Path2D path;
     path.points.push_back({0, 0});
     path.points.push_back({50, 50});
     snap.add_path(path, nk::Color{0, 1, 0, 1}, 1.0F);
-    
+
     nk::Matrix3x2 mat{2.0F, 0.0F, 0.0F, 2.0F, 10.0F, 10.0F};
     snap.push_transform(mat);
     snap.add_color_rect({0, 0, 10, 10}, nk::Color{0, 0, 1, 1});
     snap.pop_transform();
-    
+
     auto root = snap.take_root();
     REQUIRE(root != nullptr);
     REQUIRE(root->children().size() == 2); // 2 containers (content, overlay)
-    
+
     auto* content_root = root->children()[0].get();
     REQUIRE(content_root->children().size() == 3); // line, path, transform
+}
+
+namespace {
+
+/// A widget that can shrink (e.g. wrapping or eliding text): small minimum,
+/// large natural size.
+class ShrinkableWidget : public nk::Widget {
+public:
+    static std::shared_ptr<ShrinkableWidget> create(float min_width, float natural_width) {
+        return std::shared_ptr<ShrinkableWidget>(new ShrinkableWidget(min_width, natural_width));
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {min_width_, 20.0F, natural_width_, 20.0F};
+    }
+
+private:
+    ShrinkableWidget(float min_width, float natural_width)
+        : min_width_(min_width), natural_width_(natural_width) {}
+
+    float min_width_ = 0.0F;
+    float natural_width_ = 0.0F;
+};
+
+} // namespace
+
+TEST_CASE("Box cross-axis minimum tracks child minimums, not naturals", "[app][layout]") {
+    // A vertical box holding a shrinkable child (a wrapping label, an eliding
+    // value) must not turn the child's natural width into a hard minimum:
+    // that starves siblings in enclosing splits (the showcase "Show Sheet"
+    // regression).
+    auto container = TestContainer::create();
+    auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
+    container->set_layout_manager(std::move(layout));
+    container->append(ShrinkableWidget::create(40.0F, 300.0F));
+    container->append(FixedWidget::create(120.0F, 20.0F));
+
+    const auto request = container->measure(nk::Constraints::unbounded());
+    // Natural width follows the widest natural child; minimum follows the
+    // widest *minimum* (the fixed child, since the shrinkable one can shrink).
+    REQUIRE(request.natural_width == Catch::Approx(300.0F));
+    REQUIRE(request.minimum_width == Catch::Approx(120.0F));
+
+    // Horizontal boxes mirror the same rule on their cross axis (height).
+    auto row = TestContainer::create();
+    row->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Horizontal));
+    row->append(ShrinkableWidget::create(40.0F, 300.0F));
+    const auto row_request = row->measure(nk::Constraints::unbounded());
+    REQUIRE(row_request.natural_height == Catch::Approx(20.0F));
+    REQUIRE(row_request.minimum_height == Catch::Approx(20.0F));
 }

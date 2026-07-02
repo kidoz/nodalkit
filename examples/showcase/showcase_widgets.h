@@ -326,10 +326,13 @@ protected:
             cached_size_ = measure_text(text_, font_descriptor());
         }
         const float text_y = a.y + std::max(0.0F, (a.height - cached_size_->height) * 0.5F);
-        ctx.add_text({a.x, text_y},
-                     text_,
-                     theme_color("text-color", nk::Color{0.16F, 0.18F, 0.22F, 1.0F}),
-                     font_descriptor());
+        add_text_elided(ctx,
+                        {a.x, text_y},
+                        text_,
+                        *cached_size_,
+                        a.width,
+                        theme_color("text-color", nk::Color{0.16F, 0.18F, 0.22F, 1.0F}),
+                        font_descriptor());
     }
 
 private:
@@ -1160,9 +1163,16 @@ public:
         const float available_width = std::max(0.0F, allocation.width - spacing_);
         const float min_left = std::min(left_req.minimum_width, available_width);
         const float min_right = std::min(right_req.minimum_width, available_width);
-        const float desired_left = available_width * split_ratio_;
-        const float max_left = std::max(min_left, available_width - min_right);
-        const float left_width = std::clamp(desired_left, min_left, max_left);
+        const float min_sum = min_left + min_right;
+        float left_width = available_width * split_ratio_;
+        if (min_sum > available_width && min_sum > 0.0F) {
+            // Over-constrained: both minimums cannot fit, so squeeze the
+            // columns proportionally instead of starving one side.
+            left_width = available_width * (min_left / min_sum);
+        } else {
+            const float max_left = std::max(min_left, available_width - min_right);
+            left_width = std::clamp(left_width, min_left, max_left);
+        }
         const float right_width = std::max(0.0F, available_width - left_width);
 
         left_->allocate({allocation.x, allocation.y, left_width, allocation.height});

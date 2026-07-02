@@ -13,6 +13,7 @@ struct BoxChild {
     SizeRequest request;
     float minimum_main = 0.0F;
     float natural_main = 0.0F;
+    float minimum_cross = 0.0F;
     float natural_cross = 0.0F;
     SizePolicy main_policy = SizePolicy::Preferred;
     SizePolicy cross_policy = SizePolicy::Preferred;
@@ -67,6 +68,8 @@ collect_box_children(const Widget& widget, const Constraints& constraints, bool 
                 (vertical ? request.minimum_height : request.minimum_width) + margin_main,
             .natural_main =
                 (vertical ? request.natural_height : request.natural_width) + margin_main,
+            .minimum_cross =
+                (vertical ? request.minimum_width : request.minimum_height) + margin_cross,
             .natural_cross =
                 (vertical ? request.natural_width : request.natural_height) + margin_cross,
             .main_policy =
@@ -245,13 +248,16 @@ SizeRequest BoxLayout::measure(const Widget& widget, const Constraints& constrai
         children.empty() ? 0.0F : spacing_ * static_cast<float>(children.size() - 1);
 
     for (const auto& child : children) {
+        // The cross-axis minimum is the child's reported minimum, not its
+        // natural size: a wrapping label's long single line must not become a
+        // hard minimum that starves siblings in an enclosing split or box.
         if (vertical) {
-            result.minimum_width = std::max(result.minimum_width, child.natural_cross);
+            result.minimum_width = std::max(result.minimum_width, child.minimum_cross);
             result.natural_width = std::max(result.natural_width, child.natural_cross);
             result.minimum_height += child.minimum_main;
             result.natural_height += child.natural_main;
         } else {
-            result.minimum_height = std::max(result.minimum_height, child.natural_cross);
+            result.minimum_height = std::max(result.minimum_height, child.minimum_cross);
             result.natural_height = std::max(result.natural_height, child.natural_cross);
             result.minimum_width += child.minimum_main;
             result.natural_width += child.natural_main;
