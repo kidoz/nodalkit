@@ -1,12 +1,14 @@
 #version 450
 
+// Packed 128-byte layout shared with DrawPushConstants in vulkan_renderer.cpp:
+// params.x/.y carry radius/thickness as raw float bits, params.z packs
+// kind | (clip_count << 8), params.w packs viewport width | (height << 16).
 layout(push_constant) uniform PrimitivePushConstants {
     vec4 rect;
     vec4 color;
-    vec4 clip_rects[3];
+    vec4 clip_rects[4];
     vec4 clip_radii;
-    vec4 params0;
-    vec4 viewport;
+    uvec4 params;
 } pc;
 
 layout(location = 0) in vec2 v_pixel_position;
@@ -25,10 +27,10 @@ float rounded_rect_sd(vec2 pixel, vec4 rect, float radius) {
 }
 
 void main() {
-    float radius = pc.params0.x;
-    float thickness = pc.params0.y;
-    uint kind = uint(pc.params0.z);
-    uint clip_count = uint(pc.params0.w);
+    float radius = uintBitsToFloat(pc.params.x);
+    float thickness = uintBitsToFloat(pc.params.y);
+    uint kind = pc.params.z & 0xFFu;
+    uint clip_count = pc.params.z >> 8u;
 
     float coverage = clamp(0.5 - rounded_rect_sd(v_pixel_position, pc.rect, radius), 0.0, 1.0);
     for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {

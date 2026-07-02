@@ -32,6 +32,7 @@ nk_sources = files(
     'src/actions/action.cpp',
     'src/render/render_node.cpp',
     'src/render/renderer.cpp',
+    'src/render/clip_stack.cpp',
     'src/render/image_node.cpp',
     'src/render/snapshot_context.cpp',
     'src/style/theme.cpp',

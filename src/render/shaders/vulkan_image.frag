@@ -2,13 +2,15 @@
 
 layout(set = 0, binding = 0) uniform sampler2D u_texture;
 
+// Packed 128-byte layout shared with DrawPushConstants in vulkan_renderer.cpp:
+// params.x/.y carry radius/thickness as raw float bits, params.z packs
+// kind | (clip_count << 8), params.w packs viewport width | (height << 16).
 layout(push_constant) uniform DrawPushConstants {
     vec4 rect;
     vec4 color;
-    vec4 clip_rects[3];
+    vec4 clip_rects[4];
     vec4 clip_radii;
-    vec4 params0;
-    vec4 viewport;
+    uvec4 params;
 } pc;
 
 layout(location = 0) in vec2 v_tex_coord;
@@ -28,7 +30,7 @@ float rounded_rect_sd(vec2 pixel, vec4 rect, float radius) {
 }
 
 void main() {
-    uint clip_count = uint(pc.params0.w);
+    uint clip_count = pc.params.z >> 8u;
     float coverage = 1.0;
     for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {
         float clip_radius = pc.clip_radii[clip_index];

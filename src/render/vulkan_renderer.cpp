@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,7 @@
 #include <memory>
 #include <nk/foundation/logging.h>
 #include <nk/platform/platform_backend.h>
+#include <nk/render/clip_stack.h>
 #include <nk/render/image_node.h>
 #include <nk/render/render_node.h>
 #include <nk/text/shaped_text.h>
@@ -57,10 +59,7 @@ FontDescriptor renderer_font_for_shape(FontDescriptor font, float scale_factor) 
 #endif
 }
 
-struct ClipRegion {
-    Rect rect{};
-    float radius = 0.0F;
-};
+constexpr std::size_t kMaxClipDepth = 4;
 
 struct PrimitiveCommand {
     Rect rect{};
@@ -68,7 +67,7 @@ struct PrimitiveCommand {
     float radius = 0.0F;
     float thickness = 0.0F;
     uint32_t kind = 0;
-    std::array<ClipRegion, 3> clips{};
+    std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
 
@@ -78,14 +77,14 @@ struct ImageCommand {
     int src_width = 0;
     int src_height = 0;
     ScaleMode scale_mode = ScaleMode::NearestNeighbor;
-    std::array<ClipRegion, 3> clips{};
+    std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
 
 struct TextCommand {
     Rect rect{};
     std::shared_ptr<ShapedText> shaped_text;
-    std::array<ClipRegion, 3> clips{};
+    std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
 
@@ -100,15 +99,19 @@ struct DrawCommand {
     std::size_t command_index = 0;
 };
 
+// Packed to exactly the 128-byte push-constant minimum while carrying four
+// clip slots: radius/thickness travel as raw float bits, kind + clip count
+// share one lane, and the viewport extent packs as two uint16s — all lossless.
+// Must match the `uvec4 params` layout in the vulkan_* shaders.
 struct DrawPushConstants {
     float rect[4]{};
     float color[4]{};
-    float clip_rects[12]{};
+    float clip_rects[16]{};
     float clip_radii[4]{};
-    float params0[4]{};
-    float viewport[4]{};
+    uint32_t params[4]{};
 };
 
+static_assert(kMaxClipDepth * 4 == std::size(DrawPushConstants{}.clip_rects));
 static_assert(sizeof(DrawPushConstants) == 128);
 
 struct TextKey {
@@ -200,7 +203,6 @@ struct TextTextureCacheKeyHash {
     }
 };
 
-constexpr std::size_t kMaxClipDepth = 3;
 constexpr uint64_t kTextureCacheMaxAgeFrames = 120;
 constexpr std::size_t kImageTextureCacheMaxEntries = 128;
 constexpr std::size_t kTextTextureCacheMaxEntries = 256;
@@ -281,12 +283,10 @@ void populate_draw_push_constants(DrawPushConstants& push_constants,
         push_constants.clip_radii[index] = clips[index].radius * scale_factor;
     }
 
-    push_constants.params0[0] = radius * scale_factor;
-    push_constants.params0[1] = thickness * scale_factor;
-    push_constants.params0[2] = static_cast<float>(kind);
-    push_constants.params0[3] = static_cast<float>(clip_count);
-    push_constants.viewport[0] = static_cast<float>(viewport.width);
-    push_constants.viewport[1] = static_cast<float>(viewport.height);
+    push_constants.params[0] = std::bit_cast<uint32_t>(radius * scale_factor);
+    push_constants.params[1] = std::bit_cast<uint32_t>(thickness * scale_factor);
+    push_constants.params[2] = (kind & 0xFFU) | (clip_count << 8U);
+    push_constants.params[3] = (viewport.width & 0xFFFFU) | ((viewport.height & 0xFFFFU) << 16U);
 }
 
 const char* vk_result_name(VkResult result) {
@@ -3416,8 +3416,9 @@ private:
                 .thickness = 0.0F,
                 .kind = 0,
             };
-            command.clip_count = static_cast<uint32_t>(active_clips_.size());
-            std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+            const auto active_clips = active_clips_.active();
+            command.clip_count = static_cast<uint32_t>(active_clips.size());
+            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
             primitive_commands_.push_back(command);
             draw_commands_.push_back({.kind = DrawCommandKind::Primitive,
                                       .command_index = primitive_commands_.size() - 1});
@@ -3433,8 +3434,9 @@ private:
                 .thickness = 0.0F,
                 .kind = 0,
             };
-            command.clip_count = static_cast<uint32_t>(active_clips_.size());
-            std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+            const auto active_clips = active_clips_.active();
+            command.clip_count = static_cast<uint32_t>(active_clips.size());
+            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
             primitive_commands_.push_back(command);
             draw_commands_.push_back({.kind = DrawCommandKind::Primitive,
                                       .command_index = primitive_commands_.size() - 1});
@@ -3450,29 +3452,37 @@ private:
                 .thickness = std::max(0.0F, border_node.thickness()),
                 .kind = 1,
             };
-            command.clip_count = static_cast<uint32_t>(active_clips_.size());
-            std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+            const auto active_clips = active_clips_.active();
+            command.clip_count = static_cast<uint32_t>(active_clips.size());
+            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
             primitive_commands_.push_back(command);
             draw_commands_.push_back({.kind = DrawCommandKind::Primitive,
                                       .command_index = primitive_commands_.size() - 1});
             return true;
         }
         case RenderNodeKind::RoundedClip: {
-            if (active_clips_.size() >= kMaxClipDepth) {
-                return false;
-            }
             const auto& clip_node = static_cast<const RoundedClipNode&>(node);
-            active_clips_.push_back({
+            const bool pushed = active_clips_.push({
                 .rect = clip_node.bounds(),
                 .radius = effective_corner_radius(clip_node.bounds(), clip_node.corner_radius()),
             });
+            if (!pushed) {
+                if (!clip_depth_warning_logged_) {
+                    clip_depth_warning_logged_ = true;
+                    NK_LOG_WARN("VulkanRenderer",
+                                "Render tree nests more rounded clips than the GPU draw path "
+                                "supports; falling back to software rasterization for these "
+                                "frames");
+                }
+                return false;
+            }
             for (const auto& child : node.children()) {
                 if (child != nullptr && !collect_draw_commands(*child)) {
-                    active_clips_.pop_back();
+                    active_clips_.pop();
                     return false;
                 }
             }
-            active_clips_.pop_back();
+            active_clips_.pop();
             return true;
         }
         case RenderNodeKind::Image: {
@@ -3496,8 +3506,9 @@ private:
                 .src_height = image_node.src_height(),
                 .scale_mode = image_node.scale_mode(),
             };
-            command.clip_count = static_cast<uint32_t>(active_clips_.size());
-            std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+            const auto active_clips = active_clips_.active();
+            command.clip_count = static_cast<uint32_t>(active_clips.size());
+            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
             image_commands_.push_back(command);
             draw_commands_.push_back(
                 {.kind = DrawCommandKind::Image, .command_index = image_commands_.size() - 1});
@@ -3523,8 +3534,9 @@ private:
                          shaped_text->bitmap_height() / scale_factor_},
                 .shaped_text = std::move(shaped_text),
             };
-            command.clip_count = static_cast<uint32_t>(active_clips_.size());
-            std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+            const auto active_clips = active_clips_.active();
+            command.clip_count = static_cast<uint32_t>(active_clips.size());
+            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
             text_commands_.push_back(std::move(command));
             draw_commands_.push_back(
                 {.kind = DrawCommandKind::Text, .command_index = text_commands_.size() - 1});
@@ -3676,7 +3688,8 @@ private:
     std::vector<TextCommand> text_commands_;
     std::vector<TextureCacheEntry*> draw_textures_;
     std::vector<VkDescriptorSet> draw_descriptor_sets_;
-    std::vector<ClipRegion> active_clips_;
+    ClipStack active_clips_{kMaxClipDepth};
+    bool clip_depth_warning_logged_ = false;
     std::vector<Rect> damage_regions_;
     std::vector<VkRectLayerKHR> present_regions_;
     uint32_t queue_family_index_ = std::numeric_limits<uint32_t>::max();

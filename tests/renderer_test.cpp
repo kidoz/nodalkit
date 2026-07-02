@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <nk/platform/platform_backend.h>
+#include <nk/render/clip_stack.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/text_shaper.h>
@@ -700,4 +701,72 @@ TEST_CASE("SoftwareRenderer preserves undamaged quadrants across consecutive par
     REQUIRE(pixel_at(renderer, 15, 15).g == 255);
     REQUIRE(pixel_at(renderer, 15, 15).b == 255);
     REQUIRE(renderer.last_hotspot_counters().damage_region_count == 1);
+}
+
+TEST_CASE("ClipStack flattens nested clips into bounded GPU slots", "[render][clip]") {
+    // Four slots mirror the Vulkan draw-command clip capacity.
+    nk::ClipStack stack(4);
+
+    SECTION("plain pushes and pops are LIFO") {
+        REQUIRE(stack.push({.rect = {0, 0, 100, 100}, .radius = 8.0F}));
+        REQUIRE(stack.push({.rect = {10, 10, 50, 50}, .radius = 4.0F}));
+        REQUIRE(stack.active().size() == 2);
+        stack.pop();
+        REQUIRE(stack.active().size() == 1);
+        stack.pop();
+        REQUIRE(stack.active().empty());
+    }
+
+    SECTION("rectangular clips share one slot via intersection") {
+        REQUIRE(stack.push({.rect = {0, 0, 100, 100}, .radius = 0.0F}));
+        REQUIRE(stack.push({.rect = {40, 40, 100, 100}, .radius = 0.0F}));
+        REQUIRE(stack.active().size() == 1);
+        const auto merged = stack.active()[0];
+        REQUIRE(merged.rect.x == 40.0F);
+        REQUIRE(merged.rect.y == 40.0F);
+        REQUIRE(merged.rect.width == 60.0F);
+        REQUIRE(merged.rect.height == 60.0F);
+
+        // Popping the merged clip restores the original slot.
+        stack.pop();
+        REQUIRE(stack.active().size() == 1);
+        REQUIRE(stack.active()[0].rect.width == 100.0F);
+    }
+
+    SECTION("a clip that already contains an active clip consumes no slot") {
+        REQUIRE(stack.push({.rect = {20, 20, 40, 40}, .radius = 6.0F}));
+        REQUIRE(stack.push({.rect = {0, 0, 200, 200}, .radius = 0.0F}));
+        REQUIRE(stack.active().size() == 1);
+        stack.pop();
+        REQUIRE(stack.active().size() == 1);
+        stack.pop();
+        REQUIRE(stack.active().empty());
+    }
+
+    SECTION("overflow fails without corrupting the stack") {
+        for (int i = 0; i < 4; ++i) {
+            REQUIRE(stack.push({.rect = {static_cast<float>(i), 0, 100, 100}, .radius = 2.0F + i}));
+        }
+        REQUIRE_FALSE(stack.push({.rect = {50, 50, 10, 10}, .radius = 5.0F}));
+        REQUIRE(stack.active().size() == 4);
+        for (int i = 0; i < 4; ++i) {
+            stack.pop();
+        }
+        REQUIRE(stack.active().empty());
+    }
+
+    SECTION("the showcase nesting pattern fits") {
+        // Scroll-area viewport, inset stage, table body: rounded clips.
+        REQUIRE(stack.push({.rect = {0, 0, 900, 600}, .radius = 12.0F}));
+        REQUIRE(stack.push({.rect = {20, 20, 860, 400}, .radius = 10.0F}));
+        REQUIRE(stack.push({.rect = {30, 30, 840, 380}, .radius = 12.0F}));
+        // Table header and rows: rectangular sections, sharing the same slot.
+        REQUIRE(stack.push({.rect = {31, 31, 838, 28}, .radius = 0.0F}));
+        REQUIRE(stack.active().size() == 4);
+        stack.pop();
+        REQUIRE(stack.push({.rect = {31, 60, 838, 349}, .radius = 0.0F}));
+        REQUIRE(stack.active().size() == 4);
+        stack.pop();
+        REQUIRE(stack.active().size() == 3);
+    }
 }
