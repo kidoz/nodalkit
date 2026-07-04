@@ -67,6 +67,12 @@ test_model = executable('test_model',
 )
 test('model', test_model)
 
+test_settings = executable('test_settings',
+    'settings_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('settings', test_settings)
+
 test_drag_drop = executable('test_drag_drop',
     'drag_drop_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

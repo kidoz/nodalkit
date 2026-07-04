@@ -44,6 +44,7 @@ nk_sources = files(
     'src/model/abstract_tree_model.cpp',
     'src/model/list_model_adapters.cpp',
     'src/model/selection_model.cpp',
+    'src/model/settings.cpp',
     'src/model/tree_model.cpp',
     'src/text/shaped_text.cpp',
     'src/text/text_shaper.cpp',
