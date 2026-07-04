@@ -91,6 +91,7 @@ struct Window::Impl {
     std::unique_ptr<WindowInspector> inspector;
 
     Signal<> close_requested;
+    std::function<bool()> close_policy;
     Signal<int, int> resize_signal;
     Signal<float> scale_factor_signal;
     ScopedConnection system_preferences_subscription;
@@ -1826,6 +1827,18 @@ void Window::hide() {
 void Window::close() {
     impl_->close_requested.emit();
     hide();
+}
+
+void Window::request_close() {
+    if (impl_->close_policy && !impl_->close_policy()) {
+        NK_LOG_INFO("Window", "Close request vetoed by close policy");
+        return;
+    }
+    close();
+}
+
+void Window::set_close_policy(std::function<bool()> policy) {
+    impl_->close_policy = std::move(policy);
 }
 
 bool Window::is_visible() const {
@@ -3852,7 +3865,7 @@ void Window::dispatch_window_event(const WindowEvent& event) {
         request_frame(FrameRequestReason::ScaleFactorChanged);
         break;
     case WindowEvent::Type::Close:
-        close();
+        request_close();
         break;
     case WindowEvent::Type::Expose:
         request_frame(FrameRequestReason::Expose);

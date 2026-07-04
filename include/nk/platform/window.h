@@ -4,6 +4,7 @@
 /// @brief Top-level window abstraction.
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/signal.h>
@@ -100,8 +101,28 @@ public:
     /// Hide the window.
     void hide();
 
-    /// Close the window by emitting a close-request notification and hiding it.
+    /// Close the window unconditionally: emit the close-request notification
+    /// and hide it. This bypasses any close policy (see set_close_policy) — it
+    /// is the "force close" a confirm-before-close flow calls once the user has
+    /// approved. Application code and the platform window manager should prefer
+    /// request_close().
     void close();
+
+    /// Request a close that a close policy may veto. If a policy is installed
+    /// (see set_close_policy) and it returns false, nothing happens and the
+    /// window stays open; otherwise this behaves like close(). This is the path
+    /// the platform close button (WindowEvent::Type::Close) drives.
+    void request_close();
+
+    /// Install a predicate consulted by request_close() before the window
+    /// hides. Return true to allow the close, false to veto it. Runs on the
+    /// UI/event-loop thread. Only one policy may be installed; a new one
+    /// replaces the previous. Pass nullptr to clear.
+    ///
+    /// For an asynchronous "confirm before close" flow (NodalKit dialogs are
+    /// non-blocking), veto the request by returning false and kick off a
+    /// confirm Dialog; when the user approves, call close() to force it.
+    void set_close_policy(std::function<bool()> policy);
 
     /// Whether the window is currently visible.
     [[nodiscard]] bool is_visible() const;
