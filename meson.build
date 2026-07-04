@@ -94,9 +94,16 @@ nk_sources = files(
 nk_deps = []
 nk_cpp_args = ['-DBUILDING_NK_LIBRARY']
 
+# System libraries that a static NodalKit exposes transitively. These must be
+# published in nodalkit.pc as Libs.private so consumers of the installed SDK
+# link cleanly (see docs/BUILDING_APPLICATIONS.md). Populated per platform below;
+# empty on platforms where NodalKit is a shared library.
+nk_pkgconfig_private_deps = []
+
 # --- Platform-specific sources ---
 
 host_system = host_machine.system()
+host_cpu = host_machine.cpu_family()
 
 if host_system == 'darwin'
     add_languages('objcpp', native : false)
@@ -327,7 +334,14 @@ elif host_system == 'windows'
         'src/text/windows/gdi_text_shaper.cpp',
     )
 
-    nk_deps += [user32_dep, gdi32_dep, advapi32_dep, dwmapi_dep, ole32_dep, shcore_dep, dwrite_dep, d3d11_dep, d3dcompiler_dep, dxgi_dep]
+    # These import libraries are identical across i686 and x86_64 Windows; the
+    # 32-bit vs 64-bit distinction is handled by the toolchain/cross file, not
+    # by selecting different libraries here.
+    nk_windows_system_deps = [user32_dep, gdi32_dep, advapi32_dep, dwmapi_dep, ole32_dep, shcore_dep, dwrite_dep, d3d11_dep, d3dcompiler_dep, dxgi_dep]
+    nk_deps += nk_windows_system_deps
+    # NodalKit is a static_library on Windows (see below), so every one of these
+    # must land in nodalkit.pc's Libs.private for downstream links to resolve.
+    nk_pkgconfig_private_deps += nk_windows_system_deps
     if vulkan_dep.found() and glslang_validator.found()
         vulkan_primitive_vert_spv = custom_target('vulkan-primitive-vert-spv',
             input : 'src/render/shaders/vulkan_primitive.vert',
@@ -432,6 +446,7 @@ install_subdir('include/nk',
 
 pkgconfig.generate(
     libraries : nk_lib,
+    libraries_private : nk_pkgconfig_private_deps,
     filebase : 'nodalkit',
     name : 'NodalKit',
     description : 'C++-first GUI toolkit for modern desktop applications',

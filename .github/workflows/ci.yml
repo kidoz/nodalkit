@@ -91,6 +91,56 @@ jobs:
           meson setup build-install-smoke-${{ matrix.os }}-${{ matrix.buildtype }} tests/install_smoke
           meson test -C build-install-smoke-${{ matrix.os }}-${{ matrix.buildtype }} --print-errorlogs
 
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
+        buildtype: [debug, release]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install meson and ninja
+        run: python -m pip install meson ninja
+      # NodalKit's Windows build uses clang (the sources rely on clang-only
+      # flags such as -Wno-c2y-extensions), which is preinstalled on the runner.
+      # msvc-dev-cmd only supplies the Windows SDK / CRT headers and import
+      # libraries (INCLUDE / LIB) for the selected architecture; clang links
+      # against them.
+      - name: Set up Windows SDK environment (${{ matrix.arch }})
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - name: Configure (x64 native)
+        if: matrix.arch == 'x64'
+        env:
+          CC: clang
+          CXX: clang++
+        run: meson setup build --buildtype=${{ matrix.buildtype }} --prefix="$PWD/.local" --libdir=lib
+      - name: Configure (x86 / i686 cross)
+        if: matrix.arch == 'x86'
+        run: meson setup build --cross-file ci/windows-i686-clang.ini --buildtype=${{ matrix.buildtype }} --prefix="$PWD/.local" --libdir=lib
+      - name: Build
+        run: meson compile -C build
+      - name: Test
+        run: meson test -C build --print-errorlogs
+      - name: Install
+        run: meson install -C build
+      # nodalkit.pc must carry the transitive Windows import libraries in its
+      # link line so downstream static links resolve; assert they are present.
+      - name: Verify nodalkit.pc exports Windows link flags
+        run: |
+          pc="$PWD/.local/lib/pkgconfig/nodalkit.pc"
+          test -f "$pc" || { echo "nodalkit.pc not installed"; exit 1; }
+          grep -Eq -- '-luser32' "$pc" || { echo "nodalkit.pc missing Windows system libs"; cat "$pc"; exit 1; }
+          cat "$pc"
+
   sanitizers:
     runs-on: ubuntu-latest
     steps:
