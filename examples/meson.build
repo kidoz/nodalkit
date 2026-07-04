@@ -13,6 +13,11 @@ executable('long_task',
     dependencies : nk_dep,
 )
 
+executable('process_launch',
+    'process_launch.cpp',
+    dependencies : nk_dep,
+)
+
 executable('accessibility_probe',
     'accessibility_probe.cpp',
     dependencies : nk_dep,
