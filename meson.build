@@ -54,6 +54,7 @@ nk_sources = files(
     'src/widgets/text_field.cpp',
     'src/widgets/scroll_area.cpp',
     'src/widgets/list_view.cpp',
+    'src/widgets/log_view.cpp',
     'src/widgets/data_table.cpp',
     'src/widgets/tree_view.cpp',
     'src/widgets/grid_view.cpp',

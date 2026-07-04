@@ -73,6 +73,12 @@ test_settings = executable('test_settings',
 )
 test('settings', test_settings)
 
+test_log_view = executable('test_log_view',
+    'log_view_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('log_view', test_log_view)
+
 test_drag_drop = executable('test_drag_drop',
     'drag_drop_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],
