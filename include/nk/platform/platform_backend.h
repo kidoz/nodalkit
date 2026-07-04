@@ -91,11 +91,34 @@ public:
     virtual void set_fullscreen(bool fullscreen) = 0;
     [[nodiscard]] virtual bool is_fullscreen() const = 0;
 
-    /// Get the platform-native handle (NSWindow*, wl_surface*, etc.).
+    /// Get the platform-native handle for this surface.
+    ///
+    /// The concrete type behind the opaque `NativeWindowHandle` is:
+    ///   - Windows: `HWND` (the top-level window handle)
+    ///   - macOS:   `NSWindow*`
+    ///   - Linux:   `wl_surface*` (Wayland)
+    ///
+    /// Contract:
+    ///   - Validity: non-null only once the surface has been realized, i.e.
+    ///     after the owning Window's first present(). Before that,
+    ///     Window::native_surface() itself is null. Prefer the typed helpers in
+    ///     the platform interop headers (e.g. nk/platform/windows_interop.h),
+    ///     which fold this null check in.
+    ///   - Lifetime: valid until the Window (and its surface) is destroyed. Do
+    ///     not retain it past the owning Window's lifetime.
+    ///   - Stability: the handle is stable across resize and fullscreen
+    ///     transitions; NodalKit does not recreate the top-level window for
+    ///     either. (Backends may recreate internal child/buffer objects, but
+    ///     never this handle.)
+    ///   - Thread affinity: only touch the handle on the UI/event-loop thread.
+    ///     Marshal work from other threads with EventLoop::post().
     [[nodiscard]] virtual NativeWindowHandle native_handle() const = 0;
 
     /// Get the platform-native display/connection handle when the renderer
     /// needs both the surface and the parent display server connection.
+    /// Concrete type: `HINSTANCE` on Windows, `wl_display*` on Wayland,
+    /// nullptr on macOS. Same validity/lifetime/thread contract as
+    /// native_handle().
     [[nodiscard]] virtual NativeWindowHandle native_display_handle() const { return nullptr; }
 
     /// Apply a platform cursor shape for the current pointer location.
