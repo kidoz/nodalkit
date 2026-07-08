@@ -63,6 +63,12 @@ public:
     /// Current content area size.
     [[nodiscard]] virtual Size size() const = 0;
 
+    /// Insets of the widget-layout area within the surface, in logical
+    /// coordinates. Non-zero when native chrome overlaps the surface — e.g.
+    /// a macOS unified titlebar/toolbar over a full-size content view — so
+    /// the window lays widgets out below the chrome instead of under it.
+    [[nodiscard]] virtual Insets content_insets() const { return {}; }
+
     /// Device pixel ratio for the current content area.
     [[nodiscard]] virtual float scale_factor() const = 0;
 

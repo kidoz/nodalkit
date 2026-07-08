@@ -1627,6 +1627,20 @@ Size MacosSurface::size() const {
     }
 }
 
+Insets MacosSurface::content_insets() const {
+    @autoreleasepool {
+        if (window_ == nil || ([window_ styleMask] & NSWindowStyleMaskFullSizeContentView) == 0) {
+            return {};
+        }
+        // With a full-size content view the titlebar/toolbar chrome overlaps
+        // the top of the content view; contentLayoutRect excludes it.
+        const NSRect frame = [[window_ contentView] frame];
+        const NSRect layout = [window_ contentLayoutRect];
+        const float top = static_cast<float>(std::max(0.0, frame.size.height - NSMaxY(layout)));
+        return {top, 0.0F, 0.0F, 0.0F};
+    }
+}
+
 float MacosSurface::scale_factor() const {
     @autoreleasepool {
         if (window_ != nullptr) {
@@ -1782,7 +1796,9 @@ void MacosSurface::set_native_toolbar(const NativeToolbarConfig* config) {
         [new_toolbar
             setAllowsUserCustomization:toolbar_config_->allows_user_customization ? YES : NO];
         [new_toolbar setAutosavesConfiguration:YES];
-        [new_toolbar setDisplayMode:NSToolbarDisplayModeIconAndLabel];
+        // Icon-only matches the modern macOS toolbar default; labels remain
+        // available through tooltips and the customization palette.
+        [new_toolbar setDisplayMode:NSToolbarDisplayModeIconOnly];
 
         toolbar_ = new_toolbar;
         if (window_) {

@@ -20,6 +20,7 @@
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/style/theme.h>
 #include <nk/text/text_shaper.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/text_field.h>
@@ -873,6 +874,20 @@ Rect compute_debug_content_area(Size viewport,
     }
 
     content.width = std::max(0.0F, viewport.width - reserved_width);
+    return content;
+}
+
+/// Shrink the widget-layout area by the surface's native-chrome insets (e.g.
+/// the macOS unified titlebar/toolbar over a full-size content view).
+Rect apply_surface_content_insets(Rect content, const NativeSurface* surface) {
+    if (surface == nullptr) {
+        return content;
+    }
+    const auto insets = surface->content_insets();
+    content.x += insets.left;
+    content.y += insets.top;
+    content.width = std::max(0.0F, content.width - insets.left - insets.right);
+    content.height = std::max(0.0F, content.height - insets.top - insets.bottom);
     return content;
 }
 
@@ -1921,6 +1936,20 @@ std::unique_ptr<RenderNode> Window::build_window_debug_render_tree(Size viewport
 
     SnapshotContext snap_ctx(impl_->text_shaper.get());
     snap_ctx.set_debug_annotations_enabled(impl_->debug_overlay_flags != DebugOverlayFlags::None);
+    if (content_area.y > 0.0F) {
+        // Native chrome (unified titlebar/toolbar) overlaps the surface above
+        // the content area. Fill that strip with the theme window background
+        // so translucent chrome composites over theme-correct pixels instead
+        // of stale framebuffer content.
+        Color strip_color = Color::from_rgb(248, 249, 252);
+        if (const auto theme = Theme::active()) {
+            if (const auto* value = theme->token("window-bg");
+                value != nullptr && std::holds_alternative<Color>(*value)) {
+                strip_color = std::get<Color>(*value);
+            }
+        }
+        snap_ctx.add_color_rect({0.0F, 0.0F, viewport_size.width, content_area.y}, strip_color);
+    }
     impl_->child->snapshot_subtree(snap_ctx);
     for (auto& overlay : impl_->overlays) {
         if (overlay.widget != nullptr && overlay.widget->is_visible()) {
@@ -2316,8 +2345,10 @@ void Window::request_frame(FrameRequestReason reason) {
             const auto sz = size();
             const float scale_factor =
                 impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
-            const auto content_area = compute_debug_content_area(
-                sz, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
+            const auto content_area = apply_surface_content_insets(
+                compute_debug_content_area(
+                    sz, impl_->debug_overlay_flags, impl_->debug_inspector_presentation),
+                impl_->surface.get());
             FrameDiagnostics frame;
             frame.frame_id = impl_->next_frame_id++;
             frame.logical_viewport = sz;
@@ -3063,10 +3094,11 @@ Result<void> WindowInspector::save_debug_screenshot_ppm_file(std::string_view pa
         const auto viewport_size = window_.size();
         const float scale_factor =
             window_.impl_->surface != nullptr ? window_.impl_->surface->scale_factor() : 1.0F;
-        const auto content_area =
+        const auto content_area = apply_surface_content_insets(
             compute_debug_content_area(viewport_size,
                                        window_.impl_->debug_overlay_flags,
-                                       window_.impl_->debug_inspector_presentation);
+                                       window_.impl_->debug_inspector_presentation),
+            window_.impl_->surface.get());
 
         auto* self = const_cast<Window*>(&window_);
         if (window_.impl_->needs_layout) {
@@ -3228,8 +3260,10 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
     const auto render_selected_index =
         selected_render_entry_index(render_entries, impl_->debug_selected_render_path);
     const auto viewport_size = size();
-    const auto content_area = compute_debug_content_area(
-        viewport_size, impl_->debug_overlay_flags, impl_->debug_inspector_presentation);
+    const auto content_area = apply_surface_content_insets(
+        compute_debug_content_area(
+            viewport_size, impl_->debug_overlay_flags, impl_->debug_inspector_presentation),
+        impl_->surface.get());
     const auto inspector_layout =
         compute_inspector_panel_layout(viewport_size,
                                        content_area,
