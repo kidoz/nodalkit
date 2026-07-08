@@ -83,6 +83,10 @@ struct Window::Impl {
 
     bool visible = false;
     bool window_focused = false;
+    // True while the most recent input was keyboard; focus granted then is
+    // keyboard-visible (StateFlags::FocusVisible), pointer/programmatic focus
+    // is not — the platform focus-ring convention.
+    bool last_input_keyboard = false;
     bool needs_layout = true;
     bool frame_pending = false;
     // Liveness token shared with posted frame tasks. Cleared in ~Window so a frame
@@ -2580,6 +2584,7 @@ void Window::focus_widget(Widget* widget) {
 
     if (impl_->focused_widget != nullptr) {
         impl_->focused_widget->set_state_flag(StateFlags::Focused, false);
+        impl_->focused_widget->set_state_flag(StateFlags::FocusVisible, false);
         impl_->focused_widget->dispatch_focus_controllers(false);
         impl_->focused_widget->on_focus_changed(false);
     }
@@ -2588,6 +2593,7 @@ void Window::focus_widget(Widget* widget) {
 
     if (impl_->focused_widget != nullptr) {
         impl_->focused_widget->set_state_flag(StateFlags::Focused, true);
+        impl_->focused_widget->set_state_flag(StateFlags::FocusVisible, impl_->last_input_keyboard);
         impl_->focused_widget->dispatch_focus_controllers(true);
         impl_->focused_widget->on_focus_changed(true);
         impl_->pending_focus_restore = impl_->focused_widget->shared_from_this();
@@ -3238,6 +3244,9 @@ DragOperation Window::dispatch_drag_drop_event(DragDropEvent event) {
 // --- Event dispatch ---
 
 void Window::dispatch_mouse_event(const MouseEvent& event) {
+    if (event.type == MouseEvent::Type::Press) {
+        impl_->last_input_keyboard = false;
+    }
     if (!impl_->child) {
         return;
     }
@@ -3572,6 +3581,9 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
 }
 
 void Window::dispatch_key_event(const KeyEvent& event) {
+    if (event.type == KeyEvent::Type::Press) {
+        impl_->last_input_keyboard = true;
+    }
     const auto key_index = static_cast<std::size_t>(event.key);
     if (key_index < impl_->key_state.size()) {
         impl_->key_state[key_index] = event.type == KeyEvent::Type::Press;

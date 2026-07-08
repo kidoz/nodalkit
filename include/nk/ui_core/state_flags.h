@@ -19,6 +19,10 @@ enum class StateFlags : uint32_t {
     Checked = 1u << 4,
     Selected = 1u << 5,
     Dragging = 1u << 6,
+    /// Focused through keyboard navigation (Tab/arrow traversal). Widgets show
+    /// the focus ring for this state only; pointer or programmatic focus sets
+    /// Focused without FocusVisible, matching platform focus-ring conventions.
+    FocusVisible = 1u << 7,
 };
 
 constexpr StateFlags operator|(StateFlags a, StateFlags b) {
