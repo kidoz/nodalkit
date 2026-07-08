@@ -6,6 +6,7 @@
 #include <nk/model/selection_model.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/grid_view.h>
 #include <sstream>
@@ -539,8 +540,14 @@ void GridView::snapshot(SnapshotContext& ctx) const {
     const auto border = theme_color("border-color");
     const auto text_color = theme_color("text-color");
     const auto muted_text = theme_color("muted-text-color");
-    const auto selected_bg = theme_color("selected-background");
-    const auto selected_text = theme_color("selected-text-color", text_color);
+    // Selection swaps to the muted pair while the window is inactive so the
+    // active-window accent highlight reads as window state.
+    const bool window_active = host_window() == nullptr || host_window()->is_focused();
+    const auto selected_bg = window_active ? theme_color("selected-background")
+                                           : theme_color("inactive-selected-background");
+    const auto selected_text = window_active
+                                   ? theme_color("selected-text-color", text_color)
+                                   : theme_color("inactive-selected-text-color", text_color);
     const auto focus_ring = theme_color("focus-ring-color");
     const auto hover_bg = theme_color("hover-background");
     const auto cell_border = theme_color("cell-border-color", Color{0.88F, 0.90F, 0.93F, 1.0F});
@@ -627,11 +634,15 @@ void GridView::snapshot(SnapshotContext& ctx) const {
     const float total_height =
         content_height_for_items(items, columns, impl_->cell_height, impl_->gap);
     if (total_height > content.height) {
+        // Overlay mode floats a translucent thumb with no persistent track.
+        const bool overlay = theme_string("scrollbar-mode", "persistent") == "overlay";
         constexpr float ScrollbarWidth = 11.0F;
         const float track_x = inner.right() - ScrollbarWidth - 4.0F;
-        ctx.add_rounded_rect({track_x, inner.y + 6.0F, ScrollbarWidth, inner.height - 12.0F},
-                             scrollbar_track,
-                             ScrollbarWidth * 0.5F);
+        if (!overlay) {
+            ctx.add_rounded_rect({track_x, inner.y + 6.0F, ScrollbarWidth, inner.height - 12.0F},
+                                 scrollbar_track,
+                                 ScrollbarWidth * 0.5F);
+        }
 
         const float max_offset = std::max(1.0F, total_height - content.height);
         const float thumb_height =
@@ -639,8 +650,11 @@ void GridView::snapshot(SnapshotContext& ctx) const {
         const float thumb_y =
             inner.y + 6.0F +
             (impl_->scroll_offset / max_offset) * ((inner.height - 12.0F) - thumb_height);
+        const auto thumb_color =
+            overlay ? Color{scrollbar_thumb.r, scrollbar_thumb.g, scrollbar_thumb.b, 0.55F}
+                    : scrollbar_thumb;
         ctx.add_rounded_rect({track_x + 2.0F, thumb_y, ScrollbarWidth - 4.0F, thumb_height},
-                             scrollbar_thumb,
+                             thumb_color,
                              (ScrollbarWidth - 4.0F) * 0.5F);
     }
 

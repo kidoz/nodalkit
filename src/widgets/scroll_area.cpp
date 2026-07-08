@@ -426,16 +426,21 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
     const bool show_h_scrollbar =
         should_show_h_scrollbar(impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport);
 
+    // Overlay mode (macOS/GNOME) floats a translucent thumb over the content
+    // with no persistent track; persistent mode (Windows) keeps track+thumb.
+    const bool overlay = theme_string("scrollbar-mode", "persistent") == "overlay";
     const auto raw_track = theme_color("scrollbar-track-color");
     const auto raw_thumb = theme_color("scrollbar-thumb-color");
     const auto track_color = Color{raw_track.r, raw_track.g, raw_track.b, 0.72F};
-    const auto thumb_color = Color{raw_thumb.r, raw_thumb.g, raw_thumb.b, 0.86F};
+    const auto thumb_color = Color{raw_thumb.r, raw_thumb.g, raw_thumb.b, overlay ? 0.55F : 0.86F};
 
     if (show_v_scrollbar) {
         const auto track = scrollbar_track(viewport, true);
         const auto thumb = v_thumb_rect(
             impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport, impl_->v_offset);
-        ctx.add_rounded_rect(track, track_color, track.width * 0.5F);
+        if (!overlay) {
+            ctx.add_rounded_rect(track, track_color, track.width * 0.5F);
+        }
         ctx.add_rounded_rect(thumb, thumb_color, thumb.width * 0.5F);
     }
 
@@ -443,7 +448,9 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
         const auto track = scrollbar_track(viewport, false);
         const auto thumb = h_thumb_rect(
             impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport, impl_->h_offset);
-        ctx.add_rounded_rect(track, track_color, track.height * 0.5F);
+        if (!overlay) {
+            ctx.add_rounded_rect(track, track_color, track.height * 0.5F);
+        }
         ctx.add_rounded_rect(thumb, thumb_color, thumb.height * 0.5F);
     }
 }

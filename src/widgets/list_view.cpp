@@ -4,6 +4,7 @@
 #include <nk/model/selection_model.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/list_view.h>
 #include <set>
@@ -42,7 +43,7 @@ struct ListView::Impl {
 
 Rect list_body_rect(const ListView& view) {
     auto body = view.allocation();
-    if (has_flag(view.state_flags(), StateFlags::Focused)) {
+    if (has_flag(view.state_flags(), StateFlags::FocusVisible)) {
         body = {
             body.x + 2.0F,
             body.y + 2.0F,
@@ -74,14 +75,18 @@ Rect intersect_rect(Rect lhs, Rect rhs) {
     return {left, top, right - left, bottom - top};
 }
 
-Rect list_content_rect(const ListView& view, const AbstractListModel* model, float row_height) {
+Rect list_content_rect(const ListView& view,
+                       const AbstractListModel* model,
+                       float row_height,
+                       bool overlay_scrollbar) {
     const auto inner = list_inner_rect(view);
     if (!model) {
         return inner;
     }
 
     const float total_height = static_cast<float>(model->row_count()) * row_height;
-    const bool show_scrollbar = total_height > inner.height;
+    // Overlay scrollbars float above the rows and reserve no content width.
+    const bool show_scrollbar = !overlay_scrollbar && total_height > inner.height;
     const float scrollbar_width = show_scrollbar ? 11.0F : 0.0F;
     return {
         inner.x,
@@ -361,8 +366,9 @@ void ListView::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     const float corner_radius = theme_number("corner-radius", 12.0F);
     const float selection_radius = theme_number("selection-radius", 8.0F);
+    const bool overlay_scrollbar = theme_string("scrollbar-mode", "persistent") == "overlay";
     auto body = a;
-    if (has_flag(state_flags(), StateFlags::Focused)) {
+    if (has_flag(state_flags(), StateFlags::FocusVisible)) {
         const auto focus_ring = theme_color("focus-ring-color");
         ctx.add_rounded_rect(
             a, Color{focus_ring.r, focus_ring.g, focus_ring.b, 0.08F}, corner_radius + 1.5F);
@@ -382,7 +388,8 @@ void ListView::snapshot(SnapshotContext& ctx) const {
         const auto row_h = impl_->row_height;
         const auto font = list_font();
         const float total_height = static_cast<float>(total_rows) * row_h;
-        const bool show_scrollbar = total_height > inner.height;
+        const bool needs_scrollbar = total_height > inner.height;
+        const bool show_scrollbar = !overlay_scrollbar && needs_scrollbar;
         const float scrollbar_width = show_scrollbar ? 11.0F : 0.0F;
         Rect content_rect = {
             inner.x,
@@ -390,9 +397,15 @@ void ListView::snapshot(SnapshotContext& ctx) const {
             std::max(0.0F, inner.width - scrollbar_width - (show_scrollbar ? 12.0F : 0.0F)),
             inner.height,
         };
+        // Selection swaps to the muted pair while the window is inactive so
+        // the active-window accent highlight reads as window state.
+        const bool window_active = host_window() == nullptr || host_window()->is_focused();
         const auto text_color = theme_color("text-color");
-        const auto selected_bg = theme_color("selected-background");
-        const auto selected_text = theme_color("selected-text-color", text_color);
+        const auto selected_bg = window_active ? theme_color("selected-background")
+                                               : theme_color("inactive-selected-background");
+        const auto selected_text = window_active
+                                       ? theme_color("selected-text-color", text_color)
+                                       : theme_color("inactive-selected-text-color", text_color);
         const auto separator = theme_color("row-separator-color");
         const auto scrollbar_track = theme_color("scrollbar-track-color");
         const auto scrollbar_thumb = theme_color("scrollbar-thumb-color");
@@ -450,6 +463,21 @@ void ListView::snapshot(SnapshotContext& ctx) const {
             ctx.add_rounded_rect({track_x + 2.0F, thumb_y, scrollbar_width - 4.0F, thumb_height},
                                  scrollbar_thumb,
                                  (scrollbar_width - 4.0F) * 0.5F);
+        } else if (needs_scrollbar) {
+            // Overlay mode: a slim translucent thumb floats over the rows;
+            // no track and no reserved gutter.
+            const float thumb_width = 6.0F;
+            const float thumb_x = inner.right() - thumb_width - 3.0F;
+            const float max_offset = std::max(1.0F, total_height - content_rect.height);
+            const float thumb_height =
+                std::max(28.0F, (content_rect.height / total_height) * (inner.height - 12.0F));
+            const float thumb_y =
+                inner.y + 6.0F +
+                (impl_->scroll_offset / max_offset) * ((inner.height - 12.0F) - thumb_height);
+            ctx.add_rounded_rect(
+                {thumb_x, thumb_y, thumb_width, thumb_height},
+                Color{scrollbar_thumb.r, scrollbar_thumb.g, scrollbar_thumb.b, 0.55F},
+                thumb_width * 0.5F);
         }
     }
 }
@@ -482,7 +510,8 @@ void ListView::sync_visible_items() {
 
     const auto total_rows = impl_->model->row_count();
     const float total_height = static_cast<float>(total_rows) * impl_->row_height;
-    const bool show_scrollbar = total_height > inner.height;
+    const bool show_scrollbar =
+        theme_string("scrollbar-mode", "persistent") != "overlay" && total_height > inner.height;
     const float scrollbar_width = show_scrollbar ? 10.0F : 0.0F;
     Rect content_rect = {
         inner.x,
@@ -552,7 +581,11 @@ Rect ListView::local_row_damage_rect(std::size_t row) const {
         return {};
     }
 
-    const auto content_rect = list_content_rect(*this, impl_->model.get(), impl_->row_height);
+    const auto content_rect =
+        list_content_rect(*this,
+                          impl_->model.get(),
+                          impl_->row_height,
+                          theme_string("scrollbar-mode", "persistent") == "overlay");
     if (content_rect.width <= 0.0F || content_rect.height <= 0.0F) {
         return {};
     }

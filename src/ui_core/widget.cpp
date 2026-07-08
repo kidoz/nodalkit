@@ -798,6 +798,40 @@ float Widget::theme_number(std::string_view property_name, float fallback) const
     return fallback;
 }
 
+std::string Widget::theme_string(std::string_view property_name, std::string_view fallback) const {
+    auto theme = Theme::active();
+    if (!theme) {
+        return std::string(fallback);
+    }
+
+    // String policy values must not be dereferenced blindly: "overlay" is a
+    // value, not a token name. Resolve the raw rule value, then follow token
+    // indirection only while the string names an existing token.
+    const StyleValue* value =
+        theme->resolve({}, impl_->style_classes, impl_->state, property_name, 0);
+    if (value == nullptr) {
+        value = theme->token(property_name);
+    }
+    int depth = 0;
+    while (value != nullptr && std::holds_alternative<std::string>(*value) && depth < 4) {
+        const auto* target = theme->token(std::get<std::string>(*value));
+        if (target == nullptr) {
+            break;
+        }
+        value = target;
+        ++depth;
+    }
+
+    if (value != nullptr && std::holds_alternative<std::string>(*value)) {
+        return std::get<std::string>(*value);
+    }
+    return std::string(fallback);
+}
+
+Window* Widget::host_window() const {
+    return impl_->host_window;
+}
+
 void Widget::snapshot(SnapshotContext& ctx) const {
     // Default: recursively snapshot visible children.
     for (const auto& child : impl_->children) {

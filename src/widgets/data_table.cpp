@@ -6,6 +6,7 @@
 #include <nk/model/selection_model.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/data_table.h>
 #include <numeric>
@@ -589,8 +590,14 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
     const auto separator = theme_color("row-separator-color");
     const auto text_color = theme_color("text-color");
     const auto muted_text = theme_color("muted-text-color");
-    const auto selected_bg = theme_color("selected-background");
-    const auto selected_text = theme_color("selected-text-color", text_color);
+    // Selection swaps to the muted pair while the window is inactive so the
+    // active-window accent highlight reads as window state.
+    const bool window_active = host_window() == nullptr || host_window()->is_focused();
+    const auto selected_bg = window_active ? theme_color("selected-background")
+                                           : theme_color("inactive-selected-background");
+    const auto selected_text = window_active
+                                   ? theme_color("selected-text-color", text_color)
+                                   : theme_color("inactive-selected-text-color", text_color);
     const auto focus_ring = theme_color("focus-ring-color");
     const auto scrollbar_track = theme_color("scrollbar-track-color");
     const auto scrollbar_thumb = theme_color("scrollbar-thumb-color");
@@ -692,20 +699,28 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
     }
 
     if (show_h_scrollbar) {
+        // Overlay mode floats a translucent thumb with no persistent track.
+        const bool overlay = theme_string("scrollbar-mode", "persistent") == "overlay";
         const float track_height = 8.0F;
         const float track_y = inner.bottom() - track_height - 3.0F;
         const float track_x = inner.x + 8.0F;
         const float track_width = std::max(0.0F, inner.width - 16.0F);
-        ctx.add_rounded_rect(
-            {track_x, track_y, track_width, track_height}, scrollbar_track, track_height * 0.5F);
+        if (!overlay) {
+            ctx.add_rounded_rect({track_x, track_y, track_width, track_height},
+                                 scrollbar_track,
+                                 track_height * 0.5F);
+        }
         const float content_width = total_column_width(impl_->columns);
         const float thumb_width =
             std::max(32.0F, (inner.width / std::max(inner.width, content_width)) * track_width);
         const float max_offset = std::max(1.0F, content_width - inner.width);
         const float thumb_x =
             track_x + (impl_->horizontal_scroll_offset / max_offset) * (track_width - thumb_width);
+        const auto thumb_color =
+            overlay ? Color{scrollbar_thumb.r, scrollbar_thumb.g, scrollbar_thumb.b, 0.55F}
+                    : scrollbar_thumb;
         ctx.add_rounded_rect({thumb_x, track_y + 2.0F, thumb_width, track_height - 4.0F},
-                             scrollbar_thumb,
+                             thumb_color,
                              (track_height - 4.0F) * 0.5F);
     }
 

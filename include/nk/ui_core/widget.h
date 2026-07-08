@@ -282,6 +282,17 @@ protected:
     /// different type.
     [[nodiscard]] float theme_number(std::string_view property_name, float fallback) const;
 
+    /// Resolve a themed string policy value (e.g. "scrollbar-mode",
+    /// "chevron-style") from style rules or semantic tokens. A string value
+    /// that names an existing token is dereferenced; otherwise the string is
+    /// the value itself. Falls back when the property is unset.
+    [[nodiscard]] std::string theme_string(std::string_view property_name,
+                                           std::string_view fallback) const;
+
+    /// The window this widget is currently attached to, or nullptr. Widgets
+    /// use it for window-level state such as activation-aware selection.
+    [[nodiscard]] Window* host_window() const;
+
     /// Measure text using the host window's active text shaper when
     /// available. Falls back to a simple estimate otherwise.
     [[nodiscard]] Size measure_text(std::string_view text, const FontDescriptor& font) const;

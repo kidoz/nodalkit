@@ -6,6 +6,7 @@
 #include <nk/model/tree_model.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/tree_view.h>
 #include <sstream>
@@ -428,8 +429,14 @@ void TreeView::snapshot(SnapshotContext& ctx) const {
     const auto border = theme_color("border-color");
     const auto text_color = theme_color("text-color");
     const auto muted_text = theme_color("muted-text-color");
-    const auto selected_bg = theme_color("selected-background");
-    const auto selected_text = theme_color("selected-text-color", text_color);
+    // Selection swaps to the muted pair while the window is inactive so the
+    // active-window accent highlight reads as window state.
+    const bool window_active = host_window() == nullptr || host_window()->is_focused();
+    const auto selected_bg = window_active ? theme_color("selected-background")
+                                           : theme_color("inactive-selected-background");
+    const auto selected_text = window_active
+                                   ? theme_color("selected-text-color", text_color)
+                                   : theme_color("inactive-selected-text-color", text_color);
     const auto focus_ring = theme_color("focus-ring-color");
     const auto hover_bg = theme_color("hover-background");
     const auto separator = theme_color("row-separator-color");

@@ -460,9 +460,15 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
                   std::max(0.0F, body.width - 2.0F),
                   std::max(0.0F, body.height - 2.0F)};
 
+    // "divided" renders the chevron in a border-separated segment (the
+    // Windows pattern); "capsule" renders it in a small accent capsule inside
+    // the control (the macOS NSPopUpButton pattern). Per-family rule choice.
+    const bool capsule_chevron = theme_string("chevron-style", "divided") == "capsule";
     const float arrow_width = 28.0F;
-    ctx.add_color_rect({inner.right() - arrow_width, inner.y, 1.0F, inner.height},
-                       theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}));
+    if (!capsule_chevron) {
+        ctx.add_color_rect({inner.right() - arrow_width, inner.y, 1.0F, inner.height},
+                           theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}));
+    }
 
     const auto font = combo_box_font();
     auto text = selected_text();
@@ -479,11 +485,30 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
     };
     const auto chevron_text = impl_->popup_open ? "^" : "v";
     const auto chevron_size = measure_text(chevron_text, chevron_font);
-    const float arrow_x =
-        inner.right() - ((arrow_width - chevron_size.width) * 0.5F) - chevron_size.width;
-    const float arrow_y = inner.y + std::max(0.0F, (inner.height - chevron_size.height) * 0.5F);
     const auto arrow_color = theme_color("chevron-color", Color{0.45F, 0.48F, 0.54F, 1.0F});
-    ctx.add_text({arrow_x, arrow_y}, chevron_text, arrow_color, chevron_font);
+    if (capsule_chevron) {
+        const float capsule_height = std::max(0.0F, inner.height - 8.0F);
+        const float capsule_width = 18.0F;
+        const Rect capsule = {
+            inner.right() - capsule_width - 4.0F,
+            inner.y + std::max(0.0F, (inner.height - capsule_height) * 0.5F),
+            capsule_width,
+            capsule_height,
+        };
+        ctx.add_rounded_rect(capsule,
+                             theme_color("chevron-background", Color{0.21F, 0.52F, 0.89F, 1.0F}),
+                             std::max(2.0F, corner_radius - 2.0F));
+        const float arrow_x =
+            capsule.x + std::max(0.0F, (capsule.width - chevron_size.width) * 0.5F);
+        const float arrow_y =
+            capsule.y + std::max(0.0F, (capsule.height - chevron_size.height) * 0.5F);
+        ctx.add_text({arrow_x, arrow_y}, chevron_text, arrow_color, chevron_font);
+    } else {
+        const float arrow_x =
+            inner.right() - ((arrow_width - chevron_size.width) * 0.5F) - chevron_size.width;
+        const float arrow_y = inner.y + std::max(0.0F, (inner.height - chevron_size.height) * 0.5F);
+        ctx.add_text({arrow_x, arrow_y}, chevron_text, arrow_color, chevron_font);
+    }
 
     if (!impl_->popup_open || impl_->items.empty()) {
         return;
