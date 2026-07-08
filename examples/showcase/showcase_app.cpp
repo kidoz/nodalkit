@@ -201,15 +201,18 @@ int run_showcase(int argc, char** argv) {
     controls_content->append(InsetStage::create(command_group,
                                                 profile.command_stage_min_height,
                                                 profile.command_stage_natural_height,
-                                                profile.command_stage_padding));
+                                                profile.command_stage_padding,
+                                                profile.stage_chrome));
     controls_content->append(InsetStage::create(counter_group,
                                                 profile.counter_stage_min_height,
                                                 profile.counter_stage_natural_height,
-                                                profile.counter_stage_padding));
+                                                profile.counter_stage_padding,
+                                                profile.stage_chrome));
     controls_content->append(InsetStage::create(accent_group,
                                                 profile.palette_stage_min_height,
                                                 profile.palette_stage_natural_height,
-                                                profile.palette_stage_padding));
+                                                profile.palette_stage_padding,
+                                                profile.stage_chrome));
     auto controls_card = SurfacePanel::card(controls_content);
 
     auto list_title = SectionTitle::create(profile.list_title);
@@ -235,7 +238,8 @@ int run_showcase(int argc, char** argv) {
     auto list_stage = InsetStage::create(list_view,
                                          profile.list_stage_min_height,
                                          profile.list_stage_natural_height,
-                                         profile.list_stage_padding);
+                                         profile.list_stage_padding,
+                                         profile.stage_chrome);
     auto list_status = StatusPill::create("10 items");
     auto add_item_btn = nk::Button::create("Add Item");
     add_item_btn->add_style_class("suggested");
@@ -310,7 +314,8 @@ int run_showcase(int argc, char** argv) {
         },
     });
     data_table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
-    auto table_stage = InsetStage::create(data_table, 156.0F, 172.0F, profile.list_stage_padding);
+    auto table_stage = InsetStage::create(
+        data_table, 156.0F, 172.0F, profile.list_stage_padding, profile.stage_chrome);
 
     auto tree_label = FieldLabel::create("Tree view");
     auto tree_model = std::make_shared<nk::TreeModel>();
@@ -330,7 +335,8 @@ int run_showcase(int argc, char** argv) {
     tree_view->set_model(tree_model);
     tree_view->set_selection_model(tree_selection);
     tree_view->set_row_height(26.0F);
-    auto tree_stage = InsetStage::create(tree_view, 144.0F, 160.0F, profile.list_stage_padding);
+    auto tree_stage = InsetStage::create(
+        tree_view, 144.0F, 160.0F, profile.list_stage_padding, profile.stage_chrome);
 
     auto grid_label = FieldLabel::create("Grid view");
     auto grid_model = std::make_shared<nk::StringListModel>(std::vector<std::string>{
@@ -350,7 +356,8 @@ int run_showcase(int argc, char** argv) {
     grid_view->set_cell_width(96.0F);
     grid_view->set_cell_height(58.0F);
     grid_view->set_gap(8.0F);
-    auto grid_stage = InsetStage::create(grid_view, 144.0F, 160.0F, profile.list_stage_padding);
+    auto grid_stage = InsetStage::create(
+        grid_view, 144.0F, 160.0F, profile.list_stage_padding, profile.stage_chrome);
 
     auto list_content = Box::vertical(12.0F);
     list_content->append(list_title);
@@ -385,7 +392,8 @@ int run_showcase(int argc, char** argv) {
     auto preview_stage = InsetStage::create(preview_canvas,
                                             profile.preview_stage_min_height,
                                             profile.preview_stage_natural_height,
-                                            profile.preview_stage_padding);
+                                            profile.preview_stage_padding,
+                                            profile.stage_chrome);
     auto scale_label = FieldLabel::create("Scale mode");
     auto scale_combo = nk::ComboBox::create();
     scale_combo->set_horizontal_size_policy(nk::SizePolicy::Expanding);
@@ -555,7 +563,8 @@ int run_showcase(int argc, char** argv) {
     auto property_panel = InsetStage::create(property_group,
                                              profile.runtime_property_min_height,
                                              profile.runtime_property_natural_height,
-                                             profile.runtime_property_padding);
+                                             profile.runtime_property_padding,
+                                             profile.stage_chrome);
 
     auto dialog_group = Box::vertical(
         profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact ? 6.0F : 8.0F);
@@ -569,7 +578,8 @@ int run_showcase(int argc, char** argv) {
     auto dialog_panel = InsetStage::create(dialog_group,
                                            profile.runtime_dialog_min_height,
                                            profile.runtime_dialog_natural_height,
-                                           profile.runtime_dialog_padding);
+                                           profile.runtime_dialog_padding,
+                                           profile.stage_chrome);
 
     auto status_label = FieldLabel::create("Latest result");
     auto status_group = Box::vertical(
@@ -580,7 +590,8 @@ int run_showcase(int argc, char** argv) {
     auto status_panel = InsetStage::create(status_group,
                                            profile.runtime_status_min_height,
                                            profile.runtime_status_natural_height,
-                                           profile.runtime_status_padding);
+                                           profile.runtime_status_padding,
+                                           profile.stage_chrome);
 
     auto actions_row =
         SplitColumns::create(property_panel, dialog_panel, 0.5F, profile.actions_row_spacing);
@@ -625,8 +636,8 @@ int run_showcase(int argc, char** argv) {
         runtime_status->set_text("Command palette: " + std::string(command_id));
         runtime_status_detail->set_text("The command was activated from the searchable palette.");
     });
-    auto palette_stage =
-        InsetStage::create(command_palette, 186.0F, 220.0F, profile.runtime_status_padding);
+    auto palette_stage = InsetStage::create(
+        command_palette, 186.0F, 220.0F, profile.runtime_status_padding, profile.stage_chrome);
 
     auto actions_content = Box::vertical(profile.preview_section_spacing);
     actions_content->append(actions_title);
@@ -673,7 +684,8 @@ int run_showcase(int argc, char** argv) {
     auto page_bottom_spacer = InsetStage::create(Spacer::create(),
                                                  profile.page_bottom_spacer_height,
                                                  profile.page_bottom_spacer_height,
-                                                 0.0F);
+                                                 0.0F,
+                                                 profile.stage_chrome);
     body_content->append(page_bottom_spacer);
 
     auto body_page = SurfacePanel::page(body_content);

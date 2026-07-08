@@ -58,7 +58,6 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
         profile.actions_subtitle =
             "Status-first hooks for shared state, dialogs, and Wayland-era desktop flow.";
         profile.platform_pill_text = "Wayland";
-        profile.ready_segment = "Wayland ready";
         profile.palette_label = "Preview palette";
         profile.palette_value_prefix = "Palette: ";
         profile.preview_layout_mode = ShowcasePreviewLayoutMode::Stacked;
@@ -120,7 +119,6 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
         profile.actions_title = "Runtime Actions";
         profile.actions_subtitle = "Shared runtime hooks and modal flow in a more compact shell.";
         profile.platform_pill_text = "X11";
-        profile.ready_segment = "Linux ready";
         profile.show_hero_close_button = false;
         profile.window_width = 1200.0F;
         profile.window_height = 820.0F;
@@ -154,7 +152,7 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
         profile.actions_subtitle =
             "Status-first runtime hooks for shared state, dialogs, and desktop flow.";
         profile.platform_pill_text = "macOS";
-        profile.ready_segment = "macOS ready";
+        profile.stage_chrome = false;
         profile.show_hero_close_button = false;
         profile.window_width = 1280.0F;
         profile.window_height = 1020.0F;
@@ -185,7 +183,6 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
         profile.actions_title = "Runtime Actions";
         profile.actions_subtitle = "Shared runtime hooks for status changes, state, and dialogs.";
         profile.platform_pill_text = "Windows";
-        profile.ready_segment = "Windows ready";
         profile.preview_layout_mode = ShowcasePreviewLayoutMode::Stacked;
         profile.show_hero_close_button = false;
         profile.window_width = 1320.0F;
@@ -203,7 +200,6 @@ ShowcaseProfile make_showcase_profile(const nk::SystemPreferences& system_prefer
     case ShowcasePlatformFlavor::Generic:
         profile.flavor = ShowcasePlatformFlavor::Generic;
         profile.platform_pill_text = "Generic";
-        profile.ready_segment = "Ready";
         break;
     }
 

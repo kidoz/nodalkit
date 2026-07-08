@@ -52,6 +52,9 @@ struct ShowcaseProfile {
     ShowcasePreviewLayoutMode preview_layout_mode = ShowcasePreviewLayoutMode::Split;
     ShowcaseActionsLayoutMode actions_layout_mode = ShowcaseActionsLayoutMode::Expanded;
     bool show_hero_close_button = false;
+    // Whether inset stages draw their gray panel + border. macOS grouped
+    // forms flatten one surface level, so it turns the chrome off there (R7).
+    bool stage_chrome = true;
     float window_width = 1180.0F;
     float window_height = 760.0F;
     float main_split_ratio = 0.44F;

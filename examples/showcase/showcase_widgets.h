@@ -176,10 +176,10 @@ protected:
 private:
     explicit SectionTitle(std::string text) : text_(std::move(text)) {}
 
-    static nk::FontDescriptor font_descriptor() {
+    [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
             .family = {},
-            .size = 18.0F,
+            .size = theme_number("font-size-title", 18.0F),
             .weight = nk::FontWeight::Medium,
         };
     }
@@ -226,10 +226,10 @@ protected:
 private:
     explicit SecondaryText(std::string text) : text_(std::move(text)) {}
 
-    static nk::FontDescriptor font_descriptor() {
+    [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
             .family = {},
-            .size = 13.0F,
+            .size = theme_number("font-size-body", 13.0F),
             .weight = nk::FontWeight::Regular,
         };
     }
@@ -284,10 +284,10 @@ protected:
 private:
     explicit FieldLabel(std::string text) : text_(std::move(text)) {}
 
-    static nk::FontDescriptor font_descriptor() {
+    [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
             .family = {},
-            .size = 12.0F,
+            .size = theme_number("font-size-caption", 12.0F),
             .weight = nk::FontWeight::Medium,
         };
     }
@@ -338,10 +338,10 @@ protected:
 private:
     explicit ValueText(std::string text) : text_(std::move(text)) {}
 
-    static nk::FontDescriptor font_descriptor() {
+    [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
             .family = {},
-            .size = 17.0F,
+            .size = theme_number("font-size-value", 17.0F),
             .weight = nk::FontWeight::Medium,
         };
     }
@@ -607,9 +607,11 @@ public:
     static std::shared_ptr<InsetStage> create(std::shared_ptr<nk::Widget> content,
                                               float min_height,
                                               float natural_height,
-                                              float padding = 10.0F) {
+                                              float padding = 10.0F,
+                                              bool chrome = true) {
         auto stage =
             std::shared_ptr<InsetStage>(new InsetStage(min_height, natural_height, padding));
+        stage->chrome_ = chrome;
         stage->set_horizontal_size_policy(nk::SizePolicy::Expanding);
         stage->set_content(std::move(content));
         return stage;
@@ -658,13 +660,16 @@ protected:
     void snapshot(nk::SnapshotContext& ctx) const override {
         const auto a = allocation();
         const float corner_radius = theme_number("corner-radius", 14.0F);
-        ctx.add_rounded_rect(a,
-                             theme_color("surface-panel", nk::Color{0.972F, 0.978F, 0.988F, 1.0F}),
-                             corner_radius);
-        ctx.add_border(a,
-                       theme_color("border-color", nk::Color{0.88F, 0.90F, 0.93F, 1.0F}),
-                       1.0F,
-                       corner_radius);
+        if (chrome_) {
+            ctx.add_rounded_rect(
+                a,
+                theme_color("surface-panel", nk::Color{0.972F, 0.978F, 0.988F, 1.0F}),
+                corner_radius);
+            ctx.add_border(a,
+                           theme_color("border-color", nk::Color{0.88F, 0.90F, 0.93F, 1.0F}),
+                           1.0F,
+                           corner_radius);
+        }
 
         ctx.push_rounded_clip(a, corner_radius);
         Widget::snapshot(ctx);
@@ -679,6 +684,7 @@ private:
     float min_height_ = 0.0F;
     float natural_height_ = 0.0F;
     float padding_ = 0.0F;
+    bool chrome_ = true;
 };
 
 class PreviewCanvas : public nk::Widget {
