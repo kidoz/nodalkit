@@ -490,11 +490,35 @@ TEST_CASE("Widget fallback defaults equal the light-theme tokens", "[theme]") {
 
 TEST_CASE("Every family defines the full token vocabulary", "[theme]") {
     static constexpr const char* CommonColorTokens[] = {
-        "window-bg",       "surface-panel",  "surface-card",    "surface-raised", "surface-hover",
-        "surface-pressed", "surface-field",  "border-field",    "border-subtle",  "border-strong",
-        "text-primary",    "text-secondary", "text-disabled",   "accent",         "accent-hover",
-        "accent-pressed",  "accent-soft",    "accent-contrast", "focus-ring",     "scrollbar-track",
-        "scrollbar-thumb", "surface-osd",    "text-osd",        "field-bg",       "field-border",
+        "window-bg",
+        "surface-panel",
+        "surface-card",
+        "surface-raised",
+        "surface-hover",
+        "surface-pressed",
+        "surface-field",
+        "border-field",
+        "border-subtle",
+        "border-strong",
+        "text-primary",
+        "text-secondary",
+        "text-disabled",
+        "accent",
+        "accent-hover",
+        "accent-pressed",
+        "accent-soft",
+        "accent-contrast",
+        "focus-ring",
+        "scrollbar-track",
+        "scrollbar-thumb",
+        "surface-osd",
+        "text-osd",
+        "field-bg",
+        "field-border",
+        "selection-active-bg",
+        "selection-active-text",
+        "selection-inactive-bg",
+        "selection-inactive-text",
     };
     static constexpr const char* CommonMetricTokens[] = {
         "spacing-xs",
@@ -523,12 +547,17 @@ TEST_CASE("Every family defines the full token vocabulary", "[theme]") {
         "popup-item-height",
         "segment-min-width",
         "image-min-height",
+        "font-size-title",
+        "font-size-body",
+        "font-size-caption",
+        "font-size-value",
     };
     static constexpr const char* PolicyTokens[] = {
         "accent-source",
         "motion-mode",
         "transparency-mode",
         "density",
+        "scrollbar-mode",
     };
     static constexpr const char* WindowsOnlyTokens[] = {
         "focus-visible",
@@ -619,6 +648,17 @@ TEST_CASE("Text and focus colors meet WCAG 2.2 contrast in every palette", "[the
             // Focus indicators are non-text UI: WCAG 2.2 requires >= 3:1.
             INFO(palette.name << " focus ring");
             REQUIRE(contrast_ratio(focus_ring, color_token(*palette.theme, "window-bg")) >= 3.0F);
+            // Selection pairs: text on the active highlight matches the native
+            // platform pair (macOS solid accent sits near the 3:1 UI-component
+            // floor, like AppKit); the inactive pair is regular gray-on-gray
+            // text and must hold the full 4.5:1.
+            INFO(palette.name << " selection pairs");
+            REQUIRE(contrast_ratio(aliased_color_token(*palette.theme, "selection-active-text"),
+                                   aliased_color_token(*palette.theme, "selection-active-bg")) >=
+                    3.0F);
+            REQUIRE(contrast_ratio(aliased_color_token(*palette.theme, "selection-inactive-text"),
+                                   aliased_color_token(*palette.theme, "selection-inactive-bg")) >=
+                    4.5F);
             if (palette.theme->token("focus-visible") != nullptr) {
                 REQUIRE(contrast_ratio(color_token(*palette.theme, "focus-visible"),
                                        color_token(*palette.theme, "window-bg")) >= 3.0F);
@@ -772,4 +812,79 @@ TEST_CASE("No widget class leaks light-theme colors into the dark theme", "[them
     REQUIRE(disabled_text != nullptr);
     REQUIRE(std::holds_alternative<std::string>(*disabled_text));
     REQUIRE(std::get<std::string>(*disabled_text) == "text-disabled");
+}
+
+TEST_CASE("Selection, chevron, and scrollbar policy carry family personality",
+          "[theme][selection]") {
+    auto gnome = nk::Theme::make_linux_gnome(nk::ColorScheme::Light);
+    auto win11 = nk::Theme::make_windows_11(nk::ColorScheme::Light);
+    auto win10 = nk::Theme::make_windows_10(nk::ColorScheme::Light);
+    auto macos = nk::Theme::make_macos_26(nk::ColorScheme::Light);
+
+    SECTION("macOS active selection is the solid accent pair; others keep the soft wash") {
+        REQUIRE(aliased_color_token(*macos, "selection-active-bg") ==
+                color_token(*macos, "accent"));
+        REQUIRE(aliased_color_token(*macos, "selection-active-text") ==
+                color_token(*macos, "accent-contrast"));
+        for (const auto* theme : {gnome.get(), win11.get(), win10.get()}) {
+            REQUIRE(aliased_color_token(*theme, "selection-active-bg") ==
+                    color_token(*theme, "accent-soft"));
+            REQUIRE(aliased_color_token(*theme, "selection-active-text") ==
+                    color_token(*theme, "text-primary"));
+        }
+    }
+
+    SECTION("inactive-window selection collapses to the muted pair in every family") {
+        for (const auto* theme : {gnome.get(), win11.get(), win10.get(), macos.get()}) {
+            REQUIRE(aliased_color_token(*theme, "selection-inactive-bg") ==
+                    color_token(*theme, "surface-pressed"));
+            REQUIRE(aliased_color_token(*theme, "selection-inactive-text") ==
+                    color_token(*theme, "text-primary"));
+        }
+    }
+
+    SECTION("list rules expose both selection pairs to widgets") {
+        for (const auto* theme : {gnome.get(), macos.get()}) {
+            REQUIRE(resolved_color(*theme, {"list-view"}, "selected-background") ==
+                    aliased_color_token(*theme, "selection-active-bg"));
+            REQUIRE(resolved_color(*theme, {"list-view"}, "inactive-selected-background") ==
+                    aliased_color_token(*theme, "selection-inactive-bg"));
+        }
+    }
+
+    SECTION("the list focus ring is keyboard-only: FocusVisible resolves it, Focused does not") {
+        const auto* visible_ring =
+            gnome->resolve("",
+                           {"list-view"},
+                           nk::StateFlags::Focused | nk::StateFlags::FocusVisible,
+                           "border-color");
+        REQUIRE(visible_ring != nullptr);
+        REQUIRE(std::holds_alternative<std::string>(*visible_ring));
+        REQUIRE(std::get<std::string>(*visible_ring) == "focus-ring");
+
+        const auto* pointer_ring =
+            gnome->resolve("", {"list-view"}, nk::StateFlags::Focused, "border-color");
+        REQUIRE(pointer_ring != nullptr);
+        REQUIRE(std::holds_alternative<std::string>(*pointer_ring));
+        REQUIRE(std::get<std::string>(*pointer_ring) == "border-subtle");
+    }
+
+    SECTION("macOS renders the combo chevron as a capsule; other families keep the divider") {
+        REQUIRE(resolved_string(*macos, {"combo-box"}, "chevron-style") == "capsule");
+        const auto* capsule_glyph =
+            macos->resolve("", {"combo-box"}, nk::StateFlags::None, "chevron-color");
+        REQUIRE(capsule_glyph != nullptr);
+        REQUIRE(std::holds_alternative<std::string>(*capsule_glyph));
+        REQUIRE(std::get<std::string>(*capsule_glyph) == "accent-contrast");
+        for (const auto* theme : {gnome.get(), win11.get(), win10.get()}) {
+            REQUIRE(resolved_string(*theme, {"combo-box"}, "chevron-style") == "divided");
+        }
+    }
+
+    SECTION("scrollbar mode is overlay on GNOME/macOS and persistent on Windows") {
+        REQUIRE(string_token(*gnome, "scrollbar-mode") == "overlay");
+        REQUIRE(string_token(*macos, "scrollbar-mode") == "overlay");
+        REQUIRE(string_token(*win11, "scrollbar-mode") == "persistent");
+        REQUIRE(string_token(*win10, "scrollbar-mode") == "persistent");
+    }
 }

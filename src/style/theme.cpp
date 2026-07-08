@@ -44,6 +44,28 @@ void install_legacy_token_aliases(Theme& theme) {
     set_alias_token(theme, "field-border", "border-field");
 }
 
+// Paired selection tokens (R2): the active-window selection highlight and the
+// text on it, plus the muted pair used while the window is inactive. Families
+// choose native values — GNOME/Windows keep the soft accent wash, macOS uses
+// the solid accent with contrast text.
+void install_selection_tokens(Theme& theme,
+                              std::string_view active_bg,
+                              std::string_view active_text) {
+    set_alias_token(theme, "selection-active-bg", active_bg);
+    set_alias_token(theme, "selection-active-text", active_text);
+    set_alias_token(theme, "selection-inactive-bg", "surface-pressed");
+    set_alias_token(theme, "selection-inactive-text", "text-primary");
+}
+
+// Per-family type scale (R10): showcase and application text roles resolve
+// these instead of hardcoding point sizes.
+void install_type_scale_tokens(Theme& theme, float title, float body, float caption, float value) {
+    set_metric_token(theme, "font-size-title", title);
+    set_metric_token(theme, "font-size-body", body);
+    set_metric_token(theme, "font-size-caption", caption);
+    set_metric_token(theme, "font-size-value", value);
+}
+
 // Named metric tokens whose value is currently the same in every family. The
 // per-family personality lives in the spacing scale, control heights, radius
 // roles, and control padding set by each factory; everything here exists so no
@@ -257,6 +279,7 @@ void install_shared_rules(Theme& theme) {
                  {"border-color", StyleValue{std::string("border-field")}},
                  {"text-color", StyleValue{std::string("text-primary")}},
                  {"chevron-color", StyleValue{std::string("text-secondary")}},
+                 {"chevron-style", StyleValue{std::string("divided")}},
                  {"popup-background", StyleValue{std::string("surface-card")}},
                  {"popup-border-color", StyleValue{std::string("border-subtle")}},
                  {"popup-hover-background", StyleValue{std::string("surface-hover")}},
@@ -320,8 +343,10 @@ void install_shared_rules(Theme& theme) {
                  {"background", StyleValue{std::string("surface-card")}},
                  {"border-color", StyleValue{std::string("border-subtle")}},
                  {"text-color", StyleValue{std::string("text-primary")}},
-                 {"selected-background", StyleValue{std::string("accent-soft")}},
-                 {"selected-text-color", StyleValue{std::string("text-primary")}},
+                 {"selected-background", token_ref("selection-active-bg")},
+                 {"selected-text-color", token_ref("selection-active-text")},
+                 {"inactive-selected-background", token_ref("selection-inactive-bg")},
+                 {"inactive-selected-text-color", token_ref("selection-inactive-text")},
                  {"row-separator-color", StyleValue{std::string("border-subtle")}},
                  {"focus-ring-color", StyleValue{std::string("focus-ring")}},
                  {"scrollbar-track-color", StyleValue{std::string("scrollbar-track")}},
@@ -329,9 +354,11 @@ void install_shared_rules(Theme& theme) {
                  {"corner-radius", token_ref("radius-card")},
                  {"selection-radius", token_ref("radius-selection")},
              });
+    // The list viewport ring is a keyboard-focus affordance; pointer or
+    // programmatic focus must not paint it (R3).
     add_rule(theme,
              {"list-view"},
-             StateFlags::Focused,
+             StateFlags::FocusVisible,
              {{"border-color", StyleValue{std::string("focus-ring")}}});
 
     add_rule(theme,
@@ -419,6 +446,10 @@ void install_shared_rules(Theme& theme) {
                  {"background", token_ref("surface-card")},
                  {"header-background", token_ref("surface-panel")},
                  {"cell-border-color", token_ref("border-subtle")},
+                 {"selected-background", token_ref("selection-active-bg")},
+                 {"selected-text-color", token_ref("selection-active-text")},
+                 {"inactive-selected-background", token_ref("selection-inactive-bg")},
+                 {"inactive-selected-text-color", token_ref("selection-inactive-text")},
              });
 
     add_rule(theme,
@@ -448,6 +479,10 @@ void install_shared_rules(Theme& theme) {
              {
                  {"background", token_ref("surface-card")},
                  {"cell-border-color", token_ref("border-subtle")},
+                 {"selected-background", token_ref("selection-active-bg")},
+                 {"selected-text-color", token_ref("selection-active-text")},
+                 {"inactive-selected-background", token_ref("selection-inactive-bg")},
+                 {"inactive-selected-text-color", token_ref("selection-inactive-text")},
              });
 
     add_rule(theme, {"info-bar"}, StateFlags::None, {{"close-color", token_ref("text-secondary")}});
@@ -555,7 +590,16 @@ void install_shared_rules(Theme& theme) {
                  {"text-color", token_ref("text-osd")},
              });
 
-    add_rule(theme, {"tree-view"}, StateFlags::None, {{"background", token_ref("surface-card")}});
+    add_rule(theme,
+             {"tree-view"},
+             StateFlags::None,
+             {
+                 {"background", token_ref("surface-card")},
+                 {"selected-background", token_ref("selection-active-bg")},
+                 {"selected-text-color", token_ref("selection-active-text")},
+                 {"inactive-selected-background", token_ref("selection-inactive-bg")},
+                 {"inactive-selected-text-color", token_ref("selection-inactive-text")},
+             });
 
     // --- Inactive-window rules: dim text when window loses focus ---
     add_rule(theme,
@@ -606,6 +650,21 @@ void install_windows_layer_tokens(Theme& theme, bool dark) {
         set_color_token(theme, "layer-content-bg", 255, 255, 255);
         set_color_token(theme, "layer-status-bg", 243, 243, 243);
     }
+}
+
+// macOS-family rule overrides, installed after the shared rules so the
+// source-order tie-break lets them win at equal specificity. The popup chevron
+// renders as an accent capsule inside the control (NSPopUpButton pattern)
+// instead of the divided segment the Windows families keep (R4).
+void install_macos_overrides(Theme& theme) {
+    add_rule(theme,
+             {"combo-box"},
+             StateFlags::None,
+             {
+                 {"chevron-style", StyleValue{std::string("capsule")}},
+                 {"chevron-color", token_ref("accent-contrast")},
+                 {"chevron-background", token_ref("accent")},
+             });
 }
 
 std::shared_ptr<Theme>& active_theme_storage() {
@@ -770,16 +829,20 @@ std::unique_ptr<Theme> Theme::make_light() {
     set_color_token(*theme, "surface-osd", 38, 38, 43, 0.95F);
     set_color_token(*theme, "text-osd", 255, 255, 255);
     install_legacy_token_aliases(*theme);
+    install_selection_tokens(*theme, "accent-soft", "text-primary");
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
     theme->set_token("density", StyleValue{std::string("standard")});
+    // GNOME overlay scrollbars: slim thumb over content, no persistent track.
+    theme->set_token("scrollbar-mode", StyleValue{std::string("overlay")});
 
     set_metric_token(*theme, "spacing-xs", 4.0F);
     set_metric_token(*theme, "spacing-sm", 8.0F);
     set_metric_token(*theme, "spacing-md", 12.0F);
     set_metric_token(*theme, "spacing-lg", 16.0F);
     set_metric_token(*theme, "spacing-xl", 24.0F);
+    install_type_scale_tokens(*theme, 18.0F, 13.0F, 12.0F, 17.0F);
     set_metric_token(*theme, "control-height", 36.0F);
     set_metric_token(*theme, "menu-height", 30.0F);
     set_metric_token(*theme, "status-height", 28.0F);
@@ -831,16 +894,20 @@ std::unique_ptr<Theme> Theme::make_dark() {
     set_color_token(*theme, "surface-osd", 58, 58, 64, 0.98F);
     set_color_token(*theme, "text-osd", 255, 255, 255);
     install_legacy_token_aliases(*theme);
+    install_selection_tokens(*theme, "accent-soft", "text-primary");
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
     theme->set_token("density", StyleValue{std::string("standard")});
+    // GNOME overlay scrollbars: slim thumb over content, no persistent track.
+    theme->set_token("scrollbar-mode", StyleValue{std::string("overlay")});
 
     set_metric_token(*theme, "spacing-xs", 4.0F);
     set_metric_token(*theme, "spacing-sm", 8.0F);
     set_metric_token(*theme, "spacing-md", 12.0F);
     set_metric_token(*theme, "spacing-lg", 16.0F);
     set_metric_token(*theme, "spacing-xl", 24.0F);
+    install_type_scale_tokens(*theme, 18.0F, 13.0F, 12.0F, 17.0F);
     set_metric_token(*theme, "control-height", 34.0F);
     set_metric_token(*theme, "menu-height", 32.0F);
     set_metric_token(*theme, "status-height", 28.0F);
@@ -930,6 +997,9 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
 
     install_windows_layer_tokens(*theme, dark);
     install_legacy_token_aliases(*theme);
+    install_selection_tokens(*theme, "accent-soft", "text-primary");
+    // Windows keeps persistent scrollbars — the native desktop convention.
+    theme->set_token("scrollbar-mode", StyleValue{std::string("persistent")});
 
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
@@ -941,6 +1011,7 @@ std::unique_ptr<Theme> Theme::make_windows_11(ColorScheme color_scheme) {
     set_metric_token(*theme, "spacing-md", 12.0F);
     set_metric_token(*theme, "spacing-lg", 16.0F);
     set_metric_token(*theme, "spacing-xl", 24.0F);
+    install_type_scale_tokens(*theme, 18.0F, 13.0F, 12.0F, 17.0F);
     set_metric_token(*theme, "control-height", 32.0F);
     set_metric_token(*theme, "menu-height", 32.0F);
     set_metric_token(*theme, "status-height", 26.0F);
@@ -1027,6 +1098,9 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
 
     install_windows_layer_tokens(*theme, dark);
     install_legacy_token_aliases(*theme);
+    install_selection_tokens(*theme, "accent-soft", "text-primary");
+    // Windows keeps persistent scrollbars — the native desktop convention.
+    theme->set_token("scrollbar-mode", StyleValue{std::string("persistent")});
 
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
@@ -1038,6 +1112,7 @@ std::unique_ptr<Theme> Theme::make_windows_10(ColorScheme color_scheme) {
     set_metric_token(*theme, "spacing-md", 12.0F);
     set_metric_token(*theme, "spacing-lg", 16.0F);
     set_metric_token(*theme, "spacing-xl", 24.0F);
+    install_type_scale_tokens(*theme, 18.0F, 13.0F, 12.0F, 17.0F);
     set_metric_token(*theme, "control-height", 32.0F);
     set_metric_token(*theme, "menu-height", 28.0F);
     set_metric_token(*theme, "status-height", 24.0F);
@@ -1120,16 +1195,22 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
     }
 
     install_legacy_token_aliases(*theme);
+    // macOS active selection is the solid accent with contrast text; the soft
+    // accent wash is the GNOME/Windows pattern (R2).
+    install_selection_tokens(*theme, "accent", "accent-contrast");
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
     theme->set_token("density", StyleValue{std::string("standard")});
+    // macOS overlay scrollbars: slim thumb over content, no persistent track.
+    theme->set_token("scrollbar-mode", StyleValue{std::string("overlay")});
 
     set_metric_token(*theme, "spacing-xs", 4.0F);
     set_metric_token(*theme, "spacing-sm", 8.0F);
     set_metric_token(*theme, "spacing-md", 10.0F);
     set_metric_token(*theme, "spacing-lg", 14.0F);
     set_metric_token(*theme, "spacing-xl", 20.0F);
+    install_type_scale_tokens(*theme, 17.0F, 13.0F, 11.0F, 16.0F);
     set_metric_token(*theme, "control-height", 28.0F);
     set_metric_token(*theme, "menu-height", 28.0F);
     set_metric_token(*theme, "status-height", 24.0F);
@@ -1149,6 +1230,7 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
     install_shared_metric_tokens(*theme);
 
     install_shared_rules(*theme);
+    install_macos_overrides(*theme);
 
     return theme;
 }

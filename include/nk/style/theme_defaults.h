@@ -39,6 +39,8 @@ inline constexpr auto ThemeColorDefaults = std::to_array<ThemeColorDefault>({
     {"focus-ring-color", "focus-ring", Color::from_rgb(76, 144, 228)},
     {"accent-color", "accent", Color::from_rgb(53, 132, 228)},
     {"selected-background", "accent-soft", Color::from_rgb(222, 236, 252)},
+    {"inactive-selected-background", "selection-inactive-bg", Color::from_rgb(232, 236, 242)},
+    {"inactive-selected-text-color", "selection-inactive-text", Color::from_rgb(37, 40, 46)},
     {"popup-selected-background", "accent-soft", Color::from_rgb(222, 236, 252)},
     {"hover-background", "surface-hover", Color::from_rgb(240, 243, 247)},
     {"popup-hover-background", "surface-hover", Color::from_rgb(240, 243, 247)},
