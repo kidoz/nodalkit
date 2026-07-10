@@ -360,6 +360,23 @@ bool CommandPalette::handle_text_input_event(const TextInputEvent& event) {
     return true;
 }
 
+std::optional<WidgetTextInputState> CommandPalette::text_input_state() const {
+    const auto search =
+        search_rect(*this, resolved_search_height(), resolved_search_section_height());
+    const auto search_font =
+        palette_font(theme_number("title-font-size", 13.0F) * theme_number("text-scale", 1.0F));
+
+    WidgetTextInputState state{};
+    state.text = impl_->query;
+    state.cursor = impl_->query.size();
+    state.anchor = state.cursor;
+    state.caret_rect = {search.x + 12.0F + measure_text(impl_->query, search_font).width,
+                        search.y + 8.0F,
+                        1.5F,
+                        std::max(0.0F, search.height - 16.0F)};
+    return state;
+}
+
 CursorShape CommandPalette::cursor_shape() const {
     return CursorShape::IBeam;
 }

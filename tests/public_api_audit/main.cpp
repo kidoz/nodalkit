@@ -491,6 +491,8 @@ void force_symbol_references() {
         &nk::CommandPalette::on_command_activated);
     (void)static_cast<nk::Signal<>& (nk::CommandPalette::*)()>(
         &nk::CommandPalette::on_dismiss_requested);
+    (void)static_cast<std::optional<nk::WidgetTextInputState> (nk::CommandPalette::*)() const>(
+        &nk::CommandPalette::text_input_state);
     (void)static_cast<int (nk::Application::*)()>(&nk::Application::run);
     (void)static_cast<void (nk::Application::*)(int)>(&nk::Application::quit);
     (void)static_cast<nk::EventLoop& (nk::Application::*)()>(&nk::Application::event_loop);

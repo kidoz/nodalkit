@@ -4792,6 +4792,35 @@ TEST_CASE("CommandPalette filters, navigates, and activates enabled commands", "
     REQUIRE(palette->current_command() == 2);
 }
 
+TEST_CASE("CommandPalette exposes a text input session while focused", "[app][command][text]") {
+    nk::Window window({.title = "Palette text", .width = 480, .height = 320});
+    auto palette = nk::CommandPalette::create();
+    palette->set_commands({
+        nk::CommandPaletteCommand{
+            .id = "file.open", .title = "Open File", .subtitle = "", .category = "File"},
+        nk::CommandPaletteCommand{
+            .id = "view.sidebar", .title = "Toggle Sidebar", .subtitle = "", .category = "View"},
+    });
+    window.set_child(palette);
+    palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
+    palette->grab_focus();
+
+    const auto empty_state = window.current_text_input_state();
+    REQUIRE(empty_state.has_value());
+    REQUIRE(empty_state->text.empty());
+    REQUIRE(empty_state->caret_rect.width > 0.0F);
+
+    window.dispatch_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "side"});
+    REQUIRE(palette->query() == "side");
+    REQUIRE(palette->current_command() == 1);
+
+    const auto typed_state = window.current_text_input_state();
+    REQUIRE(typed_state.has_value());
+    REQUIRE(typed_state->text == "side");
+    REQUIRE(typed_state->cursor == 4);
+    REQUIRE(typed_state->caret_rect.x > empty_state->caret_rect.x);
+}
+
 TEST_CASE("CommandPalette focus preserves the measured results viewport", "[app][command]") {
     auto palette = nk::CommandPalette::create();
     palette->set_commands({
