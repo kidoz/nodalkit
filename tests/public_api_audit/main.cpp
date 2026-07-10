@@ -1101,6 +1101,8 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Widget::*)(const nk::KeyEvent&)>(&nk::Widget::handle_key_event);
     (void)static_cast<bool (nk::Widget::*)(const nk::TextInputEvent&)>(
         &nk::Widget::handle_text_input_event);
+    (void)static_cast<std::optional<nk::WidgetTextInputState> (nk::Widget::*)() const>(
+        &nk::Widget::text_input_state);
     (void)static_cast<bool (nk::Widget::*)(nk::DragDropEvent&)>(
         &nk::Widget::handle_drag_drop_event);
     (void)static_cast<bool (nk::Widget::*)(nk::Point) const>(&nk::Widget::hit_test);
@@ -1304,6 +1306,8 @@ void force_symbol_references() {
         &nk::TextField::handle_key_event);
     (void)static_cast<bool (nk::TextField::*)(const nk::TextInputEvent&)>(
         &nk::TextField::handle_text_input_event);
+    (void)static_cast<std::optional<nk::WidgetTextInputState> (nk::TextField::*)() const>(
+        &nk::TextField::text_input_state);
     (void)static_cast<std::optional<nk::Rect> (nk::TextField::*)() const>(
         &nk::TextField::text_input_caret_rect);
     (void)static_cast<nk::CursorShape (nk::TextField::*)() const>(&nk::TextField::cursor_shape);

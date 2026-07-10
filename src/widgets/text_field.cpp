@@ -906,6 +906,32 @@ bool TextField::handle_text_input_event(const TextInputEvent& event) {
     return false;
 }
 
+std::optional<WidgetTextInputState> TextField::text_input_state() const {
+    if (!is_editable()) {
+        return std::nullopt;
+    }
+
+    const auto caret_rect = text_input_caret_rect();
+    if (!caret_rect.has_value()) {
+        return std::nullopt;
+    }
+
+    WidgetTextInputState state{};
+    state.text = std::string(text());
+    state.cursor = cursor_position();
+    if (has_selection()) {
+        if (state.cursor == selection_start()) {
+            state.anchor = selection_end();
+        } else {
+            state.anchor = selection_start();
+        }
+    } else {
+        state.anchor = state.cursor;
+    }
+    state.caret_rect = *caret_rect;
+    return state;
+}
+
 std::optional<Rect> TextField::text_input_caret_rect() const {
     const auto text_bounds = text_rect();
     const auto font = text_field_font();

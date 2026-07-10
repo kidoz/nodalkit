@@ -24,7 +24,6 @@
 #include <nk/style/theme.h>
 #include <nk/text/text_shaper.h>
 #include <nk/ui_core/widget.h>
-#include <nk/widgets/text_field.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -2710,38 +2709,29 @@ bool Window::is_key_pressed(KeyCode key) const {
 }
 
 std::optional<Rect> Window::current_text_input_caret_rect() const {
-    auto* text_field = dynamic_cast<TextField*>(impl_->focused_widget);
-    if (text_field == nullptr) {
+    const auto state = current_text_input_state();
+    if (!state.has_value()) {
         return std::nullopt;
     }
-    return text_field->text_input_caret_rect();
+    return state->caret_rect;
 }
 
 std::optional<WindowTextInputState> Window::current_text_input_state() const {
-    auto* text_field = dynamic_cast<TextField*>(impl_->focused_widget);
-    if (text_field == nullptr || !text_field->is_editable()) {
+    if (impl_->focused_widget == nullptr) {
         return std::nullopt;
     }
 
-    const auto caret_rect = text_field->text_input_caret_rect();
-    if (!caret_rect.has_value()) {
+    auto widget_state = impl_->focused_widget->text_input_state();
+    if (!widget_state.has_value()) {
         return std::nullopt;
     }
 
-    WindowTextInputState state{};
-    state.text = std::string(text_field->text());
-    state.cursor = text_field->cursor_position();
-    if (text_field->has_selection()) {
-        if (state.cursor == text_field->selection_start()) {
-            state.anchor = text_field->selection_end();
-        } else {
-            state.anchor = text_field->selection_start();
-        }
-    } else {
-        state.anchor = state.cursor;
-    }
-    state.caret_rect = *caret_rect;
-    return state;
+    return WindowTextInputState{
+        .text = std::move(widget_state->text),
+        .cursor = widget_state->cursor,
+        .anchor = widget_state->anchor,
+        .caret_rect = widget_state->caret_rect,
+    };
 }
 
 WindowInspector& Window::inspector() {

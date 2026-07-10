@@ -910,6 +910,10 @@ bool Widget::handle_text_input_event(const TextInputEvent& /*event*/) {
     return false;
 }
 
+std::optional<WidgetTextInputState> Widget::text_input_state() const {
+    return std::nullopt;
+}
+
 bool Widget::handle_drag_drop_event(DragDropEvent& event) {
     switch (event.type) {
     case DragDropEventType::Enter:

@@ -17,8 +17,10 @@ namespace nk {
 class SnapshotContext;
 }
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -39,6 +41,16 @@ enum class SizePolicy {
     Fixed,
     Preferred,
     Expanding,
+};
+
+/// Active text-input session a focused widget exposes to platform backends
+/// for IME activation, composition, and candidate-window placement.
+struct WidgetTextInputState {
+    std::string text;
+    std::size_t cursor = 0;
+    std::size_t anchor = 0;
+    /// Caret rectangle in window coordinates.
+    Rect caret_rect{};
 };
 
 /// Base class for all widgets. Widgets form a tree with unique-pointer
@@ -244,6 +256,12 @@ public:
     /// Handle a platform text-input event targeted at this widget.
     /// Returns true if the event was consumed.
     virtual bool handle_text_input_event(const TextInputEvent& event);
+
+    /// The active text-input session, or nullopt when the widget does not
+    /// accept text input. While the focused widget returns a value, platform
+    /// backends route keystrokes through IME composition and deliver
+    /// TextInputEvents instead of raw character key events.
+    [[nodiscard]] virtual std::optional<WidgetTextInputState> text_input_state() const;
 
     /// Handle a drag/drop event targeted at this widget.
     /// Returns true when the event was accepted by the widget or one of its
