@@ -27,6 +27,7 @@
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
 #include <nk/layout/box_layout.h>
+#include <nk/layout/breakpoint.h>
 #include <nk/layout/constraints.h>
 #include <nk/layout/grid_layout.h>
 #include <nk/layout/layout_manager.h>
@@ -65,7 +66,9 @@
 #include <nk/ui_core/cursor_shape.h>
 #include <nk/ui_core/state_flags.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/banner.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/clamp.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
@@ -76,10 +79,16 @@
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
+#include <nk/widgets/navigation_split_view.h>
+#include <nk/widgets/overlay_split_view.h>
+#include <nk/widgets/preferences.h>
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
+#include <nk/widgets/status_page.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/toast_overlay.h>
+#include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tree_view.h>
 
 namespace {
@@ -203,6 +212,20 @@ void force_symbol_references() {
                           const>(&nk::BoxLayout::measure);
     (void)static_cast<void (nk::BoxLayout::*)(nk::Widget&, const nk::Rect&)>(
         &nk::BoxLayout::allocate);
+    (void)static_cast<bool (nk::BreakpointCondition::*)(nk::Size) const>(
+        &nk::BreakpointCondition::matches);
+    (void)&nk::Breakpoint::create;
+    (void)&nk::Breakpoint::condition;
+    (void)&nk::Breakpoint::set_condition;
+    (void)&nk::Breakpoint::is_active;
+    (void)&nk::Breakpoint::on_active_changed;
+    (void)&nk::BreakpointBin::create;
+    (void)&nk::BreakpointBin::set_child;
+    (void)&nk::BreakpointBin::child;
+    (void)&nk::BreakpointBin::add_breakpoint;
+    (void)&nk::BreakpointBin::remove_breakpoint;
+    (void)&nk::BreakpointBin::clear_breakpoints;
+    (void)&nk::BreakpointBin::breakpoints;
     (void)static_cast<float (nk::GridLayout::*)() const>(&nk::GridLayout::row_spacing);
     (void)static_cast<void (nk::GridLayout::*)(float)>(&nk::GridLayout::set_row_spacing);
     (void)static_cast<float (nk::GridLayout::*)() const>(&nk::GridLayout::column_spacing);
@@ -601,13 +624,135 @@ void force_symbol_references() {
     (void)&nk::load_gtk_palette;
     (void)static_cast<void (nk::TextShaper::*)(std::string_view, bool)>(
         &nk::TextShaper::set_system_default_family);
+    (void)static_cast<void (nk::TextShaper::*)(std::string_view)>(
+        &nk::TextShaper::set_system_document_family);
     (void)&nk::Headerbar::create;
+    (void)static_cast<std::string_view (nk::Headerbar::*)() const>(&nk::Headerbar::title);
     (void)static_cast<void (nk::Headerbar::*)(std::string)>(&nk::Headerbar::set_title);
     (void)static_cast<void (nk::Headerbar::*)(std::shared_ptr<nk::Widget>)>(
         &nk::Headerbar::add_leading);
     (void)static_cast<void (nk::Headerbar::*)(std::shared_ptr<nk::Widget>)>(
         &nk::Headerbar::add_trailing);
     (void)static_cast<void (nk::Headerbar::*)(bool)>(&nk::Headerbar::set_window_controls_enabled);
+    (void)static_cast<std::string_view (nk::Headerbar::*)() const>(
+        &nk::Headerbar::decoration_layout);
+    (void)static_cast<void (nk::Headerbar::*)(std::string)>(&nk::Headerbar::set_decoration_layout);
+    (void)static_cast<nk::HeaderbarCenteringPolicy (nk::Headerbar::*)() const>(
+        &nk::Headerbar::centering_policy);
+    (void)static_cast<void (nk::Headerbar::*)(nk::HeaderbarCenteringPolicy)>(
+        &nk::Headerbar::set_centering_policy);
+    (void)static_cast<bool (nk::Headerbar::*)() const>(&nk::Headerbar::shows_back_button);
+    (void)static_cast<void (nk::Headerbar::*)(bool)>(&nk::Headerbar::set_show_back_button);
+    (void)static_cast<nk::Signal<>& (nk::Headerbar::*)()>(&nk::Headerbar::on_back_requested);
+    (void)&nk::Clamp::create;
+    (void)&nk::Clamp::set_child;
+    (void)&nk::Clamp::child;
+    (void)&nk::Clamp::orientation;
+    (void)&nk::Clamp::maximum_size;
+    (void)&nk::Clamp::set_maximum_size;
+    (void)&nk::Clamp::tightening_threshold;
+    (void)&nk::Clamp::set_tightening_threshold;
+    (void)&nk::Clamp::scales_with_text;
+    (void)&nk::Clamp::set_scales_with_text;
+    (void)&nk::NavigationSplitView::create;
+    (void)&nk::NavigationSplitView::set_sidebar;
+    (void)&nk::NavigationSplitView::sidebar;
+    (void)&nk::NavigationSplitView::set_content;
+    (void)&nk::NavigationSplitView::content;
+    (void)&nk::NavigationSplitView::is_collapsed;
+    (void)&nk::NavigationSplitView::set_collapsed;
+    (void)&nk::NavigationSplitView::shows_content;
+    (void)&nk::NavigationSplitView::set_show_content;
+    (void)&nk::NavigationSplitView::sidebar_width_fraction;
+    (void)&nk::NavigationSplitView::set_sidebar_width_fraction;
+    (void)&nk::NavigationSplitView::set_min_sidebar_width;
+    (void)&nk::NavigationSplitView::set_max_sidebar_width;
+    (void)&nk::NavigationSplitView::on_collapsed_changed;
+    (void)&nk::NavigationSplitView::on_show_content_changed;
+    (void)&nk::OverlaySplitView::create;
+    (void)&nk::OverlaySplitView::set_sidebar;
+    (void)&nk::OverlaySplitView::sidebar;
+    (void)&nk::OverlaySplitView::set_content;
+    (void)&nk::OverlaySplitView::content;
+    (void)&nk::OverlaySplitView::is_collapsed;
+    (void)&nk::OverlaySplitView::set_collapsed;
+    (void)&nk::OverlaySplitView::shows_sidebar;
+    (void)&nk::OverlaySplitView::set_show_sidebar;
+    (void)&nk::OverlaySplitView::sidebar_width;
+    (void)&nk::OverlaySplitView::set_sidebar_width;
+    (void)&nk::OverlaySplitView::on_collapsed_changed;
+    (void)&nk::OverlaySplitView::on_show_sidebar_changed;
+    (void)&nk::ToolbarView::create;
+    (void)&nk::ToolbarView::set_content;
+    (void)&nk::ToolbarView::content;
+    (void)&nk::ToolbarView::add_top_bar;
+    (void)&nk::ToolbarView::add_bottom_bar;
+    (void)&nk::ToolbarView::remove;
+    (void)&nk::ToolbarView::top_bars;
+    (void)&nk::ToolbarView::bottom_bars;
+    (void)&nk::ToolbarView::top_bar_style;
+    (void)&nk::ToolbarView::set_top_bar_style;
+    (void)&nk::ToolbarView::bottom_bar_style;
+    (void)&nk::ToolbarView::set_bottom_bar_style;
+    (void)&nk::ToolbarView::reveals_top_bars;
+    (void)&nk::ToolbarView::set_reveal_top_bars;
+    (void)&nk::ToolbarView::reveals_bottom_bars;
+    (void)&nk::ToolbarView::set_reveal_bottom_bars;
+    (void)&nk::ToolbarView::extends_content_to_top_edge;
+    (void)&nk::ToolbarView::set_extend_content_to_top_edge;
+    (void)&nk::ToolbarView::extends_content_to_bottom_edge;
+    (void)&nk::ToolbarView::set_extend_content_to_bottom_edge;
+    (void)&nk::ToolbarView::top_bar_height;
+    (void)&nk::ToolbarView::bottom_bar_height;
+    (void)&nk::PreferencesRow::create;
+    (void)&nk::PreferencesRow::title;
+    (void)&nk::PreferencesRow::set_title;
+    (void)&nk::PreferencesRow::subtitle;
+    (void)&nk::PreferencesRow::set_subtitle;
+    (void)&nk::PreferencesRow::set_suffix;
+    (void)&nk::PreferencesRow::suffix;
+    (void)&nk::PreferencesRow::is_activatable;
+    (void)&nk::PreferencesRow::set_activatable;
+    (void)&nk::PreferencesRow::on_activated;
+    (void)&nk::PreferencesGroup::create;
+    (void)&nk::PreferencesGroup::title;
+    (void)&nk::PreferencesGroup::set_title;
+    (void)&nk::PreferencesGroup::add;
+    (void)&nk::PreferencesGroup::remove;
+    (void)&nk::PreferencesGroup::rows;
+    (void)&nk::PreferencesPage::create;
+    (void)&nk::PreferencesPage::title;
+    (void)&nk::PreferencesPage::set_title;
+    (void)&nk::PreferencesPage::description;
+    (void)&nk::PreferencesPage::set_description;
+    (void)&nk::PreferencesPage::add;
+    (void)&nk::PreferencesPage::remove;
+    (void)&nk::PreferencesPage::groups;
+    (void)&nk::Banner::create;
+    (void)&nk::Banner::title;
+    (void)&nk::Banner::set_title;
+    (void)&nk::Banner::button_label;
+    (void)&nk::Banner::set_button_label;
+    (void)&nk::Banner::is_revealed;
+    (void)&nk::Banner::set_revealed;
+    (void)&nk::Banner::on_button_clicked;
+    (void)&nk::StatusPage::create;
+    (void)&nk::StatusPage::title;
+    (void)&nk::StatusPage::set_title;
+    (void)&nk::StatusPage::description;
+    (void)&nk::StatusPage::set_description;
+    (void)&nk::StatusPage::set_action;
+    (void)&nk::StatusPage::action;
+    (void)&nk::ToastOverlay::create;
+    (void)&nk::ToastOverlay::set_child;
+    (void)&nk::ToastOverlay::child;
+    (void)&nk::ToastOverlay::add_toast;
+    (void)&nk::ToastOverlay::dismiss_current;
+    (void)&nk::ToastOverlay::dismiss_all;
+    (void)&nk::ToastOverlay::toast_count;
+    (void)&nk::ToastOverlay::current_toast;
+    (void)&nk::ToastOverlay::on_action;
+    (void)&nk::ToastOverlay::on_dismissed;
     (void)static_cast<void (nk::Window::*)(nk::NativeToolbarConfig)>(
         &nk::Window::set_native_toolbar);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::clear_native_toolbar);
