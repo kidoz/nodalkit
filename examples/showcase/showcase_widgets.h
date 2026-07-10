@@ -322,7 +322,7 @@ public:
 
     [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
         const auto text = measure_text(label_, font_descriptor());
-        const float height = std::max(40.0F, text.height + 16.0F);
+        const float height = std::max(44.0F, text.height + 16.0F);
         return {text.width + 28.0F, height, text.width + 28.0F, height};
     }
 
@@ -512,6 +512,45 @@ protected:
 
 private:
     Spacer() = default;
+};
+
+class EmptyStateIllustration : public nk::Widget {
+public:
+    static std::shared_ptr<EmptyStateIllustration> create() {
+        return std::shared_ptr<EmptyStateIllustration>(new EmptyStateIllustration());
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {64.0F, 64.0F, 64.0F, 64.0F};
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        const auto bounds = allocation();
+        const auto accent = theme_color("focus-ring-color", nk::Color::from_rgb(53, 132, 228));
+        const auto wash =
+            theme_color("selected-background", nk::Color{accent.r, accent.g, accent.b, 0.16F});
+        ctx.add_rounded_rect(bounds, wash, bounds.height * 0.5F);
+
+        const nk::Rect tray = {bounds.x + 15.0F, bounds.y + 26.0F, bounds.width - 30.0F, 24.0F};
+        ctx.add_rounded_rect(
+            tray, theme_color("background", nk::Color{1.0F, 1.0F, 1.0F, 1.0F}), 6.0F);
+        ctx.add_border(tray, accent, 2.0F, 6.0F);
+        ctx.add_rounded_rect(
+            {tray.x + 5.0F, tray.y - 6.0F, tray.width - 10.0F, 8.0F}, accent, 4.0F);
+
+        const float center_x = tray.x + (tray.width * 0.5F);
+        const float center_y = tray.y + (tray.height * 0.56F);
+        ctx.add_rounded_rect({center_x - 6.0F, center_y - 1.0F, 12.0F, 2.0F}, accent, 1.0F);
+        ctx.add_rounded_rect({center_x - 1.0F, center_y - 6.0F, 2.0F, 12.0F}, accent, 1.0F);
+    }
+
+private:
+    EmptyStateIllustration() {
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Image);
+        accessible.set_name("Empty sample collection");
+    }
 };
 
 class SectionTitle : public nk::Widget {

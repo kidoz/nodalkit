@@ -243,7 +243,10 @@ int run_showcase(int argc, char** argv) {
                                                 profile.palette_stage_natural_height,
                                                 profile.palette_stage_padding,
                                                 profile.stage_chrome));
-    auto controls_card = SurfacePanel::card(controls_content);
+    std::shared_ptr<nk::Widget> controls_card = controls_content;
+    if (!is_linux_wayland) {
+        controls_card = SurfacePanel::card(controls_content);
+    }
 
     auto list_title = SectionTitle::create(profile.list_title);
     auto list_subtitle = SecondaryText::create(profile.list_subtitle);
@@ -264,12 +267,14 @@ int run_showcase(int argc, char** argv) {
     auto list_view = nk::ListView::create();
     list_view->set_model(model);
     list_view->set_selection_model(selection);
-    list_view->set_row_height(30.0F);
+    list_view->set_row_height(is_linux_wayland ? 40.0F : 30.0F);
+    const float model_stage_padding = is_linux_wayland ? 0.0F : profile.list_stage_padding;
+    const bool model_stage_chrome = profile.stage_chrome && !is_linux_wayland;
     auto list_stage = InsetStage::create(list_view,
                                          profile.list_stage_min_height,
                                          profile.list_stage_natural_height,
-                                         profile.list_stage_padding,
-                                         profile.stage_chrome);
+                                         model_stage_padding,
+                                         model_stage_chrome);
     auto list_status = StatusPill::create("10 items");
     auto add_item_btn = nk::Button::create("Add Item");
     add_item_btn->add_style_class("suggested");
@@ -319,12 +324,13 @@ int run_showcase(int argc, char** argv) {
         nk::DataTableColumn{
             .id = "widget",
             .title = "Widget",
-            .width = 150.0F,
+            .width = 180.0F,
             .sortable = true,
             .text =
                 [](const nk::AbstractListModel& model, std::size_t row) {
                     return showcase_table_field(model.display_text(row), 1);
                 },
+            .expand = 2.0F,
         },
         nk::DataTableColumn{
             .id = "status",
@@ -335,6 +341,7 @@ int run_showcase(int argc, char** argv) {
                 [](const nk::AbstractListModel& model, std::size_t row) {
                     return showcase_table_field(model.display_text(row), 2);
                 },
+            .expand = 1.0F,
         },
         nk::DataTableColumn{
             .id = "priority",
@@ -345,11 +352,16 @@ int run_showcase(int argc, char** argv) {
                 [](const nk::AbstractListModel& model, std::size_t row) {
                     return showcase_table_field(model.display_text(row), 3);
                 },
+            .expand = 0.5F,
         },
     });
+    if (is_linux_wayland) {
+        data_table->set_row_height(34.0F);
+        data_table->set_header_height(36.0F);
+    }
     data_table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
-    auto table_stage = InsetStage::create(
-        data_table, 156.0F, 172.0F, profile.list_stage_padding, profile.stage_chrome);
+    auto table_stage =
+        InsetStage::create(data_table, 156.0F, 172.0F, model_stage_padding, model_stage_chrome);
 
     auto tree_label = FieldLabel::create("Tree view");
     auto tree_model = std::make_shared<nk::TreeModel>();
@@ -368,9 +380,9 @@ int run_showcase(int argc, char** argv) {
     auto tree_view = nk::TreeView::create();
     tree_view->set_model(tree_model);
     tree_view->set_selection_model(tree_selection);
-    tree_view->set_row_height(26.0F);
-    auto tree_stage = InsetStage::create(
-        tree_view, 144.0F, 160.0F, profile.list_stage_padding, profile.stage_chrome);
+    tree_view->set_row_height(is_linux_wayland ? 36.0F : 26.0F);
+    auto tree_stage =
+        InsetStage::create(tree_view, 144.0F, 160.0F, model_stage_padding, model_stage_chrome);
 
     auto grid_label = FieldLabel::create("Grid view");
     auto grid_model = std::make_shared<nk::StringListModel>(std::vector<std::string>{
@@ -390,8 +402,8 @@ int run_showcase(int argc, char** argv) {
     grid_view->set_cell_width(96.0F);
     grid_view->set_cell_height(58.0F);
     grid_view->set_gap(8.0F);
-    auto grid_stage = InsetStage::create(
-        grid_view, 144.0F, 160.0F, profile.list_stage_padding, profile.stage_chrome);
+    auto grid_stage =
+        InsetStage::create(grid_view, 144.0F, 160.0F, model_stage_padding, model_stage_chrome);
 
     auto list_content = Box::vertical(12.0F);
     list_content->append(list_title);
@@ -405,7 +417,9 @@ int run_showcase(int argc, char** argv) {
     list_content->append(grid_label);
     list_content->append(grid_stage);
     std::shared_ptr<nk::Widget> list_card;
-    if (is_macos) {
+    if (is_linux_wayland) {
+        list_card = list_content;
+    } else if (is_macos) {
         // Native-Mac sidebar: edge-to-edge vibrancy with no card chrome so the
         // material reads as the surface itself, not a floating rounded panel.
         list_content->set_padding(nk::Insets::uniform(16.0F));
@@ -494,7 +508,10 @@ int run_showcase(int argc, char** argv) {
     preview_content->append(preview_title);
     preview_content->append(preview_subtitle);
     preview_content->append(preview_display);
-    auto preview_card = SurfacePanel::card(preview_content);
+    std::shared_ptr<nk::Widget> preview_card = preview_content;
+    if (!is_linux_wayland) {
+        preview_card = SurfacePanel::card(preview_content);
+    }
 
     auto actions_title = SectionTitle::create(profile.actions_title);
     auto actions_subtitle = SecondaryText::create(profile.actions_subtitle);
@@ -516,8 +533,8 @@ int run_showcase(int argc, char** argv) {
         nk::Button::create(profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact
                                ? "Show Sheet"
                                : "Show Preferences Sheet");
-    dialog_btn->add_style_class("suggested");
-    dialog_btn->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+    dialog_btn->set_horizontal_size_policy(is_linux_wayland ? nk::SizePolicy::Preferred
+                                                            : nk::SizePolicy::Expanding);
     auto runtime_status = ValueText::create("Waiting for an action.");
     auto runtime_status_detail = SecondaryText::create("No runtime action has fired yet.");
 
@@ -731,8 +748,12 @@ int run_showcase(int argc, char** argv) {
         runtime_status_detail->set_text("The command was activated from the searchable palette.");
         show_linux_toast("Command: " + std::string(command_id));
     });
-    auto palette_stage = InsetStage::create(
-        command_palette, 186.0F, 220.0F, profile.runtime_status_padding, profile.stage_chrome);
+    auto palette_stage =
+        InsetStage::create(command_palette,
+                           186.0F,
+                           220.0F,
+                           is_linux_wayland ? 0.0F : profile.runtime_status_padding,
+                           profile.stage_chrome && !is_linux_wayland);
 
     auto actions_content = Box::vertical(profile.preview_section_spacing);
     actions_content->append(actions_title);
@@ -743,19 +764,23 @@ int run_showcase(int argc, char** argv) {
         actions_content->append(FieldLabel::create("Command palette"));
         actions_content->append(palette_stage);
     }
-    auto actions_card = SurfacePanel::card(actions_content);
+    std::shared_ptr<nk::Widget> actions_card = actions_content;
+    if (!is_linux_wayland) {
+        actions_card = SurfacePanel::card(actions_content);
+    }
 
     if (is_linux_wayland) {
         auto commands_content = Box::vertical(profile.preview_section_spacing);
-        commands_content->append(SectionTitle::create("Commands"));
+        auto commands_title = SectionTitle::create("Commands");
+        commands_content->append(commands_title);
         commands_content->append(
             SecondaryText::create("Search and activate application-wide commands."));
         commands_content->append(palette_stage);
-        auto commands_card = SurfacePanel::card(commands_content);
 
         auto status_page = nk::StatusPage::create(
             "No Samples Yet",
             "This dedicated empty state offers one clear action to create content.");
+        status_page->set_icon(EmptyStateIllustration::create());
         auto status_page_action = nk::Button::create("Add Sample Item");
         status_page_action->add_style_class("suggested");
         (void)status_page_action->on_clicked().connect(add_showcase_item);
@@ -763,6 +788,7 @@ int run_showcase(int argc, char** argv) {
 
         auto make_scrolling_page = [&](std::shared_ptr<nk::Widget> content,
                                        float maximum_width = 860.0F) {
+            content->set_horizontal_size_policy(nk::SizePolicy::Expanding);
             content->set_vertical_size_policy(nk::SizePolicy::Preferred);
             content->set_vertical_stretch(0);
             auto page_flow = Box::vertical();
@@ -789,11 +815,11 @@ int run_showcase(int argc, char** argv) {
         const std::vector<std::string> category_titles = {
             "Controls", "Models & Views", "Preview", "Runtime", "Commands", "Empty State"};
         auto page_stack = PageStack::create();
-        page_stack->add_page(make_scrolling_page(controls_card));
+        page_stack->add_page(make_scrolling_page(controls_card, 720.0F));
         page_stack->add_page(make_scrolling_page(list_card, 980.0F));
-        page_stack->add_page(make_scrolling_page(preview_card));
-        page_stack->add_page(make_scrolling_page(actions_card));
-        page_stack->add_page(make_scrolling_page(commands_card));
+        page_stack->add_page(make_scrolling_page(preview_card, 720.0F));
+        page_stack->add_page(make_scrolling_page(actions_card, 760.0F));
+        page_stack->add_page(make_scrolling_page(commands_content, 720.0F));
         page_stack->add_page(status_page);
 
         auto sidebar_content = Box::vertical(4.0F);
@@ -840,12 +866,17 @@ int run_showcase(int argc, char** argv) {
         auto adaptive_bin = nk::BreakpointBin::create();
         adaptive_bin->set_child(adaptive_split);
         adaptive_bin->add_breakpoint(compact_layout);
+        const std::vector<std::shared_ptr<SectionTitle>> page_titles = {
+            input_title, list_title, preview_title, actions_title, commands_title};
         (void)compact_layout->on_active_changed().connect(
-            [adaptive_split, headerbar, &profile](bool compact) {
+            [adaptive_split, headerbar, page_titles, &profile](bool compact) {
                 adaptive_split->set_collapsed(compact);
                 adaptive_split->set_show_content(false);
                 headerbar->set_show_back_button(false);
                 headerbar->set_title(profile.window_title);
+                for (const auto& title : page_titles) {
+                    title->set_visible(!compact);
+                }
             });
 
         linux_toasts = nk::ToastOverlay::create();
