@@ -38,6 +38,10 @@ public:
     /// back to a hardcoded generic. Base implementation is a no-op.
     virtual void set_system_default_family(std::string_view family, bool monospace = false);
 
+    /// Provide the platform's configured document font family. The generic
+    /// "document" family resolves to this value when available.
+    virtual void set_system_document_family(std::string_view family);
+
     /// Measure text with word wrapping within max_width.
     [[nodiscard]] virtual Size
     measure_wrapped(std::string_view text, const FontDescriptor& font, float max_width) const;

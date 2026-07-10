@@ -15,19 +15,19 @@
 #include "xdg-shell-client-protocol.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <gio/gio.h>
-#include <atomic>
 #include <mutex>
 #include <nk/accessibility/accessible.h>
 #include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/logging.h>
-#include <nk/runtime/event_loop.h>
 #include <nk/platform/application.h>
 #include <nk/platform/window_inspector.h>
+#include <nk/runtime/event_loop.h>
 #include <nk/ui_core/widget.h>
 #include <optional>
 #include <poll.h>
@@ -365,12 +365,11 @@ void post_portal_file_dialog_result(PortalFileDialogCallback callback, FileDialo
         return;
     }
 
-    app->event_loop().post(
-        [callback = std::move(callback), result = std::move(result)]() mutable {
-            if (callback) {
-                callback(std::move(result));
-            }
-        });
+    app->event_loop().post([callback = std::move(callback), result = std::move(result)]() mutable {
+        if (callback) {
+            callback(std::move(result));
+        }
+    });
 }
 
 void show_portal_file_dialog_async(std::string method,
@@ -397,8 +396,8 @@ void show_portal_file_dialog_async(std::string method,
         g_main_context_push_thread_default(context);
 
         const auto handle_token = make_portal_handle_token();
-        auto request_path =
-            detail::portal_request_path(g_dbus_connection_get_unique_name(connection), handle_token);
+        auto request_path = detail::portal_request_path(
+            g_dbus_connection_get_unique_name(connection), handle_token);
 
         PortalRequestState state;
         state.loop = g_main_loop_new(context, FALSE);
@@ -433,20 +432,18 @@ void show_portal_file_dialog_async(std::string method,
         (void)options.confirm_overwrite; // XDG portals own overwrite confirmation behavior.
 
         GError* error = nullptr;
-        GVariant* reply = g_dbus_connection_call_sync(connection,
-                                                      PortalBusName,
-                                                      PortalObjectPath,
-                                                      PortalFileChooserInterface,
-                                                      method.c_str(),
-                                                      g_variant_new("(ssa{sv})",
-                                                                    "",
-                                                                    options.title.c_str(),
-                                                                    &options_builder),
-                                                      G_VARIANT_TYPE("(o)"),
-                                                      G_DBUS_CALL_FLAGS_NONE,
-                                                      -1,
-                                                      nullptr,
-                                                      &error);
+        GVariant* reply = g_dbus_connection_call_sync(
+            connection,
+            PortalBusName,
+            PortalObjectPath,
+            PortalFileChooserInterface,
+            method.c_str(),
+            g_variant_new("(ssa{sv})", "", options.title.c_str(), &options_builder),
+            G_VARIANT_TYPE("(o)"),
+            G_DBUS_CALL_FLAGS_NONE,
+            -1,
+            nullptr,
+            &error);
         if (reply == nullptr) {
             if (error != nullptr) {
                 NK_LOG_ERROR("Wayland", error->message);
@@ -618,6 +615,7 @@ struct WaylandBackend::Impl {
     GMainLoop* system_preferences_loop = nullptr;
     GSettings* interface_settings = nullptr;
     GSettings* a11y_interface_settings = nullptr;
+    GSettings* wm_preferences_settings = nullptr;
     bool system_preferences_stop_requested = false;
 
     mutable std::mutex accessibility_mutex;
@@ -863,6 +861,7 @@ void apply_portal_appearance_overrides(SystemPreferences& preferences,
 
 SystemPreferences linux_preferences_from_gsettings(GSettings* interface_settings,
                                                    GSettings* a11y_settings,
+                                                   GSettings* wm_settings,
                                                    DesktopEnvironment desktop_environment) {
     SystemPreferences preferences;
     preferences.platform_family = PlatformFamily::Linux;
@@ -925,6 +924,21 @@ SystemPreferences linux_preferences_from_gsettings(GSettings* interface_settings
             }
             g_free(mono_name);
         }
+        if (char* document_name = g_settings_get_string(interface_settings, "document-font-name")) {
+            if (*document_name != '\0') {
+                preferences.system_document_font_name = std::string(document_name);
+            }
+            g_free(document_name);
+        }
+    }
+
+    if (wm_settings != nullptr) {
+        if (char* button_layout = g_settings_get_string(wm_settings, "button-layout")) {
+            if (*button_layout != '\0') {
+                preferences.window_decoration_layout = std::string(button_layout);
+            }
+            g_free(button_layout);
+        }
     }
 
     if (a11y_settings != nullptr && g_settings_get_boolean(a11y_settings, "high-contrast")) {
@@ -959,13 +973,17 @@ SystemPreferences query_linux_preferences() {
         has_gsettings_schema("org.gnome.desktop.interface")) {
         GSettings* interface_settings = create_settings_for_schema("org.gnome.desktop.interface");
         GSettings* a11y_settings = create_settings_for_schema("org.gnome.desktop.a11y.interface");
+        GSettings* wm_settings = create_settings_for_schema("org.gnome.desktop.wm.preferences");
         preferences = linux_preferences_from_gsettings(
-            interface_settings, a11y_settings, desktop_environment);
+            interface_settings, a11y_settings, wm_settings, desktop_environment);
         if (interface_settings != nullptr) {
             g_object_unref(interface_settings);
         }
         if (a11y_settings != nullptr) {
             g_object_unref(a11y_settings);
+        }
+        if (wm_settings != nullptr) {
+            g_object_unref(wm_settings);
         }
     } else {
         preferences = fallback_linux_preferences();
@@ -1124,6 +1142,10 @@ void on_a11y_setting_changed(GSettings* /*settings*/, gchar* /*key*/, gpointer u
     emit_linux_system_preferences_change(*static_cast<WaylandBackend::Impl*>(user_data));
 }
 
+void on_wm_setting_changed(GSettings* /*settings*/, gchar* /*key*/, gpointer user_data) {
+    emit_linux_system_preferences_change(*static_cast<WaylandBackend::Impl*>(user_data));
+}
+
 void on_portal_setting_changed(GDBusConnection* /*connection*/,
                                const gchar* /*sender_name*/,
                                const gchar* /*object_path*/,
@@ -1251,11 +1273,12 @@ Widget* find_live_atspi_widget(WaylandBackend::Impl& impl, std::string_view obje
             title = "Window";
         }
         const auto size = surface->size();
-        const auto snapshot = build_atspi_window_snapshot(AtspiApplicationRootPath,
-                                                          "window" + std::to_string(window_index++),
-                                                          title,
-                                                          {0.0F, 0.0F, size.width, size.height},
-                                                          surface->owner().inspector().debug_tree());
+        const auto snapshot =
+            build_atspi_window_snapshot(AtspiApplicationRootPath,
+                                        "window" + std::to_string(window_index++),
+                                        title,
+                                        {0.0F, 0.0F, size.width, size.height},
+                                        surface->owner().inspector().debug_tree());
         if (const auto* node = find_atspi_accessible_node(snapshot, object_path); node != nullptr) {
             return resolve_widget_by_tree_path(surface->owner(), node->tree_path);
         }
@@ -1423,25 +1446,22 @@ void atspi_method_call(GDBusConnection* connection,
             // perform_action() onto the main thread via the event loop.
             if (action_index >= 0 &&
                 static_cast<std::size_t>(action_index) < node->action_names.size()) {
-                const auto action_name =
-                    node->action_names[static_cast<std::size_t>(action_index)];
+                const auto action_name = node->action_names[static_cast<std::size_t>(action_index)];
                 if (auto* app = Application::instance(); app != nullptr) {
-                    app->event_loop().post(
-                        [impl, path = std::string(object_path), action_name]() {
-                            // Runs on the main thread: widget tree and surfaces map are safe here.
-                            auto* widget = find_live_atspi_widget(*impl, path);
-                            if (widget == nullptr || widget->accessible() == nullptr) {
-                                return;
-                            }
-                            if (action_name == "activate") {
-                                (void)widget->accessible()->perform_action(
-                                    AccessibleAction::Activate);
-                            } else if (action_name == "focus") {
-                                (void)widget->accessible()->perform_action(AccessibleAction::Focus);
-                            } else if (action_name == "toggle") {
-                                (void)widget->accessible()->perform_action(AccessibleAction::Toggle);
-                            }
-                        });
+                    app->event_loop().post([impl, path = std::string(object_path), action_name]() {
+                        // Runs on the main thread: widget tree and surfaces map are safe here.
+                        auto* widget = find_live_atspi_widget(*impl, path);
+                        if (widget == nullptr || widget->accessible() == nullptr) {
+                            return;
+                        }
+                        if (action_name == "activate") {
+                            (void)widget->accessible()->perform_action(AccessibleAction::Activate);
+                        } else if (action_name == "focus") {
+                            (void)widget->accessible()->perform_action(AccessibleAction::Focus);
+                        } else if (action_name == "toggle") {
+                            (void)widget->accessible()->perform_action(AccessibleAction::Toggle);
+                        }
+                    });
                     success = true;
                 }
             }
@@ -2033,6 +2053,7 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
         GMainLoop* loop = g_main_loop_new(context, FALSE);
         GSettings* interface_settings = create_settings_for_schema("org.gnome.desktop.interface");
         GSettings* a11y_settings = create_settings_for_schema("org.gnome.desktop.a11y.interface");
+        GSettings* wm_settings = create_settings_for_schema("org.gnome.desktop.wm.preferences");
 
         // Per-thread portal connection so the SettingChanged signal dispatches to THIS thread's
         // GMainContext. portal_session_bus_connection() uses g_bus_get_sync() which returns the
@@ -2064,6 +2085,7 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
             impl->system_preferences_loop = loop;
             impl->interface_settings = interface_settings;
             impl->a11y_interface_settings = a11y_settings;
+            impl->wm_preferences_settings = wm_settings;
         }
 
         if (interface_settings != nullptr) {
@@ -2073,6 +2095,9 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
         if (a11y_settings != nullptr) {
             g_signal_connect(a11y_settings, "changed", G_CALLBACK(on_a11y_setting_changed), impl);
         }
+        if (wm_settings != nullptr) {
+            g_signal_connect(wm_settings, "changed", G_CALLBACK(on_wm_setting_changed), impl);
+        }
 
         bool stop_requested = false;
         {
@@ -2080,8 +2105,8 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
             stop_requested = impl->system_preferences_stop_requested;
         }
 
-        const bool any_source =
-            (interface_settings != nullptr || a11y_settings != nullptr || portal_subscription != 0);
+        const bool any_source = (interface_settings != nullptr || a11y_settings != nullptr ||
+                                 wm_settings != nullptr || portal_subscription != 0);
         if (!stop_requested && any_source) {
             g_main_loop_run(loop);
         }
@@ -2100,6 +2125,10 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
             g_signal_handlers_disconnect_by_data(a11y_settings, impl);
             g_object_unref(a11y_settings);
         }
+        if (wm_settings != nullptr) {
+            g_signal_handlers_disconnect_by_data(wm_settings, impl);
+            g_object_unref(wm_settings);
+        }
 
         g_main_context_pop_thread_default(context);
 
@@ -2107,6 +2136,7 @@ void WaylandBackend::start_system_preferences_observation(SystemPreferencesObser
             std::lock_guard lock(impl->system_preferences_mutex);
             impl->interface_settings = nullptr;
             impl->a11y_interface_settings = nullptr;
+            impl->wm_preferences_settings = nullptr;
             impl->system_preferences_loop = nullptr;
             impl->system_preferences_context = nullptr;
         }

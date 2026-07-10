@@ -368,6 +368,16 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
         apply_accent_override(*theme, selection.color_scheme, selection.accent_color);
     }
 
+    theme->set_token(
+        "font-family-ui",
+        StyleValue{system_preferences.system_font_name.value_or(std::string("System"))});
+    theme->set_token("font-family-document",
+                     StyleValue{system_preferences.system_document_font_name.value_or(
+                         std::string("System-Document"))});
+    theme->set_token("font-family-monospace",
+                     StyleValue{system_preferences.system_monospace_font_name.value_or(
+                         std::string("System-Monospace"))});
+
     return std::shared_ptr<Theme>(theme.release());
 }
 

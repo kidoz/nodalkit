@@ -42,6 +42,30 @@ void set_alias_token(Theme& theme, std::string name, std::string_view target) {
 void install_legacy_token_aliases(Theme& theme) {
     set_alias_token(theme, "field-bg", "surface-field");
     set_alias_token(theme, "field-border", "border-field");
+
+    // Libadwaita-compatible semantic surface roles. Keeping these as aliases
+    // lets platform families retain their own palettes while widgets consume a
+    // stable background/foreground vocabulary.
+    set_alias_token(theme, "window-fg", "text-primary");
+    set_alias_token(theme, "view-bg", "surface-field");
+    set_alias_token(theme, "view-fg", "text-primary");
+    set_alias_token(theme, "headerbar-bg", "surface-card");
+    set_alias_token(theme, "headerbar-fg", "text-primary");
+    set_alias_token(theme, "headerbar-backdrop", "window-bg");
+    set_alias_token(theme, "headerbar-border", "border-subtle");
+    set_alias_token(theme, "headerbar-shade", "border-subtle");
+    set_alias_token(theme, "sidebar-bg", "surface-panel");
+    set_alias_token(theme, "sidebar-fg", "text-primary");
+    set_alias_token(theme, "sidebar-backdrop", "surface-panel");
+    set_alias_token(theme, "sidebar-border", "border-subtle");
+    set_alias_token(theme, "secondary-sidebar-bg", "surface-raised");
+    set_alias_token(theme, "secondary-sidebar-fg", "text-primary");
+    set_alias_token(theme, "card-bg", "surface-card");
+    set_alias_token(theme, "card-fg", "text-primary");
+    set_alias_token(theme, "dialog-bg", "surface-card");
+    set_alias_token(theme, "dialog-fg", "text-primary");
+    set_alias_token(theme, "popover-bg", "surface-card");
+    set_alias_token(theme, "popover-fg", "text-primary");
 }
 
 // Paired selection tokens (R2): the active-window selection highlight and the
@@ -62,6 +86,8 @@ void install_selection_tokens(Theme& theme,
 void install_type_scale_tokens(Theme& theme, float title, float body, float caption, float value) {
     set_metric_token(theme, "font-size-title", title);
     set_metric_token(theme, "font-size-body", body);
+    set_metric_token(theme, "font-size-heading", body + 1.0F);
+    set_metric_token(theme, "font-size-document", body + 1.0F);
     set_metric_token(theme, "font-size-caption", caption);
     set_metric_token(theme, "font-size-value", value);
 }
@@ -78,6 +104,15 @@ void install_shared_metric_tokens(Theme& theme) {
     set_metric_token(theme, "popup-item-height", 30.0F);
     set_metric_token(theme, "segment-min-width", 84.0F);
     set_metric_token(theme, "image-min-height", 168.0F);
+    set_metric_token(theme, "headerbar-height", 46.0F);
+    set_metric_token(theme, "headerbar-control-target", 46.0F);
+    set_metric_token(theme, "headerbar-control-size", 34.0F);
+    set_metric_token(theme, "headerbar-icon-size", 12.0F);
+    set_metric_token(theme, "headerbar-padding-x", 6.0F);
+    set_metric_token(theme, "clamp-maximum-size", 720.0F);
+    set_metric_token(theme, "clamp-tightening-threshold", 540.0F);
+    set_metric_token(theme, "adaptive-sidebar-width", 280.0F);
+    set_metric_token(theme, "toolbar-view-separator-width", 1.0F);
 }
 
 void add_rule(Theme& theme,
@@ -245,6 +280,22 @@ void install_shared_rules(Theme& theme) {
              {"button", "flat"},
              StateFlags::Pressed,
              {{"background", StyleValue{std::string("surface-pressed")}}});
+    add_rule(theme,
+             {"navigation-row"},
+             StateFlags::None,
+             {{"selected-background", StyleValue{std::string("accent-soft")}},
+              {"hover-background", StyleValue{std::string("surface-hover")}},
+              {"pressed-background", StyleValue{std::string("surface-pressed")}},
+              {"text-color", StyleValue{std::string("text-primary")}},
+              {"focus-ring-color", StyleValue{std::string("focus-ring")}},
+              {"font-size", token_ref("font-size-body")}});
+    add_rule(theme,
+             {"primary-menu-button"},
+             StateFlags::None,
+             {{"hover-background", StyleValue{std::string("surface-hover")}},
+              {"pressed-background", StyleValue{std::string("surface-pressed")}},
+              {"text-color", StyleValue{std::string("text-primary")}},
+              {"focus-ring-color", StyleValue{std::string("focus-ring")}}});
 
     add_rule(theme,
              {"text-field"},
@@ -545,6 +596,69 @@ void install_shared_rules(Theme& theme) {
 
     add_rule(
         theme, {"split-view"}, StateFlags::None, {{"divider-color", token_ref("border-subtle")}});
+    add_rule(theme,
+             {"navigation-split-view"},
+             StateFlags::None,
+             {{"sidebar-background", token_ref("sidebar-bg")},
+              {"sidebar-border-color", token_ref("sidebar-border")}});
+    add_rule(theme,
+             {"overlay-split-view"},
+             StateFlags::None,
+             {{"sidebar-background", token_ref("sidebar-bg")},
+              {"sidebar-border-color", token_ref("sidebar-border")},
+              {"scrim-color", StyleValue{Color{0.0F, 0.0F, 0.0F, 0.24F}}}});
+    add_rule(theme,
+             {"adaptive-scrim"},
+             StateFlags::None,
+             {{"background", StyleValue{Color{0.0F, 0.0F, 0.0F, 0.24F}}}});
+    add_rule(
+        theme,
+        {"adaptive-sidebar-surface"},
+        StateFlags::None,
+        {{"background", token_ref("sidebar-bg")}, {"border-color", token_ref("sidebar-border")}});
+    add_rule(theme,
+             {"preferences-row"},
+             StateFlags::None,
+             {{"background", token_ref("card-bg")},
+              {"border-color", token_ref("border-subtle")},
+              {"text-color", token_ref("card-fg")},
+              {"subtitle-color", token_ref("text-secondary")},
+              {"corner-radius", token_ref("radius-card")}});
+    add_rule(theme,
+             {"banner"},
+             StateFlags::None,
+             {{"background", token_ref("accent-soft")},
+              {"text-color", token_ref("text-primary")},
+              {"action-color", token_ref("accent")},
+              {"font-size", token_ref("font-size-body")}});
+    add_rule(theme,
+             {"status-page"},
+             StateFlags::None,
+             {{"text-color", token_ref("text-primary")},
+              {"description-color", token_ref("text-secondary")},
+              {"title-font-size", token_ref("font-size-title")},
+              {"body-font-size", token_ref("font-size-body")}});
+    add_rule(theme,
+             {"toast-overlay"},
+             StateFlags::None,
+             {{"background", token_ref("surface-osd")},
+              {"action-color", token_ref("accent")},
+              {"corner-radius", token_ref("radius-popup")},
+              {"font-size", token_ref("font-size-body")}});
+    add_rule(theme,
+             {"toast-surface"},
+             StateFlags::None,
+             {{"background", token_ref("surface-osd")},
+              {"text-color", token_ref("text-osd")},
+              {"action-color", token_ref("accent")},
+              {"corner-radius", token_ref("radius-popup")},
+              {"font-size", token_ref("font-size-body")}});
+    add_rule(theme,
+             {"preferences-page"},
+             StateFlags::None,
+             {{"maximum-width", token_ref("clamp-maximum-size")},
+              {"page-title-font-size", token_ref("font-size-title")},
+              {"description-font-size", token_ref("font-size-body")}});
 
     add_rule(theme,
              {"switch"},
@@ -581,6 +695,35 @@ void install_shared_rules(Theme& theme) {
              });
 
     add_rule(theme, {"toolbar"}, StateFlags::None, {{"background", token_ref("surface-panel")}});
+    add_rule(theme,
+             {"toolbar-view"},
+             StateFlags::None,
+             {{"bar-background", token_ref("headerbar-bg")},
+              {"bar-backdrop-background", token_ref("headerbar-backdrop")},
+              {"bar-border-color", token_ref("headerbar-shade")}});
+    add_rule(theme,
+             {"toolbar-view-backdrop"},
+             StateFlags::None,
+             {{"bar-background", token_ref("headerbar-bg")},
+              {"bar-backdrop-background", token_ref("headerbar-backdrop")},
+              {"bar-border-color", token_ref("headerbar-shade")},
+              {"separator-width", token_ref("toolbar-view-separator-width")}});
+    add_rule(theme,
+             {"headerbar"},
+             StateFlags::None,
+             {{"background", token_ref("headerbar-bg")},
+              {"text-color", token_ref("headerbar-fg")},
+              {"border-color", token_ref("headerbar-shade")}});
+    add_rule(theme,
+             {"headerbar-control"},
+             StateFlags::None,
+             {{"target-size", token_ref("headerbar-control-target")},
+              {"control-size", token_ref("headerbar-control-size")},
+              {"icon-size", token_ref("headerbar-icon-size")},
+              {"tooltip-font-size", token_ref("font-size-caption")},
+              {"tooltip-background", token_ref("surface-osd")},
+              {"tooltip-text", token_ref("text-osd")},
+              {"tooltip-radius", token_ref("radius-control")}});
 
     add_rule(theme,
              {"tooltip"},

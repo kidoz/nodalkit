@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
+#include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/types.h>
 #include <nk/render/render_node.h>
 #include <nk/render/snapshot_context.h>
@@ -359,10 +360,58 @@ TEST_CASE("Headerbar keeps actions clear of its title and exposes window control
     std::vector<std::string> accessible_controls;
     for (const auto& child : headerbar->children()) {
         if (const auto* accessible = child->accessible();
-            accessible != nullptr && accessible->role() == nk::AccessibleRole::Button) {
+            accessible != nullptr && accessible->role() == nk::AccessibleRole::Button &&
+            child->is_visible()) {
             accessible_controls.emplace_back(accessible->name());
             CHECK(accessible->supports_action(nk::AccessibleAction::Activate));
         }
     }
     CHECK(accessible_controls == std::vector<std::string>{"Minimize", "Maximize", "Close"});
+    REQUIRE(headerbar->accessible() != nullptr);
+    CHECK(headerbar->accessible()->role() == nk::AccessibleRole::Group);
+    CHECK(nk::atspi_role_name("group") == "panel");
+    CHECK(headerbar->centering_policy() == nk::HeaderbarCenteringPolicy::Strict);
+}
+
+TEST_CASE("Headerbar centers titles, follows decoration layout, and exposes back navigation",
+          "[widgets][headerbar][accessibility]") {
+    auto headerbar = SnapshotHeaderbar::create("Centered");
+    headerbar->set_decoration_layout("close:");
+    headerbar->set_show_back_button(true);
+    headerbar->allocate({0.0F, 0.0F, 800.0F, 46.0F});
+
+    nk::SnapshotContext context;
+    headerbar->snapshot_for_test(context);
+    const auto root = context.take_root();
+    REQUIRE(root != nullptr);
+    const auto* title = find_text_node(*root, "Centered");
+    REQUIRE(title != nullptr);
+    constexpr float estimated_title_width = 8.0F * 14.0F * 0.55F;
+    CHECK(title->bounds().x == Catch::Approx((800.0F - estimated_title_width) * 0.5F));
+    CHECK(headerbar->decoration_layout() == "close:");
+    CHECK(headerbar->shows_back_button());
+
+    bool back_requested = false;
+    auto connection = headerbar->on_back_requested().connect([&] { back_requested = true; });
+    bool saw_back = false;
+    bool saw_visible_close_at_start = false;
+    for (const auto& child : headerbar->children()) {
+        const auto* accessible = child->accessible();
+        if (accessible == nullptr || accessible->role() != nk::AccessibleRole::Button) {
+            continue;
+        }
+        CHECK(accessible->description() == accessible->name());
+        if (accessible->name() == "Back") {
+            saw_back = child->is_visible();
+            REQUIRE(accessible->perform_action(nk::AccessibleAction::Activate));
+        } else if (accessible->name() == "Close") {
+            saw_visible_close_at_start = child->is_visible() && child->allocation().x < 100.0F;
+        } else {
+            CHECK_FALSE(child->is_visible());
+        }
+    }
+    CHECK(saw_back);
+    CHECK(saw_visible_close_at_start);
+    CHECK(back_requested);
+    connection.disconnect();
 }

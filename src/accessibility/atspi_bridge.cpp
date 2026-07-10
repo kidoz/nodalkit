@@ -110,6 +110,9 @@ std::string atspi_role_name(std::string_view accessible_role) {
     if (accessible_role == "gridcell") {
         return "table cell";
     }
+    if (accessible_role == "group") {
+        return "panel";
+    }
     if (accessible_role == "image") {
         return "image";
     }

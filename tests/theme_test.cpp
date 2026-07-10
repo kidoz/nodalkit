@@ -153,6 +153,68 @@ TEST_CASE("Windows 11 theme is a native family, not a GNOME clone", "[theme][win
     REQUIRE(metric_token(*gnome, "control-height") == Catch::Approx(36.0F));
 }
 
+TEST_CASE("GNOME theme exposes Libadwaita semantic surfaces and adaptive metrics",
+          "[theme][gnome]") {
+    for (const auto scheme : {nk::ColorScheme::Light, nk::ColorScheme::Dark}) {
+        auto theme = nk::Theme::make_linux_gnome(scheme);
+        for (const auto* token : {"window-fg",
+                                  "view-bg",
+                                  "view-fg",
+                                  "headerbar-bg",
+                                  "headerbar-fg",
+                                  "headerbar-backdrop",
+                                  "headerbar-border",
+                                  "headerbar-shade",
+                                  "sidebar-bg",
+                                  "sidebar-fg",
+                                  "sidebar-backdrop",
+                                  "sidebar-border",
+                                  "secondary-sidebar-bg",
+                                  "secondary-sidebar-fg",
+                                  "card-bg",
+                                  "card-fg",
+                                  "dialog-bg",
+                                  "dialog-fg",
+                                  "popover-bg",
+                                  "popover-fg"}) {
+            INFO("missing semantic token: " << token);
+            REQUIRE(theme->token(token) != nullptr);
+            REQUIRE(deref_aliases(*theme, theme->token(token)) != nullptr);
+        }
+        CHECK(metric_token(*theme, "headerbar-height") == Catch::Approx(46.0F));
+        CHECK(metric_token(*theme, "headerbar-control-target") == Catch::Approx(46.0F));
+        CHECK(metric_token(*theme, "clamp-maximum-size") == Catch::Approx(720.0F));
+        CHECK(metric_token(*theme, "adaptive-sidebar-width") == Catch::Approx(280.0F));
+    }
+}
+
+TEST_CASE("Toast overlay keeps page content foreground while its surface uses OSD colors",
+          "[theme][toast]") {
+    auto theme = nk::Theme::make_linux_gnome(nk::ColorScheme::Light);
+
+    REQUIRE(resolved_color(*theme, {"toast-overlay"}, "text-color") ==
+            color_token(*theme, "text-primary"));
+    REQUIRE(resolved_color(*theme, {"toast-surface"}, "text-color") ==
+            color_token(*theme, "text-osd"));
+}
+
+TEST_CASE("GNOME theme publishes platform UI, document, and monospace font families",
+          "[theme][gnome][fonts]") {
+    nk::SystemPreferences preferences;
+    preferences.platform_family = nk::PlatformFamily::Linux;
+    preferences.desktop_environment = nk::DesktopEnvironment::Gnome;
+    preferences.system_font_name = "Adwaita Sans 11";
+    preferences.system_document_font_name = "Cantarell 12";
+    preferences.system_monospace_font_name = "Adwaita Mono 11";
+
+    nk::ThemeSelection selection;
+    const auto resolved = nk::resolve_theme_selection(selection, preferences);
+    auto theme = nk::make_theme(resolved, preferences);
+    CHECK(string_token(*theme, "font-family-ui") == "Adwaita Sans 11");
+    CHECK(string_token(*theme, "font-family-document") == "Cantarell 12");
+    CHECK(string_token(*theme, "font-family-monospace") == "Adwaita Mono 11");
+}
+
 TEST_CASE("Windows 11 theme exposes shell layer-role tokens", "[theme][windows]") {
     auto windows = nk::Theme::make_windows_11(nk::ColorScheme::Light);
 
@@ -782,6 +844,7 @@ TEST_CASE("No widget class leaks light-theme colors into the dark theme", "[them
     static constexpr ClassProbe Probes[] = {
         {"avatar", "background"},
         {"badge", "background"},
+        {"banner", "background"},
         {"breadcrumb", "link-color"},
         {"button", "background"},
         {"calendar", "background"},
@@ -800,6 +863,7 @@ TEST_CASE("No widget class leaks light-theme colors into the dark theme", "[them
         {"list-view", "background"},
         {"menu-bar", "background"},
         {"popover", "background"},
+        {"preferences-row", "background"},
         {"progress-bar", "track-color"},
         {"radio-button", "background"},
         {"scroll-area", "scrollbar-track-color"},
@@ -816,6 +880,7 @@ TEST_CASE("No widget class leaks light-theme colors into the dark theme", "[them
         {"text-area", "background"},
         {"text-field", "background"},
         {"toolbar", "background"},
+        {"toast-overlay", "background"},
         {"tooltip", "background"},
         {"tree-view", "background"},
     };

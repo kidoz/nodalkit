@@ -16,6 +16,7 @@ enum class AccessibleRole : uint8_t {
     Dialog,
     Grid,
     GridCell,
+    Group,
     Image,
     Label,
     Link,

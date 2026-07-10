@@ -28,6 +28,7 @@ public:
                                            float max_width) const override;
 
     void set_system_default_family(std::string_view family, bool monospace = false) override;
+    void set_system_document_family(std::string_view family) override;
 
 private:
     struct Impl;

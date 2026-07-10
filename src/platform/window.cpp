@@ -101,6 +101,7 @@ struct Window::Impl {
     Signal<int, int> resize_signal;
     Signal<float> scale_factor_signal;
     ScopedConnection system_preferences_subscription;
+    SystemPreferences system_preferences;
 };
 
 namespace {
@@ -592,6 +593,8 @@ std::string_view accessible_role_name(AccessibleRole role) {
         return "grid";
     case AccessibleRole::GridCell:
         return "gridcell";
+    case AccessibleRole::Group:
+        return "group";
     case AccessibleRole::Image:
         return "image";
     case AccessibleRole::Label:
@@ -1707,7 +1710,8 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
         // Seed the shaper with the platform-configured default font families so
         // the generic "System"/"monospace" families resolve to the GNOME UI font
         // (e.g. Adwaita Sans) rather than fontconfig's generic sans-serif.
-        apply_system_font_preferences_to_shaper(app->system_preferences());
+        impl_->system_preferences = app->system_preferences();
+        apply_system_font_preferences_to_shaper(impl_->system_preferences);
 
         // System preferences (color-scheme, contrast, motion, accent color, text scale) can change
         // at any time. The Application already re-resolves Theme::active() before emitting this
@@ -1715,6 +1719,7 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
         // full redraw so every widget reads from the new theme.
         impl_->system_preferences_subscription = ScopedConnection(
             app->on_system_preferences_changed().connect([this](const SystemPreferences& prefs) {
+                impl_->system_preferences = prefs;
                 apply_system_font_preferences_to_shaper(prefs);
                 impl_->needs_layout = true;
                 request_frame(FrameRequestReason::SystemPreferencesChanged);
@@ -4006,11 +4011,17 @@ TextShaper* Window::text_shaper() const {
     return impl_->text_shaper.get();
 }
 
+const SystemPreferences& Window::system_preferences() const {
+    return impl_->system_preferences;
+}
+
 void Window::apply_system_font_preferences_to_shaper(const SystemPreferences& preferences) {
     if (impl_->text_shaper == nullptr) {
         return;
     }
     impl_->text_shaper->set_system_default_family(preferences.system_font_name.value_or(""), false);
+    impl_->text_shaper->set_system_document_family(
+        preferences.system_document_font_name.value_or(""));
     impl_->text_shaper->set_system_default_family(
         preferences.system_monospace_font_name.value_or(""), true);
 }

@@ -179,6 +179,11 @@ void Widget::set_state_flag(StateFlags flag, bool active) {
         impl_->state = impl_->state & ~flag;
     }
     if (impl_->state != previous) {
+        // Some stateful widgets paint transient content outside their base
+        // allocation (for example a hovered control's tooltip). Preserve the
+        // old footprint before the state changes so clearing that state also
+        // damages the pixels occupied by the old transient content.
+        preserve_damage_regions_for_next_redraw();
         sync_accessible_state();
         queue_redraw();
     }

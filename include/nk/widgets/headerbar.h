@@ -15,6 +15,12 @@
 
 namespace nk {
 
+/// Policy used to place the title between asymmetric headerbar controls.
+enum class HeaderbarCenteringPolicy {
+    Loose,  ///< Center in the free space between the start and end controls.
+    Strict, ///< Center relative to the whole window whenever space permits.
+};
+
 /// A client-side headerbar. Add action widgets with `add_leading()` /
 /// `add_trailing()`; the title and window controls are managed automatically.
 /// Hide the window-control buttons with `set_window_controls_enabled(false)`.
@@ -24,6 +30,7 @@ public:
     ~Headerbar() override;
 
     /// Set the title text shown at the start of the bar.
+    [[nodiscard]] std::string_view title() const;
     void set_title(std::string title);
 
     /// Add a widget to the leading (start) side of the bar.
@@ -33,6 +40,19 @@ public:
 
     /// Show or hide the minimize/maximize/close buttons (shown by default).
     void set_window_controls_enabled(bool enabled);
+
+    /// Override the platform decoration layout. An empty string follows the
+    /// system setting. The syntax is "start-controls:end-controls".
+    [[nodiscard]] std::string_view decoration_layout() const;
+    void set_decoration_layout(std::string layout);
+
+    [[nodiscard]] HeaderbarCenteringPolicy centering_policy() const;
+    void set_centering_policy(HeaderbarCenteringPolicy policy);
+
+    /// Show a contextual back button at the start of the headerbar.
+    [[nodiscard]] bool shows_back_button() const;
+    void set_show_back_button(bool show);
+    Signal<>& on_back_requested();
 
     // --- Widget overrides ---
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;

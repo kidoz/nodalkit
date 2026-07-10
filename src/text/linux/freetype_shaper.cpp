@@ -286,6 +286,7 @@ struct FreeTypeShaper::Impl {
     // the hardcoded fontconfig generics. GNOME supplies these as e.g.
     // "Adwaita Sans 11" (family + trailing point size), which we strip.
     std::string system_default_family;
+    std::string system_document_family;
     std::string system_default_monospace_family;
 
     // Font path cache: (family, weight, style) → file path.
@@ -347,6 +348,10 @@ struct FreeTypeShaper::Impl {
         if (requested == "monospace" || requested == "System-Monospace") {
             return system_default_monospace_family.empty() ? "monospace"
                                                            : system_default_monospace_family;
+        }
+        if (requested == "document" || requested == "System-Document") {
+            return system_document_family.empty() ? resolve_family("System")
+                                                  : system_document_family;
         }
         return requested;
     }
@@ -707,6 +712,19 @@ void FreeTypeShaper::set_system_default_family(std::string_view family, bool mon
     target = std::move(normalized);
     // Cached paths, shaped faces, and measurements were resolved against the old
     // default family, so they must be discarded before the next shape/measure.
+    impl_->font_path_cache.clear();
+    impl_->face_lru.clear();
+    impl_->face_map.clear();
+    impl_->measure_lru.clear();
+    impl_->measure_map.clear();
+}
+
+void FreeTypeShaper::set_system_document_family(std::string_view family) {
+    auto normalized = Impl::strip_trailing_size(family);
+    if (impl_->system_document_family == normalized) {
+        return;
+    }
+    impl_->system_document_family = std::move(normalized);
     impl_->font_path_cache.clear();
     impl_->face_lru.clear();
     impl_->face_map.clear();

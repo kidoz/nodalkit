@@ -26,6 +26,7 @@ class TextShaper;
 class Widget;
 class Dialog;
 class Headerbar;
+class ToolbarView;
 class RenderNode;
 class WindowInspector;
 
@@ -228,9 +229,11 @@ private:
     friend class Widget;
     friend class Dialog;
     friend class Headerbar;
+    friend class ToolbarView;
     friend class WindowInspector;
 
     [[nodiscard]] TextShaper* text_shaper() const;
+    [[nodiscard]] const SystemPreferences& system_preferences() const;
     // Pushes platform-configured default font families (GNOME font-name /
     // monospace-font-name) into the text shaper. No-op when the preferences are
     // absent or the shaper was not created.
