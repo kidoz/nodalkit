@@ -10,10 +10,13 @@
 #include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/layout/box_layout.h>
+#include <nk/layout/stack_layout.h>
 #include <nk/platform/events.h>
+#include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/context_menu.h>
 #include <nk/widgets/image_view.h>
 #include <optional>
 #include <sstream>
@@ -117,13 +120,315 @@ private:
     Box() = default;
 };
 
+class PageStack : public nk::Widget {
+public:
+    static std::shared_ptr<PageStack> create() {
+        auto stack = std::shared_ptr<PageStack>(new PageStack());
+        stack->set_layout_manager(std::make_unique<nk::StackLayout>());
+        stack->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        stack->set_vertical_size_policy(nk::SizePolicy::Expanding);
+        auto& accessible = stack->ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Group);
+        accessible.set_name("Showcase category content");
+        return stack;
+    }
+
+    void add_page(std::shared_ptr<nk::Widget> page) {
+        if (page == nullptr) {
+            return;
+        }
+        page->set_visible(pages_.empty());
+        pages_.push_back(page);
+        append_child(std::move(page));
+        queue_layout();
+    }
+
+    void set_visible_page(std::size_t index) {
+        if (index >= pages_.size() || index == visible_page_) {
+            return;
+        }
+        pages_[visible_page_]->set_visible(false);
+        visible_page_ = index;
+        pages_[visible_page_]->set_visible(true);
+        queue_layout();
+    }
+
+    [[nodiscard]] std::size_t visible_page() const { return visible_page_; }
+
+private:
+    PageStack() = default;
+
+    std::vector<std::shared_ptr<nk::Widget>> pages_;
+    std::size_t visible_page_ = 0;
+};
+
+class PrimaryMenuButton : public nk::Widget {
+public:
+    static std::shared_ptr<PrimaryMenuButton> create() {
+        auto button = std::shared_ptr<PrimaryMenuButton>(new PrimaryMenuButton());
+        button->menu_ = nk::ContextMenu::create();
+        button->append_child(button->menu_);
+        button->menu_connection_ = nk::ScopedConnection(button->menu_->on_item_activated().connect(
+            [weak = std::weak_ptr<PrimaryMenuButton>(button)](int index) {
+                if (const auto self = weak.lock()) {
+                    self->item_activated_.emit(index);
+                }
+            }));
+        return button;
+    }
+
+    void add_item(std::string label) { menu_->add_item(std::move(label)); }
+
+    void add_separator() { menu_->add_separator(); }
+
+    nk::Signal<int>& on_item_activated() { return item_activated_; }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {40.0F, 40.0F, 40.0F, 40.0F};
+    }
+
+    void allocate(const nk::Rect& allocation) override {
+        Widget::allocate(allocation);
+        menu_->allocate(allocation);
+    }
+
+    bool handle_mouse_event(const nk::MouseEvent& event) override {
+        if (menu_->is_open() && !allocation().contains({event.x, event.y}) &&
+            menu_->hit_test({event.x, event.y})) {
+            return menu_->handle_mouse_event(event);
+        }
+        if (event.button != 1) {
+            return false;
+        }
+        if (event.type == nk::MouseEvent::Type::Press) {
+            armed_ = allocation().contains({event.x, event.y});
+            queue_redraw();
+            return armed_;
+        }
+        if (event.type == nk::MouseEvent::Type::Release) {
+            const bool activate = armed_ && allocation().contains({event.x, event.y});
+            armed_ = false;
+            queue_redraw();
+            if (activate) {
+                toggle_menu();
+            }
+            return activate;
+        }
+        return false;
+    }
+
+    bool handle_key_event(const nk::KeyEvent& event) override {
+        if (menu_->is_open() && menu_->handle_key_event(event)) {
+            return true;
+        }
+        if (event.type == nk::KeyEvent::Type::Press &&
+            (event.key == nk::KeyCode::Space || event.key == nk::KeyCode::Return)) {
+            toggle_menu();
+            return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] bool hit_test(nk::Point point) const override {
+        return Widget::hit_test(point) || menu_->hit_test(point);
+    }
+
+    [[nodiscard]] std::vector<nk::Rect> damage_regions() const override {
+        auto regions = Widget::damage_regions();
+        const auto menu_regions = menu_->damage_regions();
+        regions.insert(regions.end(), menu_regions.begin(), menu_regions.end());
+        return regions;
+    }
+
+    [[nodiscard]] nk::CursorShape cursor_shape() const override {
+        return nk::CursorShape::PointingHand;
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        auto bounds = allocation();
+        if (nk::has_flag(state_flags(), nk::StateFlags::Focused)) {
+            ctx.add_rounded_rect(bounds, theme_color("focus-ring-color"), 10.0F);
+            bounds = {bounds.x + 2.0F,
+                      bounds.y + 2.0F,
+                      std::max(0.0F, bounds.width - 4.0F),
+                      std::max(0.0F, bounds.height - 4.0F)};
+        }
+        if (armed_ || nk::has_flag(state_flags(), nk::StateFlags::Hovered) || menu_->is_open()) {
+            ctx.add_rounded_rect(bounds,
+                                 theme_color(armed_ ? "pressed-background" : "hover-background",
+                                             nk::Color{0.0F, 0.0F, 0.0F, 0.08F}),
+                                 8.0F);
+        }
+
+        const auto color = theme_color("text-color", nk::Color{0.18F, 0.19F, 0.21F, 1.0F});
+        const float x = bounds.x + (bounds.width * 0.5F);
+        const float y = bounds.y + (bounds.height * 0.5F);
+        constexpr float kDotSize = 3.0F;
+        for (float offset : {-6.0F, 0.0F, 6.0F}) {
+            ctx.add_rounded_rect(
+                {x - (kDotSize * 0.5F), y + offset - (kDotSize * 0.5F), kDotSize, kDotSize},
+                color,
+                kDotSize * 0.5F);
+        }
+        Widget::snapshot(ctx);
+    }
+
+private:
+    PrimaryMenuButton() {
+        set_focusable(true);
+        add_style_class("primary-menu-button");
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Button);
+        accessible.set_name("Main Menu");
+        accessible.add_action(nk::AccessibleAction::Activate, [this] {
+            toggle_menu();
+            return true;
+        });
+    }
+
+    void toggle_menu() {
+        if (menu_->is_open()) {
+            menu_->dismiss();
+            return;
+        }
+        const auto bounds = allocation();
+        menu_->show_at({std::max(8.0F, bounds.right() - 220.0F), bounds.bottom() + 4.0F});
+    }
+
+    std::shared_ptr<nk::ContextMenu> menu_;
+    nk::ScopedConnection menu_connection_;
+    nk::Signal<int> item_activated_;
+    bool armed_ = false;
+};
+
+class NavigationRow : public nk::Widget {
+public:
+    static std::shared_ptr<NavigationRow> create(std::string label) {
+        return std::shared_ptr<NavigationRow>(new NavigationRow(std::move(label)));
+    }
+
+    void set_selected(bool selected) {
+        if (selected_ == selected) {
+            return;
+        }
+        selected_ = selected;
+        set_state_flag(nk::StateFlags::Selected, selected);
+        queue_redraw();
+    }
+
+    nk::Signal<>& on_clicked() { return clicked_; }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        const auto text = measure_text(label_, font_descriptor());
+        const float height = std::max(40.0F, text.height + 16.0F);
+        return {text.width + 28.0F, height, text.width + 28.0F, height};
+    }
+
+    bool handle_mouse_event(const nk::MouseEvent& event) override {
+        if (event.button != 1) {
+            return false;
+        }
+        if (event.type == nk::MouseEvent::Type::Press) {
+            armed_ = allocation().contains({event.x, event.y});
+            queue_redraw();
+            return armed_;
+        }
+        if (event.type == nk::MouseEvent::Type::Release) {
+            const bool activate = armed_ && allocation().contains({event.x, event.y});
+            armed_ = false;
+            queue_redraw();
+            if (activate) {
+                clicked_.emit();
+            }
+            return activate;
+        }
+        return false;
+    }
+
+    bool handle_key_event(const nk::KeyEvent& event) override {
+        if (event.type == nk::KeyEvent::Type::Press &&
+            (event.key == nk::KeyCode::Space || event.key == nk::KeyCode::Return)) {
+            clicked_.emit();
+            return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] nk::CursorShape cursor_shape() const override {
+        return nk::CursorShape::PointingHand;
+    }
+
+protected:
+    void snapshot(nk::SnapshotContext& ctx) const override {
+        auto bounds = allocation();
+        if (nk::has_flag(state_flags(), nk::StateFlags::FocusVisible)) {
+            ctx.add_rounded_rect(bounds, theme_color("focus-ring-color"), 10.0F);
+            bounds = {bounds.x + 2.0F,
+                      bounds.y + 2.0F,
+                      std::max(0.0F, bounds.width - 4.0F),
+                      std::max(0.0F, bounds.height - 4.0F)};
+        }
+        if (selected_) {
+            ctx.add_rounded_rect(
+                bounds,
+                theme_color("selected-background", nk::Color{0.80F, 0.88F, 0.98F, 1.0F}),
+                9.0F);
+        } else if (armed_ || nk::has_flag(state_flags(), nk::StateFlags::Hovered)) {
+            ctx.add_rounded_rect(bounds,
+                                 theme_color(armed_ ? "pressed-background" : "hover-background",
+                                             nk::Color{0.0F, 0.0F, 0.0F, 0.06F}),
+                                 9.0F);
+        }
+
+        const auto font = font_descriptor();
+        const auto text = measure_text(label_, font);
+        add_text_elided(
+            ctx,
+            {bounds.x + 14.0F, bounds.y + std::max(0.0F, (bounds.height - text.height) * 0.5F)},
+            label_,
+            text,
+            std::max(0.0F, bounds.width - 28.0F),
+            theme_color("text-color", nk::Color{0.18F, 0.19F, 0.21F, 1.0F}),
+            font);
+    }
+
+private:
+    explicit NavigationRow(std::string label) : label_(std::move(label)) {
+        set_focusable(true);
+        set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        add_style_class("navigation-row");
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Button);
+        accessible.set_name(label_);
+        accessible.add_action(nk::AccessibleAction::Activate, [this] {
+            clicked_.emit();
+            return true;
+        });
+    }
+
+    [[nodiscard]] nk::FontDescriptor font_descriptor() const {
+        return {
+            .family = {},
+            .size = theme_number("font-size", 14.0F),
+            .weight = nk::FontWeight::Regular,
+        };
+    }
+
+    std::string label_;
+    nk::Signal<> clicked_;
+    bool selected_ = false;
+    bool armed_ = false;
+};
+
 class Spacer : public nk::Widget {
 public:
     static std::shared_ptr<Spacer> create() {
         auto spacer = std::shared_ptr<Spacer>(new Spacer());
         spacer->set_horizontal_size_policy(nk::SizePolicy::Expanding);
-        spacer->set_vertical_size_policy(nk::SizePolicy::Preferred);
+        spacer->set_vertical_size_policy(nk::SizePolicy::Expanding);
         spacer->set_horizontal_stretch(1);
+        spacer->set_vertical_stretch(1);
         return spacer;
     }
 
@@ -174,7 +479,10 @@ protected:
     }
 
 private:
-    explicit SectionTitle(std::string text) : text_(std::move(text)) {}
+    explicit SectionTitle(std::string text) : text_(std::move(text)) {
+        add_style_class("label");
+        add_style_class("heading");
+    }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
@@ -224,7 +532,10 @@ protected:
     }
 
 private:
-    explicit SecondaryText(std::string text) : text_(std::move(text)) {}
+    explicit SecondaryText(std::string text) : text_(std::move(text)) {
+        add_style_class("label");
+        add_style_class("muted");
+    }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
@@ -282,7 +593,10 @@ protected:
     }
 
 private:
-    explicit FieldLabel(std::string text) : text_(std::move(text)) {}
+    explicit FieldLabel(std::string text) : text_(std::move(text)) {
+        add_style_class("label");
+        add_style_class("muted");
+    }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
@@ -336,7 +650,7 @@ protected:
     }
 
 private:
-    explicit ValueText(std::string text) : text_(std::move(text)) {}
+    explicit ValueText(std::string text) : text_(std::move(text)) { add_style_class("label"); }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {

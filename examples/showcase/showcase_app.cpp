@@ -8,32 +8,47 @@
 #include "showcase_widgets.h"
 
 #include <chrono>
+#include <cmath>
+#include <cstddef>
 #include <filesystem>
+#include <memory>
 #include <nk/foundation/property.h>
+#include <nk/foundation/types.h>
+#include <nk/layout/breakpoint.h>
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/selection_model.h>
 #include <nk/model/tree_model.h>
 #include <nk/platform/application.h>
 #include <nk/platform/native_toolbar.h>
+#include <nk/platform/system_preferences.h>
 #include <nk/platform/window.h>
 #include <nk/platform/window_inspector.h>
+#include <nk/render/image_node.h>
 #include <nk/style/theme_selection.h>
+#include <nk/ui_core/widget.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/clamp.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/command_palette.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
+#include <nk/widgets/headerbar.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
+#include <nk/widgets/navigation_split_view.h>
+#include <nk/widgets/preferences.h>
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/status_bar.h>
+#include <nk/widgets/status_page.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/toast_overlay.h>
+#include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tree_view.h>
 #include <nk/widgets/visual_effect_view.h>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -62,6 +77,8 @@ std::string showcase_table_field(std::string_view row, std::size_t index) {
 int run_showcase(int argc, char** argv) {
     nk::Application app(argc, argv);
     auto profile = make_showcase_profile(app.system_preferences());
+    const bool is_linux_wayland = profile.flavor == ShowcasePlatformFlavor::LinuxWayland;
+    const bool is_macos = profile.flavor == ShowcasePlatformFlavor::MacOS;
     if (profile.flavor == ShowcasePlatformFlavor::MacOS) {
         // Roomier page padding to match Mac document-window conventions.
         profile.page_padding_top = 24.0F;
@@ -73,10 +90,10 @@ int run_showcase(int argc, char** argv) {
     nk::ThemeSelection theme_selection;
     theme_selection.family = profile.theme_family;
     theme_selection.density = profile.density;
-    theme_selection.accent_color_override = profile.accent_color;
+    if (!is_linux_wayland) {
+        theme_selection.accent_color_override = profile.accent_color;
+    }
     app.set_theme_selection(theme_selection);
-
-    const bool is_macos = profile.flavor == ShowcasePlatformFlavor::MacOS;
 
     nk::Window window({
         .title = profile.window_title,
@@ -101,6 +118,19 @@ int run_showcase(int argc, char** argv) {
 
     auto status_bar = nk::StatusBar::create();
     status_bar->set_segments({profile.ready_segment, "10 items", "Counter 0"});
+
+    std::shared_ptr<nk::ToastOverlay> linux_toasts;
+    auto show_linux_toast = [&](std::string title,
+                                std::string action_label = {},
+                                nk::ToastPriority priority = nk::ToastPriority::Normal) {
+        if (linux_toasts != nullptr) {
+            linux_toasts->add_toast({
+                .title = std::move(title),
+                .action_label = std::move(action_label),
+                .priority = priority,
+            });
+        }
+    };
 
     auto hero_counter_pill = StatusPill::create("Counter 0", true);
     auto hero_items_pill = StatusPill::create("10 items");
@@ -244,14 +274,16 @@ int run_showcase(int argc, char** argv) {
     auto add_item_btn = nk::Button::create("Add Item");
     add_item_btn->add_style_class("suggested");
 
-    (void)add_item_btn->on_clicked().connect([&] {
+    auto add_showcase_item = [&] {
         const auto next = model->row_count() + 1;
         model->append("Item " + std::to_string(next));
         const auto count_text = std::to_string(model->row_count()) + " items";
         list_status->set_text(count_text);
         status_bar->set_segment(1, count_text);
         hero_items_pill->set_text(count_text);
-    });
+        show_linux_toast("Added item " + std::to_string(next));
+    };
+    (void)add_item_btn->on_clicked().connect(add_showcase_item);
 
     auto list_footer = Box::horizontal(10.0F);
     list_footer->append(list_status);
@@ -262,7 +294,9 @@ int run_showcase(int argc, char** argv) {
         "NK-101 | DataTable | In Progress | High",
         "NK-108 | TreeView | Preview | Medium",
         "NK-114 | GridView | Preview | Medium",
-        "NK-120 | ToastOverlay | Backlog | Low",
+        "NK-120 | ToastOverlay | Ready | High",
+        "NK-124 | PreferencesPage | Ready | High",
+        "NK-128 | OverlaySplitView | Ready | High",
         "NK-131 | CommandPalette | Preview | High",
     });
     auto table_selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
@@ -497,6 +531,7 @@ int run_showcase(int argc, char** argv) {
             status_bar->set_segment(0, "Diagnostics bundle exported");
             runtime_status->set_text("Diagnostics bundle exported.");
             runtime_status_detail->set_text("Saved to " + bundle_label + " in the temp directory.");
+            show_linux_toast("Diagnostics bundle exported");
 
             auto dialog = nk::Dialog::create(
                 "Diagnostics Bundle", "Exported showcase diagnostics to:\n" + bundle_dir.string());
@@ -508,6 +543,7 @@ int run_showcase(int argc, char** argv) {
         status_bar->set_segment(0, "Diagnostics export failed");
         runtime_status->set_text("Diagnostics export failed.");
         runtime_status_detail->set_text(std::string(result.error()));
+        show_linux_toast("Diagnostics export failed", {}, nk::ToastPriority::High);
 
         auto dialog =
             nk::Dialog::create("Diagnostics Bundle Export Failed", std::string(result.error()));
@@ -522,22 +558,80 @@ int run_showcase(int argc, char** argv) {
         runtime_status->set_text("Property binding updated.");
         runtime_status_detail->set_text("Source and target are now synchronized at 99.");
         status_bar->set_segment(0, "Property binding updated");
+        show_linux_toast("Property binding synchronized");
     });
 
     auto present_preferences_sheet = [&] {
-        auto dialog = nk::Dialog::create(
-            "Preferences",
-            "Review the current showcase shell configuration before applying the change.");
+        auto dialog = is_linux_wayland
+                          ? nk::Dialog::create("System Integration")
+                          : nk::Dialog::create(
+                                "Preferences",
+                                "Review the current showcase shell configuration before applying "
+                                "the change.");
         dialog->set_presentation_style(nk::DialogPresentationStyle::Sheet);
-        dialog->set_minimum_panel_width(460.0F);
-        dialog->add_button("Later", nk::DialogResponse::Cancel);
-        dialog->add_button("Apply", nk::DialogResponse::Accept);
+        dialog->set_minimum_panel_width(is_linux_wayland ? 620.0F : 460.0F);
+
+        if (is_linux_wayland) {
+            const auto& preferences = app.system_preferences();
+            auto page = nk::PreferencesPage::create(
+                "System Integration", "Desktop settings currently used by this showcase.");
+
+            auto appearance = nk::PreferencesGroup::create("Appearance");
+            auto color_scheme = nk::PreferencesRow::create(
+                "Color Scheme", "Follows the GNOME light or dark appearance preference.");
+            color_scheme->set_suffix(ValueText::create(
+                preferences.color_scheme == nk::ColorScheme::Dark ? "Dark" : "Light"));
+            appearance->add(color_scheme);
+
+            auto accent = nk::PreferencesRow::create(
+                "Accent Color", "Uses the desktop accent without a showcase override.");
+            accent->set_suffix(
+                ValueText::create(preferences.accent_color.has_value() ? "System" : "Fallback"));
+            appearance->add(accent);
+
+            auto typography = nk::PreferencesGroup::create("Typography & Accessibility");
+            auto text_scale = nk::PreferencesRow::create(
+                "Text Scale", "Scales type and control metrics through the resolved theme.");
+            const auto text_scale_percent =
+                static_cast<int>(std::lround(preferences.text_scale_factor * 100.0F));
+            text_scale->set_suffix(ValueText::create(std::to_string(text_scale_percent) + "%"));
+            typography->add(text_scale);
+
+            auto motion = nk::PreferencesRow::create(
+                "Animations", "Respects the desktop reduced-motion preference.");
+            motion->set_suffix(ValueText::create(
+                preferences.motion == nk::MotionPreference::Reduced ? "Reduced" : "Enabled"));
+            typography->add(motion);
+
+            auto contrast = nk::PreferencesRow::create(
+                "Contrast", "Uses the high-contrast palette when requested by the desktop.");
+            contrast->set_suffix(ValueText::create(
+                preferences.contrast == nk::ContrastPreference::High ? "High" : "Normal"));
+            typography->add(contrast);
+
+            page->add(appearance);
+            page->add(typography);
+            dialog->set_content(page);
+        }
+
+        if (is_linux_wayland) {
+            dialog->add_button("Close", nk::DialogResponse::Accept);
+        } else {
+            dialog->add_button("Later", nk::DialogResponse::Cancel);
+            dialog->add_button("Apply", nk::DialogResponse::Accept);
+        }
         (void)dialog->on_response().connect([&](nk::DialogResponse response) {
+            if (is_linux_wayland) {
+                runtime_status->set_text("System integration inspected.");
+                runtime_status_detail->set_text("The read-only desktop settings sheet was closed.");
+                return;
+            }
             if (response == nk::DialogResponse::Accept) {
                 status_bar->set_segment(0, "Sheet: Applied");
                 runtime_status->set_text("Preferences sheet applied.");
                 runtime_status_detail->set_text(
                     "The top-attached sheet closed after an accepted response.");
+                show_linux_toast("Preferences applied");
             } else {
                 status_bar->set_segment(0, "Sheet: Deferred");
                 runtime_status->set_text("Preferences sheet deferred.");
@@ -596,7 +690,6 @@ int run_showcase(int argc, char** argv) {
     auto actions_row =
         SplitColumns::create(property_panel, dialog_panel, 0.5F, profile.actions_row_spacing);
 
-    auto palette_label = FieldLabel::create("Command palette");
     auto command_palette = nk::CommandPalette::create();
     command_palette->set_commands({
         nk::CommandPaletteCommand{
@@ -613,8 +706,9 @@ int run_showcase(int argc, char** argv) {
         },
         nk::CommandPaletteCommand{
             .id = "app.preferences",
-            .title = "Show Preferences",
-            .subtitle = "Open the preferences sheet",
+            .title = is_linux_wayland ? "System Integration" : "Show Preferences",
+            .subtitle =
+                is_linux_wayland ? "Inspect desktop settings" : "Open the preferences sheet",
             .category = "Application",
         },
         nk::CommandPaletteCommand{
@@ -635,6 +729,7 @@ int run_showcase(int argc, char** argv) {
         status_bar->set_segment(0, "Command: " + std::string(command_id));
         runtime_status->set_text("Command palette: " + std::string(command_id));
         runtime_status_detail->set_text("The command was activated from the searchable palette.");
+        show_linux_toast("Command: " + std::string(command_id));
     });
     auto palette_stage = InsetStage::create(
         command_palette, 186.0F, 220.0F, profile.runtime_status_padding, profile.stage_chrome);
@@ -644,64 +739,227 @@ int run_showcase(int argc, char** argv) {
     actions_content->append(actions_subtitle);
     actions_content->append(status_panel);
     actions_content->append(actions_row);
-    actions_content->append(palette_label);
-    actions_content->append(palette_stage);
+    if (!is_linux_wayland) {
+        actions_content->append(FieldLabel::create("Command palette"));
+        actions_content->append(palette_stage);
+    }
     auto actions_card = SurfacePanel::card(actions_content);
 
-    auto left_column = Box::vertical(profile.controls_spacing);
-    left_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
-    left_column->append(controls_card);
-    left_column->append(list_card);
+    if (is_linux_wayland) {
+        auto commands_content = Box::vertical(profile.preview_section_spacing);
+        commands_content->append(SectionTitle::create("Commands"));
+        commands_content->append(
+            SecondaryText::create("Search and activate application-wide commands."));
+        commands_content->append(palette_stage);
+        auto commands_card = SurfacePanel::card(commands_content);
 
-    auto right_column = Box::vertical(profile.controls_spacing);
-    right_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
-    right_column->append(preview_card);
-    right_column->append(actions_card);
+        auto status_page = nk::StatusPage::create(
+            "No Samples Yet",
+            "This dedicated empty state offers one clear action to create content.");
+        auto status_page_action = nk::Button::create("Add Sample Item");
+        status_page_action->add_style_class("suggested");
+        (void)status_page_action->on_clicked().connect(add_showcase_item);
+        status_page->set_action(status_page_action);
 
-    auto content_row = SplitColumns::create(
-        left_column, right_column, profile.main_split_ratio, profile.main_column_spacing);
-    content_row->set_vertical_size_policy(nk::SizePolicy::Preferred);
-    content_row->set_vertical_stretch(0);
-    std::vector<std::shared_ptr<nk::Widget>> hero_pills = {
-        hero_counter_pill,
-        hero_items_pill,
-        hero_preview_pill,
-    };
-    if (hero_close_button) {
-        hero_pills.push_back(hero_close_button);
+        auto make_scrolling_page = [&](std::shared_ptr<nk::Widget> content,
+                                       float maximum_width = 860.0F) {
+            content->set_vertical_size_policy(nk::SizePolicy::Preferred);
+            content->set_vertical_stretch(0);
+            auto page_flow = Box::vertical();
+            page_flow->append(std::move(content));
+            page_flow->append(Spacer::create());
+
+            auto page = SurfacePanel::page(page_flow);
+            page->set_padding(24.0F, 24.0F + profile.scrollbar_safe_gutter, 32.0F, 24.0F);
+            page->set_vertical_size_policy(nk::SizePolicy::Preferred);
+            page->set_vertical_stretch(0);
+
+            auto clamp = nk::Clamp::create();
+            clamp->set_maximum_size(maximum_width);
+            clamp->set_tightening_threshold(620.0F);
+            clamp->set_child(page);
+
+            auto scroll = nk::ScrollArea::create();
+            scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+            scroll->set_v_scroll_policy(nk::ScrollPolicy::Automatic);
+            scroll->set_content(clamp);
+            return scroll;
+        };
+
+        const std::vector<std::string> category_titles = {
+            "Controls", "Models & Views", "Preview", "Runtime", "Commands", "Empty State"};
+        auto page_stack = PageStack::create();
+        page_stack->add_page(make_scrolling_page(controls_card));
+        page_stack->add_page(make_scrolling_page(list_card, 980.0F));
+        page_stack->add_page(make_scrolling_page(preview_card));
+        page_stack->add_page(make_scrolling_page(actions_card));
+        page_stack->add_page(make_scrolling_page(commands_card));
+        page_stack->add_page(status_page);
+
+        auto sidebar_content = Box::vertical(4.0F);
+        sidebar_content->append(FieldLabel::create("Showcase"));
+        std::vector<std::shared_ptr<NavigationRow>> category_buttons;
+        category_buttons.reserve(category_titles.size());
+        for (const auto& title : category_titles) {
+            auto button = NavigationRow::create(title);
+            category_buttons.push_back(button);
+            sidebar_content->append(button);
+        }
+        category_buttons.front()->set_selected(true);
+        sidebar_content->append(Spacer::create());
+
+        auto sidebar_page = SurfacePanel::page(sidebar_content);
+        sidebar_page->set_padding(18.0F, 12.0F, 18.0F, 12.0F);
+
+        auto adaptive_split = nk::NavigationSplitView::create();
+        adaptive_split->set_sidebar(sidebar_page);
+        adaptive_split->set_content(page_stack);
+        adaptive_split->set_sidebar_width_fraction(0.24F);
+        adaptive_split->set_min_sidebar_width(220.0F);
+        adaptive_split->set_max_sidebar_width(280.0F);
+
+        auto headerbar = nk::Headerbar::create(profile.window_title);
+        headerbar->set_centering_policy(nk::HeaderbarCenteringPolicy::Strict);
+        headerbar->set_show_back_button(false);
+
+        auto select_category = [&, adaptive_split, headerbar](std::size_t index) {
+            page_stack->set_visible_page(index);
+            for (std::size_t button_index = 0; button_index < category_buttons.size();
+                 ++button_index) {
+                if (button_index == index) {
+                    category_buttons.at(button_index)->set_selected(true);
+                } else {
+                    category_buttons.at(button_index)->set_selected(false);
+                }
+            }
+            if (adaptive_split->is_collapsed()) {
+                adaptive_split->set_show_content(true);
+                headerbar->set_title(category_titles.at(index));
+                headerbar->set_show_back_button(true);
+            }
+        };
+        for (std::size_t index = 0; index < category_buttons.size(); ++index) {
+            (void)category_buttons.at(index)->on_clicked().connect(
+                [select_category, index] { select_category(index); });
+        }
+        (void)headerbar->on_back_requested().connect([adaptive_split, headerbar, &profile] {
+            adaptive_split->set_show_content(false);
+            headerbar->set_show_back_button(false);
+            headerbar->set_title(profile.window_title);
+        });
+
+        auto compact_layout = nk::Breakpoint::create({
+            .min_width = std::nullopt,
+            .max_width = 960.0F,
+            .min_height = std::nullopt,
+            .max_height = std::nullopt,
+        });
+        auto adaptive_bin = nk::BreakpointBin::create();
+        adaptive_bin->set_child(adaptive_split);
+        adaptive_bin->add_breakpoint(compact_layout);
+        (void)compact_layout->on_active_changed().connect(
+            [adaptive_split, headerbar, &profile](bool compact) {
+                adaptive_split->set_collapsed(compact);
+                adaptive_split->set_show_content(false);
+                headerbar->set_show_back_button(false);
+                headerbar->set_title(profile.window_title);
+            });
+
+        linux_toasts = nk::ToastOverlay::create();
+        linux_toasts->set_child(adaptive_bin);
+
+        auto primary_menu = PrimaryMenuButton::create();
+        primary_menu->add_item("Export Diagnostics Bundle");
+        primary_menu->add_separator();
+        primary_menu->add_item("System Integration");
+        primary_menu->add_item("About NodalKit");
+        primary_menu->add_separator();
+        primary_menu->add_item("Quit");
+        (void)primary_menu->on_item_activated().connect([&](int index) {
+            switch (index) {
+            case 0:
+                export_debug_bundle();
+                break;
+            case 2:
+                present_preferences_sheet();
+                break;
+            case 3: {
+                auto dialog = nk::Dialog::create(
+                    "About NodalKit", "NodalKit Showcase v0.1.0\nA C++23 desktop GUI toolkit");
+                dialog->add_button("Close", nk::DialogResponse::Accept);
+                dialog->present(window);
+                break;
+            }
+            case 5:
+                app.quit(0);
+                break;
+            default:
+                break;
+            }
+        });
+        headerbar->add_trailing(primary_menu);
+
+        auto toolbar_view = nk::ToolbarView::create();
+        toolbar_view->set_content(linux_toasts);
+        toolbar_view->add_top_bar(headerbar);
+        toolbar_view->set_top_bar_style(nk::ToolbarStyle::Flat);
+        window.set_child(toolbar_view);
+    } else {
+        auto left_column = Box::vertical(profile.controls_spacing);
+        left_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        left_column->append(controls_card);
+        left_column->append(list_card);
+
+        auto right_column = Box::vertical(profile.controls_spacing);
+        right_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        right_column->append(preview_card);
+        right_column->append(actions_card);
+
+        std::vector<std::shared_ptr<nk::Widget>> hero_pills = {
+            hero_counter_pill,
+            hero_items_pill,
+            hero_preview_pill,
+        };
+        if (hero_close_button) {
+            hero_pills.push_back(hero_close_button);
+        }
+        auto hero_banner =
+            HeroBanner::create(profile.hero_title, profile.hero_subtitle, std::move(hero_pills));
+        hero_banner->set_height(profile.hero_min_height, profile.hero_natural_height);
+
+        auto content_row = SplitColumns::create(
+            left_column, right_column, profile.main_split_ratio, profile.main_column_spacing);
+        content_row->set_vertical_size_policy(nk::SizePolicy::Preferred);
+        content_row->set_vertical_stretch(0);
+
+        auto body_content = Box::vertical(profile.section_spacing);
+        // Mac apps put the window title + toolbar at the top; an inline hero
+        // banner duplicates that chrome, so hide it on macOS.
+        if (!is_macos) {
+            body_content->append(hero_banner);
+        }
+        body_content->append(content_row);
+        auto page_bottom_spacer = InsetStage::create(Spacer::create(),
+                                                     profile.page_bottom_spacer_height,
+                                                     profile.page_bottom_spacer_height,
+                                                     0.0F,
+                                                     profile.stage_chrome);
+        body_content->append(page_bottom_spacer);
+
+        auto body_page = SurfacePanel::page(body_content);
+        body_page->set_padding(profile.page_padding_top,
+                               profile.page_padding_right + profile.scrollbar_safe_gutter,
+                               profile.page_padding_bottom,
+                               profile.page_padding_left);
+        body_page->set_vertical_size_policy(nk::SizePolicy::Preferred);
+        body_page->set_vertical_stretch(0);
+        auto scroll_body = nk::ScrollArea::create();
+        scroll_body->set_h_scroll_policy(nk::ScrollPolicy::Never);
+        scroll_body->set_v_scroll_policy(nk::ScrollPolicy::Automatic);
+        scroll_body->set_content(body_page);
+
+        window.set_child(ShowcaseShell::create(menu_surface, scroll_body, status_bar));
     }
-    auto hero_banner =
-        HeroBanner::create(profile.hero_title, profile.hero_subtitle, std::move(hero_pills));
-    hero_banner->set_height(profile.hero_min_height, profile.hero_natural_height);
-
-    auto body_content = Box::vertical(profile.section_spacing);
-    // Mac apps put the window title + toolbar at the top; an inline hero
-    // banner duplicates that chrome, so hide it on macOS.
-    if (!is_macos) {
-        body_content->append(hero_banner);
-    }
-    body_content->append(content_row);
-    auto page_bottom_spacer = InsetStage::create(Spacer::create(),
-                                                 profile.page_bottom_spacer_height,
-                                                 profile.page_bottom_spacer_height,
-                                                 0.0F,
-                                                 profile.stage_chrome);
-    body_content->append(page_bottom_spacer);
-
-    auto body_page = SurfacePanel::page(body_content);
-    body_page->set_padding(profile.page_padding_top,
-                           profile.page_padding_right + profile.scrollbar_safe_gutter,
-                           profile.page_padding_bottom,
-                           profile.page_padding_left);
-    body_page->set_vertical_size_policy(nk::SizePolicy::Preferred);
-    body_page->set_vertical_stretch(0);
-    auto scroll_body = nk::ScrollArea::create();
-    scroll_body->set_h_scroll_policy(nk::ScrollPolicy::Never);
-    scroll_body->set_v_scroll_policy(nk::ScrollPolicy::Automatic);
-    scroll_body->set_content(body_page);
-
-    auto root = ShowcaseShell::create(menu_surface, scroll_body, status_bar);
-    window.set_child(root);
 
     list_view->grab_focus();
 
@@ -759,14 +1017,7 @@ int run_showcase(int argc, char** argv) {
         add_item.label = "Add Item";
         add_item.tooltip = "Append a new item to the list";
         add_item.symbol_name = "plus";
-        add_item.on_activate = [&] {
-            const auto next = model->row_count() + 1;
-            model->append("Item " + std::to_string(next));
-            const auto count_text = std::to_string(model->row_count()) + " items";
-            list_status->set_text(count_text);
-            status_bar->set_segment(1, count_text);
-            hero_items_pill->set_text(count_text);
-        };
+        add_item.on_activate = add_showcase_item;
         toolbar.items.push_back(std::move(add_item));
 
         nk::NativeToolbarItem flex;
