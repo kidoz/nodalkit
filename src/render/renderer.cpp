@@ -596,6 +596,40 @@ void SoftwareRenderer::render(const RenderNode& root) {
             }
         }
 
+        if (node.kind() == RenderNodeKind::Line) {
+            const auto& line = static_cast<const LineNode&>(node);
+            const auto start = scale_point(line.start(), impl_->scale_factor);
+            const auto end = scale_point(line.end(), impl_->scale_factor);
+            const float radius = std::max(0.5F, line.thickness() * impl_->scale_factor * 0.5F);
+            const float delta_x = end.x - start.x;
+            const float delta_y = end.y - start.y;
+            const float length_squared = (delta_x * delta_x) + (delta_y * delta_y);
+            auto color = line.color();
+            color.a *= opacity;
+
+            for (int y = c_y0; y < c_y1; ++y) {
+                for (int x = c_x0; x < c_x1; ++x) {
+                    const float pixel_x = static_cast<float>(x) + 0.5F;
+                    const float pixel_y = static_cast<float>(y) + 0.5F;
+                    const float projection = length_squared > 0.0F
+                                                 ? std::clamp(((pixel_x - start.x) * delta_x +
+                                                               (pixel_y - start.y) * delta_y) /
+                                                                  length_squared,
+                                                              0.0F,
+                                                              1.0F)
+                                                 : 0.0F;
+                    const float nearest_x = start.x + (delta_x * projection);
+                    const float nearest_y = start.y + (delta_y * projection);
+                    const float distance = std::hypot(pixel_x - nearest_x, pixel_y - nearest_y);
+                    const float coverage =
+                        clamp01(radius + 0.5F - distance) * clip_coverage(x, y, clips);
+                    if (coverage > 0.0F) {
+                        blend_pixel(impl_->pixels, impl_->width, x, y, color, coverage);
+                    }
+                }
+            }
+        }
+
         if (node.kind() == RenderNodeKind::Shadow) {
             const auto& shadow = static_cast<const ShadowNode&>(node);
             const float sf = impl_->scale_factor;

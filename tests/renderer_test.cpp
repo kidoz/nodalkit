@@ -159,6 +159,25 @@ TEST_CASE("SoftwareRenderer scales logical content into a HiDPI framebuffer", "[
     REQUIRE(outside.a == 255);
 }
 
+TEST_CASE("SoftwareRenderer rasterizes symbolic line strokes", "[renderer]") {
+    nk::SnapshotContext snapshot;
+    snapshot.add_line({2.0F, 2.0F}, {18.0F, 18.0F}, nk::Color::from_rgb(20, 30, 40), 2.0F);
+
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({20.0F, 20.0F}, 1.0F);
+    renderer.render(*snapshot.take_root());
+    renderer.end_frame();
+
+    const auto center = pixel_at(renderer, 10, 10);
+    CHECK(center.r < 80);
+    CHECK(center.g < 80);
+    CHECK(center.b < 80);
+    const auto background = pixel_at(renderer, 2, 18);
+    CHECK(background.r == 255);
+    CHECK(background.g == 255);
+    CHECK(background.b == 255);
+}
+
 TEST_CASE("NativeSurface derives framebuffer size from logical size and scale factor",
           "[renderer]") {
     RecordingSurface surface;
