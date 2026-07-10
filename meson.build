@@ -75,6 +75,7 @@ nk_sources = files(
     'src/widgets/spin_button.cpp',
     'src/widgets/tab_bar.cpp',
     'src/widgets/toolbar.cpp',
+    'src/widgets/headerbar.cpp',
     'src/widgets/context_menu.cpp',
     'src/widgets/search_field.cpp',
     'src/widgets/command_palette.cpp',
@@ -150,6 +151,9 @@ elif host_system == 'linux'
     tablet_v2_xml = wl_protocol_dir / 'stable' / 'tablet' / 'tablet-v2.xml'
     fractional_scale_v1_xml = wl_protocol_dir / 'staging' / 'fractional-scale' / 'fractional-scale-v1.xml'
     viewporter_xml = wl_protocol_dir / 'stable' / 'viewporter' / 'viewporter.xml'
+    # xdg-decoration lets the client request CSD so NodalKit can draw its own
+    # headerbar. GNOME/Mutter ignores SSD and expects CSD, so we default to it.
+    xdg_decoration_v1_xml = wl_protocol_dir / 'unstable' / 'xdg-decoration' / 'xdg-decoration-unstable-v1.xml'
 
     xdg_shell_header = custom_target('xdg-shell-client-header',
         input : xdg_shell_xml,
@@ -216,6 +220,16 @@ elif host_system == 'linux'
         output : 'viewporter-protocol.c',
         command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
+    xdg_decoration_v1_header = custom_target('xdg-decoration-v1-client-header',
+        input : xdg_decoration_v1_xml,
+        output : 'xdg-decoration-unstable-v1-client-protocol.h',
+        command : [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+    xdg_decoration_v1_code = custom_target('xdg-decoration-v1-private-code',
+        input : xdg_decoration_v1_xml,
+        output : 'xdg-decoration-unstable-v1-protocol.c',
+        command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
     nk_sources += files(
         'src/platform/linux/wayland_backend.cpp',
         'src/platform/linux/wayland_portal_helpers.cpp',
@@ -237,6 +251,8 @@ elif host_system == 'linux'
         fractional_scale_v1_code,
         viewporter_header,
         viewporter_code,
+        xdg_decoration_v1_header,
+        xdg_decoration_v1_code,
     ]
 
     nk_deps += [wayland_client_dep, xkbcommon_dep, freetype_dep, fontconfig_dep, harfbuzz_dep, gio_dep]

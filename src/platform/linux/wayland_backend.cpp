@@ -11,6 +11,7 @@
 #include "wayland_input.h"
 #include "wayland_portal_helpers.h"
 #include "wayland_surface.h"
+#include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 #include <algorithm>
@@ -591,6 +592,7 @@ struct WaylandBackend::Impl {
     wp_cursor_shape_manager_v1* cursor_shape_manager = nullptr;
     wp_fractional_scale_manager_v1* fractional_scale_manager = nullptr;
     wp_viewporter* viewporter = nullptr;
+    zxdg_decoration_manager_v1* decoration_manager = nullptr;
     std::unordered_map<wl_output*, int> output_scales;
     // Scales staged by a wl_output are latched on the wl_output.done event. We therefore keep a
     // side-map of "pending" values until the atomic done arrives, matching the wayland protocol.
@@ -1610,6 +1612,10 @@ static void registry_global(void* data,
         impl->viewporter = static_cast<wp_viewporter*>(
             wl_registry_bind(registry, name, &wp_viewporter_interface, std::min(version, 1u)));
         NK_LOG_INFO("Wayland", "Bound wp_viewporter");
+    } else if (std::strcmp(interface, zxdg_decoration_manager_v1_interface.name) == 0) {
+        impl->decoration_manager = static_cast<zxdg_decoration_manager_v1*>(wl_registry_bind(
+            registry, name, &zxdg_decoration_manager_v1_interface, std::min(version, 1u)));
+        NK_LOG_INFO("Wayland", "Bound zxdg_decoration_manager_v1");
     } else if (std::strcmp(interface, wl_output_interface.name) == 0) {
         // wl_output version 2 adds the `scale` event (the one we need); 3 adds release, 4 adds
         // name/description. We bind at up to 4 but gracefully handle older compositors.
@@ -1826,6 +1832,10 @@ void WaylandBackend::shutdown() {
     if (impl_->viewporter) {
         wp_viewporter_destroy(impl_->viewporter);
         impl_->viewporter = nullptr;
+    }
+    if (impl_->decoration_manager) {
+        zxdg_decoration_manager_v1_destroy(impl_->decoration_manager);
+        impl_->decoration_manager = nullptr;
     }
     for (auto& [output, scale] : impl_->output_scales) {
         if (output != nullptr) {
@@ -2169,6 +2179,10 @@ wp_fractional_scale_manager_v1* WaylandBackend::fractional_scale_manager() const
 
 wp_viewporter* WaylandBackend::viewporter() const {
     return impl_->viewporter;
+}
+
+zxdg_decoration_manager_v1* WaylandBackend::decoration_manager() const {
+    return impl_->decoration_manager;
 }
 
 WaylandInput* WaylandBackend::input() const {

@@ -12,10 +12,12 @@
 struct wl_surface;
 struct wl_buffer;
 struct wl_output;
+struct wl_array;
 struct xdg_surface;
 struct xdg_toplevel;
 struct wp_fractional_scale_v1;
 struct wp_viewport;
+struct zxdg_toplevel_decoration_v1;
 
 namespace nk {
 
@@ -36,9 +38,15 @@ public:
     void present(const uint8_t* rgba, int w, int h, std::span<const Rect> damage_regions) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
+    void minimize() override;
+    void toggle_maximize() override;
+    [[nodiscard]] bool is_maximized() const override;
+    [[nodiscard]] bool uses_client_side_decorations() const override;
+    [[nodiscard]] bool begin_system_move(std::uint32_t serial) override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
     [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
+    void set_titlebar_style(TitlebarStyle style) override;
 
     /// Access the owning Window for event delivery.
     Window& owner() { return owner_; }
@@ -47,8 +55,10 @@ public:
     [[nodiscard]] wl_surface* wl_surf() const { return surface_; }
 
     // Called from XDG callbacks.
-    void handle_configure(int width, int height);
+    void handle_configure(int width, int height, const wl_array* states);
+    void handle_decoration_configure(std::uint32_t mode);
     void handle_close();
+    [[nodiscard]] bool begin_resize_if_needed(float x, float y, std::uint32_t serial);
 
     // Called from the wl_surface enter/leave callbacks and from the wl_output.done handler in
     // the backend when an output's advertised scale changes.
@@ -75,6 +85,9 @@ private:
 
     void destroy_buffer(ShmBuffer& buf);
     void ensure_buffer(ShmBuffer& buf, int w, int h);
+    void ensure_decoration_object();
+    void update_decoration_preference();
+    void notify_native_chrome_changed();
 
     WaylandBackend& backend_;
     Window& owner_;
@@ -90,6 +103,9 @@ private:
     int width_;
     int height_;
     bool fullscreen_ = false;
+    bool maximized_ = false;
+    bool decorated_ = true;
+    bool resizable_ = true;
     bool configured_ = false;
     int buffer_scale_ = 1;
     std::unordered_set<wl_output*> entered_outputs_;
@@ -101,6 +117,12 @@ private:
     wp_fractional_scale_v1* fractional_scale_ctrl_ = nullptr;
     wp_viewport* viewport_ = nullptr;
     float fractional_scale_ = 0.0F;
+
+    // Effective decoration mode reported by the compositor. If the optional
+    // negotiation protocol is absent, Wayland defaults to client ownership.
+    zxdg_toplevel_decoration_v1* toplevel_decoration_ = nullptr;
+    bool client_side_decoration_ = false;
+    TitlebarStyle titlebar_style_ = TitlebarStyle::Regular;
 };
 
 } // namespace nk

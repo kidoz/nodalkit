@@ -53,6 +53,8 @@ public:
 
     void set_cursor_shape(CursorShape shape);
 
+    [[nodiscard]] wl_seat* seat() const { return seat_; }
+
     // --- Wayland listener callbacks (public so listener structs can reference them) ---
 
     static void seat_capabilities(void* data, wl_seat* seat, uint32_t caps);

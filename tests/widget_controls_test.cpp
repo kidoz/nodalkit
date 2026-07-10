@@ -13,6 +13,7 @@
 #include <nk/widgets/calendar.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/color_well.h>
+#include <nk/widgets/headerbar.h>
 #include <nk/widgets/radio_button.h>
 #include <nk/widgets/search_field.h>
 #include <nk/widgets/slider.h>
@@ -245,6 +246,34 @@ private:
     explicit SnapshotButton(std::string label) : nk::Button(std::move(label)) {}
 };
 
+class SnapshotHeaderbar : public nk::Headerbar {
+public:
+    static std::shared_ptr<SnapshotHeaderbar> create(std::string title) {
+        return std::shared_ptr<SnapshotHeaderbar>(new SnapshotHeaderbar(std::move(title)));
+    }
+
+    void snapshot_for_test(nk::SnapshotContext& ctx) const { snapshot(ctx); }
+
+private:
+    explicit SnapshotHeaderbar(std::string title) : nk::Headerbar(std::move(title)) {}
+};
+
+class FixedWidget final : public nk::Widget {
+public:
+    static std::shared_ptr<FixedWidget> create(float width) {
+        return std::shared_ptr<FixedWidget>(new FixedWidget(width));
+    }
+
+    [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
+        return {width_, 30.0F, width_, 30.0F};
+    }
+
+private:
+    explicit FixedWidget(float width) : width_(width) {}
+
+    float width_ = 0.0F;
+};
+
 const nk::TextNode* find_text_node(const nk::RenderNode& node) {
     if (node.kind() == nk::RenderNodeKind::Text) {
         return static_cast<const nk::TextNode*>(&node);
@@ -252,6 +281,23 @@ const nk::TextNode* find_text_node(const nk::RenderNode& node) {
     for (const auto& child : node.children()) {
         if (child) {
             if (const auto* found = find_text_node(*child)) {
+                return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+const nk::TextNode* find_text_node(const nk::RenderNode& node, std::string_view text) {
+    if (node.kind() == nk::RenderNodeKind::Text) {
+        const auto* text_node = static_cast<const nk::TextNode*>(&node);
+        if (text_node->text() == text) {
+            return text_node;
+        }
+    }
+    for (const auto& child : node.children()) {
+        if (child) {
+            if (const auto* found = find_text_node(*child, text)) {
                 return found;
             }
         }
@@ -290,4 +336,33 @@ TEST_CASE("Button labels elide instead of painting past the body", "[widgets][bu
         REQUIRE(text != nullptr);
         REQUIRE(text->text() == label);
     }
+}
+
+TEST_CASE("Headerbar keeps actions clear of its title and exposes window controls",
+          "[widgets][headerbar][accessibility]") {
+    auto headerbar = SnapshotHeaderbar::create("Document title");
+    auto leading = FixedWidget::create(64.0F);
+    auto trailing = FixedWidget::create(72.0F);
+    headerbar->add_leading(leading);
+    headerbar->add_trailing(trailing);
+    headerbar->allocate({0.0F, 0.0F, 520.0F, 46.0F});
+
+    nk::SnapshotContext context;
+    headerbar->snapshot_for_test(context);
+    const auto root = context.take_root();
+    REQUIRE(root != nullptr);
+    const auto* title = find_text_node(*root, "Document title");
+    REQUIRE(title != nullptr);
+    CHECK(title->bounds().x >= leading->allocation().right());
+    CHECK(title->bounds().right() <= trailing->allocation().x);
+
+    std::vector<std::string> accessible_controls;
+    for (const auto& child : headerbar->children()) {
+        if (const auto* accessible = child->accessible();
+            accessible != nullptr && accessible->role() == nk::AccessibleRole::Button) {
+            accessible_controls.emplace_back(accessible->name());
+            CHECK(accessible->supports_action(nk::AccessibleAction::Activate));
+        }
+    }
+    CHECK(accessible_controls == std::vector<std::string>{"Minimize", "Maximize", "Close"});
 }

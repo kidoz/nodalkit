@@ -1087,13 +1087,20 @@ void WaylandInput::pointer_button(void* data,
         return;
     }
 
+    self->last_input_serial_ = serial;
+    const int nk_button = wayland_button_to_nk(button);
+    if (state == WL_POINTER_BUTTON_STATE_PRESSED && nk_button == 1 &&
+        self->pointer_focus_->begin_resize_if_needed(self->pointer_x_, self->pointer_y_, serial)) {
+        return;
+    }
+
     MouseEvent me{};
     me.type = (state == WL_POINTER_BUTTON_STATE_PRESSED) ? MouseEvent::Type::Press
                                                          : MouseEvent::Type::Release;
     me.x = self->pointer_x_;
     me.y = self->pointer_y_;
-    me.button = wayland_button_to_nk(button);
-    self->last_input_serial_ = serial;
+    me.button = nk_button;
+    me.native_serial = serial;
     self->pointer_focus_->owner().dispatch_mouse_event(me);
     if (self->pointer_focus_ == self->keyboard_focus_) {
         self->sync_text_input_state();

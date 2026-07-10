@@ -7,6 +7,7 @@
 #include "viewporter-client-protocol.h"
 #include "wayland_backend.h"
 #include "wayland_input.h"
+#include "xdg-decoration-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 #include <algorithm>
@@ -41,11 +42,9 @@ static void xdg_toplevel_handle_configure(void* data,
                                           struct xdg_toplevel* /*toplevel*/,
                                           int32_t width,
                                           int32_t height,
-                                          struct wl_array* /*states*/) {
+                                          struct wl_array* states) {
     auto* self = static_cast<WaylandSurface*>(data);
-    if (width > 0 && height > 0) {
-        self->handle_configure(width, height);
-    }
+    self->handle_configure(width, height, states);
 }
 
 static void xdg_toplevel_handle_close(void* data, struct xdg_toplevel* /*toplevel*/) {
@@ -67,6 +66,16 @@ static constexpr struct xdg_toplevel_listener xdg_toplevel_listener = {
     .close = xdg_toplevel_handle_close,
     .configure_bounds = xdg_toplevel_handle_configure_bounds,
     .wm_capabilities = xdg_toplevel_handle_wm_capabilities,
+};
+
+static void decoration_handle_configure(void* data,
+                                        zxdg_toplevel_decoration_v1* /*decoration*/,
+                                        uint32_t mode) {
+    static_cast<WaylandSurface*>(data)->handle_decoration_configure(mode);
+}
+
+static constexpr zxdg_toplevel_decoration_v1_listener decoration_listener = {
+    .configure = decoration_handle_configure,
 };
 
 // ---------------------------------------------------------------------------
@@ -147,7 +156,13 @@ static constexpr struct wp_fractional_scale_v1_listener fractional_scale_listene
 // ---------------------------------------------------------------------------
 
 WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& config, Window& owner)
-    : backend_(backend), owner_(owner), width_(config.width), height_(config.height) {
+    : backend_(backend)
+    , owner_(owner)
+    , width_(config.width)
+    , height_(config.height)
+    , decorated_(config.decorated)
+    , resizable_(config.resizable)
+    , titlebar_style_(config.titlebar_style) {
 
     surface_ = wl_compositor_create_surface(backend_.compositor());
     wl_surface_add_listener(surface_, &wl_surface_listener, this);
@@ -158,6 +173,9 @@ WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& conf
     xdg_toplevel_ = xdg_surface_get_toplevel(xdg_surface_);
     xdg_toplevel_add_listener(xdg_toplevel_, &xdg_toplevel_listener, this);
     xdg_toplevel_set_title(xdg_toplevel_, config.title.c_str());
+    if (!config.app_id.empty()) {
+        xdg_toplevel_set_app_id(xdg_toplevel_, config.app_id.c_str());
+    }
 
     if (!config.resizable) {
         xdg_toplevel_set_min_size(xdg_toplevel_, config.width, config.height);
@@ -181,6 +199,8 @@ WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& conf
         wp_viewport_set_destination(viewport_, width_, height_);
     }
 
+    update_decoration_preference();
+
     // Commit the initial surface state to trigger the first configure event.
     wl_surface_commit(surface_);
     wl_display_roundtrip(backend_.display());
@@ -202,6 +222,10 @@ WaylandSurface::~WaylandSurface() {
     if (fractional_scale_ctrl_) {
         wp_fractional_scale_v1_destroy(fractional_scale_ctrl_);
         fractional_scale_ctrl_ = nullptr;
+    }
+    if (toplevel_decoration_) {
+        zxdg_toplevel_decoration_v1_destroy(toplevel_decoration_);
+        toplevel_decoration_ = nullptr;
     }
     if (xdg_toplevel_) {
         xdg_toplevel_destroy(xdg_toplevel_);
@@ -450,7 +474,8 @@ void WaylandSurface::present(const uint8_t* rgba,
     const bool full_upload = damage_regions.empty() || !buffers_[idx].initialized || size_changed;
     if (!full_upload && last_presented_buffer_ >= 0 && last_presented_buffer_ != idx &&
         buffers_[last_presented_buffer_].data != nullptr &&
-        buffers_[last_presented_buffer_].width == w && buffers_[last_presented_buffer_].height == h &&
+        buffers_[last_presented_buffer_].width == w &&
+        buffers_[last_presented_buffer_].height == h &&
         buffers_[last_presented_buffer_].pool_size == buffers_[idx].pool_size) {
         std::memcpy(
             buffers_[idx].data, buffers_[last_presented_buffer_].data, buffers_[idx].pool_size);
@@ -487,21 +512,53 @@ void WaylandSurface::present(const uint8_t* rgba,
 }
 
 void WaylandSurface::set_fullscreen(bool fullscreen) {
-    if (fullscreen_ == fullscreen) {
+    if (xdg_toplevel_ == nullptr) {
         return;
     }
-    fullscreen_ = fullscreen;
-    if (xdg_toplevel_) {
-        if (fullscreen) {
-            xdg_toplevel_set_fullscreen(xdg_toplevel_, nullptr);
-        } else {
-            xdg_toplevel_unset_fullscreen(xdg_toplevel_);
-        }
+    if (fullscreen) {
+        xdg_toplevel_set_fullscreen(xdg_toplevel_, nullptr);
+    } else {
+        xdg_toplevel_unset_fullscreen(xdg_toplevel_);
     }
 }
 
 bool WaylandSurface::is_fullscreen() const {
     return fullscreen_;
+}
+
+void WaylandSurface::minimize() {
+    if (xdg_toplevel_) {
+        xdg_toplevel_set_minimized(xdg_toplevel_);
+    }
+}
+
+void WaylandSurface::toggle_maximize() {
+    if (xdg_toplevel_ == nullptr) {
+        return;
+    }
+    if (maximized_) {
+        xdg_toplevel_unset_maximized(xdg_toplevel_);
+    } else {
+        xdg_toplevel_set_maximized(xdg_toplevel_);
+    }
+}
+
+bool WaylandSurface::is_maximized() const {
+    return maximized_;
+}
+
+bool WaylandSurface::uses_client_side_decorations() const {
+    return decorated_ && client_side_decoration_ && !fullscreen_;
+}
+
+bool WaylandSurface::begin_system_move(std::uint32_t serial) {
+    auto* input = backend_.input();
+    if (!uses_client_side_decorations() || maximized_ || serial == 0 || input == nullptr ||
+        input->seat() == nullptr || xdg_toplevel_ == nullptr) {
+        return false;
+    }
+    xdg_toplevel_move(xdg_toplevel_, input->seat(), serial);
+    return true;
 }
 
 NativeWindowHandle WaylandSurface::native_handle() const {
@@ -518,11 +575,34 @@ void WaylandSurface::set_cursor_shape(CursorShape shape) {
     }
 }
 
+void WaylandSurface::set_titlebar_style(TitlebarStyle style) {
+    if (titlebar_style_ == style) {
+        return;
+    }
+    titlebar_style_ = style;
+    update_decoration_preference();
+}
+
 // ---------------------------------------------------------------------------
 // XDG event handlers
 // ---------------------------------------------------------------------------
 
-void WaylandSurface::handle_configure(int width, int height) {
+void WaylandSurface::handle_configure(int width, int height, const wl_array* states) {
+    bool next_maximized = false;
+    bool next_fullscreen = false;
+    if (states != nullptr && states->data != nullptr) {
+        const auto count = states->size / sizeof(std::uint32_t);
+        const auto* values = static_cast<const std::uint32_t*>(states->data);
+        for (std::size_t index = 0; index < count; ++index) {
+            next_maximized = next_maximized || values[index] == XDG_TOPLEVEL_STATE_MAXIMIZED;
+            next_fullscreen = next_fullscreen || values[index] == XDG_TOPLEVEL_STATE_FULLSCREEN;
+        }
+    }
+    const bool chrome_state_changed =
+        maximized_ != next_maximized || fullscreen_ != next_fullscreen;
+    maximized_ = next_maximized;
+    fullscreen_ = next_fullscreen;
+
     if (width > 0 && height > 0 && (width != width_ || height != height_)) {
         width_ = width;
         height_ = height;
@@ -534,12 +614,104 @@ void WaylandSurface::handle_configure(int width, int height) {
         owner_.dispatch_window_event(we);
     }
     configured_ = true;
+    if (chrome_state_changed) {
+        notify_native_chrome_changed();
+    }
+}
+
+void WaylandSurface::handle_decoration_configure(std::uint32_t mode) {
+    const bool next_client_side = mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+    if (client_side_decoration_ == next_client_side) {
+        return;
+    }
+    client_side_decoration_ = next_client_side;
+    notify_native_chrome_changed();
 }
 
 void WaylandSurface::handle_close() {
     WindowEvent we{};
     we.type = WindowEvent::Type::Close;
     owner_.dispatch_window_event(we);
+}
+
+bool WaylandSurface::begin_resize_if_needed(float x, float y, std::uint32_t serial) {
+    constexpr float resize_border = 6.0F;
+    auto* input = backend_.input();
+    if (!uses_client_side_decorations() || !resizable_ || maximized_ || serial == 0 ||
+        input == nullptr || input->seat() == nullptr || xdg_toplevel_ == nullptr) {
+        return false;
+    }
+
+    const bool left = x >= 0.0F && x < resize_border;
+    const bool right =
+        x <= static_cast<float>(width_) && x > static_cast<float>(width_) - resize_border;
+    const bool top = y >= 0.0F && y < resize_border;
+    const bool bottom =
+        y <= static_cast<float>(height_) && y > static_cast<float>(height_) - resize_border;
+
+    std::uint32_t edge = XDG_TOPLEVEL_RESIZE_EDGE_NONE;
+    if (top && left) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT;
+    } else if (top && right) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT;
+    } else if (bottom && left) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT;
+    } else if (bottom && right) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT;
+    } else if (left) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+    } else if (right) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+    } else if (top) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_TOP;
+    } else if (bottom) {
+        edge = XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
+    }
+
+    if (edge == XDG_TOPLEVEL_RESIZE_EDGE_NONE) {
+        return false;
+    }
+    xdg_toplevel_resize(xdg_toplevel_, input->seat(), serial, edge);
+    return true;
+}
+
+void WaylandSurface::ensure_decoration_object() {
+    if (toplevel_decoration_ != nullptr || backend_.decoration_manager() == nullptr ||
+        xdg_toplevel_ == nullptr) {
+        return;
+    }
+    toplevel_decoration_ = zxdg_decoration_manager_v1_get_toplevel_decoration(
+        backend_.decoration_manager(), xdg_toplevel_);
+    if (toplevel_decoration_ != nullptr) {
+        zxdg_toplevel_decoration_v1_add_listener(toplevel_decoration_, &decoration_listener, this);
+    }
+}
+
+void WaylandSurface::update_decoration_preference() {
+    if (backend_.decoration_manager() == nullptr) {
+        const bool changed = !client_side_decoration_;
+        client_side_decoration_ = true;
+        if (changed) {
+            notify_native_chrome_changed();
+        }
+        return;
+    }
+
+    ensure_decoration_object();
+    if (toplevel_decoration_ == nullptr) {
+        return;
+    }
+    const bool prefer_client_side = !decorated_ || titlebar_style_ != TitlebarStyle::Regular;
+    zxdg_toplevel_decoration_v1_set_mode(toplevel_decoration_,
+                                         prefer_client_side
+                                             ? ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE
+                                             : ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+}
+
+void WaylandSurface::notify_native_chrome_changed() {
+    WindowEvent event{};
+    event.type = WindowEvent::Type::NativeChromeChanged;
+    owner_.dispatch_window_event(event);
 }
 
 } // namespace nk

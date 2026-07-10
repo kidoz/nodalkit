@@ -38,6 +38,7 @@
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
+#include <nk/widgets/headerbar.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
@@ -1336,6 +1337,32 @@ TEST_CASE("Window reacts to system preference changes", "[app][prefs]") {
     REQUIRE(nk::has_frame_request_reason(window.inspector().last_frame_diagnostics(),
                                          nk::FrameRequestReason::SystemPreferencesChanged));
 }
+
+#if defined(__linux__)
+TEST_CASE("GNOME Wayland surfaces activate client-side headerbar chrome",
+          "[app][wayland][headerbar]") {
+    nk::Application app(0, nullptr);
+    if (!app.has_platform_backend() ||
+        app.system_preferences().desktop_environment != nk::DesktopEnvironment::Gnome) {
+        SKIP("GNOME Wayland backend is not active");
+    }
+
+    nk::Window window({
+        .title = "GNOME CSD",
+        .width = 360,
+        .height = 180,
+        .titlebar_style = nk::TitlebarStyle::Unified,
+    });
+    auto headerbar = nk::Headerbar::create();
+    window.set_child(headerbar);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    CHECK(window.uses_client_side_decorations());
+    CHECK(headerbar->measure(nk::Constraints::tight({360.0F, 46.0F})).natural_height ==
+          Catch::Approx(46.0F));
+}
+#endif
 
 TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][render]") {
 #if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))

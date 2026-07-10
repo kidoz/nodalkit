@@ -55,6 +55,7 @@
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/runtime/event_loop.h>
+#include <nk/style/gtk_palette.h>
 #include <nk/style/style_class.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_selection.h>
@@ -70,6 +71,7 @@
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
+#include <nk/widgets/headerbar.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
@@ -541,6 +543,13 @@ void force_symbol_references() {
         const uint8_t*, int, int, std::span<const nk::Rect>)>(&nk::NativeSurface::present);
     (void)static_cast<void (nk::NativeSurface::*)(bool)>(&nk::NativeSurface::set_fullscreen);
     (void)static_cast<bool (nk::NativeSurface::*)() const>(&nk::NativeSurface::is_fullscreen);
+    (void)static_cast<void (nk::NativeSurface::*)()>(&nk::NativeSurface::minimize);
+    (void)static_cast<void (nk::NativeSurface::*)()>(&nk::NativeSurface::toggle_maximize);
+    (void)static_cast<bool (nk::NativeSurface::*)() const>(&nk::NativeSurface::is_maximized);
+    (void)static_cast<bool (nk::NativeSurface::*)() const>(
+        &nk::NativeSurface::uses_client_side_decorations);
+    (void)static_cast<bool (nk::NativeSurface::*)(std::uint32_t)>(
+        &nk::NativeSurface::begin_system_move);
     (void)static_cast<nk::NativeWindowHandle (nk::NativeSurface::*)() const>(
         &nk::NativeSurface::native_handle);
     (void)static_cast<void (nk::NativeSurface::*)(nk::CursorShape)>(
@@ -582,8 +591,23 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_visible);
     (void)static_cast<void (nk::Window::*)(bool)>(&nk::Window::set_fullscreen);
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_fullscreen);
+    (void)static_cast<void (nk::Window::*)()>(&nk::Window::minimize);
+    (void)static_cast<void (nk::Window::*)()>(&nk::Window::toggle_maximize);
+    (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_maximized);
+    (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::uses_client_side_decorations);
     (void)static_cast<void (nk::Window::*)(nk::TitlebarStyle)>(&nk::Window::set_titlebar_style);
     (void)static_cast<nk::TitlebarStyle (nk::Window::*)() const>(&nk::Window::titlebar_style);
+    (void)&nk::parse_gtk_palette_css;
+    (void)&nk::load_gtk_palette;
+    (void)static_cast<void (nk::TextShaper::*)(std::string_view, bool)>(
+        &nk::TextShaper::set_system_default_family);
+    (void)&nk::Headerbar::create;
+    (void)static_cast<void (nk::Headerbar::*)(std::string)>(&nk::Headerbar::set_title);
+    (void)static_cast<void (nk::Headerbar::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::Headerbar::add_leading);
+    (void)static_cast<void (nk::Headerbar::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::Headerbar::add_trailing);
+    (void)static_cast<void (nk::Headerbar::*)(bool)>(&nk::Headerbar::set_window_controls_enabled);
     (void)static_cast<void (nk::Window::*)(nk::NativeToolbarConfig)>(
         &nk::Window::set_native_toolbar);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::clear_native_toolbar);

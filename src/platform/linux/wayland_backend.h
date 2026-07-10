@@ -22,6 +22,7 @@ struct zwp_primary_selection_device_manager_v1;
 struct wp_cursor_shape_manager_v1;
 struct wp_fractional_scale_manager_v1;
 struct wp_viewporter;
+struct zxdg_decoration_manager_v1;
 
 namespace nk {
 
@@ -44,7 +45,9 @@ public:
     void request_quit(int exit_code) override;
 
     [[nodiscard]] bool supports_open_file_dialog() const override;
-    void show_open_file_dialog_async(std::string_view title, const std::vector<std::string>& filters, OpenFileDialogCallback callback) override;
+    void show_open_file_dialog_async(std::string_view title,
+                                     const std::vector<std::string>& filters,
+                                     OpenFileDialogCallback callback) override;
     [[nodiscard]] bool supports_save_file_dialog() const override;
     void show_save_file_dialog_async(SaveFileDialogOptions options,
                                      SaveFileDialogCallback callback) override;
@@ -71,6 +74,7 @@ public:
     [[nodiscard]] wp_cursor_shape_manager_v1* cursor_shape_manager() const;
     [[nodiscard]] wp_fractional_scale_manager_v1* fractional_scale_manager() const;
     [[nodiscard]] wp_viewporter* viewporter() const;
+    [[nodiscard]] zxdg_decoration_manager_v1* decoration_manager() const;
     [[nodiscard]] WaylandInput* input() const;
 
     // Returns the compositor-advertised integer scale for the given wl_output, or 1 when the
