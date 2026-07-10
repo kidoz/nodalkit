@@ -306,6 +306,18 @@ const nk::TextNode* find_text_node(const nk::RenderNode& node, std::string_view 
     return nullptr;
 }
 
+bool contains_node_kind(const nk::RenderNode& node, nk::RenderNodeKind kind) {
+    if (node.kind() == kind) {
+        return true;
+    }
+    for (const auto& child : node.children()) {
+        if (child != nullptr && contains_node_kind(*child, kind)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 TEST_CASE("Button labels elide instead of painting past the body", "[widgets][button]") {
@@ -354,6 +366,8 @@ TEST_CASE("Headerbar keeps actions clear of its title and exposes window control
     REQUIRE(root != nullptr);
     const auto* title = find_text_node(*root, "Document title");
     REQUIRE(title != nullptr);
+    CHECK(find_text_node(*root, "×") != nullptr);
+    CHECK_FALSE(contains_node_kind(*root, nk::RenderNodeKind::Line));
     CHECK(title->bounds().x >= leading->allocation().right());
     CHECK(title->bounds().right() <= trailing->allocation().x);
 

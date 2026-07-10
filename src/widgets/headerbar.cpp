@@ -105,39 +105,6 @@ FontDescriptor tooltip_font(float size) {
     };
 }
 
-void draw_symbolic_icon(
-    SnapshotContext& ctx, HeaderbarIcon icon, Rect bounds, Color color, float thickness) {
-    const float left = bounds.x;
-    const float right = bounds.right();
-    const float top = bounds.y;
-    const float bottom = bounds.bottom();
-    const float center_x = bounds.x + (bounds.width * 0.5F);
-    const float center_y = bounds.y + (bounds.height * 0.5F);
-
-    switch (icon) {
-    case HeaderbarIcon::Back:
-        ctx.add_line({center_x + 2.5F, top}, {center_x - 2.5F, center_y}, color, thickness);
-        ctx.add_line({center_x - 2.5F, center_y}, {center_x + 2.5F, bottom}, color, thickness);
-        break;
-    case HeaderbarIcon::Minimize:
-        ctx.add_line({left, center_y}, {right, center_y}, color, thickness);
-        break;
-    case HeaderbarIcon::Maximize:
-        ctx.add_border(bounds, color, thickness, 1.0F);
-        break;
-    case HeaderbarIcon::Restore:
-        ctx.add_border(
-            {left + 2.0F, top, bounds.width - 2.0F, bounds.height - 2.0F}, color, thickness, 1.0F);
-        ctx.add_border(
-            {left, top + 2.0F, bounds.width - 2.0F, bounds.height - 2.0F}, color, thickness, 1.0F);
-        break;
-    case HeaderbarIcon::Close:
-        ctx.add_line({left, top}, {right, bottom}, color, thickness);
-        ctx.add_line({right, top}, {left, bottom}, color, thickness);
-        break;
-    }
-}
-
 class HeaderbarControl final : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<HeaderbarControl>
@@ -228,10 +195,12 @@ protected:
         };
         const bool active = has_flag(state_flags(), StateFlags::Hovered) ||
                             has_flag(state_flags(), StateFlags::Pressed);
-        if (active) {
-            const auto fill = destructive_
-                                  ? theme_color("destructive", Color::from_rgb(230, 45, 66))
-                                  : theme_color("surface-hover", Color::from_rgb(240, 243, 247));
+        if (active || destructive_) {
+            const auto fill =
+                destructive_ && active
+                    ? theme_color("destructive", Color::from_rgb(230, 45, 66))
+                    : theme_color("close-background",
+                                  theme_color("surface-hover", Color::from_rgb(240, 243, 247)));
             ctx.add_rounded_rect(body, fill, body.height * 0.5F);
         }
         if (has_flag(state_flags(), StateFlags::FocusVisible)) {
@@ -253,7 +222,7 @@ protected:
             icon_size,
             icon_size,
         };
-        draw_symbolic_icon(ctx, icon_, icon_bounds, foreground, 1.5F);
+        draw_symbolic_icon(ctx, icon_bounds, foreground, 1.5F);
 
         if (has_flag(state_flags(), StateFlags::Hovered) && !armed_) {
             const auto tooltip = tooltip_bounds();
@@ -292,6 +261,46 @@ private:
             clicked_.emit();
             return true;
         });
+    }
+
+    void draw_symbolic_icon(SnapshotContext& ctx, Rect bounds, Color color, float thickness) const {
+        const float center_y = bounds.y + (bounds.height * 0.5F);
+        switch (icon_) {
+        case HeaderbarIcon::Back:
+        case HeaderbarIcon::Close: {
+            const std::string_view glyph = icon_ == HeaderbarIcon::Back ? "‹" : "×";
+            const auto font = FontDescriptor{
+                .family = {},
+                .size = theme_number("symbol-font-size", 18.0F),
+                .weight = FontWeight::Regular,
+            };
+            const auto measured = measure_text(glyph, font);
+            ctx.add_text({bounds.x + ((bounds.width - measured.width) * 0.5F),
+                          bounds.y + ((bounds.height - measured.height) * 0.5F)},
+                         std::string(glyph),
+                         color,
+                         font);
+            break;
+        }
+        case HeaderbarIcon::Minimize:
+            ctx.add_rounded_rect({bounds.x, center_y - (thickness * 0.5F), bounds.width, thickness},
+                                 color,
+                                 thickness * 0.5F);
+            break;
+        case HeaderbarIcon::Maximize:
+            ctx.add_border(bounds, color, thickness, 1.0F);
+            break;
+        case HeaderbarIcon::Restore:
+            ctx.add_border({bounds.x + 2.0F, bounds.y, bounds.width - 2.0F, bounds.height - 2.0F},
+                           color,
+                           thickness,
+                           1.0F);
+            ctx.add_border({bounds.x, bounds.y + 2.0F, bounds.width - 2.0F, bounds.height - 2.0F},
+                           color,
+                           thickness,
+                           1.0F);
+            break;
+        }
     }
 
     [[nodiscard]] Rect tooltip_bounds() const {

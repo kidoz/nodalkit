@@ -720,6 +720,8 @@ void install_shared_rules(Theme& theme) {
              {{"target-size", token_ref("headerbar-control-target")},
               {"control-size", token_ref("headerbar-control-size")},
               {"icon-size", token_ref("headerbar-icon-size")},
+              {"symbol-font-size", token_ref("font-size-value")},
+              {"close-background", token_ref("surface-hover")},
               {"tooltip-font-size", token_ref("font-size-caption")},
               {"tooltip-background", token_ref("surface-osd")},
               {"tooltip-text", token_ref("text-osd")},

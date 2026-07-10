@@ -264,14 +264,13 @@ protected:
         }
 
         const auto color = theme_color("text-color", nk::Color{0.18F, 0.19F, 0.21F, 1.0F});
-        const float x = bounds.x + (bounds.width * 0.5F);
+        const float x = bounds.x + ((bounds.width - 14.0F) * 0.5F);
         const float y = bounds.y + (bounds.height * 0.5F);
-        constexpr float kDotSize = 3.0F;
-        for (float offset : {-6.0F, 0.0F, 6.0F}) {
-            ctx.add_rounded_rect(
-                {x - (kDotSize * 0.5F), y + offset - (kDotSize * 0.5F), kDotSize, kDotSize},
-                color,
-                kDotSize * 0.5F);
+        constexpr float kStrokeHeight = 2.0F;
+        for (float offset : {-5.0F, 0.0F, 5.0F}) {
+            ctx.add_rounded_rect({x, y + offset - (kStrokeHeight * 0.5F), 14.0F, kStrokeHeight},
+                                 color,
+                                 kStrokeHeight * 0.5F);
         }
         Widget::snapshot(ctx);
     }
