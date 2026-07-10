@@ -36,6 +36,8 @@ struct DataTableColumn {
     float width = 140.0F;
     bool sortable = true;
     DataTableCellText text{};
+    /// Relative share of unused table width. Zero keeps the column fixed.
+    float expand = 0.0F;
 };
 
 /// A model-backed data table with column headers, single-row navigation, and

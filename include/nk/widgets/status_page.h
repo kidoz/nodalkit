@@ -20,6 +20,9 @@ public:
     void set_title(std::string title);
     [[nodiscard]] std::string_view description() const;
     void set_description(std::string description);
+    /// Sets an optional illustration displayed above the title.
+    void set_icon(std::shared_ptr<Widget> icon);
+    [[nodiscard]] Widget* icon() const;
     void set_action(std::shared_ptr<Widget> action);
     [[nodiscard]] Widget* action() const;
 

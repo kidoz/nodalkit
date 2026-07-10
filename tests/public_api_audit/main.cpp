@@ -741,6 +741,8 @@ void force_symbol_references() {
     (void)&nk::StatusPage::set_title;
     (void)&nk::StatusPage::description;
     (void)&nk::StatusPage::set_description;
+    (void)&nk::StatusPage::set_icon;
+    (void)&nk::StatusPage::icon;
     (void)&nk::StatusPage::set_action;
     (void)&nk::StatusPage::action;
     (void)&nk::ToastOverlay::create;

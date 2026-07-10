@@ -113,6 +113,10 @@ void install_shared_metric_tokens(Theme& theme) {
     set_metric_token(theme, "clamp-tightening-threshold", 540.0F);
     set_metric_token(theme, "adaptive-sidebar-width", 280.0F);
     set_metric_token(theme, "toolbar-view-separator-width", 1.0F);
+    set_metric_token(theme, "status-page-content-width", 420.0F);
+    set_metric_token(theme, "command-palette-row-height", 56.0F);
+    set_metric_token(theme, "command-palette-search-height", 38.0F);
+    set_metric_token(theme, "command-palette-search-section-height", 58.0F);
 }
 
 void add_rule(Theme& theme,
@@ -488,6 +492,20 @@ void install_shared_rules(Theme& theme) {
                  {"background", token_ref("surface-card")},
                  {"search-background", token_ref("surface-panel")},
                  {"search-border-color", token_ref("border-subtle")},
+                 {"selected-background", token_ref("selection-active-bg")},
+                 {"hover-background", token_ref("surface-hover")},
+                 {"focus-ring-color", token_ref("focus-ring")},
+                 {"row-separator-color", token_ref("border-subtle")},
+                 {"row-height", token_ref("command-palette-row-height")},
+                 {"search-height", token_ref("command-palette-search-height")},
+                 {"search-section-height", token_ref("command-palette-search-section-height")},
+                 {"row-padding-x", token_ref("spacing-md")},
+                 {"row-padding-y", token_ref("spacing-sm")},
+                 {"detail-indent", token_ref("spacing-md")},
+                 {"line-spacing", token_ref("spacing-xs")},
+                 {"selection-radius", token_ref("radius-selection")},
+                 {"title-font-size", token_ref("font-size-body")},
+                 {"detail-font-size", token_ref("font-size-caption")},
              });
 
     add_rule(theme,
@@ -637,7 +655,12 @@ void install_shared_rules(Theme& theme) {
              {{"text-color", token_ref("text-primary")},
               {"description-color", token_ref("text-secondary")},
               {"title-font-size", token_ref("font-size-title")},
-              {"body-font-size", token_ref("font-size-body")}});
+              {"body-font-size", token_ref("font-size-body")},
+              {"content-width", token_ref("status-page-content-width")},
+              {"horizontal-padding", token_ref("spacing-xl")},
+              {"icon-spacing", token_ref("spacing-lg")},
+              {"title-spacing", token_ref("spacing-sm")},
+              {"action-spacing", token_ref("spacing-xl")}});
     add_rule(theme,
              {"toast-overlay"},
              StateFlags::None,

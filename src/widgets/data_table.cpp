@@ -37,6 +37,29 @@ float total_column_width(std::span<const DataTableColumn> columns) {
     return width;
 }
 
+std::vector<float> resolved_column_widths(std::span<const DataTableColumn> columns,
+                                          float available_width) {
+    std::vector<float> widths;
+    widths.reserve(columns.size());
+    float base_width = 0.0F;
+    float total_expand = 0.0F;
+    for (const auto& column : columns) {
+        const float width = std::max(1.0F, column.width);
+        widths.push_back(width);
+        base_width += width;
+        total_expand += std::max(0.0F, column.expand);
+    }
+
+    const float extra_width = std::max(0.0F, available_width - base_width);
+    if (extra_width <= 0.0F || total_expand <= 0.0F) {
+        return widths;
+    }
+    for (std::size_t index = 0; index < columns.size(); ++index) {
+        widths[index] += extra_width * (std::max(0.0F, columns[index].expand) / total_expand);
+    }
+    return widths;
+}
+
 Rect table_inner_rect(const DataTable& table) {
     auto body = table.allocation();
     if (has_flag(table.state_flags(), StateFlags::Focused)) {
@@ -131,7 +154,7 @@ int view_row_at_point(const AbstractListModel* display_model,
     return row;
 }
 
-int column_at_point(std::span<const DataTableColumn> columns,
+int column_at_point(std::span<const float> column_widths,
                     Rect header,
                     float horizontal_scroll_offset,
                     Point point) {
@@ -140,8 +163,8 @@ int column_at_point(std::span<const DataTableColumn> columns,
     }
 
     float x = header.x - horizontal_scroll_offset;
-    for (std::size_t index = 0; index < columns.size(); ++index) {
-        const float width = std::max(1.0F, columns[index].width);
+    for (std::size_t index = 0; index < column_widths.size(); ++index) {
+        const float width = column_widths[index];
         if (point.x >= x && point.x < x + width) {
             return static_cast<int>(index);
         }
@@ -150,7 +173,7 @@ int column_at_point(std::span<const DataTableColumn> columns,
     return -1;
 }
 
-int resize_column_at_point(std::span<const DataTableColumn> columns,
+int resize_column_at_point(std::span<const float> column_widths,
                            Rect header,
                            float horizontal_scroll_offset,
                            Point point) {
@@ -160,8 +183,8 @@ int resize_column_at_point(std::span<const DataTableColumn> columns,
 
     float x = header.x - horizontal_scroll_offset;
     constexpr float HitSlop = 5.0F;
-    for (std::size_t index = 0; index < columns.size(); ++index) {
-        x += std::max(1.0F, columns[index].width);
+    for (std::size_t index = 0; index < column_widths.size(); ++index) {
+        x += column_widths[index];
         if (std::abs(point.x - x) <= HitSlop) {
             return static_cast<int>(index);
         }
@@ -295,6 +318,7 @@ void DataTable::set_columns(std::vector<DataTableColumn> columns) {
     impl_->columns = std::move(columns);
     for (auto& column : impl_->columns) {
         column.width = std::max(impl_->min_column_width, column.width);
+        column.expand = std::max(0.0F, column.expand);
     }
     if (impl_->sort_column && *impl_->sort_column >= impl_->columns.size()) {
         clear_sort();
@@ -418,18 +442,21 @@ bool DataTable::handle_mouse_event(const MouseEvent& event) {
     if (event.type == MouseEvent::Type::Press && event.button == 1) {
         const Point point{event.x, event.y};
         const auto header = table_header_rect(*this, impl_->header_height);
+        const auto column_widths = resolved_column_widths(impl_->columns, header.width);
         const int resize_column =
-            resize_column_at_point(impl_->columns, header, impl_->horizontal_scroll_offset, point);
+            resize_column_at_point(column_widths, header, impl_->horizontal_scroll_offset, point);
         if (resize_column >= 0) {
             impl_->resizing_column = true;
             impl_->resize_column = static_cast<std::size_t>(resize_column);
             impl_->resize_start_x = event.x;
-            impl_->resize_start_width = impl_->columns[impl_->resize_column].width;
+            impl_->resize_start_width = column_widths[impl_->resize_column];
+            impl_->columns[impl_->resize_column].width = impl_->resize_start_width;
+            impl_->columns[impl_->resize_column].expand = 0.0F;
             return true;
         }
 
         const int column =
-            column_at_point(impl_->columns, header, impl_->horizontal_scroll_offset, point);
+            column_at_point(column_widths, header, impl_->horizontal_scroll_offset, point);
         if (column >= 0) {
             const auto column_index = static_cast<std::size_t>(column);
             if (impl_->columns[column_index].sortable) {
@@ -611,6 +638,7 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
                         std::max(0.0F, body.height - 2.0F)};
     const Rect header = {
         inner.x, inner.y, inner.width, std::min(impl_->header_height, inner.height)};
+    const auto column_widths = resolved_column_widths(impl_->columns, inner.width);
     const bool show_h_scrollbar = total_column_width(impl_->columns) > inner.width;
     const Rect rows = table_rows_viewport_rect(*this, impl_->header_height, impl_->columns);
 
@@ -624,7 +652,7 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
     float x = header.x - impl_->horizontal_scroll_offset;
     for (std::size_t column_index = 0; column_index < impl_->columns.size(); ++column_index) {
         const auto& column = impl_->columns[column_index];
-        const float width = std::max(1.0F, column.width);
+        const float width = column_widths[column_index];
         const Rect cell = {x, header.y, width, header.height};
         const bool sorted = impl_->sort_column && *impl_->sort_column == column_index;
         const float title_width = std::max(0.0F, width - 10.0F - (sorted ? 22.0F : 12.0F));
@@ -680,8 +708,10 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
             }
 
             float cell_x = rows.x - impl_->horizontal_scroll_offset;
-            for (const auto& column : impl_->columns) {
-                const float width = std::max(1.0F, column.width);
+            for (std::size_t column_index = 0; column_index < impl_->columns.size();
+                 ++column_index) {
+                const auto& column = impl_->columns[column_index];
+                const float width = column_widths[column_index];
                 const auto text = cell_text(column, *impl_->model, source_row);
                 // Keep a trailing gap to the next column and elide overflow.
                 add_text_elided(ctx,

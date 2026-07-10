@@ -4285,6 +4285,28 @@ TEST_CASE("DataTable resizes columns with a minimum width", "[app][table]") {
     REQUIRE(table->columns()[0].width == Catch::Approx(80.0F));
 }
 
+TEST_CASE("DataTable expandable columns consume unused width", "[app][table]") {
+    auto source = std::make_shared<nk::StringListModel>(std::vector<std::string>{"Ready"});
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    table->set_columns({nk::DataTableColumn{
+                            .id = "id",
+                            .title = "ID",
+                            .width = 100.0F,
+                        },
+                        nk::DataTableColumn{
+                            .id = "status",
+                            .title = "Status",
+                            .width = 100.0F,
+                            .expand = 1.0F,
+                        }});
+    table->allocate({0.0F, 0.0F, 500.0F, 130.0F});
+
+    REQUIRE(table->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 400.0F, .y = 12.0F, .button = 1}));
+    REQUIRE(table->sort_column() == 1);
+}
+
 TEST_CASE("DataTable horizontal scroll keeps offscreen columns reachable", "[app][table]") {
     auto source =
         std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});
@@ -4747,19 +4769,19 @@ TEST_CASE("CommandPalette filters, navigates, and activates enabled commands", "
 
     REQUIRE(
         palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
-    REQUIRE(palette->current_command() == 1);
+    REQUIRE(palette->current_command() == 0);
 
     std::string activated;
     auto activated_conn = palette->on_command_activated().connect(
         [&](std::string_view command_id) { activated = std::string(command_id); });
     (void)activated_conn;
-    REQUIRE_FALSE(
-        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
-    REQUIRE(activated.empty());
-
-    REQUIRE(palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Up}));
-    REQUIRE(palette->current_command() == 0);
     REQUIRE(
+        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(activated == "file.open");
+
+    palette->set_query("save");
+    REQUIRE(palette->current_command() == 1);
+    REQUIRE_FALSE(
         palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
     REQUIRE(activated == "file.open");
 
@@ -4770,6 +4792,25 @@ TEST_CASE("CommandPalette filters, navigates, and activates enabled commands", "
     REQUIRE(palette->current_command() == 2);
 }
 
+TEST_CASE("CommandPalette focus preserves the measured results viewport", "[app][command]") {
+    auto palette = nk::CommandPalette::create();
+    palette->set_commands({
+        nk::CommandPaletteCommand{.id = "one", .title = "One", .subtitle = {}, .category = {}},
+        nk::CommandPaletteCommand{.id = "two", .title = "Two", .subtitle = {}, .category = {}},
+        nk::CommandPaletteCommand{.id = "three", .title = "Three", .subtitle = {}, .category = {}},
+        nk::CommandPaletteCommand{.id = "four", .title = "Four", .subtitle = {}, .category = {}},
+        nk::CommandPaletteCommand{.id = "five", .title = "Five", .subtitle = {}, .category = {}},
+    });
+    const auto request = palette->measure(nk::Constraints::unbounded());
+    REQUIRE(request.natural_height == Catch::Approx(340.0F));
+    palette->allocate({0.0F, 0.0F, 420.0F, request.natural_height});
+    palette->grab_focus();
+
+    REQUIRE(palette->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 20.0F, .y = 338.0F, .button = 1}));
+    REQUIRE(palette->current_command() == 4);
+}
+
 TEST_CASE("CommandPalette pointer activation and escape behavior", "[app][command]") {
     auto palette = nk::CommandPalette::create();
     palette->set_commands({
@@ -4777,8 +4818,13 @@ TEST_CASE("CommandPalette pointer activation and escape behavior", "[app][comman
             .id = "file.open", .title = "Open File", .subtitle = "", .category = ""},
         nk::CommandPaletteCommand{
             .id = "view.sidebar", .title = "Toggle Sidebar", .subtitle = "", .category = ""},
+        nk::CommandPaletteCommand{.id = "disabled",
+                                  .title = "Disabled",
+                                  .subtitle = "",
+                                  .category = "",
+                                  .enabled = false},
     });
-    palette->allocate({0.0F, 0.0F, 420.0F, 260.0F});
+    palette->allocate({0.0F, 0.0F, 420.0F, 300.0F});
 
     std::string activated;
     auto activated_conn = palette->on_command_activated().connect(
@@ -4786,11 +4832,18 @@ TEST_CASE("CommandPalette pointer activation and escape behavior", "[app][comman
     (void)activated_conn;
     REQUIRE(palette->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
                                          .x = 20.0F,
-                                         .y = 112.0F,
+                                         .y = 130.0F,
                                          .button = 1,
                                          .click_count = 2}));
     REQUIRE(palette->current_command() == 1);
     REQUIRE(activated == "view.sidebar");
+
+    REQUIRE(
+        palette->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    REQUIRE(palette->current_command() == 1);
+    REQUIRE(palette->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 20.0F, .y = 190.0F, .button = 1}));
+    REQUIRE(palette->current_command() == 1);
 
     bool dismissed = false;
     auto dismiss_conn = palette->on_dismiss_requested().connect([&] { dismissed = true; });

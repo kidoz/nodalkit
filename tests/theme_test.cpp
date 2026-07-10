@@ -640,6 +640,10 @@ TEST_CASE("Every family defines the full token vocabulary", "[theme]") {
         "font-size-body",
         "font-size-caption",
         "font-size-value",
+        "status-page-content-width",
+        "command-palette-row-height",
+        "command-palette-search-height",
+        "command-palette-search-section-height",
     };
     static constexpr const char* PolicyTokens[] = {
         "accent-source",

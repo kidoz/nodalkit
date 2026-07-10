@@ -72,6 +72,9 @@ private:
     void ensure_current_visible();
     [[nodiscard]] bool activate_current();
     [[nodiscard]] std::optional<std::size_t> result_at_point(Point point) const;
+    [[nodiscard]] float resolved_row_height() const;
+    [[nodiscard]] float resolved_search_height() const;
+    [[nodiscard]] float resolved_search_section_height() const;
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
