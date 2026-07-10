@@ -6,6 +6,7 @@
 /// Platform backends convert native events into these types and
 /// deliver them through Window to the controller system.
 
+#include <cstdint>
 #include <nk/actions/shortcut.h>
 #include <nk/platform/key_codes.h>
 #include <string>
@@ -35,6 +36,9 @@ struct MouseEvent {
     bool precise_scrolling = false; ///< Pixel-like scroll deltas (e.g. trackpad) when true.
     Modifiers modifiers = Modifiers::None;
     int click_count = 1; ///< 1 for single-click, 2 for double-click, etc.
+    /// Native input serial when required by the platform. Wayland supplies the
+    /// wl_pointer button serial; other backends leave this as zero.
+    std::uint32_t native_serial = 0;
 };
 
 /// Platform text-input event.
@@ -79,7 +83,8 @@ struct WindowEvent {
         Close,
         FocusIn,
         FocusOut,
-        Expose, ///< Window needs redraw (e.g. after uncover).
+        Expose,              ///< Window needs redraw (e.g. after uncover).
+        NativeChromeChanged, ///< Decoration mode or compositor window state changed.
     };
 
     Type type{};

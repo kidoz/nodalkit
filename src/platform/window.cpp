@@ -15,6 +15,7 @@
 #include <nk/platform/drag_drop.h>
 #include <nk/platform/events.h>
 #include <nk/platform/platform_backend.h>
+#include <nk/platform/system_preferences.h>
 #include <nk/platform/window.h>
 #include <nk/platform/window_inspector.h>
 #include <nk/render/render_node.h>
@@ -1703,16 +1704,21 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
         impl_->renderer->set_text_shaper(impl_->text_shaper.get());
     }
     if (auto* app = Application::instance(); app != nullptr) {
+        // Seed the shaper with the platform-configured default font families so
+        // the generic "System"/"monospace" families resolve to the GNOME UI font
+        // (e.g. Adwaita Sans) rather than fontconfig's generic sans-serif.
+        apply_system_font_preferences_to_shaper(app->system_preferences());
+
         // System preferences (color-scheme, contrast, motion, accent color, text scale) can change
         // at any time. The Application already re-resolves Theme::active() before emitting this
         // signal; the Window's job is to force a layout pass (text scale may shift metrics) and a
         // full redraw so every widget reads from the new theme.
-        impl_->system_preferences_subscription =
-            ScopedConnection(app->on_system_preferences_changed().connect(
-                [this](const SystemPreferences& /*prefs*/) {
-                    impl_->needs_layout = true;
-                    request_frame(FrameRequestReason::SystemPreferencesChanged);
-                }));
+        impl_->system_preferences_subscription = ScopedConnection(
+            app->on_system_preferences_changed().connect([this](const SystemPreferences& prefs) {
+                apply_system_font_preferences_to_shaper(prefs);
+                impl_->needs_layout = true;
+                request_frame(FrameRequestReason::SystemPreferencesChanged);
+            }));
     }
     NK_LOG_DEBUG("Window", "Window created");
 }
@@ -1798,6 +1804,12 @@ void Window::present() {
     if (!impl_->surface) {
         auto* app = Application::instance();
         if (app && app->has_platform_backend()) {
+            // Seed the Wayland app_id from the application config so the compositor
+            // can group windows and match a .desktop entry. A caller-provided value
+            // (e.g. for a window belonging to a different app) takes precedence.
+            if (impl_->config.app_id.empty()) {
+                impl_->config.app_id = std::string(app->app_id());
+            }
             impl_->surface = app->platform_backend().create_surface(impl_->config, *this);
         }
     }
@@ -1881,6 +1893,32 @@ bool Window::is_fullscreen() const {
     return false;
 }
 
+void Window::minimize() {
+    if (impl_->surface) {
+        impl_->surface->minimize();
+    }
+}
+
+void Window::toggle_maximize() {
+    if (impl_->surface) {
+        impl_->surface->toggle_maximize();
+    }
+}
+
+bool Window::is_maximized() const {
+    if (impl_->surface) {
+        return impl_->surface->is_maximized();
+    }
+    return false;
+}
+
+bool Window::uses_client_side_decorations() const {
+    if (impl_->surface) {
+        return impl_->surface->uses_client_side_decorations();
+    }
+    return impl_->config.decorated && impl_->config.titlebar_style != TitlebarStyle::Regular;
+}
+
 void Window::set_titlebar_style(TitlebarStyle style) {
     if (impl_->config.titlebar_style == style) {
         return;
@@ -1889,6 +1927,8 @@ void Window::set_titlebar_style(TitlebarStyle style) {
     if (impl_->surface) {
         impl_->surface->set_titlebar_style(style);
     }
+    impl_->needs_layout = true;
+    request_frame(FrameRequestReason::SystemPreferencesChanged);
 }
 
 TitlebarStyle Window::titlebar_style() const {
@@ -3916,6 +3956,10 @@ void Window::dispatch_window_event(const WindowEvent& event) {
     case WindowEvent::Type::Expose:
         request_frame(FrameRequestReason::Expose);
         break;
+    case WindowEvent::Type::NativeChromeChanged:
+        impl_->needs_layout = true;
+        request_frame(FrameRequestReason::Resize);
+        break;
     case WindowEvent::Type::FocusIn:
         impl_->window_focused = true;
         if (impl_->child) {
@@ -3960,6 +4004,19 @@ RendererBackend Window::renderer_backend() const {
 
 TextShaper* Window::text_shaper() const {
     return impl_->text_shaper.get();
+}
+
+void Window::apply_system_font_preferences_to_shaper(const SystemPreferences& preferences) {
+    if (impl_->text_shaper == nullptr) {
+        return;
+    }
+    impl_->text_shaper->set_system_default_family(preferences.system_font_name.value_or(""), false);
+    impl_->text_shaper->set_system_default_family(
+        preferences.system_monospace_font_name.value_or(""), true);
+}
+
+bool Window::begin_system_move(std::uint32_t native_serial) {
+    return impl_->surface != nullptr && impl_->surface->begin_system_move(native_serial);
 }
 
 void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {

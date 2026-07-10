@@ -25,8 +25,11 @@ class NativeSurface;
 class TextShaper;
 class Widget;
 class Dialog;
+class Headerbar;
 class RenderNode;
 class WindowInspector;
+
+struct SystemPreferences;
 struct MouseEvent;
 struct KeyEvent;
 struct TextInputEvent;
@@ -53,6 +56,10 @@ enum class TitlebarStyle : std::uint8_t {
 /// Configuration for window creation.
 struct WindowConfig {
     std::string title;
+    /// Wayland app_id (reverse-DNS) used by the compositor to group windows,
+    /// associate a `.desktop` file, and apply window-matching rules. When left
+    /// empty, `Window::present()` seeds it from `Application::app_id()`.
+    std::string app_id{};
     int width = 800;
     int height = 600;
     bool resizable = true;
@@ -134,6 +141,15 @@ public:
     void set_fullscreen(bool fullscreen);
     [[nodiscard]] bool is_fullscreen() const;
 
+    /// Minimize (iconify) the window. No-op if the window has no surface yet.
+    void minimize();
+    /// Toggle the maximized state of the window.
+    void toggle_maximize();
+    /// Whether the window is currently maximized.
+    [[nodiscard]] bool is_maximized() const;
+    /// Whether the active platform surface expects client-drawn window chrome.
+    [[nodiscard]] bool uses_client_side_decorations() const;
+
     /// Titlebar presentation style. See TitlebarStyle for per-platform behavior.
     void set_titlebar_style(TitlebarStyle style);
     [[nodiscard]] TitlebarStyle titlebar_style() const;
@@ -211,9 +227,15 @@ public:
 private:
     friend class Widget;
     friend class Dialog;
+    friend class Headerbar;
     friend class WindowInspector;
 
     [[nodiscard]] TextShaper* text_shaper() const;
+    // Pushes platform-configured default font families (GNOME font-name /
+    // monospace-font-name) into the text shaper. No-op when the preferences are
+    // absent or the shaper was not created.
+    void apply_system_font_preferences_to_shaper(const SystemPreferences& preferences);
+    [[nodiscard]] bool begin_system_move(std::uint32_t native_serial);
     void request_frame(FrameRequestReason reason);
     void perform_window_layout(Rect content_area);
     [[nodiscard]] std::unique_ptr<RenderNode> build_window_debug_render_tree(Size viewport_size,

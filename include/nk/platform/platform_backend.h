@@ -97,6 +97,20 @@ public:
     virtual void set_fullscreen(bool fullscreen) = 0;
     [[nodiscard]] virtual bool is_fullscreen() const = 0;
 
+    /// Request the window be minimized (iconified). Default no-op.
+    virtual void minimize() {}
+
+    /// Toggle maximized state. Default no-op.
+    virtual void toggle_maximize() {}
+
+    [[nodiscard]] virtual bool is_maximized() const { return false; }
+
+    /// Whether the client is responsible for drawing window decorations.
+    [[nodiscard]] virtual bool uses_client_side_decorations() const { return false; }
+
+    /// Start an interactive compositor-managed move from an input-event serial.
+    [[nodiscard]] virtual bool begin_system_move(std::uint32_t /*serial*/) { return false; }
+
     /// Get the platform-native handle for this surface.
     ///
     /// The concrete type behind the opaque `NativeWindowHandle` is:

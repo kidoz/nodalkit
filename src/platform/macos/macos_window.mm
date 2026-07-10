@@ -1726,6 +1726,24 @@ bool MacosSurface::is_fullscreen() const {
     return fullscreen_;
 }
 
+void MacosSurface::minimize() {
+    @autoreleasepool {
+        [window_ performMiniaturize:nil];
+    }
+}
+
+void MacosSurface::toggle_maximize() {
+    @autoreleasepool {
+        [window_ zoom:nil];
+    }
+}
+
+bool MacosSurface::is_maximized() const {
+    @autoreleasepool {
+        return window_ != nil && [window_ isZoomed];
+    }
+}
+
 NativeWindowHandle MacosSurface::native_handle() const {
     return (__bridge NativeWindowHandle)window_;
 }

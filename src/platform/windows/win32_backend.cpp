@@ -623,6 +623,9 @@ public:
                  std::span<const Rect> damage_regions) override;
     void set_fullscreen(bool fullscreen) override;
     [[nodiscard]] bool is_fullscreen() const override;
+    void minimize() override;
+    void toggle_maximize() override;
+    [[nodiscard]] bool is_maximized() const override;
     [[nodiscard]] NativeWindowHandle native_handle() const override;
     [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
@@ -834,6 +837,22 @@ void Win32Surface::set_fullscreen(bool fullscreen) {
 
 bool Win32Surface::is_fullscreen() const {
     return fullscreen_;
+}
+
+void Win32Surface::minimize() {
+    if (hwnd_ != nullptr) {
+        ShowWindow(hwnd_, SW_MINIMIZE);
+    }
+}
+
+void Win32Surface::toggle_maximize() {
+    if (hwnd_ != nullptr) {
+        ShowWindow(hwnd_, IsZoomed(hwnd_) != FALSE ? SW_RESTORE : SW_MAXIMIZE);
+    }
+}
+
+bool Win32Surface::is_maximized() const {
+    return hwnd_ != nullptr && IsZoomed(hwnd_) != FALSE;
 }
 
 NativeWindowHandle Win32Surface::native_handle() const {
