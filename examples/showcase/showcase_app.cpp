@@ -822,26 +822,9 @@ int run_showcase(int argc, char** argv) {
         headerbar->set_centering_policy(nk::HeaderbarCenteringPolicy::Strict);
         headerbar->set_show_back_button(false);
 
-        auto select_category = [&, adaptive_split, headerbar](std::size_t index) {
-            page_stack->set_visible_page(index);
-            for (std::size_t button_index = 0; button_index < category_buttons.size();
-                 ++button_index) {
-                if (button_index == index) {
-                    category_buttons.at(button_index)->set_selected(true);
-                } else {
-                    category_buttons.at(button_index)->set_selected(false);
-                }
-            }
-            if (adaptive_split->is_collapsed()) {
-                adaptive_split->set_show_content(true);
-                headerbar->set_title(category_titles.at(index));
-                headerbar->set_show_back_button(true);
-            }
-        };
-        for (std::size_t index = 0; index < category_buttons.size(); ++index) {
-            (void)category_buttons.at(index)->on_clicked().connect(
-                [select_category, index] { select_category(index); });
-        }
+        auto navigation_controller = ShowcaseNavigationController::create(
+            page_stack, adaptive_split, headerbar, category_titles, category_buttons);
+        (void)navigation_controller;
         (void)headerbar->on_back_requested().connect([adaptive_split, headerbar, &profile] {
             adaptive_split->set_show_content(false);
             headerbar->set_show_back_button(false);

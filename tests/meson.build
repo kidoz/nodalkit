@@ -97,6 +97,13 @@ test_widget_views = executable('test_widget_views',
 )
 test('widget_views', test_widget_views)
 
+test_showcase_navigation = executable('test_showcase_navigation',
+    'showcase_navigation_test.cpp',
+    include_directories : include_directories('..'),
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('showcase_navigation', test_showcase_navigation)
+
 test_editor_scale_validation = executable('test_editor_scale_validation',
     'editor_scale_validation_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

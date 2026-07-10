@@ -17,7 +17,9 @@
 #include <nk/text/font.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/context_menu.h>
+#include <nk/widgets/headerbar.h>
 #include <nk/widgets/image_view.h>
+#include <nk/widgets/navigation_split_view.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -419,6 +421,76 @@ private:
     nk::Signal<> clicked_;
     bool selected_ = false;
     bool armed_ = false;
+};
+
+class ShowcaseNavigationController
+    : public std::enable_shared_from_this<ShowcaseNavigationController> {
+public:
+    static std::shared_ptr<ShowcaseNavigationController>
+    create(const std::shared_ptr<PageStack>& page_stack,
+           const std::shared_ptr<nk::NavigationSplitView>& split_view,
+           const std::shared_ptr<nk::Headerbar>& headerbar,
+           std::vector<std::string> titles,
+           const std::vector<std::shared_ptr<NavigationRow>>& rows) {
+        auto controller =
+            std::shared_ptr<ShowcaseNavigationController>(new ShowcaseNavigationController(
+                page_stack, split_view, headerbar, std::move(titles), rows));
+        controller->bind_rows(rows);
+        return controller;
+    }
+
+    void select_category(std::size_t index) {
+        const auto page_stack = page_stack_.lock();
+        if (page_stack == nullptr || index >= titles_.size() || index >= rows_.size()) {
+            return;
+        }
+
+        page_stack->set_visible_page(index);
+        for (std::size_t row_index = 0; row_index < rows_.size(); ++row_index) {
+            if (const auto row = rows_.at(row_index).lock()) {
+                row->set_selected(row_index == index);
+            }
+        }
+
+        const auto split_view = split_view_.lock();
+        if (split_view == nullptr || !split_view->is_collapsed()) {
+            return;
+        }
+        split_view->set_show_content(true);
+        if (const auto headerbar = headerbar_.lock()) {
+            headerbar->set_title(titles_.at(index));
+            headerbar->set_show_back_button(true);
+        }
+    }
+
+private:
+    ShowcaseNavigationController(const std::shared_ptr<PageStack>& page_stack,
+                                 const std::shared_ptr<nk::NavigationSplitView>& split_view,
+                                 const std::shared_ptr<nk::Headerbar>& headerbar,
+                                 std::vector<std::string> titles,
+                                 const std::vector<std::shared_ptr<NavigationRow>>& rows)
+        : page_stack_(page_stack)
+        , split_view_(split_view)
+        , headerbar_(headerbar)
+        , titles_(std::move(titles)) {
+        rows_.reserve(rows.size());
+        for (const auto& row : rows) {
+            rows_.push_back(row);
+        }
+    }
+
+    void bind_rows(const std::vector<std::shared_ptr<NavigationRow>>& rows) {
+        for (std::size_t index = 0; index < rows.size(); ++index) {
+            (void)rows.at(index)->on_clicked().connect(
+                [controller = shared_from_this(), index] { controller->select_category(index); });
+        }
+    }
+
+    std::weak_ptr<PageStack> page_stack_;
+    std::weak_ptr<nk::NavigationSplitView> split_view_;
+    std::weak_ptr<nk::Headerbar> headerbar_;
+    std::vector<std::string> titles_;
+    std::vector<std::weak_ptr<NavigationRow>> rows_;
 };
 
 class Spacer : public nk::Widget {
