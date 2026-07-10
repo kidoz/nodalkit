@@ -13,6 +13,8 @@ namespace nk {
 
 void TextShaper::set_scale_factor(float /*scale_factor*/) {}
 
+void TextShaper::set_system_default_family(std::string_view /*family*/, bool /*monospace*/) {}
+
 Size TextShaper::measure_wrapped(std::string_view text,
                                  const FontDescriptor& font,
                                  float /*max_width*/) const {

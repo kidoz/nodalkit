@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <nk/style/gtk_palette.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_selection.h>
 
@@ -215,6 +216,33 @@ void apply_accent_override(Theme& theme,
     theme.set_token("accent-source", StyleValue{std::string("override")});
 }
 
+/// Override the hardcoded Linux palette with colors parsed from the on-disk GTK
+/// theme stylesheet. The accent slots are intentionally left untouched so the
+/// subsequent `apply_accent_override` (system/portal accent) still wins.
+void apply_gtk_palette_override(Theme& theme, const GtkPalette& palette) {
+    if (palette.has_window_bg) {
+        theme.set_token("window-bg", StyleValue{palette.window_bg});
+    }
+    if (palette.has_window_fg) {
+        theme.set_token("text-primary", StyleValue{palette.window_fg});
+    }
+    if (palette.has_view_bg) {
+        theme.set_token("surface-field", StyleValue{palette.view_bg});
+        theme.set_token("surface-card", StyleValue{palette.view_bg});
+    }
+    if (palette.has_view_fg) {
+        theme.set_token("text-secondary", StyleValue{palette.view_fg});
+    }
+    if (palette.has_borders) {
+        theme.set_token("border-subtle", StyleValue{palette.borders});
+        theme.set_token("border-field", StyleValue{palette.borders});
+    }
+    if (palette.has_borders_dark) {
+        theme.set_token("border-strong", StyleValue{palette.borders_dark});
+    }
+    theme.set_token("palette-source", StyleValue{std::string("gtk")});
+}
+
 } // namespace
 
 ThemeFamily default_theme_family_for(const SystemPreferences& system_preferences) {
@@ -288,7 +316,7 @@ ResolvedThemeSelection resolve_theme_selection(const ThemeSelection& selection,
 }
 
 std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
-                                  const SystemPreferences& /*system_preferences*/) {
+                                  const SystemPreferences& system_preferences) {
     std::unique_ptr<Theme> theme;
 
     switch (selection.family) {
@@ -308,6 +336,16 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
     default:
         theme = Theme::make_linux_gnome(selection.color_scheme);
         break;
+    }
+
+    // High contrast mandates a guaranteed-contrast palette; a GTK stylesheet
+    // override would weaken that guarantee, so it is skipped in that mode.
+    if (selection.family == ThemeFamily::LinuxGnome && !selection.high_contrast &&
+        system_preferences.gtk_theme_name.has_value()) {
+        const bool dark = selection.color_scheme == ColorScheme::Dark;
+        if (auto palette = load_gtk_palette(*system_preferences.gtk_theme_name, dark)) {
+            apply_gtk_palette_override(*theme, *palette);
+        }
     }
 
     if (selection.high_contrast) {

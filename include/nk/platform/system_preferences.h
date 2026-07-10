@@ -68,6 +68,14 @@ struct SystemPreferences {
     BackdropCapability backdrop = BackdropCapability::Opaque;
     float text_scale_factor = 1.0F;
     std::optional<Color> accent_color;
+    // System-configured UI fonts (GNOME `org.gnome.desktop.interface` font-name
+    // / monospace-font-name, macOS system font, etc.). Absent when the platform
+    // does not expose a preference; consumers fall back to a generic family.
+    std::optional<std::string> system_font_name;
+    std::optional<std::string> system_monospace_font_name;
+    // GTK theme name (GNOME `org.gnome.desktop.interface` gtk-theme), used on
+    // Linux to locate the on-disk stylesheet for live palette extraction.
+    std::optional<std::string> gtk_theme_name;
     // OS version, when known. Zero means "unknown" and callers should assume the
     // most modern behavior. On Windows, os_version_build distinguishes Windows 11
     // (build >= 22000) from Windows 10.

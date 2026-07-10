@@ -880,10 +880,23 @@ SystemPreferences linux_preferences_from_gsettings(GSettings* interface_settings
                 if (theme_name != nullptr) {
                     preferences.color_scheme =
                         looks_like_dark_theme(theme_name) ? ColorScheme::Dark : ColorScheme::Light;
+                    preferences.gtk_theme_name = std::string(theme_name);
                     g_free(theme_name);
                 }
             }
             g_free(color_scheme);
+        }
+
+        // Capture the GTK theme name even when an explicit color-scheme is set,
+        // so the palette extractor can locate the stylesheet in both modes.
+        if (!preferences.gtk_theme_name.has_value()) {
+            char* theme_name = g_settings_get_string(interface_settings, "gtk-theme");
+            if (theme_name != nullptr && *theme_name != '\0') {
+                preferences.gtk_theme_name = std::string(theme_name);
+            }
+            if (theme_name != nullptr) {
+                g_free(theme_name);
+            }
         }
 
         char* accent_name = g_settings_get_string(interface_settings, "accent-color");
@@ -896,6 +909,19 @@ SystemPreferences linux_preferences_from_gsettings(GSettings* interface_settings
             static_cast<float>(g_settings_get_double(interface_settings, "text-scaling-factor"));
         if (!g_settings_get_boolean(interface_settings, "enable-animations")) {
             preferences.motion = MotionPreference::Reduced;
+        }
+
+        if (char* font_name = g_settings_get_string(interface_settings, "font-name")) {
+            if (*font_name != '\0') {
+                preferences.system_font_name = std::string(font_name);
+            }
+            g_free(font_name);
+        }
+        if (char* mono_name = g_settings_get_string(interface_settings, "monospace-font-name")) {
+            if (*mono_name != '\0') {
+                preferences.system_monospace_font_name = std::string(mono_name);
+            }
+            g_free(mono_name);
         }
     }
 

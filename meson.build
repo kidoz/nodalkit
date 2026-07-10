@@ -37,6 +37,7 @@ nk_sources = files(
     'src/render/snapshot_context.cpp',
     'src/style/theme.cpp',
     'src/style/theme_selection.cpp',
+    'src/style/gtk_palette.cpp',
     'src/accessibility/accessible.cpp',
     'src/accessibility/atspi_bridge.cpp',
     'src/model/abstract_list_model.cpp',

@@ -31,6 +31,13 @@ public:
     /// Notify the shaper of the active device scale for future rasterization.
     virtual void set_scale_factor(float scale_factor);
 
+    /// Provide the platform's configured default font family. When `monospace`
+    /// is false this is the UI font (e.g. GNOME `font-name`); when true it is
+    /// the configured monospace family. The shaper uses this to resolve the
+    /// generic "System"/"" (and "monospace") family names instead of falling
+    /// back to a hardcoded generic. Base implementation is a no-op.
+    virtual void set_system_default_family(std::string_view family, bool monospace = false);
+
     /// Measure text with word wrapping within max_width.
     [[nodiscard]] virtual Size
     measure_wrapped(std::string_view text, const FontDescriptor& font, float max_width) const;

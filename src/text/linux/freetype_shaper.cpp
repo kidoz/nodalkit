@@ -7,6 +7,7 @@
 #include <nk/foundation/logging.h>
 #include FT_FREETYPE_H
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <fontconfig/fontconfig.h>
@@ -280,6 +281,13 @@ void blend_alpha_mask(std::vector<uint8_t>& bitmap,
 struct FreeTypeShaper::Impl {
     FT_Library ft_library = nullptr;
 
+    // Platform-configured default families (set by the backend). When non-empty,
+    // these resolve the generic "System"/"" and "monospace" families instead of
+    // the hardcoded fontconfig generics. GNOME supplies these as e.g.
+    // "Adwaita Sans 11" (family + trailing point size), which we strip.
+    std::string system_default_family;
+    std::string system_default_monospace_family;
+
     // Font path cache: (family, weight, style) → file path.
     std::unordered_map<FontPathKey, std::string, FontPathKeyHash> font_path_cache;
 
@@ -306,9 +314,46 @@ struct FreeTypeShaper::Impl {
         }
     }
 
+    // GNOME's font-name gsetting carries the family and a trailing point size
+    // (e.g. "Adwaita Sans 11"). fontconfig resolves family names only, so we
+    // strip a trailing numeric size token before handing it to FcFontMatch.
+    static std::string strip_trailing_size(std::string_view raw) {
+        auto end = raw.find_last_not_of(' ');
+        if (end == std::string_view::npos) {
+            return {};
+        }
+        std::string_view trimmed = raw.substr(0, end + 1);
+        auto pos = trimmed.find_last_of(' ');
+        if (pos != std::string_view::npos) {
+            auto tail = trimmed.substr(pos + 1);
+            float point_size = 0.0F;
+            const auto [ptr, error] =
+                std::from_chars(tail.data(), tail.data() + tail.size(), point_size);
+            if (error == std::errc{} && ptr == tail.data() + tail.size() && point_size > 0.0F) {
+                trimmed = trimmed.substr(0, pos);
+            }
+        }
+        return std::string(trimmed);
+    }
+
+    // Maps a FontDescriptor family to the family name fontconfig should resolve.
+    // Empty/"System" prefers the platform UI font; "monospace" prefers the
+    // platform monospace font; both fall back to the fontconfig generics when
+    // the platform did not supply a preference.
+    std::string resolve_family(const std::string& requested) const {
+        if (requested.empty() || requested == "System") {
+            return system_default_family.empty() ? "sans-serif" : system_default_family;
+        }
+        if (requested == "monospace" || requested == "System-Monospace") {
+            return system_default_monospace_family.empty() ? "monospace"
+                                                           : system_default_monospace_family;
+        }
+        return requested;
+    }
+
     const std::string& resolve_font_path(const FontDescriptor& desc) {
         FontPathKey key{
-            desc.family.empty() || desc.family == "System" ? "sans-serif" : desc.family,
+            resolve_family(desc.family),
             desc.weight,
             desc.style,
         };
@@ -651,6 +696,23 @@ FreeTypeShaper::FreeTypeShaper() : impl_(std::make_unique<Impl>()) {
 }
 
 FreeTypeShaper::~FreeTypeShaper() = default;
+
+void FreeTypeShaper::set_system_default_family(std::string_view family, bool monospace) {
+    auto normalized = Impl::strip_trailing_size(family);
+    std::string& target =
+        monospace ? impl_->system_default_monospace_family : impl_->system_default_family;
+    if (target == normalized) {
+        return;
+    }
+    target = std::move(normalized);
+    // Cached paths, shaped faces, and measurements were resolved against the old
+    // default family, so they must be discarded before the next shape/measure.
+    impl_->font_path_cache.clear();
+    impl_->face_lru.clear();
+    impl_->face_map.clear();
+    impl_->measure_lru.clear();
+    impl_->measure_map.clear();
+}
 
 Size FreeTypeShaper::measure(std::string_view text, const FontDescriptor& font) const {
     if (impl_->ft_library == nullptr || text.empty()) {

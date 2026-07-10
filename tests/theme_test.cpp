@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <nk/platform/system_preferences.h>
+#include <nk/style/gtk_palette.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_defaults.h>
 #include <nk/style/theme_selection.h>
@@ -106,6 +107,32 @@ std::string resolved_string(const nk::Theme& theme,
 }
 
 } // namespace
+
+TEST_CASE("GTK palette parsing validates literals and honors later overrides",
+          "[theme][gtk-palette]") {
+    const auto palette = nk::parse_gtk_palette_css(R"css(
+        @define-color window_bg_color #102030;
+        @define-color window_bg_color rgb(64, 80, 96);
+        @define-color window_fg_color rgba(240, 241, 242, 0.75);
+        @define-color accent_bg_color #3584e4;
+    )css");
+
+    REQUIRE(palette.has_value());
+    REQUIRE(palette->has_window_bg);
+    REQUIRE(palette->has_window_fg);
+    CHECK(palette->window_bg.r == Catch::Approx(64.0F / 255.0F));
+    CHECK(palette->window_bg.g == Catch::Approx(80.0F / 255.0F));
+    CHECK(palette->window_bg.b == Catch::Approx(96.0F / 255.0F));
+    CHECK(palette->window_fg.a == Catch::Approx(0.75F));
+
+    const auto invalid = nk::parse_gtk_palette_css(R"css(
+        @define-color window_bg_color rgb(999, 0, 0);
+        @define-color accent_bg_color #3584e4;
+    )css");
+    REQUIRE(invalid.has_value());
+    CHECK_FALSE(invalid->has_window_bg);
+    CHECK(invalid->has_accent_bg);
+}
 
 TEST_CASE("Windows 11 theme is a native family, not a GNOME clone", "[theme][windows]") {
     auto windows = nk::Theme::make_windows_11(nk::ColorScheme::Light);
