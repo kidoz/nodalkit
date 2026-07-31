@@ -22,12 +22,14 @@ nodalkit_dep = nodalkit_proj.get_variable('nk_dep')
 
 executable('frontend', 'main.cpp',
     dependencies : nodalkit_dep,
-    override_options : ['cpp_std=c++23'],
+    override_options : ['cpp_std=c++23,c++latest'],
 )
 ```
 
 `nk_dep` carries the include directories and links the NodalKit library; on
 Windows it also pulls in the transitive Win32 import libraries.
+The ordered `c++23,c++latest` value keeps the exact C++23 mode on compilers that
+name it directly and uses MSVC's `/std:c++latest` spelling otherwise.
 
 ## Isolating C++23 to the GUI target
 
@@ -44,7 +46,7 @@ core_lib = static_library('core', core_sources)
 executable('frontend',
     'frontend/main.cpp',
     dependencies : [nodalkit_dep, core_dep],
-    override_options : ['cpp_std=c++23'],
+    override_options : ['cpp_std=c++23,c++latest'],
 )
 ```
 

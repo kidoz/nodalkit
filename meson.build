@@ -1,7 +1,9 @@
+
+# MSVC exposes its C++23 mode as /std:c++latest rather than /std:c++23.
 project('NodalKit', 'cpp',
         version : '0.1.0',
         meson_version : '>=1.11.0',
-        default_options : ['warning_level=3', 'werror=true', 'cpp_std=c++23'])
+        default_options : ['warning_level=3', 'werror=true', 'cpp_std=c++23,c++latest'])
 
 nk_inc = include_directories('include')
 pkgconfig = import('pkgconfig')
@@ -40,6 +42,9 @@ nk_sources = files(
     'src/style/theme_selection.cpp',
     'src/style/gtk_palette.cpp',
     'src/accessibility/accessible.cpp',
+    # Pure data conversion (WidgetDebugNode -> AtspiAccessibleSnapshot); no D-Bus/glib deps.
+    # Compiled on every platform intentionally so the snapshot logic is unit-tested under
+    # Windows/macOS too. Only the Linux Wayland backend actually consumes the snapshot.
     'src/accessibility/atspi_bridge.cpp',
     'src/model/abstract_list_model.cpp',
     'src/model/abstract_table_model.cpp',
@@ -336,9 +341,11 @@ elif host_system == 'windows'
         '-DUNICODE',
         '-D_UNICODE',
         '-D_CRT_SECURE_NO_WARNINGS',
-        '-Wno-c2y-extensions',
         language : 'cpp',
     )
+    if cpp_compiler.get_id() == 'clang' or cpp_compiler.get_id() == 'clang-cl'
+        add_project_arguments('-Wno-c2y-extensions', language : 'cpp')
+    endif
 
     user32_dep = cpp_compiler.find_library('user32', required : true)
     gdi32_dep = cpp_compiler.find_library('gdi32', required : true)
