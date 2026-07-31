@@ -418,10 +418,10 @@ Signal<std::size_t>& DataTable::on_row_activated() {
 SizeRequest DataTable::measure(const Constraints& /*constraints*/) const {
     const float min_width = std::min(220.0F, std::max(1.0F, total_column_width(impl_->columns)));
     const float natural_width = std::max(320.0F, total_column_width(impl_->columns) + 2.0F);
-    const float body_rows =
+    const float body_rows = static_cast<float>(
         impl_->display_model
             ? std::min<std::size_t>(8, std::max<std::size_t>(4, impl_->display_model->row_count()))
-            : 4;
+            : 4);
     const float natural_height = impl_->header_height + (body_rows * impl_->row_height) + 2.0F;
     return {
         min_width, impl_->header_height + impl_->row_height + 2.0F, natural_width, natural_height};

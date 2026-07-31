@@ -2987,10 +2987,10 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
                     std::string::npos);
         }
         {
-            const auto selected_widget_json =
+            const auto bundle_selected_widget_json =
                 nk::load_widget_debug_json_file((bundle_dir / "selected_widget.json").string());
-            REQUIRE(selected_widget_json);
-            REQUIRE(selected_widget_json->debug_name == "bundle-child");
+            REQUIRE(bundle_selected_widget_json);
+            REQUIRE(bundle_selected_widget_json->debug_name == "bundle-child");
         }
         {
             std::ifstream screenshot_in(bundle_dir / "screenshot.ppm", std::ios::binary);

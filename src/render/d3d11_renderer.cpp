@@ -520,14 +520,18 @@ float renderer_max_width_for_shape(float max_width, float scale_factor) {
 #endif
 }
 
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlanguage-extension-token"
+#endif
 
 template <typename T> const IID& type_iid() {
     return __uuidof(T);
 }
 
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
 
 class D3D11Renderer final : public Renderer {
 public:
@@ -1161,7 +1165,6 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         draw_commands_.clear();
         return false;
     }
-    return false;
 }
 
 bool D3D11Renderer::ensure_software_frame() {
