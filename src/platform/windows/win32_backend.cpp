@@ -1,14 +1,24 @@
 #include "win32_backend.h"
+#include "win32_spell_checker.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <nk/foundation/logging.h>
+#include <nk/platform/drag_drop.h>
+#include <nk/platform/native_menu.h>
+#include <nk/platform/spell_checker.h>
 #include <nk/platform/window.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/platform/application.h>
+#include <ranges>
+#include <span>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 // windows.h must precede the Windows-specific headers below.
@@ -16,6 +26,8 @@
 
 #include <dwmapi.h>
 #include <objbase.h>
+#include <ole2.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
@@ -604,6 +616,264 @@ RECT logical_client_rect_for_window(Size logical_size,
     return rect;
 }
 
+// --- Native menu bar helpers -----------------------------------------------
+
+/// Map a KeyCode to a single-character shortcut label (e.g. KeyCode::S -> "S").
+/// Returns empty when the key has no useful textual accelerator (arrows, F-keys
+/// handled separately below).
+[[nodiscard]] std::wstring shortcut_label_for_key(KeyCode key) {
+    switch (key) {
+    case KeyCode::A: return L"A"; case KeyCode::B: return L"B"; case KeyCode::C: return L"C";
+    case KeyCode::D: return L"D"; case KeyCode::E: return L"E"; case KeyCode::F: return L"F";
+    case KeyCode::G: return L"G"; case KeyCode::H: return L"H"; case KeyCode::I: return L"I";
+    case KeyCode::J: return L"J"; case KeyCode::K: return L"K"; case KeyCode::L: return L"L";
+    case KeyCode::M: return L"M"; case KeyCode::N: return L"N"; case KeyCode::O: return L"O";
+    case KeyCode::P: return L"P"; case KeyCode::Q: return L"Q"; case KeyCode::R: return L"R";
+    case KeyCode::S: return L"S"; case KeyCode::T: return L"T"; case KeyCode::U: return L"U";
+    case KeyCode::V: return L"V"; case KeyCode::W: return L"W"; case KeyCode::X: return L"X";
+    case KeyCode::Y: return L"Y"; case KeyCode::Z: return L"Z";
+    case KeyCode::Num0: return L"0"; case KeyCode::Num1: return L"1"; case KeyCode::Num2: return L"2";
+    case KeyCode::Num3: return L"3"; case KeyCode::Num4: return L"4"; case KeyCode::Num5: return L"5";
+    case KeyCode::Num6: return L"6"; case KeyCode::Num7: return L"7"; case KeyCode::Num8: return L"8";
+    case KeyCode::Num9: return L"9";
+    case KeyCode::Return: return L"Enter"; case KeyCode::Escape: return L"Esc";
+    case KeyCode::Backspace: return L"Backspace"; case KeyCode::Tab: return L"Tab";
+    case KeyCode::Space: return L"Space"; case KeyCode::Delete: return L"Delete";
+    case KeyCode::Left: return L"Left"; case KeyCode::Right: return L"Right";
+    case KeyCode::Up: return L"Up"; case KeyCode::Down: return L"Down";
+    case KeyCode::Home: return L"Home"; case KeyCode::End: return L"End";
+    case KeyCode::PageUp: return L"PageUp"; case KeyCode::PageDown: return L"PageDown";
+    case KeyCode::Minus: return L"-"; case KeyCode::Equals: return L"=";
+    case KeyCode::LeftBracket: return L"["; case KeyCode::RightBracket: return L"]";
+    case KeyCode::Backslash: return L"\\"; case KeyCode::Semicolon: return L";";
+    case KeyCode::Apostrophe: return L"'"; case KeyCode::Comma: return L",";
+    case KeyCode::Period: return L"."; case KeyCode::Slash: return L"/";
+    case KeyCode::F1: return L"F1"; case KeyCode::F2: return L"F2"; case KeyCode::F3: return L"F3";
+    case KeyCode::F4: return L"F4"; case KeyCode::F5: return L"F5"; case KeyCode::F6: return L"F6";
+    case KeyCode::F7: return L"F7"; case KeyCode::F8: return L"F8"; case KeyCode::F9: return L"F9";
+    case KeyCode::F10: return L"F10"; case KeyCode::F11: return L"F11"; case KeyCode::F12: return L"F12";
+    default: return {};
+    }
+}
+
+/// Build a "Ctrl+Shift+S" style suffix ("\tCtrl+Shift+S") for a NativeMenuShortcut.
+/// Win32 renders the part after the tab as the right-aligned accelerator hint.
+/// Super (Win key) is omitted: it has no conventional menu-accelerator spelling on
+/// Windows and would conflict with system shortcuts.
+[[nodiscard]] std::wstring shortcut_suffix(const NativeMenuShortcut& shortcut) {
+    std::wstring parts;
+    if ((shortcut.modifiers & NativeMenuModifier::Ctrl) != NativeMenuModifier::None) {
+        parts += L"Ctrl+";
+    }
+    if ((shortcut.modifiers & NativeMenuModifier::Alt) != NativeMenuModifier::None) {
+        parts += L"Alt+";
+    }
+    if ((shortcut.modifiers & NativeMenuModifier::Shift) != NativeMenuModifier::None) {
+        parts += L"Shift+";
+    }
+    const auto label = shortcut_label_for_key(shortcut.key);
+    if (label.empty()) {
+        return {};
+    }
+    return L"\t" + parts + label;
+}
+
+/// Recursively append NativeMenuItem entries to a popup HMENU. Each leaf with an
+/// action_name gets a unique command id recorded in command_actions so WM_COMMAND
+/// can dispatch it through the shared NativeMenuActionHandler.
+void build_win32_menu_popup(HMENU popup, std::span<const NativeMenuItem> items, UINT& next_command,
+                            std::unordered_map<UINT, std::string>& command_actions) {
+    for (const auto& item : items) {
+        if (item.separator) {
+            AppendMenuW(popup, MF_SEPARATOR, 0u, nullptr);
+            continue;
+        }
+        if (!item.children.empty()) {
+            const HMENU submenu = CreatePopupMenu();
+            build_win32_menu_popup(submenu, item.children, next_command, command_actions);
+            AppendMenuW(popup, MF_POPUP | (item.enabled ? MF_ENABLED : MF_GRAYED),
+                        reinterpret_cast<UINT_PTR>(submenu), utf8_to_wide(item.label).c_str());
+            continue;
+        }
+        const UINT command_id = next_command++;
+        std::wstring label = utf8_to_wide(item.label);
+        if (item.shortcut.has_value()) {
+            label += shortcut_suffix(*item.shortcut);
+        }
+        const UINT flags = MF_STRING | (item.enabled && !item.action_name.empty() ? MF_ENABLED
+                                                                                  : MF_GRAYED);
+        AppendMenuW(popup, flags, command_id, label.c_str());
+        if (!item.action_name.empty()) {
+            command_actions.emplace(command_id, item.action_name);
+        }
+    }
+}
+
+/// Build a menu bar (HMENU) from the app-global NativeMenu model. First command
+/// id is 1 (0 is reserved by Win32).
+[[nodiscard]] HMENU build_win32_menu_bar(std::span<const NativeMenu> menus,
+                                         std::unordered_map<UINT, std::string>& command_actions) {
+    command_actions.clear();
+    const HMENU bar = CreateMenu();
+    UINT next_command = 1;
+    for (const auto& menu : menus) {
+        const HMENU popup = CreatePopupMenu();
+        build_win32_menu_popup(popup, menu.items, next_command, command_actions);
+        AppendMenuW(bar, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(popup),
+                    utf8_to_wide(menu.title).c_str());
+    }
+    return bar;
+}
+
+// --- OLE drop target (receive side) ----------------------------------------
+
+/// Win32 clipboard/DnD effect flags for a NodalKit DragOperation.
+[[nodiscard]] DWORD drop_effect_for_operation(DragOperation operation) {
+    switch (operation) {
+    case DragOperation::Copy: return DROPEFFECT_COPY;
+    case DragOperation::Move: return DROPEFFECT_MOVE;
+    case DragOperation::Link: return DROPEFFECT_LINK;
+    case DragOperation::None:
+    default: return DROPEFFECT_NONE;
+    }
+}
+
+/// NodalKit DragOperation for the Win32 source-effect bitmask, choosing the most
+/// "destructive" allowed operation as the requested one.
+[[nodiscard]] DragOperation operation_from_effect(DWORD effect) {
+    if ((effect & DROPEFFECT_COPY) != 0) {
+        return DragOperation::Copy;
+    }
+    if ((effect & DROPEFFECT_MOVE) != 0) {
+        return DragOperation::Move;
+    }
+    if ((effect & DROPEFFECT_LINK) != 0) {
+        return DragOperation::Link;
+    }
+    return DragOperation::None;
+}
+
+/// Parse a CF_HDROP blob (the `hGlobal` payload of an IDataObject) into file
+/// paths. Returns null if the data is not a file drop.
+[[nodiscard]] std::shared_ptr<const DragPayload>
+payload_from_data_object(IDataObject* data_object) {
+    if (data_object == nullptr) {
+        return nullptr;
+    }
+    // Prefer CF_HDROP (files), then fall back to CF_UNICODETEXT (plain text).
+    FORMATETC hdrop_format{
+        .cfFormat = CF_HDROP,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+    STGMEDIUM medium{};
+    if (SUCCEEDED(data_object->GetData(&hdrop_format, &medium)) && medium.hGlobal != nullptr) {
+        // The CF_HDROP global is itself a valid HDROP (a DROPFILES header followed
+        // by the path list). DragQueryFileW is the supported way to enumerate it,
+        // avoiding any dependency on the DROPFILES struct layout across SDKs.
+        const auto drop = static_cast<HDROP>(medium.hGlobal);
+        std::shared_ptr<const DragPayload> payload;
+        const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        if (count != 0) {
+            std::vector<std::filesystem::path> files;
+            files.reserve(count);
+            for (UINT i = 0; i < count; ++i) {
+                const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+                if (length == 0) {
+                    continue;
+                }
+                std::wstring path(length, L'\0');
+                DragQueryFileW(drop, i, path.data(), length + 1);
+                files.emplace_back(std::move(path));
+            }
+            payload = std::make_shared<DragPayload>(DragPayload::from_files(std::move(files)));
+        }
+        ReleaseStgMedium(&medium);
+        if (payload != nullptr) {
+            return payload;
+        }
+    }
+
+    FORMATETC text_format{
+        .cfFormat = CF_UNICODETEXT,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+    if (SUCCEEDED(data_object->GetData(&text_format, &medium)) && medium.hGlobal != nullptr) {
+        const auto* wide = static_cast<const wchar_t*>(GlobalLock(medium.hGlobal));
+        std::shared_ptr<const DragPayload> payload;
+        if (wide != nullptr) {
+            payload = std::make_shared<DragPayload>(
+                DragPayload::from_text(wide_to_utf8(wide)));
+        }
+        GlobalUnlock(medium.hGlobal);
+        ReleaseStgMedium(&medium);
+        return payload;
+    }
+    return nullptr;
+}
+
+class Win32Surface; // forward
+
+/// Hand-rolled IDropTarget that translates OLE drag notifications into
+/// NodalKit DragDropEvents delivered through Win32Surface::owner(). Reference-
+/// counted so ComPtr can hold it; the surface holds the owning reference for the
+/// window's lifetime and clears the back-pointer before destruction.
+class Win32DropTarget final : public IDropTarget {
+public:
+    explicit Win32DropTarget(Win32Surface* surface) : surface_(surface) {}
+
+    void detach() { surface_ = nullptr; }
+
+    // IUnknown
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IDropTarget) {
+            *out = static_cast<IUnknown*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // IDropTarget
+    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data_object, DWORD key_state, POINTL point,
+                                       DWORD* effect) override;
+    HRESULT STDMETHODCALLTYPE DragOver(DWORD key_state, POINTL point, DWORD* effect) override;
+    HRESULT STDMETHODCALLTYPE DragLeave() override;
+    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data_object, DWORD key_state, POINTL point,
+                                   DWORD* effect) override;
+
+private:
+    /// Build a DragDropEvent of `type` from the data object + cursor position,
+    /// dispatch it, and write the resulting effect. Returns S_OK even when no
+    /// payload is available (effect just becomes DROPEFFECT_NONE).
+    HRESULT dispatch(IDataObject* data_object, DragDropEventType type, POINTL point,
+                     DWORD source_effect, DWORD* out_effect);
+
+    std::atomic<ULONG> ref_count_{1};
+    Win32Surface* surface_;
+    // Payload extracted on DragEnter and reused for Over/Leave/Drop, matching the
+    // macOS backend which re-resolves per event but benefits from the same value.
+    std::shared_ptr<const DragPayload> enter_payload_;
+    DragOperation enter_operation_ = DragOperation::None;
+};
+
 class Win32Surface final : public NativeSurface {
 public:
     Win32Surface(HINSTANCE instance, const WindowConfig& config, Window& owner);
@@ -630,6 +900,21 @@ public:
     [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
     [[nodiscard]] HWND hwnd() const;
+
+    /// Build a Win32 menu bar from the app-global menu model and attach it to the
+    /// window. The handler pointer points back into Win32Backend::Impl and stays
+    /// valid for the backend's lifetime. Called once at surface creation; safe to
+    /// call again to replace an existing menu bar.
+    void apply_native_menu(std::span<const NativeMenu> menus,
+                           const NativeMenuActionHandler* handler);
+
+    /// Deliver a drag & drop event to the widget tree. Called by Win32DropTarget
+    /// with external=true (drops from outside the process, e.g. Explorer).
+    [[nodiscard]] DragOperation dispatch_drop_event(const DragDropEvent& event);
+
+    /// Logical position (window coordinates, divided by scale factor) for a
+    /// screen-space POINTL. Used by the drop target to fill event.position.
+    [[nodiscard]] Point logical_point_for_screen(POINTL screen) const;
 
     static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
@@ -660,6 +945,13 @@ private:
     bool tracking_mouse_ = false;
     bool handling_dpi_change_ = false;
     wchar_t pending_high_surrogate_ = 0;
+    // Native menu bar state. Command ids start at 1 (0 is reserved by Win32).
+    HMENU menu_bar_ = nullptr;
+    std::unordered_map<UINT, std::string> menu_command_actions_;
+    const NativeMenuActionHandler* menu_handler_ = nullptr;
+    // OLE drop target registered on this window. Owned via refcount; we hold one
+    // strong reference and revoke it in the destructor before releasing.
+    ComPtr<Win32DropTarget> drop_target_;
 };
 
 Win32Surface::Win32Surface(HINSTANCE instance, const WindowConfig& config, Window& owner)
@@ -692,6 +984,18 @@ Win32Surface::Win32Surface(HINSTANCE instance, const WindowConfig& config, Windo
                             this);
     if (hwnd_ != nullptr) {
         update_metrics();
+        // Register an OLE drop target so external drags (e.g. files from
+        // Explorer) reach the widget tree. RegisterDragDrop requires OLE to be
+        // initialized on this thread; if it isn't (OleInitialize failed in the
+        // backend) we skip registration and DnD simply stays disabled.
+        auto* target = new Win32DropTarget(this);
+        drop_target_ = target; // surface holds the owning reference
+        const HRESULT reg_hr = RegisterDragDrop(hwnd_, target);
+        if (FAILED(reg_hr)) {
+            NK_LOG_WARN("Win32Backend", "RegisterDragDrop failed; drops disabled for window");
+            // Revoke isn't needed; nothing was registered. Keep drop_target_ alive
+            // so a later retry path could re-register; it releases with the surface.
+        }
     }
 }
 
@@ -703,6 +1007,19 @@ Win32Surface::~Win32Surface() {
         // dispatch on half-destroyed widgets and the text shaper. With the back pointer
         // cleared, window_proc falls through to DefWindowProcW during teardown.
         SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
+        if (menu_bar_ != nullptr) {
+            SetMenu(hwnd_, nullptr);
+            DestroyMenu(menu_bar_);
+            menu_bar_ = nullptr;
+        }
+        // Detach + revoke the drop target before the HWND and widget tree go
+        // away: RevokeDragDrop blocks until in-flight OLE callbacks return, and
+        // clearing the back-pointer stops any late callback from dereferencing us.
+        if (drop_target_ != nullptr) {
+            drop_target_->detach();
+            RevokeDragDrop(hwnd_);
+            drop_target_.Reset();
+        }
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
     }
@@ -874,6 +1191,143 @@ HWND Win32Surface::hwnd() const {
     return hwnd_;
 }
 
+void Win32Surface::apply_native_menu(std::span<const NativeMenu> menus,
+                                     const NativeMenuActionHandler* handler) {
+    if (hwnd_ == nullptr) {
+        return;
+    }
+    if (menu_bar_ != nullptr) {
+        // Replacing the menu bar: destroy the old one and rebuild from the model.
+        SetMenu(hwnd_, nullptr);
+        DestroyMenu(menu_bar_);
+        menu_bar_ = nullptr;
+    }
+    menu_command_actions_.clear();
+    menu_handler_ = handler;
+    if (menus.empty()) {
+        DrawMenuBar(hwnd_);
+        return;
+    }
+    menu_bar_ = build_win32_menu_bar(menus, menu_command_actions_);
+    SetMenu(hwnd_, menu_bar_);
+    DrawMenuBar(hwnd_);
+}
+
+DragOperation Win32Surface::dispatch_drop_event(const DragDropEvent& event) {
+    return owner_.dispatch_drag_drop_event(event);
+}
+
+Point Win32Surface::logical_point_for_screen(POINTL screen) const {
+    if (hwnd_ == nullptr) {
+        return {0.0F, 0.0F};
+    }
+    POINT client{screen.x, screen.y};
+    ScreenToClient(hwnd_, &client);
+    const float scale = scale_factor_ > 0.0F ? scale_factor_ : 1.0F;
+    return {static_cast<float>(client.x) / scale, static_cast<float>(client.y) / scale};
+}
+
+// --- Win32DropTarget (IDropTarget implementation) --------------------------
+// Defined here, after Win32Surface is complete, so surface_->dispatch_drop_event
+// and surface_->logical_point_for_screen resolve.
+
+HRESULT Win32DropTarget::dispatch(IDataObject* data_object, DragDropEventType type, POINTL point,
+                                  DWORD source_effect, DWORD* out_effect) {
+    if (out_effect == nullptr) {
+        return E_POINTER;
+    }
+    if (surface_ == nullptr) {
+        *out_effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
+    auto payload = payload_from_data_object(data_object);
+    DragDropEvent event{
+        .type = type,
+        .position = surface_->logical_point_for_screen(point),
+        .payload = payload,
+        .requested_operation = operation_from_effect(source_effect),
+        .accepted_operation = DragOperation::None,
+        .external = true,
+    };
+    if (payload == nullptr) {
+        *out_effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
+    const DragOperation accepted = surface_->dispatch_drop_event(event);
+    *out_effect = drop_effect_for_operation(accepted);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE Win32DropTarget::DragEnter(IDataObject* data_object, DWORD /*key_state*/,
+                                                     POINTL point, DWORD* effect) {
+    if (effect == nullptr) {
+        return E_POINTER;
+    }
+    enter_payload_ = payload_from_data_object(data_object);
+    if (enter_payload_ == nullptr) {
+        enter_operation_ = DragOperation::None;
+        *effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
+    // Re-resolve through dispatch() so the widget tree can accept/reject.
+    return dispatch(data_object, DragDropEventType::Enter, point, *effect, effect);
+}
+
+HRESULT STDMETHODCALLTYPE Win32DropTarget::DragOver(DWORD /*key_state*/, POINTL point,
+                                                    DWORD* effect) {
+    if (effect == nullptr) {
+        return E_POINTER;
+    }
+    if (surface_ == nullptr || enter_payload_ == nullptr) {
+        *effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
+    DragDropEvent event{
+        .type = DragDropEventType::Motion,
+        .position = surface_->logical_point_for_screen(point),
+        .payload = enter_payload_,
+        .requested_operation = operation_from_effect(*effect),
+        .accepted_operation = DragOperation::None,
+        .external = true,
+    };
+    const DragOperation accepted = surface_->dispatch_drop_event(event);
+    *effect = drop_effect_for_operation(accepted);
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE Win32DropTarget::DragLeave() {
+    if (surface_ == nullptr || enter_payload_ == nullptr) {
+        enter_payload_.reset();
+        enter_operation_ = DragOperation::None;
+        return S_OK;
+    }
+    DragDropEvent event{
+        .type = DragDropEventType::Leave,
+        .position = {},
+        .payload = enter_payload_,
+        .requested_operation = enter_operation_,
+        .accepted_operation = DragOperation::None,
+        .external = true,
+    };
+    (void)surface_->dispatch_drop_event(event);
+    enter_payload_.reset();
+    enter_operation_ = DragOperation::None;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE Win32DropTarget::Drop(IDataObject* data_object, DWORD /*key_state*/,
+                                                POINTL point, DWORD* effect) {
+    if (effect == nullptr) {
+        return E_POINTER;
+    }
+    // Use the freshly-resolved payload for the drop so an internal IDataObject
+    // round-trip carries the most current data.
+    const HRESULT hr = dispatch(data_object, DragDropEventType::Drop, point, *effect, effect);
+    enter_payload_.reset();
+    enter_operation_ = DragOperation::None;
+    return hr;
+}
+
 void Win32Surface::update_metrics(UINT dpi_override) {
     if (hwnd_ == nullptr) {
         return;
@@ -984,6 +1438,20 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
     switch (message) {
     case WM_ERASEBKGND:
         return 1;
+    case WM_COMMAND: {
+        // Menu-origin commands: lparam==0 and HIWORD(wparam)==0. Accelerator-
+        // origin commands have HIWORD==1 and are ignored here (full HACCEL wiring
+        // is a follow-up; the toolkit handles keyboard input directly today).
+        const bool from_menu = lparam == 0 && HIWORD(wparam) == 0;
+        if (from_menu && menu_handler_ != nullptr && *menu_handler_) {
+            const UINT command_id = LOWORD(wparam);
+            const auto found = menu_command_actions_.find(command_id);
+            if (found != menu_command_actions_.end()) {
+                (*menu_handler_)(found->second);
+            }
+        }
+        return 0;
+    }
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         HDC dc = BeginPaint(hwnd_, &paint);
@@ -1121,9 +1589,16 @@ struct Win32Backend::Impl {
     int exit_code = 0;
     bool quit_requested = false;
     bool window_class_registered = false;
+    bool ole_initialized = false;
     mutable std::string clipboard_text_cache;
     mutable bool clipboard_text_cache_valid = false;
     mutable bool clipboard_native_write_failed = false;
+    Win32SpellChecker spell_checker;
+    // App-global native menu model. Win32 menus are per-HWND, so the model is
+    // applied to each surface as it is created (see create_surface). Mirrors the
+    // app-global NSApp.mainMenu model used by macos_backend.mm.
+    std::vector<NativeMenu> app_menu_model;
+    NativeMenuActionHandler app_menu_handler;
 };
 
 Win32Backend::Win32Backend() : impl_(std::make_unique<Impl>()) {}
@@ -1152,10 +1627,25 @@ Result<void> Win32Backend::initialize() {
         return Unexpected(std::string("failed to register Win32 window class"));
     }
     impl_->window_class_registered = true;
+
+    // OLE is required by the drop-target backend (RegisterDragDrop). OleInitialize
+    // layers on top of CoInitializeEx; S_FALSE means the thread was already OLE-
+    // initialized, which is fine. We only uninitialize when we own the init.
+    const HRESULT ole_hr = OleInitialize(nullptr);
+    impl_->ole_initialized = SUCCEEDED(ole_hr);
+    if (!impl_->ole_initialized) {
+        NK_LOG_WARN("Win32Backend", "OleInitialize failed; drag & drop disabled");
+    }
     return {};
 }
 
 void Win32Backend::shutdown() {
+    impl_->app_menu_handler = {};
+    impl_->app_menu_model.clear();
+    if (impl_->ole_initialized) {
+        OleUninitialize();
+        impl_->ole_initialized = false;
+    }
     if (impl_->window_class_registered) {
         UnregisterClassW(kWindowClassName, impl_->instance);
         impl_->window_class_registered = false;
@@ -1168,6 +1658,9 @@ std::unique_ptr<NativeSurface> Win32Backend::create_surface(const WindowConfig& 
     if (surface->hwnd() == nullptr) {
         NK_LOG_ERROR("Win32Backend", "Failed to create Win32 window surface");
         return nullptr;
+    }
+    if (!impl_->app_menu_model.empty()) {
+        surface->apply_native_menu(impl_->app_menu_model, &impl_->app_menu_handler);
     }
     return surface;
 }
@@ -1305,6 +1798,20 @@ void Win32Backend::set_clipboard_text(std::string_view text) {
 
 SystemPreferences Win32Backend::system_preferences() const {
     return query_system_preferences();
+}
+
+SpellChecker* Win32Backend::spell_checker() {
+    return &impl_->spell_checker;
+}
+
+bool Win32Backend::supports_native_app_menu() const {
+    return true;
+}
+
+void Win32Backend::set_native_app_menu(std::span<const NativeMenu> menus,
+                                       NativeMenuActionHandler action_handler) {
+    impl_->app_menu_model.assign(menus.begin(), menus.end());
+    impl_->app_menu_handler = std::move(action_handler);
 }
 
 } // namespace nk

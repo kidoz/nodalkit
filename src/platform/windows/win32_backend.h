@@ -37,6 +37,11 @@ public:
 
     [[nodiscard]] SystemPreferences system_preferences() const override;
 
+    [[nodiscard]] SpellChecker* spell_checker() override;
+    [[nodiscard]] bool supports_native_app_menu() const override;
+    void set_native_app_menu(std::span<const NativeMenu> menus,
+                             NativeMenuActionHandler action_handler) override;
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -38,14 +38,14 @@ lightly tested · ❌ not implemented.
 | ----------- | ------ | ----- |
 | File / save dialogs | 🧪 | Common Item Dialog. |
 | Clipboard | 🧪 | Win32 clipboard. |
-| Drag & drop | ❌ | Planned (OLE `IDropTarget` / `RegisterDragDrop`). Only the platform-agnostic value types in `src/platform/drag_drop.cpp` exist today; no Win32 OLE drop target is wired into `Win32Backend` yet. |
-| App / menu bar | ❌ | Planned (native menu via `SetMenu` / `AppendMenuW`). `Win32Backend` does not override `supports_native_app_menu()` / `set_native_app_menu()`; only macOS has a native menu backend. The in-toolkit `MenuBar` widget is still available. |
+| Drag & drop | 🧪 | OLE `IDropTarget` receive side. External drops (files via `CF_HDROP`, text via `CF_UNICODETEXT`) are translated to `DragPayload` and delivered through `Window::dispatch_drag_drop_event`. Drag *source* (`DoDragDrop`) is not yet wired; in-process drags keep using the toolkit's synthetic simulation. |
+| App / menu bar | 🧪 | Native menu bar built per window from the app-global `NativeMenu` model (`SetMenu` / `AppendMenuW`); `WM_COMMAND` dispatches `action_name` through the shared `NativeMenuActionHandler`. Shortcuts render as label text only (`HACCEL` accelerators are a follow-up). |
 | High-DPI | 🧪 | Per-monitor DPI awareness; scale tracked per window. |
 | Fullscreen | 🧪 | Borderless-on-monitor toggle. |
 | Text shaping | 🧪 | DirectWrite, with a GDI fallback shaper. |
 | Native window handle | ✅ | `HWND` / `HINSTANCE` via [`windows_interop.h`](../include/nk/platform/windows_interop.h). See [NATIVE_INTEROP.md](NATIVE_INTEROP.md). |
 | Accessibility | ❌ | No UI Automation provider yet. The accessibility model (`nk/accessibility`) is populated, but only the Linux AT-SPI bridge is wired. |
-| Spell checking | ❌ | Planned (e.g. `ISpellCheckerFactory`). `Win32Backend` does not provide a `SpellChecker`; `TextField` spell-squiggles are a no-op on Windows today (only macOS ships `NSSpellChecker` integration). |
+| Spell checking | 🧪 | Windows Spell Checking API (`ISpellCheckerFactory` / `ISpellChecker`) in `win32_spell_checker.cpp`. Lazily picks the first supported language; returns empty results (no crash) when no spell-check language is installed. Returned `SpellCheckRange` offsets are UTF-8 bytes. |
 
 ## Release gating
 
