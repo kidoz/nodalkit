@@ -38,13 +38,14 @@ lightly tested · ❌ not implemented.
 | ----------- | ------ | ----- |
 | File / save dialogs | 🧪 | Common Item Dialog. |
 | Clipboard | 🧪 | Win32 clipboard. |
-| Drag & drop | 🧪 | OLE `IDropTarget` / `RegisterDragDrop`. |
-| App / menu bar | 🧪 | Native menu integration. |
+| Drag & drop | ❌ | Planned (OLE `IDropTarget` / `RegisterDragDrop`). Only the platform-agnostic value types in `src/platform/drag_drop.cpp` exist today; no Win32 OLE drop target is wired into `Win32Backend` yet. |
+| App / menu bar | ❌ | Planned (native menu via `SetMenu` / `AppendMenuW`). `Win32Backend` does not override `supports_native_app_menu()` / `set_native_app_menu()`; only macOS has a native menu backend. The in-toolkit `MenuBar` widget is still available. |
 | High-DPI | 🧪 | Per-monitor DPI awareness; scale tracked per window. |
 | Fullscreen | 🧪 | Borderless-on-monitor toggle. |
 | Text shaping | 🧪 | DirectWrite, with a GDI fallback shaper. |
 | Native window handle | ✅ | `HWND` / `HINSTANCE` via [`windows_interop.h`](../include/nk/platform/windows_interop.h). See [NATIVE_INTEROP.md](NATIVE_INTEROP.md). |
 | Accessibility | ❌ | No UI Automation provider yet. The accessibility model (`nk/accessibility`) is populated, but only the Linux AT-SPI bridge is wired. |
+| Spell checking | ❌ | Planned (e.g. `ISpellCheckerFactory`). `Win32Backend` does not provide a `SpellChecker`; `TextField` spell-squiggles are a no-op on Windows today (only macOS ships `NSSpellChecker` integration). |
 
 ## Release gating
 
