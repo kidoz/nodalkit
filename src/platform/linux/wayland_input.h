@@ -53,6 +53,12 @@ public:
 
     void set_cursor_shape(CursorShape shape);
 
+    /// Drop any pointer/keyboard/text-input focus bookkeeping that points at
+    /// a surface about to be destroyed; the WaylandSurface destructor calls
+    /// this before releasing its native objects. Does not dispatch events
+    /// into the dying surface.
+    void forget_surface(WaylandSurface* surface);
+
     [[nodiscard]] wl_seat* seat() const { return seat_; }
 
     // --- Wayland listener callbacks (public so listener structs can reference them) ---
@@ -78,6 +84,9 @@ public:
                                uint32_t state);
     static void
     pointer_axis(void* data, wl_pointer* pointer, uint32_t time, uint32_t axis, wl_fixed_t value);
+    // Wayland >= 1.26 (WL_POINTER_WARP_SINCE_VERSION).
+    static void
+    pointer_warp(void* data, wl_pointer* pointer, wl_fixed_t surface_x, wl_fixed_t surface_y);
 
     static void
     keyboard_keymap(void* data, wl_keyboard* keyboard, uint32_t format, int fd, uint32_t size);

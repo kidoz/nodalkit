@@ -210,6 +210,11 @@ WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& conf
 }
 
 WaylandSurface::~WaylandSurface() {
+    // Input may still hold focus pointers at this surface; clear them before
+    // the native objects go away so late events cannot dereference it.
+    if (auto* input = backend_.input(); input != nullptr) {
+        input->forget_surface(this);
+    }
     backend_.unregister_surface(surface_);
 
     destroy_buffer(buffers_[0]);

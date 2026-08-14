@@ -332,6 +332,21 @@ static void pointer_axis_relative_direction(void* /*data*/,
                                             uint32_t /*axis*/,
                                             uint32_t /*direction*/) {}
 
+#ifdef WL_POINTER_WARP_SINCE_VERSION
+// Wayland >= 1.26 reports in-surface pointer repositioning that did not come
+// from the input device (surface moved, confinement exited). Refresh the
+// tracked surface-local coordinates so the next button/axis dispatch is
+// consistent; do not synthesize a Move event for a non-device source.
+void WaylandInput::pointer_warp(void* data,
+                                wl_pointer* /*pointer*/,
+                                wl_fixed_t surface_x,
+                                wl_fixed_t surface_y) {
+    auto* self = static_cast<WaylandInput*>(data);
+    self->pointer_x_ = static_cast<float>(wl_fixed_to_double(surface_x));
+    self->pointer_y_ = static_cast<float>(wl_fixed_to_double(surface_y));
+}
+#endif
+
 static constexpr struct wl_pointer_listener pointer_listener = {
     .enter = WaylandInput::pointer_enter,
     .leave = WaylandInput::pointer_leave,
@@ -344,6 +359,9 @@ static constexpr struct wl_pointer_listener pointer_listener = {
     .axis_discrete = pointer_axis_discrete,
     .axis_value120 = pointer_axis_value120,
     .axis_relative_direction = pointer_axis_relative_direction,
+#ifdef WL_POINTER_WARP_SINCE_VERSION
+    .warp = WaylandInput::pointer_warp,
+#endif
 };
 
 void WaylandInput::keyboard_repeat_info(void* data,
@@ -611,6 +629,12 @@ void WaylandInput::dispatch_key_press(uint32_t key, bool is_repeat) {
 
     owner.dispatch_key_event(ke);
     sync_text_input_state();
+    // The key handler may have destroyed the focused window; forget_surface()
+    // clears keyboard_focus_ in that case, so stop before touching owner
+    // again.
+    if (keyboard_focus_ == nullptr) {
+        return;
+    }
 
     if (is_repeat) {
         if ((mods & Modifiers::Ctrl) == Modifiers::Ctrl ||
@@ -1102,7 +1126,9 @@ void WaylandInput::pointer_button(void* data,
     me.button = nk_button;
     me.native_serial = serial;
     self->pointer_focus_->owner().dispatch_mouse_event(me);
-    if (self->pointer_focus_ == self->keyboard_focus_) {
+    // The handler above may have destroyed the focused surface; forget_surface
+    // clears the focus pointers in that case, so re-check before use.
+    if (self->pointer_focus_ != nullptr && self->pointer_focus_ == self->keyboard_focus_) {
         self->sync_text_input_state();
     }
 }
@@ -1182,6 +1208,24 @@ void WaylandInput::keyboard_enter(void* data,
         we.type = WindowEvent::Type::FocusIn;
         self->keyboard_focus_->owner().dispatch_window_event(we);
         self->sync_text_input_state();
+    }
+}
+
+void WaylandInput::forget_surface(WaylandSurface* surface) {
+    if (surface == nullptr) {
+        return;
+    }
+    if (pointer_focus_ == surface) {
+        pointer_focus_ = nullptr;
+    }
+    if (keyboard_focus_ == surface) {
+        keyboard_focus_ = nullptr;
+        stop_key_repeat();
+    }
+    // disable_text_input() needs text_input_surface_ still set to issue the
+    // compositor-side disable, so it must run before the pointer is dropped.
+    if (text_input_surface_ == surface) {
+        disable_text_input();
     }
 }
 
