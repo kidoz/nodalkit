@@ -812,14 +812,55 @@ int run_showcase(int argc, char** argv) {
             return scroll;
         };
 
-        const std::vector<std::string> category_titles = {
-            "Controls", "Models & Views", "Preview", "Runtime", "Commands", "Empty State"};
+        // Boxed lists are GNOME's signature content pattern: grouped rows in a
+        // rounded card, each carrying at most one control, with the row
+        // background activating that control.
+        auto settings_page = nk::PreferencesPage::create("Settings");
+
+        auto appearance_group = nk::PreferencesGroup::create("Appearance");
+        auto sidebar_row =
+            nk::SwitchRow::create("Show Sidebar", "Keep the navigation sidebar expanded");
+        sidebar_row->set_active(true);
+        (void)sidebar_row->on_toggled().connect(
+            [&](bool active) { show_linux_toast(active ? "Sidebar shown" : "Sidebar hidden"); });
+        appearance_group->add(sidebar_row);
+
+        auto density_row = nk::ComboRow::create("Density", "Spacing applied across the window");
+        density_row->set_items({"Comfortable", "Standard", "Compact"});
+        density_row->set_selected_index(0);
+        (void)density_row->on_selection_changed().connect(
+            [&](int index) { status_bar->set_segment(0, "Density " + std::to_string(index)); });
+        appearance_group->add(density_row);
+        settings_page->add(appearance_group);
+
+        auto workspace_group = nk::PreferencesGroup::create("Workspace");
+        auto name_row = nk::EntryRow::create("Workspace Name");
+        name_row->set_text("NodalKit");
+        name_row->set_placeholder("Name this workspace");
+        (void)name_row->on_text_changed().connect([&](std::string_view text) {
+            status_bar->set_segment(
+                0, text.empty() ? "Workspace unnamed" : "Workspace: " + std::string(text));
+        });
+        workspace_group->add(name_row);
+
+        auto autosave_row = nk::SwitchRow::create("Autosave", "Save changes as you work");
+        workspace_group->add(autosave_row);
+        settings_page->add(workspace_group);
+
+        const std::vector<std::string> category_titles = {"Controls",
+                                                          "Models & Views",
+                                                          "Preview",
+                                                          "Runtime",
+                                                          "Commands",
+                                                          "Settings",
+                                                          "Empty State"};
         auto page_stack = PageStack::create();
         page_stack->add_page(make_scrolling_page(controls_card, 720.0F));
         page_stack->add_page(make_scrolling_page(list_card, 980.0F));
         page_stack->add_page(make_scrolling_page(preview_card, 720.0F));
         page_stack->add_page(make_scrolling_page(actions_card, 760.0F));
         page_stack->add_page(make_scrolling_page(commands_content, 720.0F));
+        page_stack->add_page(make_scrolling_page(settings_page, 720.0F));
         page_stack->add_page(status_page);
 
         auto sidebar_content = Box::vertical(4.0F);
