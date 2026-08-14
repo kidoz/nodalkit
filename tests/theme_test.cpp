@@ -593,6 +593,7 @@ TEST_CASE("Every family defines the full token vocabulary", "[theme]") {
         "text-secondary",
         "text-disabled",
         "accent",
+        "accent-bg",
         "accent-hover",
         "accent-pressed",
         "accent-soft",
@@ -828,8 +829,13 @@ TEST_CASE("Every resolved preference moves the theme it builds", "[theme][select
         selection.accent_color_override = nk::Color::from_rgb(200, 40, 40);
         auto theme = nk::make_theme(nk::resolve_theme_selection(selection, prefs), prefs);
         REQUIRE(string_token(*theme, "accent-source") == "override");
-        REQUIRE(color_token(*theme, "accent") == nk::Color::from_rgb(200, 40, 40));
-        // Rules alias the accent token, so the override reaches suggested buttons.
+        // The chosen accent is the fill color and is used unmodified, matching
+        // how GNOME applies a system accent.
+        REQUIRE(color_token(*theme, "accent-bg") == nk::Color::from_rgb(200, 40, 40));
+        // The standalone-text accent is nudged for contrast against the page, so
+        // it deliberately differs from the fill.
+        REQUIRE(color_token(*theme, "accent") != nk::Color::from_rgb(200, 40, 40));
+        // Rules alias the accent-bg token, so the override reaches suggested buttons.
         REQUIRE(resolved_color(*theme, {"button", "suggested"}, "background") ==
                 nk::Color::from_rgb(200, 40, 40));
     }

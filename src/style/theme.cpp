@@ -43,6 +43,14 @@ void install_legacy_token_aliases(Theme& theme) {
     set_alias_token(theme, "field-bg", "surface-field");
     set_alias_token(theme, "field-border", "border-field");
 
+    // Libadwaita splits the accent into a fill and a standalone-text role:
+    // `accent_bg_color` is the suggested-button fill and is the same in both
+    // schemes, while `accent_color` shifts per scheme purely to hold contrast
+    // against the page. Families that do not need the distinction alias the
+    // two together, so this is a no-op for them; GNOME overrides `accent-bg`
+    // with a real value after calling this.
+    set_alias_token(theme, "accent-bg", "accent");
+
     // Libadwaita-compatible semantic surface roles. Keeping these as aliases
     // lets platform families retain their own palettes while widgets consume a
     // stable background/foreground vocabulary.
@@ -256,8 +264,8 @@ void install_shared_rules(Theme& theme) {
              {"button", "suggested"},
              StateFlags::None,
              {
-                 {"background", StyleValue{std::string("accent")}},
-                 {"border-color", StyleValue{std::string("accent")}},
+                 {"background", StyleValue{std::string("accent-bg")}},
+                 {"border-color", StyleValue{std::string("accent-bg")}},
                  {"text-color", StyleValue{std::string("accent-contrast")}},
              });
     add_rule(theme,
@@ -450,7 +458,7 @@ void install_shared_rules(Theme& theme) {
              {"badge"},
              StateFlags::None,
              {
-                 {"background", token_ref("accent")},
+                 {"background", token_ref("accent-bg")},
                  {"text-color", token_ref("accent-contrast")},
              });
 
@@ -478,7 +486,7 @@ void install_shared_rules(Theme& theme) {
              {
                  {"background", token_ref("surface-field")},
                  {"border-color", token_ref("border-field")},
-                 {"checked-background", token_ref("accent")},
+                 {"checked-background", token_ref("accent-bg")},
                  {"check-color", token_ref("accent-contrast")},
              });
 
@@ -562,7 +570,7 @@ void install_shared_rules(Theme& theme) {
              {"progress-bar"},
              StateFlags::None,
              {
-                 {"fill-color", token_ref("accent")},
+                 {"fill-color", token_ref("accent-bg")},
                  {"track-color", token_ref("scrollbar-track")},
              });
 
@@ -572,7 +580,7 @@ void install_shared_rules(Theme& theme) {
              {
                  {"background", token_ref("surface-field")},
                  {"border-color", token_ref("border-field")},
-                 {"selected-color", token_ref("accent")},
+                 {"selected-color", token_ref("accent-bg")},
              });
 
     add_rule(theme,
@@ -592,7 +600,7 @@ void install_shared_rules(Theme& theme) {
              {"slider"},
              StateFlags::None,
              {
-                 {"fill-color", token_ref("accent")},
+                 {"fill-color", token_ref("accent-bg")},
                  {"track-background", token_ref("border-subtle")},
                  // Knob stays light in both GNOME schemes, like the switch thumb.
                  {"thumb-color", token_ref("accent-contrast")},
@@ -687,7 +695,7 @@ void install_shared_rules(Theme& theme) {
              {"switch"},
              StateFlags::None,
              {
-                 {"active-track-color", token_ref("accent")},
+                 {"active-track-color", token_ref("accent-bg")},
                  {"inactive-track-color", token_ref("border-strong")},
                  {"thumb-color", token_ref("accent-contrast")},
              });
@@ -831,7 +839,7 @@ void install_macos_overrides(Theme& theme) {
              {
                  {"chevron-style", StyleValue{std::string("capsule")}},
                  {"chevron-color", token_ref("accent-contrast")},
-                 {"chevron-background", token_ref("accent")},
+                 {"chevron-background", token_ref("accent-bg")},
              });
 }
 
@@ -1365,7 +1373,7 @@ std::unique_ptr<Theme> Theme::make_macos_26(ColorScheme color_scheme) {
     install_legacy_token_aliases(*theme);
     // macOS active selection is the solid accent with contrast text; the soft
     // accent wash is the GNOME/Windows pattern (R2).
-    install_selection_tokens(*theme, "accent", "accent-contrast");
+    install_selection_tokens(*theme, "accent-bg", "accent-contrast");
     theme->set_token("accent-source", StyleValue{std::string("theme")});
     theme->set_token("motion-mode", StyleValue{std::string("normal")});
     theme->set_token("transparency-mode", StyleValue{std::string("allowed")});

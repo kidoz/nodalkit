@@ -99,6 +99,7 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
         for (const auto* highlight : {"surface-hover",
                                       "surface-pressed",
                                       "accent",
+                                      "accent-bg",
                                       "accent-hover",
                                       "accent-pressed",
                                       "accent-soft",
@@ -139,6 +140,7 @@ void apply_high_contrast(Theme& theme, ColorScheme color_scheme) {
         for (const auto* highlight : {"surface-hover",
                                       "surface-pressed",
                                       "accent",
+                                      "accent-bg",
                                       "accent-hover",
                                       "accent-pressed",
                                       "accent-soft",
@@ -209,7 +211,15 @@ void apply_accent_override(Theme& theme,
         color_scheme == ColorScheme::Dark ? darken(accent, 0.10F) : darken(accent, 0.18F);
     auto soft = color_scheme == ColorScheme::Dark ? lighten(accent, 0.10F) : lighten(accent, 0.72F);
 
-    theme.set_token("accent", StyleValue{accent});
+    // The chosen accent is the *fill* color and is used unmodified in both
+    // schemes, matching how GNOME applies a system accent. The standalone-text
+    // accent is nudged toward the far end of the scheme so accent-colored text
+    // and links keep their contrast against the page.
+    auto standalone =
+        color_scheme == ColorScheme::Dark ? lighten(accent, 0.28F) : darken(accent, 0.14F);
+
+    theme.set_token("accent-bg", StyleValue{accent});
+    theme.set_token("accent", StyleValue{standalone});
     theme.set_token("accent-hover", StyleValue{hover});
     theme.set_token("accent-pressed", StyleValue{pressed});
     theme.set_token("accent-soft", StyleValue{soft});
