@@ -33,6 +33,11 @@ public:
     [[nodiscard]] std::string_view title() const;
     void set_title(std::string title);
 
+    /// Secondary line under the title, matching GNOME's title/subtitle window
+    /// heading. Empty (the default) renders the title alone, vertically centered.
+    [[nodiscard]] std::string_view subtitle() const;
+    void set_subtitle(std::string subtitle);
+
     /// Add a widget to the leading (start) side of the bar.
     void add_leading(std::shared_ptr<Widget> item);
     /// Add a widget to the trailing (end) side, before the window controls.

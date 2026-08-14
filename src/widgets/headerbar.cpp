@@ -326,6 +326,7 @@ private:
 
 struct Headerbar::Impl {
     std::string title;
+    std::string subtitle;
     std::string decoration_layout;
     HeaderbarCenteringPolicy centering_policy = HeaderbarCenteringPolicy::Strict;
     std::vector<std::shared_ptr<Widget>> leading;
@@ -396,6 +397,19 @@ void Headerbar::set_title(std::string title) {
     }
     impl_->title = std::move(title);
     ensure_accessible().set_name(impl_->title.empty() ? "Window Header Bar" : impl_->title);
+    queue_layout();
+}
+
+std::string_view Headerbar::subtitle() const {
+    return impl_->subtitle;
+}
+
+void Headerbar::set_subtitle(std::string subtitle) {
+    if (impl_->subtitle == subtitle) {
+        return;
+    }
+    impl_->subtitle = std::move(subtitle);
+    ensure_accessible().set_description(impl_->subtitle);
     queue_layout();
 }
 
@@ -501,10 +515,18 @@ SizeRequest Headerbar::measure(const Constraints& constraints) const {
                                 ? std::string(host_window()->title())
                                 : impl_->title;
     if (!title_text.empty()) {
-        natural_width +=
+        float heading_width =
             measure_text(title_text, headerbar_title_font(theme_number("title-font-size", 14.0F)))
-                .width +
-            spacing;
+                .width;
+        if (!impl_->subtitle.empty()) {
+            // The heading is as wide as its wider line.
+            heading_width = std::max(
+                heading_width,
+                measure_text(impl_->subtitle,
+                             headerbar_title_font(theme_number("subtitle-font-size", 11.0F)))
+                    .width);
+        }
+        natural_width += heading_width + spacing;
     }
     return {0.0F, height, natural_width, height};
 }
@@ -619,9 +641,18 @@ void Headerbar::allocate(const Rect& allocation) {
         const auto title_text = impl_->title.empty() && host_window() != nullptr
                                     ? std::string(host_window()->title())
                                     : impl_->title;
-        const float title_width =
+        float title_width =
             measure_text(title_text, headerbar_title_font(theme_number("title-font-size", 14.0F)))
                 .width;
+        if (!impl_->subtitle.empty()) {
+            // The heading block is as wide as its wider line, so a long subtitle
+            // must not be squeezed by centering that only considered the title.
+            title_width = std::max(
+                title_width,
+                measure_text(impl_->subtitle,
+                             headerbar_title_font(theme_number("subtitle-font-size", 11.0F)))
+                    .width);
+        }
         // Preserve strict window-relative centering whenever the title fits.
         // At narrow widths, fall back to the full free span instead of
         // needlessly eliding a title because one side contains more controls.
@@ -681,16 +712,45 @@ void Headerbar::snapshot(SnapshotContext& ctx) const {
     if (!hide_title && !title_text.empty() && impl_->title_bounds.width > 0.0F) {
         const auto font = headerbar_title_font(theme_number("title-font-size", 14.0F));
         const auto measured = measure_text(title_text, font);
-        const float text_x =
-            measured.width <= impl_->title_bounds.width
-                ? impl_->title_bounds.x + ((impl_->title_bounds.width - measured.width) * 0.5F)
-                : impl_->title_bounds.x;
-        const Point origin{
-            text_x,
-            impl_->title_bounds.y + ((impl_->title_bounds.height - measured.height) * 0.5F),
+        const auto centered_x = [&](float width) {
+            return width <= impl_->title_bounds.width
+                       ? impl_->title_bounds.x + ((impl_->title_bounds.width - width) * 0.5F)
+                       : impl_->title_bounds.x;
         };
-        add_text_elided(
-            ctx, origin, title_text, measured, impl_->title_bounds.width, foreground, font);
+
+        if (impl_->subtitle.empty()) {
+            const Point origin{
+                centered_x(measured.width),
+                impl_->title_bounds.y + ((impl_->title_bounds.height - measured.height) * 0.5F),
+            };
+            add_text_elided(
+                ctx, origin, title_text, measured, impl_->title_bounds.width, foreground, font);
+        } else {
+            // GNOME stacks a dimmed subtitle under the title, the pair centered
+            // together as one heading block.
+            const auto subtitle_font =
+                headerbar_title_font(theme_number("subtitle-font-size", 11.0F));
+            const auto subtitle_measured = measure_text(impl_->subtitle, subtitle_font);
+            const float gap = 1.0F;
+            const float block_height = measured.height + gap + subtitle_measured.height;
+            const float top =
+                impl_->title_bounds.y + ((impl_->title_bounds.height - block_height) * 0.5F);
+
+            add_text_elided(ctx,
+                            {centered_x(measured.width), top},
+                            title_text,
+                            measured,
+                            impl_->title_bounds.width,
+                            foreground,
+                            font);
+            add_text_elided(ctx,
+                            {centered_x(subtitle_measured.width), top + measured.height + gap},
+                            impl_->subtitle,
+                            subtitle_measured,
+                            impl_->title_bounds.width,
+                            theme_color("subtitle-color", theme_color("text-secondary")),
+                            subtitle_font);
+        }
     }
 
     Widget::snapshot(ctx);

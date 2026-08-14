@@ -498,3 +498,25 @@ TEST_CASE("Boxed-list rows wrap their control and keep focus on it",
         }
     }
 }
+
+TEST_CASE("Headerbar stacks a subtitle under the title", "[widgets][headerbar][gnome]") {
+    auto headerbar = nk::Headerbar::create("Workspace");
+    CHECK(headerbar->subtitle().empty());
+
+    const nk::Constraints constraints{0.0F, 0.0F, 800.0F, 46.0F};
+    const float title_only_width = headerbar->measure(constraints).natural_width;
+
+    // A subtitle wider than the title must widen the heading block, otherwise
+    // centering would squeeze it and elide text that had room.
+    headerbar->set_subtitle("A considerably longer secondary line of text");
+    CHECK(headerbar->subtitle() == "A considerably longer secondary line of text");
+    CHECK(headerbar->measure(constraints).natural_width > title_only_width);
+
+    // A subtitle narrower than the title leaves the heading width to the title.
+    headerbar->set_subtitle("ok");
+    CHECK(headerbar->measure(constraints).natural_width == Catch::Approx(title_only_width));
+
+    // The subtitle reaches assistive technology as the row's description.
+    REQUIRE(headerbar->accessible() != nullptr);
+    CHECK(headerbar->accessible()->description() == "ok");
+}
