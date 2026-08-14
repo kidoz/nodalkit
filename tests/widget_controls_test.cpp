@@ -250,6 +250,20 @@ private:
     explicit SnapshotButton(std::string label) : nk::Button(std::move(label)) {}
 };
 
+class SnapshotSwitchRow : public nk::SwitchRow {
+public:
+    static std::shared_ptr<SnapshotSwitchRow> create(std::string title, std::string subtitle) {
+        return std::shared_ptr<SnapshotSwitchRow>(
+            new SnapshotSwitchRow(std::move(title), std::move(subtitle)));
+    }
+
+    void snapshot_for_test(nk::SnapshotContext& ctx) const { snapshot(ctx); }
+
+private:
+    SnapshotSwitchRow(std::string title, std::string subtitle)
+        : nk::SwitchRow(std::move(title), std::move(subtitle)) {}
+};
+
 class SnapshotHeaderbar : public nk::Headerbar {
 public:
     static std::shared_ptr<SnapshotHeaderbar> create(std::string title) {
@@ -489,6 +503,19 @@ TEST_CASE("Boxed-list rows wrap their control and keep focus on it",
         connection.disconnect();
     }
 
+    SECTION("A switch row paints its title, subtitle, and control") {
+        // Colors resolve during snapshot, so only rendering exercises that path.
+        auto row = SnapshotSwitchRow::create("Show Sidebar", "Keep the sidebar visible");
+        row->allocate({0.0F, 0.0F, 420.0F, 66.0F});
+        nk::SnapshotContext ctx;
+        row->snapshot_for_test(ctx);
+
+        const auto root = ctx.take_root();
+        REQUIRE(root != nullptr);
+        CHECK(find_text_node(*root, "Show Sidebar") != nullptr);
+        CHECK(find_text_node(*root, "Keep the sidebar visible") != nullptr);
+    }
+
     SECTION("Every row type carries the shared preferences-row style class") {
         // The subclasses add no colors of their own; they inherit the
         // preferences-row rule, so losing that class would silently unstyle them.
@@ -502,7 +529,7 @@ TEST_CASE("Boxed-list rows wrap their control and keep focus on it",
 }
 
 TEST_CASE("Headerbar stacks a subtitle under the title", "[widgets][headerbar][gnome]") {
-    auto headerbar = nk::Headerbar::create("Workspace");
+    auto headerbar = SnapshotHeaderbar::create("Workspace");
     CHECK(headerbar->subtitle().empty());
 
     const nk::Constraints constraints{0.0F, 0.0F, 800.0F, 46.0F};
@@ -521,6 +548,20 @@ TEST_CASE("Headerbar stacks a subtitle under the title", "[widgets][headerbar][g
     // The subtitle reaches assistive technology as the row's description.
     REQUIRE(headerbar->accessible() != nullptr);
     CHECK(headerbar->accessible()->description() == "ok");
+
+    SECTION("both lines actually paint") {
+        // Measuring is not enough: the subtitle's color is resolved during
+        // snapshot, so only rendering exercises that path.
+        headerbar->set_subtitle("Settings");
+        headerbar->allocate({0.0F, 0.0F, 800.0F, 46.0F});
+        nk::SnapshotContext ctx;
+        headerbar->snapshot_for_test(ctx);
+
+        const auto root = ctx.take_root();
+        REQUIRE(root != nullptr);
+        CHECK(find_text_node(*root, "Workspace") != nullptr);
+        CHECK(find_text_node(*root, "Settings") != nullptr);
+    }
 }
 
 TEST_CASE("AboutDialog omits empty fields and reports link activation", "[widgets][about][gnome]") {

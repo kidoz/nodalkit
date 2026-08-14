@@ -748,7 +748,11 @@ void Headerbar::snapshot(SnapshotContext& ctx) const {
                             impl_->subtitle,
                             subtitle_measured,
                             impl_->title_bounds.width,
-                            theme_color("subtitle-color", theme_color("text-secondary")),
+                            // The fallback-free overload takes a *property*
+                            // name, not a token name: "secondary-text-color" is
+                            // the property that resolves the text-secondary
+                            // token.
+                            theme_color("subtitle-color", theme_color("secondary-text-color")),
                             subtitle_font);
         }
     }
