@@ -189,6 +189,11 @@ int to_pixel_ceil(hb_position_t value) {
     return static_cast<int>(std::ceil(static_cast<double>(value) / 64.0));
 }
 
+// Upper bound for a single shaped-run bitmap. Real UI runs stay far below
+// this; exceeding it means hostile font sizes or string lengths, and a
+// multi-gigabyte allocation attempt would abort the process.
+constexpr std::size_t kMaxTextBitmapBytes = 256U * 1024U * 1024U;
+
 TextRunBounds compute_text_run_bounds(FT_Face face,
                                       const hb_glyph_info_t* glyph_infos,
                                       const hb_glyph_position_t* glyph_positions,
@@ -816,7 +821,16 @@ FreeTypeShaper::shape(std::string_view text, const FontDescriptor& font, Color c
         return result;
     }
 
-    std::vector<uint8_t> bitmap(static_cast<std::size_t>(bounds.width * bounds.height * 4), 0);
+    // Multiply in size_t: the int product overflows for extreme font sizes
+    // or string lengths, silently sizing the buffer smaller than what the
+    // blending code writes.
+    const auto bitmap_bytes =
+        static_cast<std::size_t>(bounds.width) * static_cast<std::size_t>(bounds.height) * 4U;
+    if (bitmap_bytes > kMaxTextBitmapBytes) {
+        hb_buffer_destroy(hb_buffer);
+        return result;
+    }
+    std::vector<uint8_t> bitmap(bitmap_bytes, 0);
 
     const auto cr = static_cast<uint8_t>(std::clamp(color.r, 0.0F, 1.0F) * 255.0F + 0.5F);
     const auto cg = static_cast<uint8_t>(std::clamp(color.g, 0.0F, 1.0F) * 255.0F + 0.5F);

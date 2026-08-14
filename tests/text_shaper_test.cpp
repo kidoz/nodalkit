@@ -497,4 +497,34 @@ TEST_CASE("Linux shaper renders non-Latin text via fontconfig fallback", "[text]
     }
     REQUIRE(alpha_sum > 0U);
 }
+
+TEST_CASE("Linux shaper refuses oversized runs instead of overflowing the byte count",
+          "[text][linux]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+
+    // 20k wide glyphs at a 192px em yield a run of several billion bytes. The
+    // byte count must be computed overflow-free and the run refused, rather
+    // than wrapping the int product (heap overflow) or attempting the
+    // multi-gigabyte allocation.
+    nk::FontDescriptor huge{
+        .family = "System",
+        .size = 144.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+    const std::string long_text(20000, 'M');
+    const auto refused = shaper->shape(long_text, huge, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+    REQUIRE(refused.bitmap_data() == nullptr);
+
+    // The shaper keeps working for sane sizes afterwards.
+    nk::FontDescriptor sane{
+        .family = "System",
+        .size = 16.0F,
+        .weight = nk::FontWeight::Regular,
+    };
+    const auto shaped = shaper->shape("NodalKit", sane, nk::Color{0.0F, 0.0F, 0.0F, 1.0F});
+    REQUIRE(shaped.bitmap_data() != nullptr);
+    REQUIRE(shaped.bitmap_width() > 0);
+    REQUIRE(shaped.bitmap_height() > 0);
+}
 #endif
