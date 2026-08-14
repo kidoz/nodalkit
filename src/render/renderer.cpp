@@ -229,7 +229,9 @@ void blend_pixel(std::vector<uint8_t>& pixels,
         return;
     }
 
-    const auto idx = static_cast<std::size_t>((y * pixel_width + x) * 4);
+    const auto idx = (static_cast<std::size_t>(y) * static_cast<std::size_t>(pixel_width) +
+                      static_cast<std::size_t>(x)) *
+                     4U;
 
     // Fast-path: opaque pixel overwrite
     if (alpha >= 0.999F) {
@@ -418,8 +420,8 @@ void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
         static_cast<std::size_t>(std::max(0, impl_->width)) *
         static_cast<std::size_t>(std::max(0, impl_->height));
 
-    const auto size =
-        static_cast<std::size_t>(std::max(0, impl_->width) * std::max(0, impl_->height) * 4);
+    const auto size = static_cast<std::size_t>(std::max(0, impl_->width)) *
+                      static_cast<std::size_t>(std::max(0, impl_->height)) * 4U;
     if (size_changed || impl_->pixels.size() != size) {
         impl_->pixels.resize(size);
         if (!impl_->pixels.empty()) {
@@ -487,8 +489,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
         }
 
         for (int y = y0; y < y1; ++y) {
-            auto* row =
-                impl_->pixels.data() + static_cast<std::size_t>((y * impl_->width + x0) * 4);
+            auto* row = impl_->pixels.data() +
+                        (static_cast<std::size_t>(y) * static_cast<std::size_t>(impl_->width) +
+                         static_cast<std::size_t>(x0)) *
+                            4U;
             std::memset(row, 0xFF, static_cast<std::size_t>(x1 - x0) * 4);
         }
     };
@@ -820,7 +824,10 @@ void SoftwareRenderer::render(const RenderNode& root) {
                         int sy = start_sy + (dy - dy0);
                         for (int dx = dx0; dx < dx1; ++dx) {
                             int sx = start_sx + (dx - dx0);
-                            auto src_idx = static_cast<std::size_t>((sy * bw + sx) * 4);
+                            auto src_idx =
+                                (static_cast<std::size_t>(sy) * static_cast<std::size_t>(bw) +
+                                 static_cast<std::size_t>(sx)) *
+                                4U;
                             uint8_t sr = bmp[src_idx + 0];
                             uint8_t sg = bmp[src_idx + 1];
                             uint8_t sb = bmp[src_idx + 2];
@@ -875,7 +882,8 @@ void SoftwareRenderer::render(const RenderNode& root) {
                     for (int dy = dest_y; dy < dest_b; ++dy) {
                         const float v = clamp01(((static_cast<float>(dy) + 0.5F) - b.y) * v_step);
                         const int sy = std::min(src_h - 1, static_cast<int>(v * src_h));
-                        const int row_offset = sy * src_w;
+                        const auto row_offset =
+                            static_cast<std::size_t>(sy) * static_cast<std::size_t>(src_w);
 
                         for (int dx = dest_x; dx < dest_r; ++dx) {
                             const float u =
