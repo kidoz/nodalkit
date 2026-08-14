@@ -452,12 +452,21 @@ public:
         }
 
         const auto split_view = split_view_.lock();
+        const auto headerbar = headerbar_.lock();
         if (split_view == nullptr || !split_view->is_collapsed()) {
+            // Wide layout: the window keeps its own title and the current page
+            // rides along as the subtitle, the GNOME title/subtitle heading.
+            if (headerbar != nullptr) {
+                headerbar->set_subtitle(titles_.at(index));
+            }
             return;
         }
         split_view->set_show_content(true);
-        if (const auto headerbar = headerbar_.lock()) {
+        if (headerbar != nullptr) {
+            // Compact layout: the page owns the title outright, so a subtitle
+            // would just repeat it.
             headerbar->set_title(titles_.at(index));
+            headerbar->set_subtitle({});
             headerbar->set_show_back_button(true);
         }
     }

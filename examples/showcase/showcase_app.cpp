@@ -896,6 +896,8 @@ int run_showcase(int argc, char** argv) {
             adaptive_split->set_show_content(false);
             headerbar->set_show_back_button(false);
             headerbar->set_title(profile.window_title);
+            // Back returns to the sidebar, where no page is on screen to name.
+            headerbar->set_subtitle({});
         });
 
         auto compact_layout = nk::Breakpoint::create({
@@ -915,6 +917,7 @@ int run_showcase(int argc, char** argv) {
                 adaptive_split->set_show_content(false);
                 headerbar->set_show_back_button(false);
                 headerbar->set_title(profile.window_title);
+                headerbar->set_subtitle({});
                 for (const auto& title : page_titles) {
                     title->set_visible(!compact);
                 }
