@@ -4,7 +4,10 @@
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
+#include <nk/widgets/combo_box.h>
 #include <nk/widgets/preferences.h>
+#include <nk/widgets/switch_widget.h>
+#include <nk/widgets/text_field.h>
 
 namespace nk {
 
@@ -211,6 +214,114 @@ void PreferencesRow::snapshot(SnapshotContext& ctx) const {
                         subtitle_font);
     }
     Widget::snapshot(ctx);
+}
+
+// --- Boxed-list row types -------------------------------------------------
+//
+// Each wraps one control as the row's suffix. Mouse events bubble from the hit
+// target upward, so a click landing on the control is consumed there and only a
+// click on the row background reaches the row — which is exactly the HIG rule
+// that the row background activates its control, with no double-toggle.
+
+struct SwitchRow::Impl {
+    std::shared_ptr<Switch> control;
+};
+
+std::shared_ptr<SwitchRow> SwitchRow::create(std::string title, std::string subtitle) {
+    return std::shared_ptr<SwitchRow>(new SwitchRow(std::move(title), std::move(subtitle)));
+}
+
+SwitchRow::SwitchRow(std::string title, std::string subtitle)
+    : PreferencesRow(std::move(title), std::move(subtitle)), impl_(std::make_unique<Impl>()) {
+    add_style_class("switch-row");
+    impl_->control = Switch::create();
+    set_suffix(impl_->control);
+    set_activatable(true);
+    // The control carries keyboard focus, not the row: the HIG wants users
+    // tabbing between controls rather than through inert rows.
+    set_focusable(false);
+    (void)on_activated().connect(
+        [this] { impl_->control->set_active(!impl_->control->is_active()); });
+}
+
+SwitchRow::~SwitchRow() = default;
+
+bool SwitchRow::is_active() const {
+    return impl_->control->is_active();
+}
+
+void SwitchRow::set_active(bool active) {
+    impl_->control->set_active(active);
+}
+
+Signal<bool>& SwitchRow::on_toggled() {
+    return impl_->control->on_toggled();
+}
+
+struct ComboRow::Impl {
+    std::shared_ptr<ComboBox> control;
+};
+
+std::shared_ptr<ComboRow> ComboRow::create(std::string title, std::string subtitle) {
+    return std::shared_ptr<ComboRow>(new ComboRow(std::move(title), std::move(subtitle)));
+}
+
+ComboRow::ComboRow(std::string title, std::string subtitle)
+    : PreferencesRow(std::move(title), std::move(subtitle)), impl_(std::make_unique<Impl>()) {
+    add_style_class("combo-row");
+    impl_->control = ComboBox::create();
+    set_suffix(impl_->control);
+}
+
+ComboRow::~ComboRow() = default;
+
+void ComboRow::set_items(std::vector<std::string> items) {
+    impl_->control->set_items(std::move(items));
+}
+
+int ComboRow::selected_index() const {
+    return impl_->control->selected_index();
+}
+
+void ComboRow::set_selected_index(int index) {
+    impl_->control->set_selected_index(index);
+}
+
+Signal<int>& ComboRow::on_selection_changed() {
+    return impl_->control->on_selection_changed();
+}
+
+struct EntryRow::Impl {
+    std::shared_ptr<TextField> control;
+};
+
+std::shared_ptr<EntryRow> EntryRow::create(std::string title, std::string subtitle) {
+    return std::shared_ptr<EntryRow>(new EntryRow(std::move(title), std::move(subtitle)));
+}
+
+EntryRow::EntryRow(std::string title, std::string subtitle)
+    : PreferencesRow(std::move(title), std::move(subtitle)), impl_(std::make_unique<Impl>()) {
+    add_style_class("entry-row");
+    impl_->control = TextField::create();
+    set_suffix(impl_->control);
+}
+
+EntryRow::~EntryRow() = default;
+
+std::string_view EntryRow::text() const {
+    return impl_->control->text();
+}
+
+void EntryRow::set_text(std::string text) {
+    impl_->control->set_text(std::move(text));
+}
+
+void EntryRow::set_placeholder(std::string placeholder) {
+    impl_->control->set_placeholder(std::move(placeholder));
+}
+
+Signal<std::string_view>& EntryRow::on_text_changed() {
+    return impl_->control->on_text_changed();
 }
 
 struct PreferencesGroup::Impl {

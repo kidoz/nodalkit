@@ -46,6 +46,69 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// A boxed-list row whose control is a switch.
+///
+/// Per the HIG, the row background activates the control: clicking anywhere on
+/// the row toggles the switch. Keyboard focus lands on the switch rather than
+/// the row, so users tab between controls instead of through inert rows.
+class SwitchRow : public PreferencesRow {
+public:
+    [[nodiscard]] static std::shared_ptr<SwitchRow> create(std::string title,
+                                                           std::string subtitle = {});
+    ~SwitchRow() override;
+
+    [[nodiscard]] bool is_active() const;
+    void set_active(bool active);
+    Signal<bool>& on_toggled();
+
+protected:
+    SwitchRow(std::string title, std::string subtitle);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+/// A boxed-list row whose control is a drop-down selection.
+class ComboRow : public PreferencesRow {
+public:
+    [[nodiscard]] static std::shared_ptr<ComboRow> create(std::string title,
+                                                          std::string subtitle = {});
+    ~ComboRow() override;
+
+    void set_items(std::vector<std::string> items);
+    [[nodiscard]] int selected_index() const;
+    void set_selected_index(int index);
+    Signal<int>& on_selection_changed();
+
+protected:
+    ComboRow(std::string title, std::string subtitle);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+/// A boxed-list row whose control is an inline text entry.
+class EntryRow : public PreferencesRow {
+public:
+    [[nodiscard]] static std::shared_ptr<EntryRow> create(std::string title,
+                                                          std::string subtitle = {});
+    ~EntryRow() override;
+
+    [[nodiscard]] std::string_view text() const;
+    void set_text(std::string text);
+    void set_placeholder(std::string placeholder);
+    Signal<std::string_view>& on_text_changed();
+
+protected:
+    EntryRow(std::string title, std::string subtitle);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 /// A titled collection of preference rows.
 class PreferencesGroup : public Widget {
 public:

@@ -15,6 +15,7 @@
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/color_well.h>
 #include <nk/widgets/headerbar.h>
+#include <nk/widgets/preferences.h>
 #include <nk/widgets/radio_button.h>
 #include <nk/widgets/search_field.h>
 #include <nk/widgets/slider.h>
@@ -428,4 +429,72 @@ TEST_CASE("Headerbar centers titles, follows decoration layout, and exposes back
     CHECK(saw_visible_close_at_start);
     CHECK(back_requested);
     connection.disconnect();
+}
+
+TEST_CASE("Boxed-list rows wrap their control and keep focus on it",
+          "[widgets][preferences][gnome]") {
+    SECTION("SwitchRow round-trips and reports toggles") {
+        auto row = nk::SwitchRow::create("Show Sidebar", "Keep the sidebar visible");
+        REQUIRE(row->suffix() != nullptr);
+        CHECK_FALSE(row->is_active());
+
+        bool observed = false;
+        auto connection = row->on_toggled().connect([&](bool active) { observed = active; });
+        row->set_active(true);
+        CHECK(row->is_active());
+        CHECK(observed);
+        connection.disconnect();
+    }
+
+    SECTION("Activating a SwitchRow's background toggles the control") {
+        // The HIG rule: a click on the row background activates its control.
+        auto row = nk::SwitchRow::create("Show Sidebar");
+        REQUIRE_FALSE(row->is_active());
+        row->on_activated().emit();
+        CHECK(row->is_active());
+        row->on_activated().emit();
+        CHECK_FALSE(row->is_active());
+    }
+
+    SECTION("The row itself stays out of the focus order") {
+        // Controls are focusable, rows are not, so users tab between controls
+        // rather than through inert rows.
+        auto row = nk::SwitchRow::create("Show Sidebar");
+        CHECK(row->is_activatable());
+        CHECK_FALSE(row->is_focusable());
+    }
+
+    SECTION("ComboRow round-trips its selection") {
+        auto row = nk::ComboRow::create("Accent", "Follows the system accent");
+        row->set_items({"Blue", "Teal", "Green"});
+        int selected = -1;
+        auto connection = row->on_selection_changed().connect([&](int index) { selected = index; });
+        row->set_selected_index(2);
+        CHECK(row->selected_index() == 2);
+        CHECK(selected == 2);
+        connection.disconnect();
+    }
+
+    SECTION("EntryRow round-trips its text") {
+        auto row = nk::EntryRow::create("Display Name");
+        row->set_placeholder("Your name");
+        std::string observed;
+        auto connection =
+            row->on_text_changed().connect([&](std::string_view text) { observed = text; });
+        row->set_text("NodalKit");
+        CHECK(row->text() == "NodalKit");
+        CHECK(observed == "NodalKit");
+        connection.disconnect();
+    }
+
+    SECTION("Every row type carries the shared preferences-row style class") {
+        // The subclasses add no colors of their own; they inherit the
+        // preferences-row rule, so losing that class would silently unstyle them.
+        for (const std::shared_ptr<nk::PreferencesRow>& row :
+             {std::static_pointer_cast<nk::PreferencesRow>(nk::SwitchRow::create("a")),
+              std::static_pointer_cast<nk::PreferencesRow>(nk::ComboRow::create("b")),
+              std::static_pointer_cast<nk::PreferencesRow>(nk::EntryRow::create("c"))}) {
+            CHECK(row->has_style_class("preferences-row"));
+        }
+    }
 }
