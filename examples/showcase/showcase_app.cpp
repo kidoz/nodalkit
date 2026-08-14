@@ -1009,11 +1009,19 @@ int run_showcase(int argc, char** argv) {
     (void)menu_bar->on_action().connect(handle_menu_action);
     (void)app.on_native_app_menu_action().connect(handle_menu_action);
 
-    (void)app.event_loop().set_interval(std::chrono::milliseconds(33), [&] {
-        ++frame_number;
-        auto frame = generate_test_pattern(kImageWidth, kImageHeight, frame_number);
+    // Reporting the desktop's reduced-motion preference in the preferences sheet
+    // is not the same as honoring it: render one static frame instead of running
+    // the animation timer when the user has asked for reduced motion.
+    if (app.system_preferences().motion == nk::MotionPreference::Reduced) {
+        auto frame = generate_test_pattern(kImageWidth, kImageHeight, 0);
         preview_canvas->update_pixel_buffer(frame.data(), kImageWidth, kImageHeight);
-    });
+    } else {
+        (void)app.event_loop().set_interval(std::chrono::milliseconds(33), [&] {
+            ++frame_number;
+            auto frame = generate_test_pattern(kImageWidth, kImageHeight, frame_number);
+            preview_canvas->update_pixel_buffer(frame.data(), kImageWidth, kImageHeight);
+        });
+    }
 
     (void)window.on_close_requested().connect([&] { app.quit(0); });
 
