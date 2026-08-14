@@ -5,11 +5,13 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <functional>
 #include <memory>
 #include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/types.h>
 #include <nk/render/render_node.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/widgets/about_dialog.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/calendar.h>
 #include <nk/widgets/check_box.h>
@@ -519,4 +521,39 @@ TEST_CASE("Headerbar stacks a subtitle under the title", "[widgets][headerbar][g
     // The subtitle reaches assistive technology as the row's description.
     REQUIRE(headerbar->accessible() != nullptr);
     CHECK(headerbar->accessible()->description() == "ok");
+}
+
+TEST_CASE("AboutDialog omits empty fields and reports link activation", "[widgets][about][gnome]") {
+    nk::AboutInfo info;
+    info.application_name = "NodalKit Showcase";
+    info.version = "0.1.0";
+    info.comments = "A C++23 desktop GUI toolkit";
+    info.website = "https://example.invalid/nodalkit";
+
+    auto about = nk::AboutDialog::create(info);
+    REQUIRE(about != nullptr);
+
+    // Activating a link row reports the URL rather than opening it: choosing a
+    // browser is the application's decision, not the toolkit's.
+    std::string activated;
+    auto connection =
+        about->on_link_activated().connect([&](std::string_view url) { activated = url; });
+
+    std::size_t activatable_rows = 0;
+    const std::function<void(const nk::Widget&)> visit = [&](const nk::Widget& widget) {
+        for (const auto& child : widget.children()) {
+            if (const auto* row = dynamic_cast<const nk::PreferencesRow*>(child.get());
+                row != nullptr && row->is_activatable()) {
+                ++activatable_rows;
+                const_cast<nk::PreferencesRow*>(row)->on_activated().emit();
+            }
+            visit(*child);
+        }
+    };
+    visit(about->dialog());
+
+    // Only the website was supplied, so "Report an Issue" must not appear.
+    CHECK(activatable_rows == 1);
+    CHECK(activated == "https://example.invalid/nodalkit");
+    connection.disconnect();
 }

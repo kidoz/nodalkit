@@ -65,6 +65,7 @@ nk_sources = files(
     'src/widgets/data_table.cpp',
     'src/widgets/tree_view.cpp',
     'src/widgets/grid_view.cpp',
+    'src/widgets/about_dialog.cpp',
     'src/widgets/dialog.cpp',
     'src/widgets/image_view.cpp',
     'src/widgets/menu_bar.cpp',
