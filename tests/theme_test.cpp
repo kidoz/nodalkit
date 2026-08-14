@@ -324,11 +324,14 @@ TEST_CASE("Shared rules resolve through the radius roles and metric tokens", "[t
     REQUIRE(resolved_metric(*gnome_light, {"segmented-control"}, "separator-inset") ==
             Catch::Approx(8.0F));
 
-    // Control min-heights come from the control-height token, so the dark
-    // family (34 px) no longer renders the light family's 36 px control height.
+    // Control min-heights come from the control-height token. GNOME controls are
+    // the same size in both schemes: color scheme is not a density signal, so
+    // switching to dark must not resize every control. (The earlier 36/34 split
+    // was an artifact of the GNOME family delegating to make_light/make_dark,
+    // which carry different control heights of their own.)
     REQUIRE(resolved_metric(*gnome_light, {"button"}, "min-height") == Catch::Approx(36.0F));
-    REQUIRE(resolved_metric(*gnome_dark, {"button"}, "min-height") == Catch::Approx(34.0F));
-    REQUIRE(resolved_metric(*gnome_dark, {"text-field"}, "min-height") == Catch::Approx(34.0F));
+    REQUIRE(resolved_metric(*gnome_dark, {"button"}, "min-height") == Catch::Approx(36.0F));
+    REQUIRE(resolved_metric(*gnome_dark, {"text-field"}, "min-height") == Catch::Approx(36.0F));
 }
 
 TEST_CASE("Deprecated surface token names alias their canonical replacements", "[theme]") {

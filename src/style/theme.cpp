@@ -1107,8 +1107,115 @@ std::unique_ptr<Theme> Theme::make_dark() {
 }
 
 std::unique_ptr<Theme> Theme::make_linux_gnome(ColorScheme color_scheme) {
-    auto theme = color_scheme == ColorScheme::Dark ? Theme::make_dark() : Theme::make_light();
+    const bool dark = color_scheme == ColorScheme::Dark;
+    auto theme = std::make_unique<Theme>(dark ? "GNOME Dark" : "GNOME Light");
     theme->set_token("theme-family", StyleValue{std::string("linux-gnome")});
+
+    // Palette values track the libadwaita named colors. Adwaita's neutrals are
+    // near-neutral with a faint violet cast — red and green stay equal and only
+    // blue lifts, by 3-4 points. Do not reintroduce a blue-grey ramp here: side
+    // by side with real GTK windows the extra blue is what reads as "not
+    // native".
+    if (dark) {
+        set_color_token(*theme, "window-bg", 34, 34, 38);      // #222226
+        set_color_token(*theme, "surface-panel", 46, 46, 50);  // #2e2e32 sidebar_bg
+        set_color_token(*theme, "surface-card", 46, 46, 50);   // #2e2e32 headerbar/card
+        set_color_token(*theme, "surface-raised", 54, 54, 58); // #36363a popover/dialog
+        set_color_token(*theme, "surface-hover", 62, 62, 67);
+        set_color_token(*theme, "surface-pressed", 70, 70, 76);
+        // Adwaita views are recessed, not raised: view_bg #1d1d20 is darker
+        // than the window it sits in. Lists and entries read as wells.
+        set_color_token(*theme, "surface-field", 29, 29, 32); // #1d1d20
+        set_color_token(*theme, "border-field", 72, 72, 78);
+        set_color_token(*theme, "border-subtle", 60, 60, 66);
+        set_color_token(*theme, "border-strong", 88, 88, 95);
+        set_color_token(*theme, "text-primary", 255, 255, 255);
+        set_color_token(*theme, "text-secondary", 255, 255, 255, 0.7F);
+        set_color_token(*theme, "text-disabled", 255, 255, 255, 0.45F);
+        // accent_color: lightened only so accent-colored *text* holds contrast
+        // against the dark ground.
+        set_color_token(*theme, "accent", 120, 174, 237); // #78aeed
+        set_color_token(*theme, "accent-soft", 53, 132, 228, 0.25F);
+        set_color_token(*theme, "focus-ring", 120, 174, 237);
+        set_color_token(*theme, "scrollbar-track", 46, 46, 50);
+        set_color_token(*theme, "scrollbar-thumb", 255, 255, 255, 0.4F);
+        set_color_token(*theme, "surface-osd", 56, 56, 61, 0.98F);
+        set_color_token(*theme, "text-osd", 255, 255, 255);
+    } else {
+        set_color_token(*theme, "window-bg", 250, 250, 251);     // #fafafb
+        set_color_token(*theme, "surface-panel", 235, 235, 237); // #ebebed sidebar_bg
+        set_color_token(*theme, "surface-card", 255, 255, 255);  // #ffffff headerbar/card
+        set_color_token(*theme, "surface-raised", 255, 255, 255);
+        set_color_token(*theme, "surface-hover", 240, 240, 243);
+        set_color_token(*theme, "surface-pressed", 230, 230, 234);
+        set_color_token(*theme, "surface-field", 255, 255, 255); // #ffffff view_bg
+        set_color_token(*theme, "border-field", 205, 205, 210);
+        set_color_token(*theme, "border-subtle", 222, 222, 227);
+        set_color_token(*theme, "border-strong", 192, 192, 199);
+        set_color_token(*theme, "text-primary", 0, 0, 6, 0.8F);
+        set_color_token(*theme, "text-secondary", 0, 0, 6, 0.55F);
+        set_color_token(*theme, "text-disabled", 0, 0, 6, 0.35F);
+        set_color_token(*theme, "accent", 28, 113, 216); // #1c71d8
+        set_color_token(*theme, "accent-soft", 53, 132, 228, 0.15F);
+        set_color_token(*theme, "focus-ring", 53, 132, 228);
+        set_color_token(*theme, "scrollbar-track", 235, 235, 237);
+        set_color_token(*theme, "scrollbar-thumb", 0, 0, 6, 0.4F);
+        // GNOME OSD role: tooltips and transient overlays stay dark in both
+        // schemes, matching the libadwaita osd style.
+        set_color_token(*theme, "surface-osd", 38, 38, 43, 0.95F);
+        set_color_token(*theme, "text-osd", 255, 255, 255);
+    }
+
+    // accent_bg_color is scheme-invariant in Adwaita: a suggested button is the
+    // same blue in light and dark, and only the text on it changes.
+    set_color_token(*theme, "accent-bg", 53, 132, 228); // #3584e4
+    if (dark) {
+        set_color_token(*theme, "accent-hover", 98, 158, 236);
+    } else {
+        set_color_token(*theme, "accent-hover", 40, 121, 223);
+    }
+    set_color_token(*theme, "accent-pressed", 26, 95, 180);
+    set_color_token(*theme, "accent-contrast", 255, 255, 255);
+
+    install_legacy_token_aliases(*theme);
+    // Adwaita gives popovers and dialogs their own step above the headerbar in
+    // dark; the generic aliases collapse them onto the card surface.
+    set_alias_token(*theme, "popover-bg", "surface-raised");
+    set_alias_token(*theme, "dialog-bg", "surface-raised");
+    install_selection_tokens(*theme, "accent-soft", "text-primary");
+
+    theme->set_token("accent-source", StyleValue{std::string("theme")});
+    theme->set_token("motion-mode", StyleValue{std::string("normal")});
+    theme->set_token("transparency-mode", StyleValue{std::string("allowed")});
+    theme->set_token("density", StyleValue{std::string("standard")});
+    // GNOME overlay scrollbars: slim thumb over content, no persistent track.
+    theme->set_token("scrollbar-mode", StyleValue{std::string("overlay")});
+
+    set_metric_token(*theme, "spacing-xs", 4.0F);
+    set_metric_token(*theme, "spacing-sm", 8.0F);
+    set_metric_token(*theme, "spacing-md", 12.0F);
+    set_metric_token(*theme, "spacing-lg", 16.0F);
+    set_metric_token(*theme, "spacing-xl", 24.0F);
+    install_type_scale_tokens(*theme, 18.0F, 13.0F, 12.0F, 17.0F);
+    set_metric_token(*theme, "control-height", 36.0F);
+    set_metric_token(*theme, "menu-height", 30.0F);
+    set_metric_token(*theme, "status-height", 28.0F);
+    // GNOME radius roles: generously rounded controls and cards.
+    set_metric_token(*theme, "radius-control", 10.0F);
+    set_metric_token(*theme, "radius-card", 12.0F);
+    set_metric_token(*theme, "radius-popup", 12.0F);
+    set_metric_token(*theme, "radius-selection", 8.0F);
+    set_metric_token(*theme, "radius-segment", 12.0F);
+    set_metric_token(*theme, "radius-image", 14.0F);
+    set_metric_token(*theme, "radius-image-content", 12.0F);
+    set_metric_token(*theme, "padding-control-x", 16.0F);
+    set_metric_token(*theme, "padding-control-y", 9.0F);
+    set_metric_token(*theme, "control-min-width", 82.0F);
+    set_metric_token(*theme, "segment-track-padding", 4.0F);
+    install_shared_metric_tokens(*theme);
+
+    install_shared_rules(*theme);
+
     return theme;
 }
 
