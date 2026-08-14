@@ -12,9 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install clang-format
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-format
+        # Pinned: the distro package floats across LLVM releases, whose
+        # formatting differs, so an unpinned check fails on untouched files.
+        # Keep this in step with the clang-format developers run locally.
+        run: pipx install clang-format==22.1.8
       - name: Check formatting
         run: |
           find src include tests examples -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
