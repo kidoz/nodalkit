@@ -26,6 +26,7 @@
 #include <nk/render/image_node.h>
 #include <nk/style/theme_selection.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/about_dialog.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/clamp.h>
 #include <nk/widgets/combo_box.h>
@@ -578,6 +579,30 @@ int run_showcase(int argc, char** argv) {
         show_linux_toast("Property binding synchronized");
     });
 
+    // Kept alive across presentations so the link-activation connection outlives
+    // the menu callback that opened it.
+    std::shared_ptr<nk::AboutDialog> about_dialog;
+    auto present_about_dialog = [&] {
+        if (about_dialog == nullptr) {
+            nk::AboutInfo about;
+            about.application_name = "NodalKit Showcase";
+            about.version = "0.1.0";
+            about.comments = "A C++23 desktop GUI toolkit";
+            about.developer_name = "NodalKit Maintainers";
+            about.website = "https://github.com/nodalkit/nodalkit";
+            about.issue_url = "https://github.com/nodalkit/nodalkit/issues";
+            about.copyright = "© 2026 NodalKit Maintainers";
+            about.license = "MIT";
+            about_dialog = nk::AboutDialog::create(std::move(about));
+            (void)about_dialog->on_link_activated().connect([&](std::string_view url) {
+                // Opening a browser is the application's call, not the toolkit's.
+                status_bar->set_segment(0, "Link: " + std::string(url));
+                show_linux_toast("Copied link to the status bar");
+            });
+        }
+        about_dialog->present(window);
+    };
+
     auto present_preferences_sheet = [&] {
         auto dialog = is_linux_wayland
                           ? nk::Dialog::create("System Integration")
@@ -941,13 +966,9 @@ int run_showcase(int argc, char** argv) {
             case 2:
                 present_preferences_sheet();
                 break;
-            case 3: {
-                auto dialog = nk::Dialog::create(
-                    "About NodalKit", "NodalKit Showcase v0.1.0\nA C++23 desktop GUI toolkit");
-                dialog->add_button("Close", nk::DialogResponse::Accept);
-                dialog->present(window);
+            case 3:
+                present_about_dialog();
                 break;
-            }
             case 5:
                 app.quit(0);
                 break;
@@ -1033,10 +1054,7 @@ int run_showcase(int argc, char** argv) {
         }
 
         if (action == "help.about") {
-            auto dialog = nk::Dialog::create(
-                "About", "NodalKit Showcase v0.1.0\nA C++23 desktop GUI toolkit");
-            dialog->add_button("OK", nk::DialogResponse::Accept);
-            dialog->present(window);
+            present_about_dialog();
             return;
         }
 
