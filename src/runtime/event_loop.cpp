@@ -54,7 +54,6 @@ thread_local EventLoop* current_event_loop = nullptr;
 
 constexpr std::size_t kTraceEventHistoryLimit = 256;
 
-
 double elapsed_ms(std::chrono::steady_clock::time_point start,
                   std::chrono::steady_clock::time_point end) {
     return std::chrono::duration<double, std::milli>(end - start).count();
@@ -101,7 +100,6 @@ EventLoop::~EventLoop() {
 EventLoop* EventLoop::current() {
     return current_event_loop;
 }
-
 
 int EventLoop::run() {
     impl_->running = true;
@@ -231,29 +229,52 @@ bool EventLoop::poll() {
         did_work = true;
     }
 
-    // Fire ready timers.
-    for (auto& t : impl_->timers) {
-        if (t.cancelled) {
+    // Fire ready timers. Iterate a snapshot of the due timers: a callback may
+    // schedule or cancel timers, or run a nested poll(), all of which mutate
+    // impl_->timers and would invalidate live iterators. Each entry is
+    // fenced (one-shots consumed, intervals parked at a far-future fire_at)
+    // so a nested poll() cannot fire it again, then re-found by handle after
+    // the callback so cancellation from inside a callback is honored.
+    const auto find_timer = [](std::vector<Impl::TimerEntry>& timers, uint64_t id) {
+        for (auto& t : timers) {
+            if (t.handle.id == id) {
+                return &t;
+            }
+        }
+        return static_cast<Impl::TimerEntry*>(nullptr);
+    };
+    std::vector<Impl::TimerEntry> due;
+    due.reserve(impl_->timers.size());
+    for (const auto& t : impl_->timers) {
+        if (!t.cancelled && now >= t.fire_at) {
+            due.push_back(t);
+        }
+    }
+    for (auto& firing : due) {
+        auto* live = find_timer(impl_->timers, firing.handle.id);
+        if (live == nullptr || live->cancelled) {
             continue;
         }
-        if (now >= t.fire_at) {
-            const auto started_at = std::chrono::steady_clock::now();
-            t.callback();
-            const auto finished_at = std::chrono::steady_clock::now();
-            append_trace_event(impl_->trace_events,
-                               impl_->diagnostics_origin,
-                               t.interval.count() > 0 ? "interval" : "timeout",
-                               "event-loop-timer",
-                               started_at,
-                               finished_at,
-                               "lateness_ms=" + std::to_string(elapsed_ms(t.fire_at, started_at)),
-                               t.source_label);
-            did_work = true;
-            if (t.interval.count() > 0) {
-                t.fire_at = now + t.interval;
-            } else {
-                t.cancelled = true;
-            }
+        const bool is_interval = live->interval.count() > 0;
+        live->fire_at = std::chrono::steady_clock::time_point::max();
+        if (!is_interval) {
+            live->cancelled = true;
+        }
+        const auto started_at = std::chrono::steady_clock::now();
+        firing.callback();
+        const auto finished_at = std::chrono::steady_clock::now();
+        append_trace_event(impl_->trace_events,
+                           impl_->diagnostics_origin,
+                           is_interval ? "interval" : "timeout",
+                           "event-loop-timer",
+                           started_at,
+                           finished_at,
+                           "lateness_ms=" + std::to_string(elapsed_ms(firing.fire_at, started_at)),
+                           firing.source_label);
+        did_work = true;
+        if (auto* rearmed = find_timer(impl_->timers, firing.handle.id);
+            rearmed != nullptr && is_interval && !rearmed->cancelled) {
+            rearmed->fire_at = now + rearmed->interval;
         }
     }
 
