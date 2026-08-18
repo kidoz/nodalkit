@@ -1476,6 +1476,9 @@ void WaylandInput::clipboard_source_cancelled(void* data, wl_data_source* source
         self->clipboard_source_ = nullptr;
     }
     self->owns_clipboard_ = false;
+    // The protocol expects the client to destroy the data source once
+    // cancelled; its event stream has ended, so this is the last reference.
+    wl_data_source_destroy(source);
 }
 
 void WaylandInput::clipboard_source_dnd_drop_performed(void* /*data*/, wl_data_source* /*source*/) {
@@ -1557,6 +1560,9 @@ void WaylandInput::primary_selection_source_cancelled(void* data,
         self->primary_selection_source_ = nullptr;
     }
     self->owns_primary_selection_ = false;
+    // The protocol expects the client to destroy the source once cancelled;
+    // its event stream has ended, so this is the last reference.
+    zwp_primary_selection_source_v1_destroy(source);
 }
 
 } // namespace nk
