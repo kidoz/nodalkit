@@ -612,6 +612,14 @@ void WaylandSurface::handle_configure(int width, int height, const wl_array* sta
         width_ = width;
         height_ = height;
 
+        // Under fractional scaling the compositor-driven size change must
+        // also update the viewport destination, or the next (larger) buffer
+        // is mapped into the stale logical size and the content appears
+        // squashed. resize() does this for app-driven resizes.
+        if (fractional_scale_ > 0.0F && viewport_ != nullptr) {
+            wp_viewport_set_destination(viewport_, width_, height_);
+        }
+
         WindowEvent we{};
         we.type = WindowEvent::Type::Resize;
         we.width = width;
