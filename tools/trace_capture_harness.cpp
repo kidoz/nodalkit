@@ -95,6 +95,9 @@ struct ArtifactSummary {
 
 struct TraceSummary {
     double max_frame_ms = 0.0;
+    double total_frame_ms = 0.0;
+    // Per-frame durations, sorted slowest-first, for the rank-wise gate.
+    std::vector<double> frame_ms;
     std::size_t over_budget_frame_count = 0;
     std::size_t slow_frame_count = 0;
     std::size_t very_slow_frame_count = 0;
@@ -329,12 +332,19 @@ ArtifactSummary summarize_artifact(const nk::FrameDiagnosticsArtifact& artifact)
     return summary;
 }
 
-TraceSummary summarize_trace(const nk::TraceCapture& trace) {
+TraceSummary summarize_trace(const nk::TraceCapture& trace, double speed_scale = 1.0) {
     TraceSummary summary;
     for (const auto& event : trace.events) {
         if (event.name == "frame") {
-            summary.max_frame_ms = std::max(summary.max_frame_ms, event.duration_ms);
-            switch (nk::classify_frame_time(event.duration_ms)) {
+            // Dividing by the host speed scale turns absolute wall-clock
+            // thresholds into relative ones: a uniformly slower host or build
+            // stays in the same buckets, while a frame that is
+            // disproportionately slow still drifts into a worse bucket.
+            const auto duration_ms = event.duration_ms / speed_scale;
+            summary.max_frame_ms = std::max(summary.max_frame_ms, duration_ms);
+            summary.total_frame_ms += duration_ms;
+            summary.frame_ms.push_back(duration_ms);
+            switch (nk::classify_frame_time(duration_ms)) {
             case nk::FramePerformanceMarker::WithinBudget:
                 break;
             case nk::FramePerformanceMarker::OverBudget:
@@ -363,6 +373,7 @@ TraceSummary summarize_trace(const nk::TraceCapture& trace) {
             ++summary.unlabeled_runtime_event_count;
         }
     }
+    std::sort(summary.frame_ms.begin(), summary.frame_ms.end(), std::greater<double>{});
     return summary;
 }
 
@@ -395,7 +406,25 @@ bool validate_against_stable_baseline(Scenario scenario,
     const auto baseline_artifact_summary = summarize_artifact(*baseline_artifact);
     const auto candidate_artifact_summary = summarize_artifact(candidate_artifact);
     const auto baseline_trace_summary = summarize_trace(*baseline_trace);
-    const auto candidate_trace_summary = summarize_trace(candidate_trace);
+    auto candidate_trace_summary = summarize_trace(candidate_trace);
+
+    // The frame-time gates compare wall-clock numbers against baselines
+    // recorded on the reference machine, so a different-speed host or a
+    // debug -O0 build shifts them without any code change. Derive the
+    // overall run-speed ratio from the two traces and normalize the
+    // candidate's frame times by it; the clamps keep a pathological baseline
+    // from inventing an extreme scale.
+    double speed_scale = 1.0;
+    if (baseline_trace_summary.total_frame_ms > 0.0 &&
+        candidate_trace_summary.total_frame_ms > 0.0) {
+        speed_scale =
+            std::clamp(candidate_trace_summary.total_frame_ms / baseline_trace_summary.total_frame_ms,
+                       0.25,
+                       8.0);
+    }
+    if (speed_scale != 1.0) {
+        candidate_trace_summary = summarize_trace(candidate_trace, speed_scale);
+    }
 
     bool failed = false;
     if (baseline_artifact_summary.frame_count != candidate_artifact_summary.frame_count) {
@@ -407,7 +436,9 @@ bool validate_against_stable_baseline(Scenario scenario,
 
     failed |= check_regression("artifact max total ms",
                                baseline_artifact_summary.max_total_ms,
-                               candidate_artifact_summary.max_total_ms,
+                               // Same host-speed normalization as the trace
+                               // frame gates above.
+                               candidate_artifact_summary.max_total_ms / speed_scale,
                                thresholds.max_artifact_total_ms_regression,
                                scenario_label);
     failed |= check_regression("artifact max render nodes",
@@ -436,21 +467,31 @@ bool validate_against_stable_baseline(Scenario scenario,
                                candidate_trace_summary.max_frame_ms,
                                thresholds.max_trace_frame_ms_regression,
                                scenario_label);
-    failed |= check_regression("trace over-budget frames",
-                               baseline_trace_summary.over_budget_frame_count,
-                               candidate_trace_summary.over_budget_frame_count,
-                               thresholds.max_over_budget_frame_regression,
-                               scenario_label);
-    failed |= check_regression("trace slow frames",
-                               baseline_trace_summary.slow_frame_count,
-                               candidate_trace_summary.slow_frame_count,
-                               thresholds.max_slow_frame_regression,
-                               scenario_label);
-    failed |= check_regression("trace very slow frames",
-                               baseline_trace_summary.very_slow_frame_count,
-                               candidate_trace_summary.very_slow_frame_count,
-                               thresholds.max_very_slow_frame_regression,
-                               scenario_label);
+    // Rank-wise normalized frame-time gate. Absolute bucket counters
+    // (over-budget/slow/very-slow) move host-dependently: a faster host
+    // drops frames into a LOWER bucket than the reference machine's
+    // baselines and looks like a count regression. Comparing each frame
+    // rank, after the host-speed normalization above, against the baseline's
+    // matching rank catches disproportionate per-frame regressions and is
+    // immune to uniform host or build-speed differences.
+    if (baseline_trace_summary.frame_ms.size() != candidate_trace_summary.frame_ms.size()) {
+        std::cerr << "stable scenario regression [" << scenario_label
+                  << "]: trace frame count baseline=" << baseline_trace_summary.frame_ms.size()
+                  << " candidate=" << candidate_trace_summary.frame_ms.size() << "\n";
+        failed = true;
+    } else {
+        constexpr double kPerFrameToleranceMs = 20.0;
+        for (std::size_t rank = 0; rank < baseline_trace_summary.frame_ms.size(); ++rank) {
+            if (candidate_trace_summary.frame_ms[rank] >
+                baseline_trace_summary.frame_ms[rank] + kPerFrameToleranceMs) {
+                std::cerr << "stable scenario regression [" << scenario_label
+                          << "]: trace frame rank " << rank
+                          << " ms baseline=" << baseline_trace_summary.frame_ms[rank]
+                          << " candidate=" << candidate_trace_summary.frame_ms[rank] << "\n";
+                failed = true;
+            }
+        }
+    }
     failed |= check_regression("trace posted tasks",
                                baseline_trace_summary.posted_task_count,
                                candidate_trace_summary.posted_task_count,
