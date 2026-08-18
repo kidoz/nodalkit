@@ -1,5 +1,5 @@
-#include <nk/model/abstract_tree_model.h>
 #include <memory>
+#include <nk/model/abstract_tree_model.h>
 
 namespace nk {
 
@@ -24,14 +24,33 @@ std::string AbstractTreeModel::display_text(const TreeIndex& /*index*/) const {
     return "";
 }
 
-Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_about_to_insert() { return impl_->nodes_about_to_insert; }
-Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_inserted() { return impl_->nodes_inserted; }
-Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_about_to_remove() { return impl_->nodes_about_to_remove; }
-Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_removed() { return impl_->nodes_removed; }
-Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_data_changed() { return impl_->data_changed; }
-Signal<>& AbstractTreeModel::on_model_reset() { return impl_->model_reset; }
+Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_about_to_insert() {
+    return impl_->nodes_about_to_insert;
+}
 
-void AbstractTreeModel::begin_insert_nodes(const TreeIndex& parent, std::size_t first, std::size_t count) {
+Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_inserted() {
+    return impl_->nodes_inserted;
+}
+
+Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_about_to_remove() {
+    return impl_->nodes_about_to_remove;
+}
+
+Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_nodes_removed() {
+    return impl_->nodes_removed;
+}
+
+Signal<TreeIndex, std::size_t, std::size_t>& AbstractTreeModel::on_data_changed() {
+    return impl_->data_changed;
+}
+
+Signal<>& AbstractTreeModel::on_model_reset() {
+    return impl_->model_reset;
+}
+
+void AbstractTreeModel::begin_insert_nodes(const TreeIndex& parent,
+                                           std::size_t first,
+                                           std::size_t count) {
     impl_->pending_parent = parent;
     impl_->pending_first = first;
     impl_->pending_count = count;
@@ -42,7 +61,9 @@ void AbstractTreeModel::end_insert_nodes() {
     impl_->nodes_inserted.emit(impl_->pending_parent, impl_->pending_first, impl_->pending_count);
 }
 
-void AbstractTreeModel::begin_remove_nodes(const TreeIndex& parent, std::size_t first, std::size_t count) {
+void AbstractTreeModel::begin_remove_nodes(const TreeIndex& parent,
+                                           std::size_t first,
+                                           std::size_t count) {
     impl_->pending_parent = parent;
     impl_->pending_first = first;
     impl_->pending_count = count;
@@ -53,7 +74,9 @@ void AbstractTreeModel::end_remove_nodes() {
     impl_->nodes_removed.emit(impl_->pending_parent, impl_->pending_first, impl_->pending_count);
 }
 
-void AbstractTreeModel::notify_data_changed(const TreeIndex& parent, std::size_t first, std::size_t last) {
+void AbstractTreeModel::notify_data_changed(const TreeIndex& parent,
+                                            std::size_t first,
+                                            std::size_t last) {
     impl_->data_changed.emit(parent, first, last);
 }
 

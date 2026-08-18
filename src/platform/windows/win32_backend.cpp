@@ -1,4 +1,5 @@
 #include "win32_backend.h"
+
 #include "win32_spell_checker.h"
 
 #include <algorithm>
@@ -8,12 +9,12 @@
 #include <filesystem>
 #include <memory>
 #include <nk/foundation/logging.h>
+#include <nk/platform/application.h>
 #include <nk/platform/drag_drop.h>
 #include <nk/platform/native_menu.h>
 #include <nk/platform/spell_checker.h>
 #include <nk/platform/window.h>
 #include <nk/runtime/event_loop.h>
-#include <nk/platform/application.h>
 #include <ranges>
 #include <span>
 #include <string>
@@ -22,14 +23,13 @@
 #include <vector>
 
 // windows.h must precede the Windows-specific headers below.
-#include <windows.h>
-
 #include <dwmapi.h>
 #include <objbase.h>
 #include <ole2.h>
 #include <shellapi.h>
-#include <shobjidl.h>
 #include <shellscalingapi.h>
+#include <shobjidl.h>
+#include <windows.h>
 #include <windowsx.h>
 #include <winternl.h>
 #include <wrl/client.h>
@@ -445,11 +445,8 @@ OpenFileDialogResult show_modern_open_file_dialog(std::string_view title,
     }
 
     void* raw_dialog = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog,
-                                  nullptr,
-                                  CLSCTX_INPROC_SERVER,
-                                  IID_IFileOpenDialog,
-                                  &raw_dialog);
+    HRESULT hr = CoCreateInstance(
+        CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileOpenDialog, &raw_dialog);
     if (FAILED(hr)) {
         return Unexpected(FileDialogError::Failed);
     }
@@ -504,11 +501,8 @@ SaveFileDialogResult show_modern_save_file_dialog(const SaveFileDialogOptions& o
     }
 
     void* raw_dialog = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_FileSaveDialog,
-                                  nullptr,
-                                  CLSCTX_INPROC_SERVER,
-                                  IID_IFileSaveDialog,
-                                  &raw_dialog);
+    HRESULT hr = CoCreateInstance(
+        CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_IFileSaveDialog, &raw_dialog);
     if (FAILED(hr)) {
         return Unexpected(FileDialogError::Failed);
     }
@@ -623,36 +617,152 @@ RECT logical_client_rect_for_window(Size logical_size,
 /// handled separately below).
 [[nodiscard]] std::wstring shortcut_label_for_key(KeyCode key) {
     switch (key) {
-    case KeyCode::A: return L"A"; case KeyCode::B: return L"B"; case KeyCode::C: return L"C";
-    case KeyCode::D: return L"D"; case KeyCode::E: return L"E"; case KeyCode::F: return L"F";
-    case KeyCode::G: return L"G"; case KeyCode::H: return L"H"; case KeyCode::I: return L"I";
-    case KeyCode::J: return L"J"; case KeyCode::K: return L"K"; case KeyCode::L: return L"L";
-    case KeyCode::M: return L"M"; case KeyCode::N: return L"N"; case KeyCode::O: return L"O";
-    case KeyCode::P: return L"P"; case KeyCode::Q: return L"Q"; case KeyCode::R: return L"R";
-    case KeyCode::S: return L"S"; case KeyCode::T: return L"T"; case KeyCode::U: return L"U";
-    case KeyCode::V: return L"V"; case KeyCode::W: return L"W"; case KeyCode::X: return L"X";
-    case KeyCode::Y: return L"Y"; case KeyCode::Z: return L"Z";
-    case KeyCode::Num0: return L"0"; case KeyCode::Num1: return L"1"; case KeyCode::Num2: return L"2";
-    case KeyCode::Num3: return L"3"; case KeyCode::Num4: return L"4"; case KeyCode::Num5: return L"5";
-    case KeyCode::Num6: return L"6"; case KeyCode::Num7: return L"7"; case KeyCode::Num8: return L"8";
-    case KeyCode::Num9: return L"9";
-    case KeyCode::Return: return L"Enter"; case KeyCode::Escape: return L"Esc";
-    case KeyCode::Backspace: return L"Backspace"; case KeyCode::Tab: return L"Tab";
-    case KeyCode::Space: return L"Space"; case KeyCode::Delete: return L"Delete";
-    case KeyCode::Left: return L"Left"; case KeyCode::Right: return L"Right";
-    case KeyCode::Up: return L"Up"; case KeyCode::Down: return L"Down";
-    case KeyCode::Home: return L"Home"; case KeyCode::End: return L"End";
-    case KeyCode::PageUp: return L"PageUp"; case KeyCode::PageDown: return L"PageDown";
-    case KeyCode::Minus: return L"-"; case KeyCode::Equals: return L"=";
-    case KeyCode::LeftBracket: return L"["; case KeyCode::RightBracket: return L"]";
-    case KeyCode::Backslash: return L"\\"; case KeyCode::Semicolon: return L";";
-    case KeyCode::Apostrophe: return L"'"; case KeyCode::Comma: return L",";
-    case KeyCode::Period: return L"."; case KeyCode::Slash: return L"/";
-    case KeyCode::F1: return L"F1"; case KeyCode::F2: return L"F2"; case KeyCode::F3: return L"F3";
-    case KeyCode::F4: return L"F4"; case KeyCode::F5: return L"F5"; case KeyCode::F6: return L"F6";
-    case KeyCode::F7: return L"F7"; case KeyCode::F8: return L"F8"; case KeyCode::F9: return L"F9";
-    case KeyCode::F10: return L"F10"; case KeyCode::F11: return L"F11"; case KeyCode::F12: return L"F12";
-    default: return {};
+    case KeyCode::A:
+        return L"A";
+    case KeyCode::B:
+        return L"B";
+    case KeyCode::C:
+        return L"C";
+    case KeyCode::D:
+        return L"D";
+    case KeyCode::E:
+        return L"E";
+    case KeyCode::F:
+        return L"F";
+    case KeyCode::G:
+        return L"G";
+    case KeyCode::H:
+        return L"H";
+    case KeyCode::I:
+        return L"I";
+    case KeyCode::J:
+        return L"J";
+    case KeyCode::K:
+        return L"K";
+    case KeyCode::L:
+        return L"L";
+    case KeyCode::M:
+        return L"M";
+    case KeyCode::N:
+        return L"N";
+    case KeyCode::O:
+        return L"O";
+    case KeyCode::P:
+        return L"P";
+    case KeyCode::Q:
+        return L"Q";
+    case KeyCode::R:
+        return L"R";
+    case KeyCode::S:
+        return L"S";
+    case KeyCode::T:
+        return L"T";
+    case KeyCode::U:
+        return L"U";
+    case KeyCode::V:
+        return L"V";
+    case KeyCode::W:
+        return L"W";
+    case KeyCode::X:
+        return L"X";
+    case KeyCode::Y:
+        return L"Y";
+    case KeyCode::Z:
+        return L"Z";
+    case KeyCode::Num0:
+        return L"0";
+    case KeyCode::Num1:
+        return L"1";
+    case KeyCode::Num2:
+        return L"2";
+    case KeyCode::Num3:
+        return L"3";
+    case KeyCode::Num4:
+        return L"4";
+    case KeyCode::Num5:
+        return L"5";
+    case KeyCode::Num6:
+        return L"6";
+    case KeyCode::Num7:
+        return L"7";
+    case KeyCode::Num8:
+        return L"8";
+    case KeyCode::Num9:
+        return L"9";
+    case KeyCode::Return:
+        return L"Enter";
+    case KeyCode::Escape:
+        return L"Esc";
+    case KeyCode::Backspace:
+        return L"Backspace";
+    case KeyCode::Tab:
+        return L"Tab";
+    case KeyCode::Space:
+        return L"Space";
+    case KeyCode::Delete:
+        return L"Delete";
+    case KeyCode::Left:
+        return L"Left";
+    case KeyCode::Right:
+        return L"Right";
+    case KeyCode::Up:
+        return L"Up";
+    case KeyCode::Down:
+        return L"Down";
+    case KeyCode::Home:
+        return L"Home";
+    case KeyCode::End:
+        return L"End";
+    case KeyCode::PageUp:
+        return L"PageUp";
+    case KeyCode::PageDown:
+        return L"PageDown";
+    case KeyCode::Minus:
+        return L"-";
+    case KeyCode::Equals:
+        return L"=";
+    case KeyCode::LeftBracket:
+        return L"[";
+    case KeyCode::RightBracket:
+        return L"]";
+    case KeyCode::Backslash:
+        return L"\\";
+    case KeyCode::Semicolon:
+        return L";";
+    case KeyCode::Apostrophe:
+        return L"'";
+    case KeyCode::Comma:
+        return L",";
+    case KeyCode::Period:
+        return L".";
+    case KeyCode::Slash:
+        return L"/";
+    case KeyCode::F1:
+        return L"F1";
+    case KeyCode::F2:
+        return L"F2";
+    case KeyCode::F3:
+        return L"F3";
+    case KeyCode::F4:
+        return L"F4";
+    case KeyCode::F5:
+        return L"F5";
+    case KeyCode::F6:
+        return L"F6";
+    case KeyCode::F7:
+        return L"F7";
+    case KeyCode::F8:
+        return L"F8";
+    case KeyCode::F9:
+        return L"F9";
+    case KeyCode::F10:
+        return L"F10";
+    case KeyCode::F11:
+        return L"F11";
+    case KeyCode::F12:
+        return L"F12";
+    default:
+        return {};
     }
 }
 
@@ -681,7 +791,9 @@ RECT logical_client_rect_for_window(Size logical_size,
 /// Recursively append NativeMenuItem entries to a popup HMENU. Each leaf with an
 /// action_name gets a unique command id recorded in command_actions so WM_COMMAND
 /// can dispatch it through the shared NativeMenuActionHandler.
-void build_win32_menu_popup(HMENU popup, std::span<const NativeMenuItem> items, UINT& next_command,
+void build_win32_menu_popup(HMENU popup,
+                            std::span<const NativeMenuItem> items,
+                            UINT& next_command,
                             std::unordered_map<UINT, std::string>& command_actions) {
     for (const auto& item : items) {
         if (item.separator) {
@@ -691,8 +803,10 @@ void build_win32_menu_popup(HMENU popup, std::span<const NativeMenuItem> items, 
         if (!item.children.empty()) {
             const HMENU submenu = CreatePopupMenu();
             build_win32_menu_popup(submenu, item.children, next_command, command_actions);
-            AppendMenuW(popup, MF_POPUP | (item.enabled ? MF_ENABLED : MF_GRAYED),
-                        reinterpret_cast<UINT_PTR>(submenu), utf8_to_wide(item.label).c_str());
+            AppendMenuW(popup,
+                        MF_POPUP | (item.enabled ? MF_ENABLED : MF_GRAYED),
+                        reinterpret_cast<UINT_PTR>(submenu),
+                        utf8_to_wide(item.label).c_str());
             continue;
         }
         const UINT command_id = next_command++;
@@ -700,8 +814,8 @@ void build_win32_menu_popup(HMENU popup, std::span<const NativeMenuItem> items, 
         if (item.shortcut.has_value()) {
             label += shortcut_suffix(*item.shortcut);
         }
-        const UINT flags = MF_STRING | (item.enabled && !item.action_name.empty() ? MF_ENABLED
-                                                                                  : MF_GRAYED);
+        const UINT flags =
+            MF_STRING | (item.enabled && !item.action_name.empty() ? MF_ENABLED : MF_GRAYED);
         AppendMenuW(popup, flags, command_id, label.c_str());
         if (!item.action_name.empty()) {
             command_actions.emplace(command_id, item.action_name);
@@ -719,7 +833,9 @@ void build_win32_menu_popup(HMENU popup, std::span<const NativeMenuItem> items, 
     for (const auto& menu : menus) {
         const HMENU popup = CreatePopupMenu();
         build_win32_menu_popup(popup, menu.items, next_command, command_actions);
-        AppendMenuW(bar, MF_POPUP | MF_STRING, reinterpret_cast<UINT_PTR>(popup),
+        AppendMenuW(bar,
+                    MF_POPUP | MF_STRING,
+                    reinterpret_cast<UINT_PTR>(popup),
                     utf8_to_wide(menu.title).c_str());
     }
     return bar;
@@ -730,11 +846,15 @@ void build_win32_menu_popup(HMENU popup, std::span<const NativeMenuItem> items, 
 /// Win32 clipboard/DnD effect flags for a NodalKit DragOperation.
 [[nodiscard]] DWORD drop_effect_for_operation(DragOperation operation) {
     switch (operation) {
-    case DragOperation::Copy: return DROPEFFECT_COPY;
-    case DragOperation::Move: return DROPEFFECT_MOVE;
-    case DragOperation::Link: return DROPEFFECT_LINK;
+    case DragOperation::Copy:
+        return DROPEFFECT_COPY;
+    case DragOperation::Move:
+        return DROPEFFECT_MOVE;
+    case DragOperation::Link:
+        return DROPEFFECT_LINK;
     case DragOperation::None:
-    default: return DROPEFFECT_NONE;
+    default:
+        return DROPEFFECT_NONE;
     }
 }
 
@@ -807,8 +927,7 @@ payload_from_data_object(IDataObject* data_object) {
         const auto* wide = static_cast<const wchar_t*>(GlobalLock(medium.hGlobal));
         std::shared_ptr<const DragPayload> payload;
         if (wide != nullptr) {
-            payload = std::make_shared<DragPayload>(
-                DragPayload::from_text(wide_to_utf8(wide)));
+            payload = std::make_shared<DragPayload>(DragPayload::from_text(wide_to_utf8(wide)));
         }
         GlobalUnlock(medium.hGlobal);
         ReleaseStgMedium(&medium);
@@ -842,7 +961,9 @@ public:
         *out = nullptr;
         return E_NOINTERFACE;
     }
+
     ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
     ULONG STDMETHODCALLTYPE Release() override {
         const ULONG count = --ref_count_;
         if (count == 0) {
@@ -852,19 +973,26 @@ public:
     }
 
     // IDropTarget
-    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data_object, DWORD key_state, POINTL point,
-                                       DWORD* effect) override;
+    HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* data_object,
+                                        DWORD key_state,
+                                        POINTL point,
+                                        DWORD* effect) override;
     HRESULT STDMETHODCALLTYPE DragOver(DWORD key_state, POINTL point, DWORD* effect) override;
     HRESULT STDMETHODCALLTYPE DragLeave() override;
-    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data_object, DWORD key_state, POINTL point,
+    HRESULT STDMETHODCALLTYPE Drop(IDataObject* data_object,
+                                   DWORD key_state,
+                                   POINTL point,
                                    DWORD* effect) override;
 
 private:
     /// Build a DragDropEvent of `type` from the data object + cursor position,
     /// dispatch it, and write the resulting effect. Returns S_OK even when no
     /// payload is available (effect just becomes DROPEFFECT_NONE).
-    HRESULT dispatch(IDataObject* data_object, DragDropEventType type, POINTL point,
-                     DWORD source_effect, DWORD* out_effect);
+    HRESULT dispatch(IDataObject* data_object,
+                     DragDropEventType type,
+                     POINTL point,
+                     DWORD source_effect,
+                     DWORD* out_effect);
 
     std::atomic<ULONG> ref_count_{1};
     Win32Surface* surface_;
@@ -1231,8 +1359,11 @@ Point Win32Surface::logical_point_for_screen(POINTL screen) const {
 // Defined here, after Win32Surface is complete, so surface_->dispatch_drop_event
 // and surface_->logical_point_for_screen resolve.
 
-HRESULT Win32DropTarget::dispatch(IDataObject* data_object, DragDropEventType type, POINTL point,
-                                  DWORD source_effect, DWORD* out_effect) {
+HRESULT Win32DropTarget::dispatch(IDataObject* data_object,
+                                  DragDropEventType type,
+                                  POINTL point,
+                                  DWORD source_effect,
+                                  DWORD* out_effect) {
     if (out_effect == nullptr) {
         return E_POINTER;
     }
@@ -1258,8 +1389,10 @@ HRESULT Win32DropTarget::dispatch(IDataObject* data_object, DragDropEventType ty
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE Win32DropTarget::DragEnter(IDataObject* data_object, DWORD /*key_state*/,
-                                                     POINTL point, DWORD* effect) {
+HRESULT STDMETHODCALLTYPE Win32DropTarget::DragEnter(IDataObject* data_object,
+                                                     DWORD /*key_state*/,
+                                                     POINTL point,
+                                                     DWORD* effect) {
     if (effect == nullptr) {
         return E_POINTER;
     }
@@ -1273,7 +1406,8 @@ HRESULT STDMETHODCALLTYPE Win32DropTarget::DragEnter(IDataObject* data_object, D
     return dispatch(data_object, DragDropEventType::Enter, point, *effect, effect);
 }
 
-HRESULT STDMETHODCALLTYPE Win32DropTarget::DragOver(DWORD /*key_state*/, POINTL point,
+HRESULT STDMETHODCALLTYPE Win32DropTarget::DragOver(DWORD /*key_state*/,
+                                                    POINTL point,
                                                     DWORD* effect) {
     if (effect == nullptr) {
         return E_POINTER;
@@ -1315,8 +1449,10 @@ HRESULT STDMETHODCALLTYPE Win32DropTarget::DragLeave() {
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE Win32DropTarget::Drop(IDataObject* data_object, DWORD /*key_state*/,
-                                                POINTL point, DWORD* effect) {
+HRESULT STDMETHODCALLTYPE Win32DropTarget::Drop(IDataObject* data_object,
+                                                DWORD /*key_state*/,
+                                                POINTL point,
+                                                DWORD* effect) {
     if (effect == nullptr) {
         return E_POINTER;
     }

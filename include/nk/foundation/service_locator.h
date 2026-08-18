@@ -27,27 +27,25 @@ public:
     }
 
     /// Registers a newly constructed instance of the given type.
-    template <typename Type>
-    static void register_service() {
+    template <typename Type> static void register_service() {
         register_service<Type, Type>(std::make_shared<Type>());
     }
 
     /// Retrieves the registered service of the requested type.
     /// @throws std::runtime_error if the service is not found.
-    template <typename Interface>
-    [[nodiscard]] static std::shared_ptr<Interface> get() {
+    template <typename Interface> [[nodiscard]] static std::shared_ptr<Interface> get() {
         std::lock_guard<std::mutex> lock(mutex());
         auto& s = services();
         auto it = s.find(std::type_index(typeid(Interface)));
         if (it == s.end()) {
-            throw std::runtime_error(std::string("Service not found in ServiceLocator: ") + typeid(Interface).name());
+            throw std::runtime_error(std::string("Service not found in ServiceLocator: ") +
+                                     typeid(Interface).name());
         }
         return std::any_cast<std::shared_ptr<Interface>>(it->second);
     }
 
     /// Checks if a service is currently registered.
-    template <typename Interface>
-    [[nodiscard]] static bool has() {
+    template <typename Interface> [[nodiscard]] static bool has() {
         std::lock_guard<std::mutex> lock(mutex());
         auto& s = services();
         return s.find(std::type_index(typeid(Interface))) != s.end();

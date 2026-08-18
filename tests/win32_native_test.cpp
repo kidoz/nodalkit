@@ -10,7 +10,6 @@
 #if defined(_WIN32)
 
 #include <catch2/catch_test_macros.hpp>
-
 #include <nk/platform/native_menu.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/spell_checker.h>
@@ -21,15 +20,14 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
-#include <shellapi.h>
-
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <shellapi.h>
 #include <string>
 #include <vector>
+#include <windows.h>
 
 namespace {
 
@@ -38,12 +36,14 @@ namespace {
 /// uniformly across target versions. This matches the documented CF_HDROP
 /// layout that DragQueryFileW consumes.
 #pragma pack(push, 1)
+
 struct LocalDropFiles {
     UINT pFiles;
     POINT pt;
     BOOL fNC;
     BOOL fWide;
 };
+
 #pragma pack(pop)
 
 /// RAII owner of a GlobalAlloc'd CF_HDROP blob, kept so the synthesized payload
@@ -77,13 +77,16 @@ public:
         *out = L'\0';
         GlobalUnlock(handle_);
     }
+
     ~OwnedGlobalDrop() {
         if (handle_ != nullptr) {
             GlobalFree(handle_);
         }
     }
+
     OwnedGlobalDrop(const OwnedGlobalDrop&) = delete;
     OwnedGlobalDrop& operator=(const OwnedGlobalDrop&) = delete;
+
     [[nodiscard]] HDROP handle() const { return static_cast<HDROP>(handle_); }
 
 private:
@@ -104,9 +107,8 @@ TEST_CASE("Win32 backend accepts a native app-menu model", "[windows][native]") 
 
     std::vector<nk::NativeMenu> menus;
     nk::NativeMenu file_menu{.title = "File", .items = {}};
-    file_menu.items.push_back(
-        nk::NativeMenuItem::action("Open", "file.open",
-                                   nk::NativeMenuShortcut{nk::KeyCode::O, nk::NativeMenuModifier::Ctrl}));
+    file_menu.items.push_back(nk::NativeMenuItem::action(
+        "Open", "file.open", nk::NativeMenuShortcut{nk::KeyCode::O, nk::NativeMenuModifier::Ctrl}));
     file_menu.items.push_back(nk::NativeMenuItem::make_separator());
     file_menu.items.push_back(nk::NativeMenuItem::action("Quit", "app.quit"));
     menus.push_back(std::move(file_menu));

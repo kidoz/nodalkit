@@ -243,12 +243,11 @@ void check_widgets() {
     palette->set_commands({
         nk::CommandPaletteCommand{
             .id = "file.open", .title = "Open File", .subtitle = "", .category = ""},
-        nk::CommandPaletteCommand{
-            .id = "file.save",
-            .title = "Save File",
-            .subtitle = "",
-            .category = "File",
-            .enabled = false},
+        nk::CommandPaletteCommand{.id = "file.save",
+                                  .title = "Save File",
+                                  .subtitle = "",
+                                  .category = "File",
+                                  .enabled = false},
     });
     palette->set_query("open");
     check(palette->commands().size() == 2, "CommandPalette::set_commands");

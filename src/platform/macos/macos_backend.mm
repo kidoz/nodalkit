@@ -480,11 +480,15 @@ void MacosBackend::show_open_file_dialog_async(std::string_view title,
         }
 
         [panel beginWithCompletionHandler:^(NSModalResponse response) {
-            if (response == NSModalResponseOK && panel.URL) {
-                if (callback) callback(std::string(panel.URL.path.UTF8String));
-            } else {
-                if (callback) callback(Unexpected(FileDialogError::Cancelled));
-            }
+          if (response == NSModalResponseOK && panel.URL) {
+              if (callback) {
+                  callback(std::string(panel.URL.path.UTF8String));
+              }
+          } else {
+              if (callback) {
+                  callback(Unexpected(FileDialogError::Cancelled));
+              }
+          }
         }];
     }
 }
@@ -502,8 +506,8 @@ void MacosBackend::show_save_file_dialog_async(SaveFileDialogOptions options,
         (void)options.confirm_overwrite; // NSSavePanel provides native overwrite confirmation.
 
         if (!options.suggested_filename.empty()) {
-            [panel setNameFieldStringValue:
-                       [NSString stringWithUTF8String:options.suggested_filename.c_str()]];
+            [panel setNameFieldStringValue:[NSString stringWithUTF8String:options.suggested_filename
+                                                                              .c_str()]];
         }
 
         if (!options.filters.empty()) {
@@ -537,11 +541,15 @@ void MacosBackend::show_save_file_dialog_async(SaveFileDialogOptions options,
         }
 
         [panel beginWithCompletionHandler:^(NSModalResponse response) {
-            if (response == NSModalResponseOK && panel.URL) {
-                if (callback) callback(std::string(panel.URL.path.UTF8String));
-            } else {
-                if (callback) callback(Unexpected(FileDialogError::Cancelled));
-            }
+          if (response == NSModalResponseOK && panel.URL) {
+              if (callback) {
+                  callback(std::string(panel.URL.path.UTF8String));
+              }
+          } else {
+              if (callback) {
+                  callback(Unexpected(FileDialogError::Cancelled));
+              }
+          }
         }];
     }
 }

@@ -33,7 +33,8 @@ public:
     [[nodiscard]] std::string dump_widget_tree_json() const;
     [[nodiscard]] Result<void> save_widget_tree_json_file(std::string_view path) const;
     [[nodiscard]] std::string dump_frame_trace_json() const;
-    [[nodiscard]] Result<void> save_frame_diagnostics_artifact_json_file(std::string_view path) const;
+    [[nodiscard]] Result<void>
+    save_frame_diagnostics_artifact_json_file(std::string_view path) const;
     [[nodiscard]] Result<void> save_frame_trace_json_file(std::string_view path) const;
     [[nodiscard]] Result<void> save_debug_bundle(std::string_view directory_path) const;
     [[nodiscard]] std::vector<TraceEvent> debug_selected_frame_runtime_events() const;

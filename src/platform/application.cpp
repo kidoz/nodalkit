@@ -241,11 +241,15 @@ void Application::open_file_dialog_async(std::string_view title,
                                          const std::vector<std::string>& filters,
                                          OpenFileDialogCallback callback) {
     if (!impl_->backend) {
-        if (callback) callback(Unexpected(FileDialogError::Unavailable));
+        if (callback) {
+            callback(Unexpected(FileDialogError::Unavailable));
+        }
         return;
     }
     if (!impl_->backend->supports_open_file_dialog()) {
-        if (callback) callback(Unexpected(FileDialogError::Unsupported));
+        if (callback) {
+            callback(Unexpected(FileDialogError::Unsupported));
+        }
         return;
     }
     impl_->backend->show_open_file_dialog_async(title, filters, std::move(callback));
@@ -258,11 +262,15 @@ bool Application::supports_save_file_dialog() const {
 void Application::save_file_dialog_async(SaveFileDialogOptions options,
                                          SaveFileDialogCallback callback) {
     if (!impl_->backend) {
-        if (callback) callback(Unexpected(FileDialogError::Unavailable));
+        if (callback) {
+            callback(Unexpected(FileDialogError::Unavailable));
+        }
         return;
     }
     if (!impl_->backend->supports_save_file_dialog()) {
-        if (callback) callback(Unexpected(FileDialogError::Unsupported));
+        if (callback) {
+            callback(Unexpected(FileDialogError::Unsupported));
+        }
         return;
     }
     impl_->backend->show_save_file_dialog_async(std::move(options), std::move(callback));

@@ -8,17 +8,16 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <objbase.h>
-#include <spellcheck.h>
-#include <windows.h>
-#include <wrl/client.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <objbase.h>
+#include <spellcheck.h>
 #include <string>
 #include <utility>
 #include <vector>
+#include <windows.h>
+#include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;
 
@@ -32,11 +31,13 @@ public:
     ComApartment()
         : result_(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))
         , should_uninitialize_(SUCCEEDED(result_)) {}
+
     ~ComApartment() {
         if (should_uninitialize_) {
             CoUninitialize();
         }
     }
+
     [[nodiscard]] bool usable() const {
         return SUCCEEDED(result_) || result_ == RPC_E_CHANGED_MODE;
     }
@@ -50,14 +51,18 @@ private:
     if (text.empty()) {
         return {};
     }
-    const int wide_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
-                                                static_cast<int>(text.size()), nullptr, 0);
+    const int wide_length = MultiByteToWideChar(
+        CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
     if (wide_length <= 0) {
         return {};
     }
     std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
-    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
-                        static_cast<int>(text.size()), wide.data(), wide_length);
+    MultiByteToWideChar(CP_UTF8,
+                        MB_ERR_INVALID_CHARS,
+                        text.data(),
+                        static_cast<int>(text.size()),
+                        wide.data(),
+                        wide_length);
     return wide;
 }
 
@@ -65,15 +70,20 @@ private:
     if (text.empty()) {
         return {};
     }
-    const int utf8_length = WideCharToMultiByte(CP_UTF8, 0, text.data(),
-                                                static_cast<int>(text.size()), nullptr, 0,
-                                                nullptr, nullptr);
+    const int utf8_length = WideCharToMultiByte(
+        CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
     if (utf8_length <= 0) {
         return {};
     }
     std::string utf8(static_cast<std::size_t>(utf8_length), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), utf8.data(),
-                        utf8_length, nullptr, nullptr);
+    WideCharToMultiByte(CP_UTF8,
+                        0,
+                        text.data(),
+                        static_cast<int>(text.size()),
+                        utf8.data(),
+                        utf8_length,
+                        nullptr,
+                        nullptr);
     return utf8;
 }
 
@@ -120,8 +130,8 @@ namespace {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlanguage-extension-token"
 #endif
-        const HRESULT create_hr = CoCreateInstance(__uuidof(SpellCheckerFactory), nullptr,
-                                                   CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
+        const HRESULT create_hr = CoCreateInstance(
+            __uuidof(SpellCheckerFactory), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory));
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -205,8 +215,8 @@ std::vector<SpellCheckRange> Win32SpellChecker::check(std::string_view text) {
         ULONG start_index = 0;
         ULONG length = 0;
         CORRECTIVE_ACTION action = CORRECTIVE_ACTION_NONE;
-        if (FAILED(error->get_StartIndex(&start_index)) ||
-            FAILED(error->get_Length(&length)) || FAILED(error->get_CorrectiveAction(&action))) {
+        if (FAILED(error->get_StartIndex(&start_index)) || FAILED(error->get_Length(&length)) ||
+            FAILED(error->get_CorrectiveAction(&action))) {
             break;
         }
         // get_CorrectiveAction returns CORRECTIVE_ACTION_NONE for benign cases;
@@ -215,7 +225,8 @@ std::vector<SpellCheckRange> Win32SpellChecker::check(std::string_view text) {
             continue;
         }
         const std::size_t byte_start = utf8_bytes_for_prefix(wide, start_index);
-        const std::size_t byte_length = utf8_bytes_for_prefix(wide, start_index + length) - byte_start;
+        const std::size_t byte_length =
+            utf8_bytes_for_prefix(wide, start_index + length) - byte_start;
         result.push_back({byte_start, byte_length});
     }
 

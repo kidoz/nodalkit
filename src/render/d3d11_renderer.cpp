@@ -102,8 +102,8 @@ struct DrawConstants {
     float viewport[4]{};
 };
 
-static_assert(sizeof(DrawConstants) == 16 + 16 + (kMaxClipDepth * 16) +
-                                           (kMaxClipDepth * 4) + 16 + 16);
+static_assert(sizeof(DrawConstants) ==
+              16 + 16 + (kMaxClipDepth * 16) + (kMaxClipDepth * 4) + 16 + 16);
 static_assert(sizeof(DrawConstants) % 16 == 0,
               "Constant buffer size must be a multiple of 16 bytes");
 
@@ -117,8 +117,8 @@ struct GradientDrawConstants {
     float viewport[4]{};
 };
 
-static_assert(sizeof(GradientDrawConstants) == 16 + 16 + 16 + (kMaxClipDepth * 16) +
-                                                 (kMaxClipDepth * 4) + 16 + 16);
+static_assert(sizeof(GradientDrawConstants) ==
+              16 + 16 + 16 + (kMaxClipDepth * 16) + (kMaxClipDepth * 4) + 16 + 16);
 static_assert(sizeof(GradientDrawConstants) % 16 == 0,
               "Constant buffer size must be a multiple of 16 bytes");
 
@@ -582,7 +582,8 @@ private:
     void draw_gradient(const GradientCommand& command, std::optional<Rect> scissor);
     void draw_image(const ImageCommand& command,
                     ID3D11ShaderResourceView& shader_resource_view,
-                    std::optional<Rect> scissor, float opacity = 1.0f);
+                    std::optional<Rect> scissor,
+                    float opacity = 1.0f);
     void draw_text(const TextCommand& command,
                    ID3D11ShaderResourceView& shader_resource_view,
                    std::optional<Rect> scissor);
@@ -975,10 +976,10 @@ void D3D11Renderer::trim_texture_cache(Map& cache, std::size_t max_entries) {
 bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
     switch (node.kind()) {
     case RenderNodeKind::Line:
-        case RenderNodeKind::Path:
-        case RenderNodeKind::Transform:
-            return true;
-        case RenderNodeKind::Container:
+    case RenderNodeKind::Path:
+    case RenderNodeKind::Transform:
+        return true;
+    case RenderNodeKind::Container:
         for (const auto& child : node.children()) {
             if (child != nullptr && !collect_gpu_commands(*child)) {
                 primitive_commands_.clear();
@@ -1112,13 +1113,15 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         push_cmd.clip_count = static_cast<uint32_t>(active_clips_.size());
         std::copy(active_clips_.begin(), active_clips_.end(), push_cmd.clips.begin());
         layer_commands_.push_back(push_cmd);
-        draw_commands_.push_back({.kind = DrawCommandKind::PushLayer, .command_index = layer_commands_.size() - 1});
+        draw_commands_.push_back(
+            {.kind = DrawCommandKind::PushLayer, .command_index = layer_commands_.size() - 1});
         for (const auto& child : node.children()) {
             if (child != nullptr && !collect_gpu_commands(*child)) {
                 return false;
             }
         }
-        draw_commands_.push_back({.kind = DrawCommandKind::PopLayer, .command_index = layer_commands_.size() - 1});
+        draw_commands_.push_back(
+            {.kind = DrawCommandKind::PopLayer, .command_index = layer_commands_.size() - 1});
         return true;
     }
     case RenderNodeKind::Text: {
@@ -1211,11 +1214,9 @@ std::shared_ptr<ShapedText> D3D11Renderer::shape_text_node(const TextNode& text_
         return it->second;
     }
 
-    auto shaped =
-        std::make_shared<ShapedText>(max_width > 0.0F
-                                         ? text_shaper_->shape_wrapped(
-                                               text_node.text(), font, color, max_width)
-                                         : text_shaper_->shape(text_node.text(), font, color));
+    auto shaped = std::make_shared<ShapedText>(
+        max_width > 0.0F ? text_shaper_->shape_wrapped(text_node.text(), font, color, max_width)
+                         : text_shaper_->shape(text_node.text(), font, color));
     ++last_hotspot_counters_.text_shape_count;
     shaped_text_cache_[key] = shaped;
     return shaped;
@@ -1302,8 +1303,7 @@ bool D3D11Renderer::create_pipeline_objects() {
     ComPtr<ID3DBlob> image_pixel_bytecode;
     if (FAILED(compile_shader(kPrimitiveVertexShader, "main", "vs_5_0", vertex_bytecode)) ||
         FAILED(compile_shader(kPrimitivePixelShader, "main", "ps_5_0", pixel_bytecode)) ||
-        FAILED(
-            compile_shader(kGradientVertexShader, "main", "vs_5_0", gradient_vertex_bytecode)) ||
+        FAILED(compile_shader(kGradientVertexShader, "main", "vs_5_0", gradient_vertex_bytecode)) ||
         FAILED(compile_shader(kGradientPixelShader, "main", "ps_5_0", gradient_pixel_bytecode)) ||
         FAILED(compile_shader(kImageVertexShader, "main", "vs_5_0", image_vertex_bytecode)) ||
         FAILED(compile_shader(kImagePixelShader, "main", "ps_5_0", image_pixel_bytecode))) {
@@ -1676,7 +1676,7 @@ bool D3D11Renderer::draw_gpu_scene() {
             ComPtr<ID3D11Texture2D> tex;
             ComPtr<ID3D11RenderTargetView> rtv;
             ComPtr<ID3D11ShaderResourceView> srv;
-            
+
             D3D11_TEXTURE2D_DESC texture_desc{};
             texture_desc.Width = static_cast<UINT>(framebuffer_width_);
             texture_desc.Height = static_cast<UINT>(framebuffer_height_);
@@ -1686,15 +1686,21 @@ bool D3D11Renderer::draw_gpu_scene() {
             texture_desc.SampleDesc.Count = 1;
             texture_desc.Usage = D3D11_USAGE_DEFAULT;
             texture_desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-            if (FAILED(device_->CreateTexture2D(&texture_desc, nullptr, &tex))) return false;
-            if (FAILED(device_->CreateRenderTargetView(tex.Get(), nullptr, &rtv))) return false;
-            
+            if (FAILED(device_->CreateTexture2D(&texture_desc, nullptr, &tex))) {
+                return false;
+            }
+            if (FAILED(device_->CreateRenderTargetView(tex.Get(), nullptr, &rtv))) {
+                return false;
+            }
+
             D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc{};
             srv_desc.Format = texture_desc.Format;
             srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
             srv_desc.Texture2D.MipLevels = 1;
-            if (FAILED(device_->CreateShaderResourceView(tex.Get(), &srv_desc, &srv))) return false;
-            
+            if (FAILED(device_->CreateShaderResourceView(tex.Get(), &srv_desc, &srv))) {
+                return false;
+            }
+
             layer_textures_.push_back(tex);
             layer_rtvs_.push_back(rtv);
             layer_srvs_.push_back(srv);
@@ -1708,7 +1714,8 @@ bool D3D11Renderer::draw_gpu_scene() {
     };
     auto pop_layer = [&]() {
         layer_depth--;
-        ID3D11RenderTargetView* rtv = layer_depth == 0 ? scene_render_target_.Get() : layer_rtvs_[layer_depth - 1].Get();
+        ID3D11RenderTargetView* rtv =
+            layer_depth == 0 ? scene_render_target_.Get() : layer_rtvs_[layer_depth - 1].Get();
         context_->OMSetRenderTargets(1, &rtv, nullptr);
     };
     if (full_scene_redraw) {
@@ -1717,14 +1724,19 @@ bool D3D11Renderer::draw_gpu_scene() {
         for (const auto& draw_command : draw_commands_) {
 
             if (draw_command.kind == DrawCommandKind::PushLayer) {
-                if (!push_layer()) return false;
+                if (!push_layer()) {
+                    return false;
+                }
                 continue;
             }
             if (draw_command.kind == DrawCommandKind::PopLayer) {
                 pop_layer();
                 const auto& cmd = layer_commands_[draw_command.command_index];
                 ImageCommand fake_img;
-                fake_img.rect = {0, 0, (float)framebuffer_width_ / scale_factor_, (float)framebuffer_height_ / scale_factor_};
+                fake_img.rect = {0,
+                                 0,
+                                 (float)framebuffer_width_ / scale_factor_,
+                                 (float)framebuffer_height_ / scale_factor_};
                 fake_img.clips = cmd.clips;
                 fake_img.clip_count = cmd.clip_count;
                 fake_img.scale_mode = ScaleMode::NearestNeighbor;
@@ -1733,21 +1745,27 @@ bool D3D11Renderer::draw_gpu_scene() {
             }
 
             if (draw_command.kind == DrawCommandKind::PushLayer) {
-                if (!push_layer()) return false;
+                if (!push_layer()) {
+                    return false;
+                }
                 continue;
             }
             if (draw_command.kind == DrawCommandKind::PopLayer) {
                 pop_layer();
                 const auto& cmd = layer_commands_[draw_command.command_index];
                 ImageCommand fake_img;
-                fake_img.rect = {0, 0, (float)framebuffer_width_ / scale_factor_, (float)framebuffer_height_ / scale_factor_};
+                fake_img.rect = {0,
+                                 0,
+                                 (float)framebuffer_width_ / scale_factor_,
+                                 (float)framebuffer_height_ / scale_factor_};
                 fake_img.clips = cmd.clips;
                 fake_img.clip_count = cmd.clip_count;
                 fake_img.scale_mode = ScaleMode::NearestNeighbor;
-                
+
                 // Draw the layer SRV onto the main RT, intersecting with damage
                 for (const auto& damage : pixel_damage_regions_) {
-                    Rect command_bounds = clip_rect_to_viewport(effective_command_bounds(cmd), framebuffer_width_, framebuffer_height_);
+                    Rect command_bounds = clip_rect_to_viewport(
+                        effective_command_bounds(cmd), framebuffer_width_, framebuffer_height_);
                     Rect slice = intersect_rect(command_bounds, damage);
                     if (!rect_is_empty(slice)) {
                         draw_image(fake_img, *layer_srvs_[layer_depth].Get(), slice, cmd.opacity);
@@ -1772,7 +1790,8 @@ bool D3D11Renderer::draw_gpu_scene() {
                 }
                 draw_image(image_commands_[draw_command.command_index],
                            *texture->shader_resource_view.Get(),
-                           std::nullopt, 1.0f);
+                           std::nullopt,
+                           1.0f);
                 continue;
             }
 
@@ -2263,7 +2282,8 @@ void D3D11Renderer::draw_gradient(const GradientCommand& command, std::optional<
 
 void D3D11Renderer::draw_image(const ImageCommand& command,
                                ID3D11ShaderResourceView& shader_resource_view,
-                               std::optional<Rect> scissor, float opacity) {
+                               std::optional<Rect> scissor,
+                               float opacity) {
     ImageDrawConstants constants{};
     const Rect draw_rect = scale_rect(command.rect, scale_factor_);
     constants.rect[0] = draw_rect.x;

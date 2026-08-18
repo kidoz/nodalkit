@@ -11,9 +11,9 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <nk/runtime/event_loop.h>
 #include <thread>
 #include <vector>
-#include <nk/runtime/event_loop.h>
 
 namespace nk {
 
@@ -97,12 +97,8 @@ public:
         auto state = std::make_shared<detail::ConnectionState>();
         std::lock_guard lock(shared_->mutex);
         state->id = shared_->next_id++;
-        shared_->slots.push_back({
-            state,
-            std::move(slot),
-            EventLoop::current(),
-            std::this_thread::get_id()
-        });
+        shared_->slots.push_back(
+            {state, std::move(slot), EventLoop::current(), std::this_thread::get_id()});
         return Connection(std::move(state));
     }
 
@@ -121,11 +117,11 @@ public:
                 if (s.target_thread == current_thread || !s.target_loop) {
                     s.callback(args...);
                 } else {
-                    if constexpr (std::conjunction_v<std::is_copy_constructible<std::decay_t<Args>>...>) {
+                    if constexpr (std::conjunction_v<
+                                      std::is_copy_constructible<std::decay_t<Args>>...>) {
                         auto cb = s.callback;
-                        s.target_loop->post([cb, args...]() mutable {
-                            cb(args...);
-                        }, "signal-cross-thread");
+                        s.target_loop->post([cb, args...]() mutable { cb(args...); },
+                                            "signal-cross-thread");
                     } else {
                         // Fallback to direct invocation if arguments are not copyable,
                         // even though it is not thread-safe.

@@ -32,7 +32,7 @@ SizeRequest CanvasWidget::measure(const Constraints& constraints) const {
 
 void CanvasWidget::snapshot(SnapshotContext& ctx) const {
     const auto rect = allocation();
-    // In a fully hardware-accelerated pipeline, we would push an off-screen 
+    // In a fully hardware-accelerated pipeline, we would push an off-screen
     // rendering node here. For now, we group the drawing commands in a container.
     ctx.push_container(rect);
     impl_->draw.emit(ctx, rect);

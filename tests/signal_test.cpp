@@ -101,9 +101,9 @@ TEST_CASE("Signal disconnect_all removes every slot", "[signal]") {
     REQUIRE(sig.connection_count() == 0);
 }
 
-#include <thread>
 #include <atomic>
 #include <nk/runtime/event_loop.h>
+#include <thread>
 
 TEST_CASE("Signal posts cross-thread emissions to the target EventLoop", "[signal][thread]") {
     nk::EventLoop loop;
@@ -112,9 +112,7 @@ TEST_CASE("Signal posts cross-thread emissions to the target EventLoop", "[signa
 
     auto conn = sig.connect([&](int v) { received = v; });
 
-    std::thread bg([&] {
-        sig.emit(42);
-    });
+    std::thread bg([&] { sig.emit(42); });
     bg.join();
 
     REQUIRE(received == 0);

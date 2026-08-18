@@ -280,9 +280,8 @@ struct DirectWriteTextShaper::Impl {
         return format;
     }
 
-    [[nodiscard]] IDWriteTextLayout* create_text_layout(std::wstring_view text,
-                                                        IDWriteTextFormat* format,
-                                                        float max_width) const {
+    [[nodiscard]] IDWriteTextLayout*
+    create_text_layout(std::wstring_view text, IDWriteTextFormat* format, float max_width) const {
         if (factory == nullptr || format == nullptr) {
             return nullptr;
         }

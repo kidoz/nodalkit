@@ -29,7 +29,9 @@ public:
     [[nodiscard]] SpellChecker* spell_checker() override;
 
     [[nodiscard]] bool supports_open_file_dialog() const override;
-    void show_open_file_dialog_async(std::string_view title, const std::vector<std::string>& filters, OpenFileDialogCallback callback) override;
+    void show_open_file_dialog_async(std::string_view title,
+                                     const std::vector<std::string>& filters,
+                                     OpenFileDialogCallback callback) override;
     [[nodiscard]] bool supports_save_file_dialog() const override;
     void show_save_file_dialog_async(SaveFileDialogOptions options,
                                      SaveFileDialogCallback callback) override;

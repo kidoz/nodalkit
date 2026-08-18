@@ -4,7 +4,6 @@
 /// @brief Windows Spell Checking API-backed spell-checking service (private header).
 
 #include <nk/platform/spell_checker.h>
-
 #include <string>
 #include <string_view>
 #include <vector>
