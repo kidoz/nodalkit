@@ -1779,6 +1779,27 @@ TEST_CASE("Window close requests are notification-only and hide the window", "[a
     REQUIRE_FALSE(window.is_visible());
 }
 
+TEST_CASE("Window survives a close handler that drops the last reference", "[app]") {
+    auto window = std::make_shared<nk::Window>(
+        nk::WindowConfig{.title = "Dying", .width = 320, .height = 240});
+    auto* raw = window.get();
+    const std::weak_ptr<nk::Window> guard = window;
+
+    raw->present();
+    // Stand in for an app-level holder destroyed by the close handler. The
+    // slot itself cannot own the Window (emit() invokes a copy, the stored
+    // slot would keep it alive), so the handler resets a bystander reference:
+    // emitting the signal destroys the Window before close() continues, and
+    // close() must not touch the freed implementation after the handler
+    // returns.
+    auto bystander = window;
+    window.reset();
+    (void)raw->on_close_requested().connect([&bystander] { bystander.reset(); });
+
+    raw->close();
+    REQUIRE(guard.expired());
+}
+
 TEST_CASE("Application reports file-dialog capability explicitly", "[app]") {
     nk::Application app(0, nullptr);
 

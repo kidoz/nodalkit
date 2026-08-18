@@ -1860,7 +1860,14 @@ void Window::hide() {
 }
 
 void Window::close() {
+    // A close handler may drop the last Window reference; ~Window clears the
+    // alive token before freeing impl_, so re-check it before touching members
+    // again instead of using a dangling impl_.
+    const auto alive = impl_->alive;
     impl_->close_requested.emit();
+    if (!*alive) {
+        return;
+    }
     hide();
 }
 
