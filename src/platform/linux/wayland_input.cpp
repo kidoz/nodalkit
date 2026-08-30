@@ -395,9 +395,18 @@ static constexpr struct zwp_text_input_v3_listener text_input_listener = {
     .commit_string = WaylandInput::text_input_commit_string,
     .delete_surrounding_text = WaylandInput::text_input_delete_surrounding_text,
     .done = WaylandInput::text_input_done,
+// These listener members only exist when the header was generated from a
+// wayland-protocols new enough to declare the matching events; older
+// distributions (e.g. the CI runners) still ship the six-event protocol.
+#ifdef ZWP_TEXT_INPUT_V3_ACTION_SINCE_VERSION
     .action = nullptr,
+#endif
+#ifdef ZWP_TEXT_INPUT_V3_LANGUAGE_SINCE_VERSION
     .language = nullptr,
+#endif
+#ifdef ZWP_TEXT_INPUT_V3_PREEDIT_HINT_SINCE_VERSION
     .preedit_hint = nullptr,
+#endif
 };
 
 static constexpr const char* PrimarySelectionMimeTextUtf8 = "text/plain;charset=utf-8";

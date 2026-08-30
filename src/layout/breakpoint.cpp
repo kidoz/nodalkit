@@ -11,17 +11,17 @@ bool BreakpointCondition::matches(Size size) const {
 }
 
 std::shared_ptr<Breakpoint> Breakpoint::create(BreakpointCondition condition) {
-    return std::shared_ptr<Breakpoint>(new Breakpoint(std::move(condition)));
+    return std::shared_ptr<Breakpoint>(new Breakpoint(condition));
 }
 
-Breakpoint::Breakpoint(BreakpointCondition condition) : condition_(std::move(condition)) {}
+Breakpoint::Breakpoint(BreakpointCondition condition) : condition_(condition) {}
 
 const BreakpointCondition& Breakpoint::condition() const {
     return condition_;
 }
 
 void Breakpoint::set_condition(BreakpointCondition condition) {
-    condition_ = std::move(condition);
+    condition_ = condition;
     if (last_size_.has_value()) {
         set_active(condition_.matches(*last_size_));
     }

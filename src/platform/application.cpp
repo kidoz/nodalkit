@@ -130,6 +130,11 @@ Application::~Application() {
     if (impl_->backend) {
         impl_->backend->shutdown();
     }
+    // The constructor installed a process-global theme derived from this
+    // application's system preferences; drop it so a later Application (or a
+    // themeless consumer falling back to Theme::active()) starts from the
+    // default policy instead of inheriting stale preference state.
+    Theme::set_active(nullptr);
     g_instance = nullptr;
     NK_LOG_DEBUG("App", "Application destroyed");
 }
@@ -182,7 +187,7 @@ void Application::set_theme_selection(ThemeSelection selection) {
     if (impl_->theme_selection == selection) {
         return;
     }
-    impl_->theme_selection = std::move(selection);
+    impl_->theme_selection = selection;
     apply_visual_policy(*impl_);
     impl_->theme_selection_changed.emit(impl_->theme_selection);
 }
