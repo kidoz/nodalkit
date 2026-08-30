@@ -875,6 +875,7 @@ TEST_CASE("No widget class leaks light-theme colors into the dark theme", "[them
         {"label", "text-color"},
         {"list-view", "background"},
         {"menu-bar", "background"},
+        {"navigation-row", "selected-text-color"},
         {"popover", "background"},
         {"preferences-row", "background"},
         {"progress-bar", "track-color"},

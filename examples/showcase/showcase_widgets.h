@@ -372,20 +372,14 @@ protected:
         }
         nk::Color label_color = theme_color("text-color", nk::Color{0.18F, 0.19F, 0.21F, 1.0F});
         if (selected_) {
-            const auto selected_bg =
-                theme_color("selected-background", nk::Color{0.80F, 0.88F, 0.98F, 1.0F});
-            ctx.add_rounded_rect(bounds, selected_bg, 9.0F);
-            // Selection fills range from soft tints (normal themes) to strong
-            // accents (high contrast); pick the label polarity from the fill's
-            // relative luminance so the row stays legible in every family.
-            const auto srgb = [](float channel) {
-                return channel <= 0.03928F ? channel / 12.92F
-                                           : std::pow((channel + 0.055F) / 1.055F, 2.4F);
-            };
-            const float luminance = 0.2126F * srgb(selected_bg.r) + 0.7152F * srgb(selected_bg.g) +
-                                    0.0722F * srgb(selected_bg.b);
-            label_color = luminance > 0.5F ? nk::Color{0.11F, 0.12F, 0.14F, 1.0F}
-                                           : nk::Color{1.0F, 1.0F, 1.0F, 1.0F};
+            ctx.add_rounded_rect(
+                bounds,
+                theme_color("selected-background", nk::Color{0.80F, 0.88F, 0.98F, 1.0F}),
+                9.0F);
+            // The theme owns the pairing (selection-active-bg/text): the label
+            // stays legible on soft tints and strong accent fills alike, and
+            // the [theme][contrast] tests lock the pair's ratio per family.
+            label_color = theme_color("selected-text-color", nk::Color{0.11F, 0.12F, 0.14F, 1.0F});
         } else if (armed_ || nk::has_flag(state_flags(), nk::StateFlags::Hovered)) {
             ctx.add_rounded_rect(bounds,
                                  theme_color(armed_ ? "pressed-background" : "hover-background",
