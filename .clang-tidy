@@ -32,7 +32,11 @@ WarningsAsErrors: >
   performance-move-const-arg,
   performance-unnecessary-copy-initialization,
 
-HeaderFilterRegex: '.*\.h$'
+# Only diagnose the repository's own headers. Compile commands reference them
+# relative to the build directory ("../include/...", "../src/..."), which is
+# what keeps system headers (absolute paths), wayland-scanner output (build
+# directory), and subproject headers ("../subprojects/...") out of the report.
+HeaderFilterRegex: '\.\./(include|src|tests|examples)/.*\.(h|hpp)$'
 
 CheckOptions:
   # Naming — matches STYLE_PROFILE.md
@@ -54,10 +58,11 @@ CheckOptions:
     value: lower_case
   - key: readability-identifier-naming.VariableCase
     value: lower_case
+  # Public aggregate members are API surface used with designated
+  # initializers (.title = ...), so only private/protected class members
+  # carry the STYLE_PROFILE trailing underscore.
   - key: readability-identifier-naming.MemberCase
     value: lower_case
-  - key: readability-identifier-naming.MemberSuffix
-    value: '_'
   - key: readability-identifier-naming.PrivateMemberCase
     value: lower_case
   - key: readability-identifier-naming.PrivateMemberSuffix
@@ -66,8 +71,8 @@ CheckOptions:
     value: lower_case
   - key: readability-identifier-naming.ProtectedMemberSuffix
     value: '_'
-  - key: readability-identifier-naming.ConstantCase
-    value: CamelCase
+  # No blanket ConstantCase: const locals and parameters read as ordinary
+  # lower_case variables; CamelCase applies to the named constant kinds below.
   - key: readability-identifier-naming.ConstexprVariableCase
     value: CamelCase
   - key: readability-identifier-naming.StaticConstantCase

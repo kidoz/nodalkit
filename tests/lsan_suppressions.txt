@@ -13,3 +13,10 @@
 leak:libdbus-1
 leak:dbus_
 leak:_dbus_
+
+# Fontconfig parses its XML configuration once per process (through libexpat)
+# and keeps the resulting FcConfig allocations reachable-by-design until
+# FcFini, which nothing in a normal application calls. Every backtrace is
+# fontconfig/expat internals with no NodalKit frame; suppress by module so a
+# genuine NodalKit leak still fails the suite.
+leak:libfontconfig
