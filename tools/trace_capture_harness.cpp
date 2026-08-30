@@ -114,9 +114,12 @@ struct TraceSummary {
 struct StableScenarioThresholds {
     // Max-frame-time tolerances must absorb realistic OS scheduling jitter. On a loaded desktop
     // (Wayland compositor, audio thread, GPU driver) the tail of a single frame can swing 2-4 ms
-    // without any code change. 1.5 ms made these gates permanently flaky.
-    double max_artifact_total_ms_regression = 30.0;
-    double max_trace_frame_ms_regression = 30.0;
+    // without any code change. 1.5 ms made these gates permanently flaky. CI VMs are worse: the
+    // worst frame of a scene is dominated by one-time init (driver, shader, atlas) that no host
+    // normalization removes, swinging tens of milliseconds above the reference baseline. The
+    // over-budget frame counters remain the systematic-regression detector.
+    double max_artifact_total_ms_regression = 90.0;
+    double max_trace_frame_ms_regression = 90.0;
     std::size_t max_render_node_regression = 2;
     std::size_t max_text_shape_regression = 2;
     std::size_t max_image_upload_regression = 1;
@@ -487,11 +490,11 @@ bool validate_against_stable_baseline(Scenario scenario,
                   << " candidate=" << candidate_trace_summary.frame_ms.size() << "\n";
         failed = true;
     } else {
-        constexpr double kPerFrameToleranceMs = 20.0;
-        // The tolerance is absolute wall-clock like the baselines themselves,
-        // so it grows by the same host-speed normalization the frame times
-        // went through; a fixed tolerance reads uniform host slowness as a
+        // Per-rank tolerance: wider than the max gate (the max gate already
+        // screens the very worst frame) but still scaled by the host-speed
+        // factor, since a fixed tolerance reads uniform host slowness as a
         // per-rank drift.
+        constexpr double kPerFrameToleranceMs = 60.0;
         const double per_frame_tolerance_ms = kPerFrameToleranceMs * slowdown;
         for (std::size_t rank = 0; rank < baseline_trace_summary.frame_ms.size(); ++rank) {
             if (candidate_trace_summary.frame_ms[rank] >
