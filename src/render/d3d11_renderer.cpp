@@ -788,16 +788,20 @@ std::size_t hash_image_content(const uint32_t* pixel_data, int width, int height
         return 0;
     }
 
-    constexpr std::size_t kOffsetBasis = 1469598103934665603ULL;
-    constexpr std::size_t kPrime = 1099511628211ULL;
-    std::size_t hash = kOffsetBasis;
+    // FNV-1a over the pixel bytes. The accumulator must stay 64-bit even on
+    // 32-bit Windows, where std::size_t cannot hold the FNV primes; the
+    // narrowing return only changes the hash's width, not its distribution
+    // over a session.
+    constexpr std::uint64_t kOffsetBasis = 1469598103934665603ULL;
+    constexpr std::uint64_t kPrime = 1099511628211ULL;
+    std::uint64_t hash = kOffsetBasis;
     const auto* bytes = reinterpret_cast<const uint8_t*>(pixel_data);
-    const auto size = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
-    for (std::size_t index = 0; index < size; ++index) {
-        hash ^= static_cast<std::size_t>(bytes[index]);
+    const auto size = static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) * 4;
+    for (std::uint64_t index = 0; index < size; ++index) {
+        hash ^= static_cast<std::uint64_t>(bytes[index]);
         hash *= kPrime;
     }
-    return hash;
+    return static_cast<std::size_t>(hash);
 }
 
 D3D11Renderer::D3D11Renderer() : software_(std::make_unique<SoftwareRenderer>()) {}

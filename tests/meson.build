@@ -8,8 +8,13 @@ endif
 # for non-sanitizer builds (LSAN_OPTIONS is ignored) and, under -Db_sanitize, stops
 # the third-party libdbus/AT-SPI atk-bridge leaks from failing the suite while still
 # catching genuine NodalKit leaks. See lsan_suppressions.txt.
+#
+# fast_unwind_on_malloc=0: distro libraries are built without frame pointers, so
+# the fast unwinder records garbage PCs inside them and module-name suppressions
+# like leak:libfontconfig never match. The slow unwinder walks their DWARF CFI
+# and produces the real modules.
 add_test_setup('nodalkit',
-    env : {'LSAN_OPTIONS': 'suppressions=' + (meson.current_source_dir() / 'lsan_suppressions.txt')},
+    env : {'LSAN_OPTIONS': 'suppressions=' + (meson.current_source_dir() / 'lsan_suppressions.txt') + ':fast_unwind_on_malloc=0'},
     is_default : true,
 )
 

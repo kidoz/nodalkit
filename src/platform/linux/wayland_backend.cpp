@@ -1928,10 +1928,14 @@ int WaylandBackend::run_event_loop(EventLoop& loop) {
         }
         wl_display_dispatch_pending(impl_->display);
 
-        // Drain the wakeup eventfd.
+        // Drain the wakeup eventfd. Both results are deliberately unchecked:
+        // a missed drain only costs one spurious wakeup and EAGAIN means the
+        // counter already holds a pending wakeup. glibc's warn_unused_result
+        // ignores (void) casts, so route the value through a variable.
         if (ret > 0 && (fds[1].revents & POLLIN)) {
             uint64_t val = 0;
-            (void)read(impl_->wake_fd, &val, sizeof(val));
+            const ssize_t drained = read(impl_->wake_fd, &val, sizeof(val));
+            (void)drained;
         }
 
         // Drive the NK event loop (posted tasks, timers, idle callbacks).
@@ -1945,7 +1949,9 @@ int WaylandBackend::run_event_loop(EventLoop& loop) {
 void WaylandBackend::wake_event_loop() {
     if (impl_->wake_fd >= 0) {
         const uint64_t val = 1;
-        (void)write(impl_->wake_fd, &val, sizeof(val));
+        // Best-effort by contract; see the wake_fd drain note in run_event_loop.
+        const ssize_t written = write(impl_->wake_fd, &val, sizeof(val));
+        (void)written;
     }
 }
 
