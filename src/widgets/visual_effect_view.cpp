@@ -14,21 +14,25 @@ struct MaterialStyle {
 };
 
 MaterialStyle style_for(VisualEffectMaterial material) {
+    // Fallbacks equal the light-theme value of the token the matching shared
+    // rule resolves (visual-effect-* classes -> semantic surface roles), per
+    // the "defensive fallbacks equal the light-theme token" convention.
     switch (material) {
     case VisualEffectMaterial::Sidebar:
-        return {"visual-effect-sidebar", "sidebar-background", Color{0.92F, 0.93F, 0.95F, 0.72F}};
+        return {"visual-effect-sidebar", "sidebar-background", Color{0.957F, 0.957F, 0.957F, 1.0F}};
     case VisualEffectMaterial::HeaderView:
-        return {"visual-effect-header", "header-background", Color{0.95F, 0.96F, 0.97F, 0.80F}};
+        return {"visual-effect-header", "header-background", Color{1.0F, 1.0F, 1.0F, 1.0F}};
     case VisualEffectMaterial::WindowBackground:
-        return {"visual-effect-window", "window-background", Color{0.96F, 0.96F, 0.97F, 0.85F}};
+        return {"visual-effect-window", "window-background", Color{0.965F, 0.965F, 0.965F, 1.0F}};
     case VisualEffectMaterial::Popover:
-        return {"visual-effect-popover", "popover-background", Color{0.98F, 0.98F, 0.99F, 0.88F}};
+        return {"visual-effect-popover", "popover-background", Color{1.0F, 1.0F, 1.0F, 1.0F}};
     case VisualEffectMaterial::Menu:
-        return {"visual-effect-menu", "menu-background", Color{0.97F, 0.97F, 0.98F, 0.90F}};
+        return {"visual-effect-menu", "menu-background", Color{1.0F, 1.0F, 1.0F, 1.0F}};
     case VisualEffectMaterial::Tooltip:
-        return {"visual-effect-tooltip", "tooltip-background", Color{0.12F, 0.12F, 0.14F, 0.88F}};
+        return {
+            "visual-effect-tooltip", "tooltip-background", Color{0.149F, 0.149F, 0.169F, 0.95F}};
     }
-    return {"visual-effect", "visual-effect-background", Color{0.95F, 0.95F, 0.96F, 0.80F}};
+    return {"visual-effect", "visual-effect-background", Color{0.95F, 0.95F, 0.96F, 1.0F}};
 }
 
 } // namespace

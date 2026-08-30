@@ -896,7 +896,14 @@ TEST_CASE("No widget class leaks light-theme colors into the dark theme", "[them
         {"toast-overlay", "background"},
         {"tooltip", "background"},
         {"tree-view", "background"},
+        {"visual-effect-header", "header-background"},
+        {"visual-effect-menu", "menu-background"},
+        {"visual-effect-popover", "popover-background"},
+        {"visual-effect-sidebar", "sidebar-background"},
+        {"visual-effect-window", "window-background"},
     };
+    // visual-effect-tooltip is intentionally absent: it resolves the OSD
+    // surface, which stays dark in both schemes by family convention.
 
     auto light = nk::Theme::make_linux_gnome(nk::ColorScheme::Light);
     auto dark = nk::Theme::make_linux_gnome(nk::ColorScheme::Dark);
