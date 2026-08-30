@@ -764,6 +764,69 @@ TEST_CASE("Dialog Escape cancellation survives caller releasing setup reference"
     REQUIRE(weak_dialog.expired());
 }
 
+TEST_CASE("Destroying a widget with a queued redraw before the next frame is safe",
+          "[app][lifetime]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Dirty purge", .width = 320, .height = 240});
+
+    auto container = TestContainer::create();
+    container->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical));
+    auto victim = FixedWidget::create(160.0F, 80.0F);
+    container->append(victim);
+    window.set_child(container);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    // Queue a redraw, then detach and destroy the widget before the frame that
+    // would consume it. The dirty list held a raw Widget* that the damage pass
+    // dereferenced after free.
+    victim->queue_redraw();
+    window.set_child(nk::Label::create("Replacement"));
+    container.reset();
+    victim.reset();
+
+    window.request_frame();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.is_visible());
+}
+
+TEST_CASE("Window teardown tolerates widgets with queued redraws", "[app][lifetime]") {
+    nk::Application app(0, nullptr);
+    {
+        nk::Window window({.title = "Teardown purge", .width = 320, .height = 240});
+        auto widget = FixedWidget::create(160.0F, 80.0F);
+        window.set_child(widget);
+        window.present();
+        REQUIRE(app.event_loop().poll());
+        widget->queue_redraw();
+        widget.reset();
+    }
+    SUCCEED("Window destruction with a pending dirty widget completed");
+}
+
+TEST_CASE("Frame after a dialog closes inside key dispatch draws without dangling widgets",
+          "[app][dialog][lifetime]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Dialog dirty purge", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("Root"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    {
+        auto dialog = nk::Dialog::create("Confirm", "Dirty-list regression");
+        dialog->add_button("OK", nk::DialogResponse::Accept);
+        dialog->present(window);
+    }
+    REQUIRE(app.event_loop().poll());
+
+    // The dialog is destroyed inside key dispatch with redraws still queued;
+    // the following frames must not touch its freed widgets.
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    REQUIRE(app.event_loop().poll());
+    window.request_frame();
+    REQUIRE(app.event_loop().poll());
+}
+
 TEST_CASE("Window exposes the active renderer backend", "[app][render]") {
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Renderer backend", .width = 320, .height = 240});

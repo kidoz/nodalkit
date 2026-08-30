@@ -111,6 +111,9 @@ Widget::Widget() : impl_(std::make_unique<Impl>()) {}
 
 Widget::~Widget() {
     impl_->on_destroy.emit();
+    if (impl_->host_window != nullptr) {
+        impl_->host_window->purge_dirty_widget(*this);
+    }
 }
 
 // --- Tree ---

@@ -246,6 +246,7 @@ private:
     void focus_widget(Widget* widget);
     void handle_widget_state_change(Widget& widget);
     void handle_widget_detached(Widget& widget);
+    void purge_dirty_widget(Widget& widget);
     void note_widget_redraw_request(Widget& widget);
     void note_widget_layout_request(Widget& widget);
     [[nodiscard]] Widget* drag_target_at(Point point) const;

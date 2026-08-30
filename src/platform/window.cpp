@@ -45,6 +45,18 @@ struct Window::Impl {
 
     WindowConfig config;
     std::shared_ptr<Widget> child;
+
+    // Set at the start of teardown so widget destructors skip dirty-list
+    // bookkeeping once window state is going away.
+    bool window_destroying = false;
+
+    ~Impl() {
+        window_destroying = true;
+        // Destroy the widget tree while the rest of Impl is still intact so
+        // ~Widget -> purge_dirty_widget runs against live state.
+        child.reset();
+    }
+
     std::optional<NativeToolbarConfig> native_toolbar;
     std::vector<OverlayEntry> overlays;
     std::unique_ptr<NativeSurface> surface;
@@ -1730,6 +1742,13 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
 Window::~Window() {
     if (impl_) {
         *impl_->alive = false;
+        // Tear the widget tree and overlays down here, while impl_ is still
+        // alive: widget destructors purge dirty-list bookkeeping through this
+        // Window. Once the impl_ member's own destruction starts, unique_ptr
+        // nulls it before ~Impl runs, and purge must tolerate that instead.
+        impl_->window_destroying = true;
+        impl_->child.reset();
+        impl_->overlays.clear();
     }
     NK_LOG_DEBUG("Window", "Window destroyed");
 }
@@ -2677,6 +2696,7 @@ void Window::handle_widget_state_change(Widget& widget) {
 }
 
 void Window::handle_widget_detached(Widget& widget) {
+    purge_dirty_widget(widget);
     if (impl_->hovered_widget != nullptr && is_descendant_of(impl_->hovered_widget, &widget)) {
         impl_->hovered_widget->set_state_flag(StateFlags::Hovered, false);
         impl_->hovered_widget = nullptr;
@@ -2705,6 +2725,16 @@ void Window::handle_widget_detached(Widget& widget) {
 
 CursorShape Window::current_cursor_shape() const {
     return impl_->current_cursor_shape;
+}
+
+// Dirty-frame bookkeeping holds raw Widget* for redraw coalescing; widgets that
+// queue a redraw and die before the next frame would otherwise dangle here and
+// be dereferenced by collect_damage_regions().
+void Window::purge_dirty_widget(Widget& widget) {
+    if (impl_ == nullptr || impl_->window_destroying) {
+        return;
+    }
+    std::erase(impl_->dirty_widgets, &widget);
 }
 
 bool Window::is_key_pressed(KeyCode key) const {
