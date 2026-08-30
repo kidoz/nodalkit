@@ -14,6 +14,23 @@ subprojects/packagecache/
 # OS
 .DS_Store
 
-# Images (screenshots, etc.)
+# Images (screenshots, etc.) — tracked docs assets are force-added.
 *.png
 
+# Local AI-agent artifacts. These are local development state and must never
+# be committed (see the local agent artifact policy). CHANGELOG.md is a normal
+# product artifact and is deliberately NOT ignored.
+/.agents/
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+/.claude/
+/.codex/
+/.gemini/
+/.antigravitycli/
+/.mcp.json
+/.local/
+/skills/
+/design_handoff_nodalkit/
+/nodalkit-architecture.skill
+/NODALKIT_FEATURE_REQUIREMENTS.md
