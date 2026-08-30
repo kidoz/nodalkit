@@ -766,6 +766,35 @@ void install_shared_rules(Theme& theme) {
                  {"text-color", token_ref("text-osd")},
              });
 
+    // VisualEffectView backdrops resolve the same semantic surface roles as
+    // the widgets they sit behind, so a material follows the active scheme
+    // instead of painting a light-theme constant. Tooltip keeps the OSD
+    // convention, which is deliberately scheme-independent in some families.
+    add_rule(theme,
+             {"visual-effect-sidebar"},
+             StateFlags::None,
+             {{"sidebar-background", token_ref("sidebar-bg")}});
+    add_rule(theme,
+             {"visual-effect-header"},
+             StateFlags::None,
+             {{"header-background", token_ref("headerbar-bg")}});
+    add_rule(theme,
+             {"visual-effect-window"},
+             StateFlags::None,
+             {{"window-background", token_ref("window-bg")}});
+    add_rule(theme,
+             {"visual-effect-popover"},
+             StateFlags::None,
+             {{"popover-background", token_ref("popover-bg")}});
+    add_rule(theme,
+             {"visual-effect-menu"},
+             StateFlags::None,
+             {{"menu-background", token_ref("popover-bg")}});
+    add_rule(theme,
+             {"visual-effect-tooltip"},
+             StateFlags::None,
+             {{"tooltip-background", token_ref("surface-osd")}});
+
     add_rule(theme,
              {"tree-view"},
              StateFlags::None,

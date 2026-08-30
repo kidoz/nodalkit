@@ -25,10 +25,12 @@ enum class VisualEffectMaterial {
 /// Single-child container that paints a translucent backdrop material behind
 /// its child.
 ///
-/// The cross-platform fallback draws a tinted translucent rectangle (optionally
-/// rounded) so applications can use this widget unconditionally; slice 2 adds
-/// real NSVisualEffectView compositing on macOS once the window surface grows a
-/// non-opaque presentation path.
+/// Each material resolves a semantic surface token through the theme's shared
+/// rules (sidebar, headerbar, popover, ...), so the backdrop follows the
+/// active color scheme; the literal tints are only defensive fallbacks for
+/// themeless use. Real NSVisualEffectView compositing on macOS remains a
+/// follow-up slice once the window surface grows a non-opaque presentation
+/// path.
 class VisualEffectView : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<VisualEffectView>
