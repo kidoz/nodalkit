@@ -478,14 +478,26 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
         ctx.add_text({inner.x + 12.0F, text_y}, std::string(text), theme_color("text-color"), font);
     }
 
-    const auto chevron_font = FontDescriptor{
-        .family = {},
-        .size = 13.0F,
-        .weight = FontWeight::Medium,
-    };
-    const auto chevron_text = impl_->popup_open ? "^" : "v";
-    const auto chevron_size = measure_text(chevron_text, chevron_font);
+    // Chevron as a stroked polyline: an ASCII "v"/"^" glyph reads as a typed
+    // letter at UI sizes, while a drawn chevron stays geometric and
+    // theme-tinted in every family.
     const auto arrow_color = theme_color("chevron-color", Color{0.45F, 0.48F, 0.54F, 1.0F});
+    const float chevron_half_width = 4.0F;
+    const float chevron_half_height = 2.25F;
+    const float chevron_thickness = 1.6F;
+    const float tip_offset = impl_->popup_open ? -chevron_half_height : chevron_half_height;
+    const auto draw_chevron = [&](float center_x, float center_y) {
+        const float tip_y = center_y + tip_offset;
+        const float base_y = center_y - tip_offset;
+        ctx.add_line({center_x - chevron_half_width, base_y},
+                     {center_x, tip_y},
+                     arrow_color,
+                     chevron_thickness);
+        ctx.add_line({center_x, tip_y},
+                     {center_x + chevron_half_width, base_y},
+                     arrow_color,
+                     chevron_thickness);
+    };
     if (capsule_chevron) {
         const float capsule_height = std::max(0.0F, inner.height - 8.0F);
         const float capsule_width = 18.0F;
@@ -498,16 +510,9 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
         ctx.add_rounded_rect(capsule,
                              theme_color("chevron-background", Color{0.21F, 0.52F, 0.89F, 1.0F}),
                              std::max(2.0F, corner_radius - 2.0F));
-        const float arrow_x =
-            capsule.x + std::max(0.0F, (capsule.width - chevron_size.width) * 0.5F);
-        const float arrow_y =
-            capsule.y + std::max(0.0F, (capsule.height - chevron_size.height) * 0.5F);
-        ctx.add_text({arrow_x, arrow_y}, chevron_text, arrow_color, chevron_font);
+        draw_chevron(capsule.x + (capsule.width * 0.5F), capsule.y + (capsule.height * 0.5F));
     } else {
-        const float arrow_x =
-            inner.right() - ((arrow_width - chevron_size.width) * 0.5F) - chevron_size.width;
-        const float arrow_y = inner.y + std::max(0.0F, (inner.height - chevron_size.height) * 0.5F);
-        ctx.add_text({arrow_x, arrow_y}, chevron_text, arrow_color, chevron_font);
+        draw_chevron(inner.right() - (arrow_width * 0.5F), inner.y + (inner.height * 0.5F));
     }
 
     if (!impl_->popup_open || impl_->items.empty()) {
