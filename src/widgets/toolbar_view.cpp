@@ -342,6 +342,11 @@ bool ToolbarView::handle_mouse_event(const MouseEvent& event) {
 }
 
 void ToolbarView::snapshot(SnapshotContext& ctx) const {
+    // As the page root carrying the window's bars, paint the themed window
+    // background across the full allocation first; regions not covered by
+    // bars or content must follow the active color scheme instead of showing
+    // the renderer's initial white fill (visible as white gutters in dark).
+    ctx.add_color_rect(allocation(), theme_color("window-bg", Color::from_rgb(250, 250, 251)));
     Widget::snapshot(ctx);
 }
 
