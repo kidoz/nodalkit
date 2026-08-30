@@ -7,10 +7,12 @@
 #include "showcase_profile.h"
 #include "showcase_widgets.h"
 
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <nk/foundation/property.h>
 #include <nk/foundation/types.h>
@@ -75,6 +77,86 @@ std::string showcase_table_field(std::string_view row, std::size_t index) {
 
 } // namespace
 
+// --- Screenshot capture mode -----------------------------------------------//
+// `--screenshot-dir=<path>` renders every showcase page in light and dark,
+// plus high-contrast and compact-width variants, and writes each settled
+// frame as a PPM. Used to review and regenerate widget visuals without an
+// interactive session.
+
+std::optional<std::filesystem::path> parse_screenshot_dir(int argc, char** argv) {
+    constexpr std::string_view kPrefix = "--screenshot-dir=";
+    for (int i = 1; i < argc; ++i) {
+        const auto arg = argv[i] != nullptr ? std::string_view(argv[i]) : std::string_view();
+        if (arg.starts_with(kPrefix)) {
+            return std::filesystem::path(arg.substr(kPrefix.size()));
+        }
+    }
+    return std::nullopt;
+}
+
+void save_settled_frame(nk::Application& app,
+                        nk::Window& window,
+                        const std::filesystem::path& path) {
+    // One poll applies pending layout/theme work; the second renders the
+    // settled frame the inspector dumps to disk.
+    (void)app.event_loop().poll();
+    (void)app.event_loop().poll();
+    auto saved = window.inspector().save_debug_screenshot_ppm_file(path.string());
+    if (!saved) {
+        std::cerr << "showcase: failed to save " << path << ": " << saved.error() << "\n";
+    }
+}
+
+void capture_showcase_screenshots(nk::Application& app,
+                                  nk::Window& window,
+                                  const std::shared_ptr<ShowcaseNavigationController>& nav,
+                                  const nk::ThemeSelection& base_selection,
+                                  const std::filesystem::path& dir) {
+    std::error_code fs_error;
+    std::filesystem::create_directories(dir, fs_error);
+    if (fs_error) {
+        std::cerr << "showcase: cannot create " << dir << ": " << fs_error.message() << "\n";
+        return;
+    }
+
+    const std::array<std::pair<nk::ColorScheme, std::string_view>, 2> schemes{
+        std::pair{nk::ColorScheme::Light, std::string_view("light")},
+        std::pair{nk::ColorScheme::Dark, std::string_view("dark")},
+    };
+    const std::array<std::string_view, 7> slugs{
+        "controls", "models-views", "preview", "runtime", "commands", "settings", "empty-state"};
+
+    for (const auto& [scheme, scheme_slug] : schemes) {
+        auto selection = base_selection;
+        selection.color_scheme_override = scheme;
+        app.set_theme_selection(selection);
+        for (std::size_t index = 0; index < slugs.size(); ++index) {
+            nav->select_category(index);
+            save_settled_frame(
+                app,
+                window,
+                dir / (std::string(slugs[index]) + "-" + std::string(scheme_slug) + ".ppm"));
+        }
+    }
+
+    auto high_contrast = base_selection;
+    high_contrast.color_scheme_override = nk::ColorScheme::Light;
+    high_contrast.force_high_contrast = true;
+    app.set_theme_selection(high_contrast);
+    nav->select_category(0);
+    save_settled_frame(app, window, dir / "controls-high-contrast-light.ppm");
+
+    // Below the 960 px breakpoint the split view collapses; capture the
+    // compact content view a phone-width or narrow-tile window shows. Poll
+    // once after the resize so the breakpoint flips before the navigation
+    // controller picks the collapsed branch.
+    app.set_theme_selection(base_selection);
+    window.resize(720, 900);
+    (void)app.event_loop().poll();
+    nav->select_category(0);
+    save_settled_frame(app, window, dir / "compact-controls-light.ppm");
+}
+
 int run_showcase(int argc, char** argv) {
     nk::Application app(argc, argv);
     auto profile = make_showcase_profile(app.system_preferences());
@@ -105,6 +187,7 @@ int run_showcase(int argc, char** argv) {
 
     int counter = 0;
     int frame_number = 0;
+    std::shared_ptr<ShowcaseNavigationController> showcase_nav;
 
     auto menus = build_showcase_menus(profile);
     auto menu_bar = nk::MenuBar::create();
@@ -924,6 +1007,7 @@ int run_showcase(int argc, char** argv) {
 
         auto navigation_controller = ShowcaseNavigationController::create(
             page_stack, adaptive_split, headerbar, category_titles, category_buttons);
+        showcase_nav = navigation_controller;
         (void)navigation_controller;
         (void)headerbar->on_back_requested().connect([adaptive_split, headerbar, &profile] {
             adaptive_split->set_show_content(false);
@@ -1144,5 +1228,11 @@ int run_showcase(int argc, char** argv) {
     }
 
     window.present();
+
+    if (auto screenshot_dir = parse_screenshot_dir(argc, argv);
+        screenshot_dir.has_value() && showcase_nav != nullptr) {
+        capture_showcase_screenshots(app, window, showcase_nav, theme_selection, *screenshot_dir);
+        return 0;
+    }
     return app.run();
 }
