@@ -1,6 +1,6 @@
 # Maintainer: Aleksandr Pavlov <ckidoz@gmail.com>
 pkgname=nodalkit
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='C++-first GUI toolkit for modern desktop applications'
 arch=('x86_64' 'aarch64')

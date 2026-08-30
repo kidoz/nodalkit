@@ -29,6 +29,7 @@
 #include <nk/platform/window_inspector.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/ui_core/widget.h>
+#include <nk_version.h>
 #include <optional>
 #include <poll.h>
 #include <sys/eventfd.h>
@@ -1407,7 +1408,7 @@ void atspi_method_call(GDBusConnection* connection,
             return;
         }
         if (std::string_view(method_name) == "GetVersion") {
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", "0.1.0"));
+            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", NK_VERSION));
             return;
         }
     } else if (std::string_view(interface_name) == AtspiComponentInterface) {
