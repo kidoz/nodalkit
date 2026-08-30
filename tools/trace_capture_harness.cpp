@@ -425,8 +425,12 @@ bool validate_against_stable_baseline(Scenario scenario,
         speed_scale = std::clamp(
             candidate_artifact_summary.busy_ms / baseline_artifact_summary.busy_ms, 0.25, 8.0);
     }
-    if (speed_scale != 1.0) {
-        candidate_trace_summary = summarize_trace(candidate_trace, speed_scale);
+    // Only a slower host is normalized away. Rescaling a faster host would
+    // inflate its frames above the reference baselines and re-read normal
+    // faster-host variance as drift; faster hosts simply have headroom.
+    const double slowdown = std::max(speed_scale, 1.0);
+    if (slowdown != 1.0) {
+        candidate_trace_summary = summarize_trace(candidate_trace, slowdown);
     }
 
     bool failed = false;
@@ -441,7 +445,7 @@ bool validate_against_stable_baseline(Scenario scenario,
                                baseline_artifact_summary.max_total_ms,
                                // Same host-speed normalization as the trace
                                // frame gates above.
-                               candidate_artifact_summary.max_total_ms / speed_scale,
+                               candidate_artifact_summary.max_total_ms / slowdown,
                                thresholds.max_artifact_total_ms_regression,
                                scenario_label);
     failed |= check_regression("artifact max render nodes",
@@ -488,7 +492,7 @@ bool validate_against_stable_baseline(Scenario scenario,
         // so it grows by the same host-speed normalization the frame times
         // went through; a fixed tolerance reads uniform host slowness as a
         // per-rank drift.
-        const double per_frame_tolerance_ms = kPerFrameToleranceMs * speed_scale;
+        const double per_frame_tolerance_ms = kPerFrameToleranceMs * slowdown;
         for (std::size_t rank = 0; rank < baseline_trace_summary.frame_ms.size(); ++rank) {
             if (candidate_trace_summary.frame_ms[rank] >
                 baseline_trace_summary.frame_ms[rank] + per_frame_tolerance_ms) {

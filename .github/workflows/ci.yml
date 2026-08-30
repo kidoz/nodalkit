@@ -139,6 +139,11 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    # Windows is an experimental platform and explicitly not a release gate
+    # (see the README support policy). The jobs run for signal but never
+    # block main: the clang-to-MSVC toolchain has never been green end to
+    # end on the runners and still fails in the linker.
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
