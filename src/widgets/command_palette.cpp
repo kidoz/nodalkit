@@ -399,7 +399,10 @@ void CommandPalette::snapshot(SnapshotContext& ctx) const {
     const auto selected_bg = theme_color("selected-background");
     const auto focus_ring = theme_color("focus-ring-color");
     const auto hover_bg = theme_color("hover-background");
-    const auto disabled_text = theme_color("disabled-text-color");
+    // Disabled rows dim the theme's own foreground instead of a separate gray
+    // token: not every palette defines one, and a fixed gray can land too
+    // close to the normal label (or too bright on dark backgrounds).
+    const auto disabled_text = Color{text_color.r, text_color.g, text_color.b, 0.45F};
     const auto row_separator = theme_color("row-separator-color");
 
     ctx.add_rounded_rect(body, background, corner_radius);
@@ -504,12 +507,9 @@ void CommandPalette::snapshot(SnapshotContext& ctx) const {
             }
             detail += command.subtitle;
         }
-        if (!command.enabled) {
-            if (!detail.empty()) {
-                detail += " — ";
-            }
-            detail += "Disabled";
-        }
+        // Disabled rows are marked by the dimmed foreground alone; a textual
+        // "Disabled" suffix made every row's detail read as a double em-dash
+        // run and repeated what the styling already says.
         const float text_block_height =
             title_line.height + (detail.empty() ? 0.0F : line_spacing + detail_line.height);
         const float title_y =
