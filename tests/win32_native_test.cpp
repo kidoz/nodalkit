@@ -24,12 +24,12 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
-// windows.h must precede shellapi.h: the shell header uses EXTERN_C, which
-// only windows.h defines.
+// ole2.h pulls in windows.h (EXTERN_C and friends) and sorts before
+// shellapi.h, so the include sorter keeps the order the shell header needs.
+#include <ole2.h>
 #include <shellapi.h>
 #include <string>
 #include <vector>
-#include <windows.h>
 
 namespace {
 

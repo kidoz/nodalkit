@@ -484,9 +484,14 @@ bool validate_against_stable_baseline(Scenario scenario,
         failed = true;
     } else {
         constexpr double kPerFrameToleranceMs = 20.0;
+        // The tolerance is absolute wall-clock like the baselines themselves,
+        // so it grows by the same host-speed normalization the frame times
+        // went through; a fixed tolerance reads uniform host slowness as a
+        // per-rank drift.
+        const double per_frame_tolerance_ms = kPerFrameToleranceMs * speed_scale;
         for (std::size_t rank = 0; rank < baseline_trace_summary.frame_ms.size(); ++rank) {
             if (candidate_trace_summary.frame_ms[rank] >
-                baseline_trace_summary.frame_ms[rank] + kPerFrameToleranceMs) {
+                baseline_trace_summary.frame_ms[rank] + per_frame_tolerance_ms) {
                 std::cerr << "stable scenario regression [" << scenario_label
                           << "]: trace frame rank " << rank
                           << " ms baseline=" << baseline_trace_summary.frame_ms[rank]
