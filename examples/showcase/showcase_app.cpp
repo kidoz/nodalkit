@@ -435,7 +435,7 @@ int run_showcase(int argc, char** argv) {
     auto preview_title = SectionTitle::create(profile.preview_title);
     auto preview_subtitle = SecondaryText::create(profile.preview_subtitle);
     auto image_label = FieldLabel::create("Live image");
-    auto image_meta = SecondaryText::create("128 x 96 source");
+    auto image_meta = SecondaryText::create("· 128 × 96 source");
     auto image_detail = SecondaryText::create("Animated sample with explicit display scaling.");
     auto preview_canvas = PreviewCanvas::create();
     auto preview_stage = InsetStage::create(preview_canvas,
