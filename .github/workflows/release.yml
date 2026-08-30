@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  # 1. Release gate: the CI build-and-test matrix plus the sanitizer suite,
+  #    run against the tag itself. Format, clang-tidy, and the Windows jobs
+  #    are already validated on main by ci.yml; Windows stays outside the
+  #    release gate because it is an experimental platform (see the README
+  #    support policy).
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        buildtype: [debug, release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            pkg-config \
+            libwayland-dev \
+            libwayland-bin \
+            wayland-protocols \
+            libxkbcommon-dev \
+            libfreetype-dev \
+            libfontconfig1-dev \
+            libharfbuzz-dev \
+            libglib2.0-dev \
+            libvulkan-dev \
+            glslang-tools \
+            weston \
+            mesa-vulkan-drivers
+          # apt's meson (1.3.x on ubuntu-latest) is older than the project's
+          # >= 1.11 floor; install a current one via pipx instead.
+          pipx install meson
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install meson ninja pkg-config
+      - name: Configure
+        run: meson setup build-${{ matrix.os }}-${{ matrix.buildtype }} --buildtype=${{ matrix.buildtype }} --prefix="$PWD/.local" --libdir=lib
+      - name: Build
+        run: meson compile -C build-${{ matrix.os }}-${{ matrix.buildtype }}
+      # The suite exercises the real Wayland + Vulkan paths (native surfaces,
+      # localized-redraw damage gates), so give it a headless compositor and
+      # Mesa's software Vulkan device instead of the windowless fallback.
+      - name: Start headless Wayland session
+        if: runner.os == 'Linux'
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless-backend.so --socket=nodalkit-ci --idle-time=0 &> "$RUNNER_TEMP/weston.log" &
+          sleep 2
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          echo "WAYLAND_DISPLAY=nodalkit-ci" >> "$GITHUB_ENV"
+      - name: Test
+        run: meson test -C build-${{ matrix.os }}-${{ matrix.buildtype }} --print-errorlogs
+      - name: Install
+        run: meson install -C build-${{ matrix.os }}-${{ matrix.buildtype }}
+      - name: Install smoke
+        env:
+          PKG_CONFIG_PATH: ${{ github.workspace }}/.local/lib/pkgconfig
+        run: |
+          meson setup build-install-smoke-${{ matrix.os }}-${{ matrix.buildtype }} tests/install_smoke
+          meson test -C build-install-smoke-${{ matrix.os }}-${{ matrix.buildtype }} --print-errorlogs
+
+  sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install sanitizer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            ninja-build \
+            pkg-config \
+            libwayland-dev \
+            libwayland-bin \
+            wayland-protocols \
+            libxkbcommon-dev \
+            libfreetype-dev \
+            libfontconfig1-dev \
+            libharfbuzz-dev \
+            libglib2.0-dev \
+            libvulkan-dev \
+            glslang-tools \
+            weston \
+            mesa-vulkan-drivers
+          pipx install meson
+      - name: Configure sanitizer build
+        env:
+          CC: clang
+          CXX: clang++
+        # b_lundef=false: clang links the ASan runtime statically into the
+        # executables only, so the shared library legitimately carries
+        # undefined __asan_* references that -Wl,--no-undefined would reject.
+        run: meson setup build-asan-ubsan --buildtype=debug -Db_sanitize=address,undefined -Db_lundef=false
+      - name: Build sanitizer target
+        run: meson compile -C build-asan-ubsan
+      - name: Start headless Wayland session
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless-backend.so --socket=nodalkit-ci --idle-time=0 &> "$RUNNER_TEMP/weston.log" &
+          sleep 2
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          echo "WAYLAND_DISPLAY=nodalkit-ci" >> "$GITHUB_ENV"
+      - name: Test sanitizer target
+        run: meson test -C build-asan-ubsan --print-errorlogs
+
+  # 2. Publish the release only if the gate completely passed. The release
+  #    body is the CHANGELOG section for the tag's version, not the whole
+  #    file, so the notes stay scoped to this release.
+  publish-release:
+    needs: [build-and-test, sanitizers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract the release notes for this tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v section="## [$version]" '
+            $0 == section || index($0, section " ") == 1 { found = 1; next }
+            /^## /                                       { found = 0 }
+            found                                        { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "CHANGELOG.md has no '## [$version]' section" >&2
+            exit 1
+          fi
+          cat release-notes.md
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
