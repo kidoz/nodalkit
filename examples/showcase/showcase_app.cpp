@@ -989,6 +989,7 @@ int run_showcase(int argc, char** argv) {
         auto toolbar_view = nk::ToolbarView::create();
         toolbar_view->set_content(linux_toasts);
         toolbar_view->add_top_bar(headerbar);
+        toolbar_view->add_bottom_bar(status_bar);
         toolbar_view->set_top_bar_style(nk::ToolbarStyle::Flat);
         window.set_child(toolbar_view);
     } else {
