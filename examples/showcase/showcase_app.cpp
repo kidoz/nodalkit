@@ -839,8 +839,10 @@ int run_showcase(int argc, char** argv) {
 
         // Boxed lists are GNOME's signature content pattern: grouped rows in a
         // rounded card, each carrying at most one control, with the row
-        // background activating that control.
-        auto settings_page = nk::PreferencesPage::create("Settings");
+        // background activating that control. The page heading uses the same
+        // SectionTitle pattern as the other pages so all headings align.
+        auto settings_page = nk::PreferencesPage::create();
+        settings_page->set_horizontal_size_policy(nk::SizePolicy::Expanding);
 
         auto appearance_group = nk::PreferencesGroup::create("Appearance");
         auto sidebar_row =
@@ -872,6 +874,10 @@ int run_showcase(int argc, char** argv) {
         workspace_group->add(autosave_row);
         settings_page->add(workspace_group);
 
+        auto settings_content = Box::vertical(profile.section_spacing);
+        settings_content->append(SectionTitle::create("Settings"));
+        settings_content->append(settings_page);
+
         const std::vector<std::string> category_titles = {"Controls",
                                                           "Models & Views",
                                                           "Preview",
@@ -880,12 +886,14 @@ int run_showcase(int argc, char** argv) {
                                                           "Settings",
                                                           "Empty State"};
         auto page_stack = PageStack::create();
+        // One shared content-column maximum keeps every page's heading on the
+        // same left edge when switching categories.
         page_stack->add_page(make_scrolling_page(controls_card, 720.0F));
-        page_stack->add_page(make_scrolling_page(list_card, 980.0F));
+        page_stack->add_page(make_scrolling_page(list_card, 720.0F));
         page_stack->add_page(make_scrolling_page(preview_card, 720.0F));
-        page_stack->add_page(make_scrolling_page(actions_card, 760.0F));
+        page_stack->add_page(make_scrolling_page(actions_card, 720.0F));
         page_stack->add_page(make_scrolling_page(commands_content, 720.0F));
-        page_stack->add_page(make_scrolling_page(settings_page, 720.0F));
+        page_stack->add_page(make_scrolling_page(settings_content, 720.0F));
         page_stack->add_page(status_page);
 
         auto sidebar_content = Box::vertical(4.0F);
