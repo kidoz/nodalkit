@@ -2710,10 +2710,18 @@ TEST_CASE("Window tracks current key state and cursor shape", "[app][input]") {
     window.dispatch_window_event({.type = nk::WindowEvent::Type::FocusOut});
     REQUIRE_FALSE(window.is_key_pressed(nk::KeyCode::A));
 
-    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 20.0F, .y = 20.0F});
+    // Probe the widgets at their allocated centers: control heights depend on
+    // the active theme's font metrics, so fixed coordinates go stale.
+    const nk::Rect button_bounds = button->allocation();
+    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move,
+                                 .x = button_bounds.x + (button_bounds.width / 2.0F),
+                                 .y = button_bounds.y + (button_bounds.height / 2.0F)});
     REQUIRE(window.current_cursor_shape() == nk::CursorShape::PointingHand);
 
-    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = 20.0F, .y = 64.0F});
+    const nk::Rect field_bounds = field->allocation();
+    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move,
+                                 .x = field_bounds.x + (field_bounds.width / 2.0F),
+                                 .y = field_bounds.y + (field_bounds.height / 2.0F)});
     REQUIRE(window.current_cursor_shape() == nk::CursorShape::IBeam);
 
     window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Leave, .x = 0.0F, .y = 0.0F});
