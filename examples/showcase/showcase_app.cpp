@@ -49,6 +49,7 @@
 #include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tree_view.h>
 #include <nk/widgets/visual_effect_view.h>
+#include <nk_version.h>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -669,11 +670,11 @@ int run_showcase(int argc, char** argv) {
         if (about_dialog == nullptr) {
             nk::AboutInfo about;
             about.application_name = "NodalKit Showcase";
-            about.version = "0.1.0";
+            about.version = NK_VERSION;
             about.comments = "A C++23 desktop GUI toolkit";
             about.developer_name = "NodalKit Maintainers";
-            about.website = "https://github.com/nodalkit/nodalkit";
-            about.issue_url = "https://github.com/nodalkit/nodalkit/issues";
+            about.website = "https://github.com/kidoz/nodalkit";
+            about.issue_url = "https://github.com/kidoz/nodalkit/issues";
             about.copyright = "© 2026 NodalKit Maintainers";
             about.license = "MIT";
             about_dialog = nk::AboutDialog::create(std::move(about));

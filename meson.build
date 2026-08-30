@@ -1,7 +1,7 @@
 
 # MSVC exposes its C++23 mode as /std:c++latest rather than /std:c++23.
 project('NodalKit', 'cpp',
-        version : '0.1.0',
+        version : '0.2.0',
         meson_version : '>=1.11.0',
         default_options : ['warning_level=3', 'werror=true', 'cpp_std=c++23,c++latest'])
 
@@ -9,6 +9,23 @@ nk_inc = include_directories('include')
 pkgconfig = import('pkgconfig')
 nk_enabled_languages = ['cpp']
 cpp_compiler = meson.get_compiler('cpp')
+
+# --- Generated version header ---
+
+# Single source of truth for the version visible to C++ code (About dialogs,
+# AT-SPI toolkit version, ...). Installed next to the nk/ headers so
+# applications can read it from the staged SDK too.
+nk_version_parts = meson.project_version().split('.')
+nk_version_conf = configuration_data()
+nk_version_conf.set('NK_VERSION', meson.project_version())
+nk_version_conf.set('NK_VERSION_MAJOR', nk_version_parts[0])
+nk_version_conf.set('NK_VERSION_MINOR', nk_version_parts[1])
+nk_version_conf.set('NK_VERSION_PATCH', nk_version_parts.get(2, '0'))
+nk_version_h = configure_file(
+    input : 'include' / 'nk_version.h.in',
+    output : 'nk_version.h',
+    configuration : nk_version_conf,
+)
 
 # --- Core sources (platform-agnostic) ---
 
@@ -454,6 +471,10 @@ endif
 
 # --- Build library ---
 
+# The generated header rides along as a source so every internal target that
+# consumes nk_dep gets the build directory on its include path.
+nk_sources += [nk_version_h]
+
 if host_system == 'windows'
     nk_lib = static_library('NodalKit', nk_sources,
         include_directories : nk_inc,
@@ -470,14 +491,21 @@ else
     )
 endif
 
+# include_directories('.') adds both the source root and the build root, so
+# in-tree consumers of nk_dep can include the generated nk_version.h.
 nk_dep = declare_dependency(
-    include_directories : nk_inc,
+    include_directories : [nk_inc, include_directories('.')],
     link_with : nk_lib,
+    sources : [nk_version_h],
 )
 
 install_subdir('include/nk',
     install_dir : get_option('includedir') / 'nk',
     strip_directory : true,
+)
+
+install_data(nk_version_h,
+    install_dir : get_option('includedir'),
 )
 
 pkgconfig.generate(
