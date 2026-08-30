@@ -595,7 +595,12 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
 }
 
 - (BOOL)isAccessibilityElement {
-    return NO;
+    // AX-safe stub (S1): expose the window itself as one group. The previous
+    // per-query NKAccessibilityNode tree handed AppKit ephemeral objects that
+    // AppKit's AX cache outlives, crashing any assistive-tech query
+    // (SIGTRAP in NSAccessibilityChildren). The full widget bridge returns in
+    // the accessibility slice once elements are anchored and thread-safe.
+    return YES;
 }
 
 - (NSString*)accessibilityRole {
@@ -603,28 +608,28 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
 }
 
 - (NSString*)accessibilityLabel {
-    return @"NodalKit window content";
+    if (!_surface) {
+        return @"NodalKit window";
+    }
+    const auto title = _surface->owner().title();
+    return [NSString stringWithUTF8String:std::string(title).c_str()];
 }
 
 - (NSString*)accessibilityTitle {
-    return @"NodalKit window content";
+    return self.accessibilityLabel;
 }
 
 - (NSArray<id>*)accessibilityChildren {
-    if (!_surface) {
-        return @[];
-    }
-    return build_accessibility_children(_surface->owner().inspector().debug_tree(), self, self);
+    return @[];
 }
 
 - (id)accessibilityFocusedUIElement {
-    id focused = accessibility_focused_element(self.accessibilityChildren);
-    return focused != nil ? focused : self;
+    return self;
 }
 
 - (id)accessibilityHitTest:(NSPoint)point {
-    id hit = accessibility_hit_test(self.accessibilityChildren, point);
-    return hit != nil ? hit : self;
+    (void)point;
+    return self;
 }
 
 // -- Tracking areas --
