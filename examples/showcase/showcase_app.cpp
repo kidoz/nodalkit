@@ -79,10 +79,11 @@ std::string showcase_table_field(std::string_view row, std::size_t index) {
 } // namespace
 
 // --- Screenshot capture mode -----------------------------------------------//
-// `--screenshot-dir=<path>` renders every showcase page in light and dark,
-// plus high-contrast and compact-width variants, and writes each settled
-// frame as a PPM. Used to review and regenerate widget visuals without an
-// interactive session.
+// `--screenshot-dir=<path>` renders the showcase to PPM files. The Linux
+// shell captures every navigation page in light and dark, plus high-contrast
+// and compact-width variants; the macOS and Windows shells have no page
+// navigation, so they capture the resting window in light and dark instead.
+// Used to review and regenerate widget visuals without an interactive session.
 
 std::optional<std::filesystem::path> parse_screenshot_dir(int argc, char** argv) {
     constexpr std::string_view kPrefix = "--screenshot-dir=";
@@ -156,6 +157,29 @@ void capture_showcase_screenshots(nk::Application& app,
     (void)app.event_loop().poll();
     nav->select_category(0);
     save_settled_frame(app, window, dir / "compact-controls-light.ppm");
+}
+
+void capture_resting_shell_screenshots(nk::Application& app,
+                                       nk::Window& window,
+                                       const nk::ThemeSelection& base_selection,
+                                       const std::filesystem::path& dir) {
+    std::error_code fs_error;
+    std::filesystem::create_directories(dir, fs_error);
+    if (fs_error) {
+        std::cerr << "showcase: cannot create " << dir << ": " << fs_error.message() << "\n";
+        return;
+    }
+
+    const std::array<std::pair<nk::ColorScheme, std::string_view>, 2> schemes{
+        std::pair{nk::ColorScheme::Light, std::string_view("light")},
+        std::pair{nk::ColorScheme::Dark, std::string_view("dark")},
+    };
+    for (const auto& [scheme, scheme_slug] : schemes) {
+        auto selection = base_selection;
+        selection.color_scheme_override = scheme;
+        app.set_theme_selection(selection);
+        save_settled_frame(app, window, dir / ("shell-" + std::string(scheme_slug) + ".ppm"));
+    }
 }
 
 int run_showcase(int argc, char** argv) {
@@ -1230,9 +1254,13 @@ int run_showcase(int argc, char** argv) {
 
     window.present();
 
-    if (auto screenshot_dir = parse_screenshot_dir(argc, argv);
-        screenshot_dir.has_value() && showcase_nav != nullptr) {
-        capture_showcase_screenshots(app, window, showcase_nav, theme_selection, *screenshot_dir);
+    if (auto screenshot_dir = parse_screenshot_dir(argc, argv); screenshot_dir.has_value()) {
+        if (showcase_nav != nullptr) {
+            capture_showcase_screenshots(
+                app, window, showcase_nav, theme_selection, *screenshot_dir);
+        } else {
+            capture_resting_shell_screenshots(app, window, theme_selection, *screenshot_dir);
+        }
         return 0;
     }
     return app.run();
