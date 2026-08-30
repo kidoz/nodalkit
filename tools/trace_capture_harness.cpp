@@ -87,6 +87,9 @@ struct HarnessOptions {
 struct ArtifactSummary {
     std::size_t frame_count = 0;
     double max_total_ms = 0.0;
+    // Pacing-free work per run: layout + snapshot + render summed over all
+    // frames. This is the host-speed signal for normalizing wall-clock gates.
+    double busy_ms = 0.0;
     std::size_t max_render_node_count = 0;
     std::size_t max_text_shape_count = 0;
     std::size_t max_image_texture_upload_count = 0;
@@ -318,6 +321,7 @@ ArtifactSummary summarize_artifact(const nk::FrameDiagnosticsArtifact& artifact)
     summary.frame_count = artifact.frames.size();
     for (const auto& frame : artifact.frames) {
         summary.max_total_ms = std::max(summary.max_total_ms, frame.total_ms);
+        summary.busy_ms += frame.layout_ms + frame.snapshot_ms + frame.render_ms;
         summary.max_render_node_count =
             std::max(summary.max_render_node_count, frame.render_node_count);
         summary.max_text_shape_count =
@@ -411,16 +415,15 @@ bool validate_against_stable_baseline(Scenario scenario,
     // The frame-time gates compare wall-clock numbers against baselines
     // recorded on the reference machine, so a different-speed host or a
     // debug -O0 build shifts them without any code change. Derive the
-    // overall run-speed ratio from the two traces and normalize the
-    // candidate's frame times by it; the clamps keep a pathological baseline
-    // from inventing an extreme scale.
+    // overall run-speed ratio from the frames' busy phases (layout +
+    // snapshot + render): trace totals include frame pacing, which reads as
+    // equal on hosts that differ only in how long the work itself takes,
+    // while the busy phases track the actual per-host cost. The clamp keeps
+    // a pathological baseline from inventing an extreme scale.
     double speed_scale = 1.0;
-    if (baseline_trace_summary.total_frame_ms > 0.0 &&
-        candidate_trace_summary.total_frame_ms > 0.0) {
-        speed_scale =
-            std::clamp(candidate_trace_summary.total_frame_ms / baseline_trace_summary.total_frame_ms,
-                       0.25,
-                       8.0);
+    if (baseline_artifact_summary.busy_ms > 0.0 && candidate_artifact_summary.busy_ms > 0.0) {
+        speed_scale = std::clamp(
+            candidate_artifact_summary.busy_ms / baseline_artifact_summary.busy_ms, 0.25, 8.0);
     }
     if (speed_scale != 1.0) {
         candidate_trace_summary = summarize_trace(candidate_trace, speed_scale);

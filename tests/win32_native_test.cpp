@@ -24,6 +24,8 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+// windows.h must precede shellapi.h: the shell header uses EXTERN_C, which
+// only windows.h defines.
 #include <shellapi.h>
 #include <string>
 #include <vector>
