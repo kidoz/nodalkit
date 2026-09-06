@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 *   **Sanitizer Test Budget:** The `basic_app` suite carries an explicit Meson timeout so instrumented Vulkan drivers no longer trip the default 30s limit.
+*   **Build:** Removed the orphaned `src/platform/window_inspector.cpp`, whose contents had already moved into `window.cpp`.
 
 ## [0.2.0] - 2026-08-30
 
