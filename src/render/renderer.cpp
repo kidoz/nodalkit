@@ -372,6 +372,10 @@ RenderHotspotCounters Renderer::last_hotspot_counters() const {
     return {};
 }
 
+std::optional<FramePixels> Renderer::read_back_frame() {
+    return std::nullopt;
+}
+
 // --- SoftwareRenderer ---
 
 struct SoftwareRenderer::Impl {
@@ -948,6 +952,17 @@ void SoftwareRenderer::present(NativeSurface& surface) {
 
 RenderHotspotCounters SoftwareRenderer::last_hotspot_counters() const {
     return impl_->last_hotspot_counters;
+}
+
+std::optional<FramePixels> SoftwareRenderer::read_back_frame() {
+    if (impl_->width <= 0 || impl_->height <= 0 || impl_->pixels.empty()) {
+        return std::nullopt;
+    }
+    return FramePixels{
+        .width = impl_->width,
+        .height = impl_->height,
+        .rgba = impl_->pixels,
+    };
 }
 
 void SoftwareRenderer::set_text_shaper(TextShaper* shaper) {

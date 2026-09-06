@@ -900,7 +900,200 @@ public:
         return last_hotspot_counters_;
     }
 
+    std::optional<FramePixels> read_back_frame() override {
+        const auto present_path = last_hotspot_counters_.gpu_present_path;
+        const bool gpu_frame_presented = present_path != GpuPresentPath::None &&
+                                         present_path != GpuPresentPath::SoftwareDirect &&
+                                         present_path != GpuPresentPath::SoftwareUpload;
+        if (gpu_frame_presented && scene_initialized_ && ready_ && device_ != VK_NULL_HANDLE &&
+            graphics_queue_ != VK_NULL_HANDLE && scene_image_ != VK_NULL_HANDLE) {
+            return read_back_scene_image();
+        }
+        // Frames that went through the software upload/direct paths presented
+        // exactly the software renderer's pixels, so that buffer is the frame.
+        if (software_frame_finalized_) {
+            return software_->read_back_frame();
+        }
+        return std::nullopt;
+    }
+
 private:
+    /// Copy the persistent scene image (the last GPU-drawn frame) into a
+    /// host-visible buffer and return it as RGBA8. Leaves the scene image in
+    /// the transfer-source layout, which every draw path accepts as input.
+    [[nodiscard]] std::optional<FramePixels> read_back_scene_image() {
+        const uint32_t width = swapchain_extent_.width;
+        const uint32_t height = swapchain_extent_.height;
+        if (width == 0 || height == 0) {
+            return std::nullopt;
+        }
+        if (!vk_ok(vkQueueWaitIdle(graphics_queue_), "vkQueueWaitIdle(readback)")) {
+            return std::nullopt;
+        }
+
+        const VkDeviceSize byte_count =
+            static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * 4;
+        VkBuffer readback_buffer = VK_NULL_HANDLE;
+        VkDeviceMemory readback_memory = VK_NULL_HANDLE;
+        const auto destroy_readback = [&] {
+            if (readback_buffer != VK_NULL_HANDLE) {
+                vkDestroyBuffer(device_, readback_buffer, nullptr);
+                readback_buffer = VK_NULL_HANDLE;
+            }
+            if (readback_memory != VK_NULL_HANDLE) {
+                vkFreeMemory(device_, readback_memory, nullptr);
+                readback_memory = VK_NULL_HANDLE;
+            }
+        };
+
+        const VkBufferCreateInfo buffer_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .size = byte_count,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .queueFamilyIndexCount = 0,
+            .pQueueFamilyIndices = nullptr,
+        };
+        if (!vk_ok(vkCreateBuffer(device_, &buffer_info, nullptr, &readback_buffer),
+                   "vkCreateBuffer(readback)")) {
+            return std::nullopt;
+        }
+
+        VkMemoryRequirements memory_requirements{};
+        vkGetBufferMemoryRequirements(device_, readback_buffer, &memory_requirements);
+        const uint32_t memory_type = find_memory_type(memory_requirements.memoryTypeBits,
+                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        if (memory_type == std::numeric_limits<uint32_t>::max()) {
+            NK_LOG_WARN("VulkanRenderer", "No host-visible memory type available for readback");
+            destroy_readback();
+            return std::nullopt;
+        }
+        const VkMemoryAllocateInfo allocate_info = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .allocationSize = memory_requirements.size,
+            .memoryTypeIndex = memory_type,
+        };
+        if (!vk_ok(vkAllocateMemory(device_, &allocate_info, nullptr, &readback_memory),
+                   "vkAllocateMemory(readback)") ||
+            !vk_ok(vkBindBufferMemory(device_, readback_buffer, readback_memory, 0),
+                   "vkBindBufferMemory(readback)")) {
+            destroy_readback();
+            return std::nullopt;
+        }
+
+        const VkCommandBufferBeginInfo begin_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .pNext = nullptr,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+            .pInheritanceInfo = nullptr,
+        };
+        if (!vk_ok(vkResetCommandPool(device_, command_pool_, 0), "vkResetCommandPool(readback)") ||
+            !vk_ok(vkBeginCommandBuffer(command_buffer_, &begin_info),
+                   "vkBeginCommandBuffer(readback)")) {
+            destroy_readback();
+            return std::nullopt;
+        }
+
+        transition_scene_image(command_buffer_,
+                               scene_layout_,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               VK_ACCESS_MEMORY_WRITE_BIT,
+                               VK_ACCESS_TRANSFER_READ_BIT,
+                               VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                               VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        const VkBufferImageCopy region = {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource =
+                {
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .mipLevel = 0,
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                },
+            .imageOffset = {0, 0, 0},
+            .imageExtent = {width, height, 1},
+        };
+        vkCmdCopyImageToBuffer(command_buffer_,
+                               scene_image_,
+                               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               readback_buffer,
+                               1,
+                               &region);
+
+        const VkBufferMemoryBarrier host_read_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .pNext = nullptr,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = readback_buffer,
+            .offset = 0,
+            .size = VK_WHOLE_SIZE,
+        };
+        vkCmdPipelineBarrier(command_buffer_,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             0,
+                             0,
+                             nullptr,
+                             1,
+                             &host_read_barrier,
+                             0,
+                             nullptr);
+
+        const VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = nullptr,
+            .waitSemaphoreCount = 0,
+            .pWaitSemaphores = nullptr,
+            .pWaitDstStageMask = nullptr,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &command_buffer_,
+            .signalSemaphoreCount = 0,
+            .pSignalSemaphores = nullptr,
+        };
+        if (!vk_ok(vkEndCommandBuffer(command_buffer_), "vkEndCommandBuffer(readback)") ||
+            !vk_ok(vkQueueSubmit(graphics_queue_, 1, &submit_info, VK_NULL_HANDLE),
+                   "vkQueueSubmit(readback)") ||
+            !vk_ok(vkQueueWaitIdle(graphics_queue_), "vkQueueWaitIdle(readback_submit)")) {
+            destroy_readback();
+            return std::nullopt;
+        }
+
+        void* mapped = nullptr;
+        if (!vk_ok(vkMapMemory(device_, readback_memory, 0, VK_WHOLE_SIZE, 0, &mapped),
+                   "vkMapMemory(readback)") ||
+            mapped == nullptr) {
+            destroy_readback();
+            return std::nullopt;
+        }
+
+        FramePixels frame{
+            .width = static_cast<int>(width),
+            .height = static_cast<int>(height),
+            .rgba = std::vector<uint8_t>(static_cast<std::size_t>(byte_count)),
+        };
+        std::memcpy(frame.rgba.data(), mapped, static_cast<std::size_t>(byte_count));
+        vkUnmapMemory(device_, readback_memory);
+        destroy_readback();
+
+        if (swapchain_format_ == VK_FORMAT_B8G8R8A8_UNORM ||
+            swapchain_format_ == VK_FORMAT_B8G8R8A8_SRGB) {
+            for (std::size_t offset = 0; offset + 3 < frame.rgba.size(); offset += 4) {
+                std::swap(frame.rgba[offset], frame.rgba[offset + 2]);
+            }
+        }
+        return frame;
+    }
+
     template <typename Map> void trim_texture_cache(Map& cache, std::size_t max_entries) {
         for (auto it = cache.begin(); it != cache.end();) {
             if ((frame_serial_ - it->second.last_used_frame) > kTextureCacheMaxAgeFrames) {

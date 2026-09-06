@@ -15,6 +15,14 @@ From [`nk/debug/diagnostics.h`](../include/nk/debug/diagnostics.h) and
 - **Render snapshots** — `build_render_snapshot` / `format_render_snapshot_json`.
 - **Trace export** — `format_frame_diagnostics_trace_json`, a Chrome
   trace-event array you can load in `chrome://tracing`.
+- **Screenshots** — `window.inspector().capture_debug_screenshot()` returns the
+  window pixels as RGBA8 plus the `source_backend` they came from;
+  `save_debug_screenshot_ppm_file(path)` writes them as a binary PPM. The
+  capture is the frame the live renderer last presented whenever that renderer
+  can read it back (software and Vulkan today), so GPU output is what you
+  review. Backends without readback fall back to a software re-render of the
+  current scene, and the bundle manifest records which one you got under
+  `screenshot_source`.
 - **One-call bundle** — `window.inspector().save_debug_bundle(directory)` writes
   the above into a directory.
 

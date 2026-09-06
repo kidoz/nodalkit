@@ -14,6 +14,7 @@ struct BundleManifest {
     std::string format;
     std::string title;
     std::string renderer_backend;
+    std::string screenshot_source;
     std::string widget_tree;
     std::string widget_tree_json;
     std::string frame_trace;
@@ -110,6 +111,11 @@ nk::Result<BundleManifest> load_manifest(const std::filesystem::path& bundle_dir
         !assign(manifest.screenshot, "screenshot")) {
         return nk::Unexpected(std::string("manifest.json is missing required fields"));
     }
+    // Older bundles predate the screenshot source; they were always software
+    // re-renders.
+    if (!assign(manifest.screenshot_source, "screenshot_source")) {
+        manifest.screenshot_source = "software";
+    }
 
     return manifest;
 }
@@ -191,6 +197,7 @@ int main(int argc, char** argv) {
     std::cout << "format: " << manifest->format << "\n";
     std::cout << "title: " << manifest->title << "\n";
     std::cout << "renderer backend: " << manifest->renderer_backend << "\n";
+    std::cout << "screenshot source: " << manifest->screenshot_source << "\n";
     std::cout << "bundle dir: " << bundle_dir.string() << "\n";
     std::cout << "widget nodes: " << count_widget_nodes(*widget_tree) << "\n";
     std::cout << "selected widget: " << selected_widget->type_name;

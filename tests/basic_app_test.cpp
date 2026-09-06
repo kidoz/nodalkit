@@ -1462,6 +1462,197 @@ TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][r
 #endif
 }
 
+namespace {
+
+struct ScreenshotPixel {
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 0;
+};
+
+ScreenshotPixel screenshot_pixel(const nk::DebugScreenshot& screenshot, int x, int y) {
+    REQUIRE(x >= 0);
+    REQUIRE(y >= 0);
+    REQUIRE(x < screenshot.width);
+    REQUIRE(y < screenshot.height);
+    const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(screenshot.width) +
+                         static_cast<std::size_t>(x)) *
+                        4;
+    return {
+        .r = screenshot.rgba[offset],
+        .g = screenshot.rgba[offset + 1],
+        .b = screenshot.rgba[offset + 2],
+        .a = screenshot.rgba[offset + 3],
+    };
+}
+
+bool pixel_matches(ScreenshotPixel pixel, int r, int g, int b, int tolerance) {
+    return std::abs(static_cast<int>(pixel.r) - r) <= tolerance &&
+           std::abs(static_cast<int>(pixel.g) - g) <= tolerance &&
+           std::abs(static_cast<int>(pixel.b) - b) <= tolerance;
+}
+
+// Center of the root widget's allocation in device pixels, so pixel probes
+// land inside the widget regardless of surface content insets or scale.
+std::pair<int, int> widget_center_pixel(const nk::Window& window, const nk::Widget& widget) {
+    const auto rect = widget.allocation();
+    const float scale = window.scale_factor();
+    return {static_cast<int>(std::round((rect.x + rect.width * 0.5F) * scale)),
+            static_cast<int>(std::round((rect.y + rect.height * 0.5F) * scale))};
+}
+
+struct PpmHeader {
+    int width = 0;
+    int height = 0;
+    std::size_t payload_bytes = 0;
+};
+
+std::optional<PpmHeader> read_ppm_header(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) {
+        return std::nullopt;
+    }
+    std::string magic;
+    PpmHeader header;
+    int max_value = 0;
+    input >> magic >> header.width >> header.height >> max_value;
+    if (!input || magic != "P6" || max_value != 255) {
+        return std::nullopt;
+    }
+    input.get(); // single whitespace byte after the header
+    const auto payload_start = input.tellg();
+    input.seekg(0, std::ios::end);
+    header.payload_bytes = static_cast<std::size_t>(input.tellg() - payload_start);
+    return header;
+}
+
+} // namespace
+
+TEST_CASE("Debug screenshot capture reads the software renderer frame", "[app][render][debug]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Software screenshot", .width = 240, .height = 160});
+    auto widget = ResizableColorWidget::create(240.0F, 160.0F, nk::Color::from_rgb(200, 40, 60));
+    window.set_child(widget);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Software);
+
+    const auto captured = window.inspector().capture_debug_screenshot();
+    REQUIRE(captured);
+    REQUIRE(captured->source_backend == nk::RendererBackend::Software);
+    REQUIRE(captured->width > 0);
+    REQUIRE(captured->height > 0);
+    REQUIRE(captured->rgba.size() == static_cast<std::size_t>(captured->width) *
+                                         static_cast<std::size_t>(captured->height) * 4);
+
+    const auto logical = window.size();
+    REQUIRE(static_cast<float>(captured->width) ==
+            Catch::Approx(std::round(logical.width * window.scale_factor())).margin(1.0));
+    REQUIRE(static_cast<float>(captured->height) ==
+            Catch::Approx(std::round(logical.height * window.scale_factor())).margin(1.0));
+
+    const auto [cx, cy] = widget_center_pixel(window, *widget);
+    REQUIRE(pixel_matches(screenshot_pixel(*captured, cx, cy), 200, 40, 60, 0));
+
+    const auto ppm_path =
+        std::filesystem::temp_directory_path() / "nodalkit_software_screenshot.ppm";
+    std::filesystem::remove(ppm_path);
+    REQUIRE(window.inspector().save_debug_screenshot_ppm_file(ppm_path.string()));
+    const auto header = read_ppm_header(ppm_path);
+    REQUIRE(header.has_value());
+    REQUIRE(header->width == captured->width);
+    REQUIRE(header->height == captured->height);
+    REQUIRE(header->payload_bytes == static_cast<std::size_t>(captured->width) *
+                                         static_cast<std::size_t>(captured->height) * 3);
+    std::filesystem::remove(ppm_path);
+}
+
+TEST_CASE("Debug screenshot capture reads back the live Vulkan frame", "[app][render][debug]") {
+#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("vulkan") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan screenshot", .width = 300, .height = 200});
+    auto widget = ResizableColorWidget::create(300.0F, 200.0F, nk::Color::from_rgb(26, 153, 150));
+    window.set_child(widget);
+
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
+
+    const auto presented = window.inspector().last_frame_diagnostics();
+    REQUIRE(presented.render_hotspot_counters.gpu_present_path != nk::GpuPresentPath::None);
+
+    // The capture must come from the Vulkan renderer itself, not from the
+    // software re-render fallback, so GPU output is what gets reviewed.
+    const auto captured = window.inspector().capture_debug_screenshot();
+    REQUIRE(captured);
+    REQUIRE(captured->source_backend == nk::RendererBackend::Vulkan);
+    REQUIRE(captured->width > 0);
+    REQUIRE(captured->height > 0);
+    REQUIRE(captured->rgba.size() == static_cast<std::size_t>(captured->width) *
+                                         static_cast<std::size_t>(captured->height) * 4);
+
+    const auto logical = window.size();
+    REQUIRE(static_cast<float>(captured->width) ==
+            Catch::Approx(std::round(logical.width * window.scale_factor())).margin(1.0));
+    REQUIRE(static_cast<float>(captured->height) ==
+            Catch::Approx(std::round(logical.height * window.scale_factor())).margin(1.0));
+
+    const auto [cx, cy] = widget_center_pixel(window, *widget);
+    REQUIRE(pixel_matches(screenshot_pixel(*captured, cx, cy), 26, 153, 150, 2));
+    REQUIRE(pixel_matches(screenshot_pixel(*captured, cx / 2, cy / 2), 26, 153, 150, 2));
+    REQUIRE(pixel_matches(screenshot_pixel(*captured, cx + cx / 2, cy + cy / 2), 26, 153, 150, 2));
+
+    // Reading back must not disturb the renderer: the next frame still goes
+    // through the GPU path and reads back the same content.
+    widget->queue_redraw();
+    window.request_frame();
+    REQUIRE(app.event_loop().poll());
+    const auto next_frame = window.inspector().last_frame_diagnostics();
+    REQUIRE(next_frame.render_hotspot_counters.gpu_present_path != nk::GpuPresentPath::None);
+    REQUIRE(next_frame.render_hotspot_counters.gpu_present_path !=
+            nk::GpuPresentPath::SoftwareDirect);
+
+    const auto recaptured = window.inspector().capture_debug_screenshot();
+    REQUIRE(recaptured);
+    REQUIRE(recaptured->source_backend == nk::RendererBackend::Vulkan);
+    REQUIRE(recaptured->width == captured->width);
+    REQUIRE(recaptured->height == captured->height);
+    REQUIRE(pixel_matches(screenshot_pixel(*recaptured, cx, cy), 26, 153, 150, 2));
+
+    // Vulkan and software captures of the same scene must agree on solid
+    // interior pixels, which is the GPU parity gate the screenshots exist for.
+    REQUIRE(renderer_backend_override.set("software") == 0);
+    nk::Window reference({.title = "Software reference", .width = 300, .height = 200});
+    auto reference_widget =
+        ResizableColorWidget::create(300.0F, 200.0F, nk::Color::from_rgb(26, 153, 150));
+    reference.set_child(reference_widget);
+    reference.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(reference.renderer_backend() == nk::RendererBackend::Software);
+    const auto reference_capture = reference.inspector().capture_debug_screenshot();
+    REQUIRE(reference_capture);
+    REQUIRE(reference_capture->source_backend == nk::RendererBackend::Software);
+    REQUIRE(reference_capture->width == captured->width);
+    REQUIRE(reference_capture->height == captured->height);
+    const auto reference_pixel = screenshot_pixel(*reference_capture, cx, cy);
+    REQUIRE(pixel_matches(screenshot_pixel(*captured, cx, cy),
+                          reference_pixel.r,
+                          reference_pixel.g,
+                          reference_pixel.b,
+                          2));
+#else
+    SUCCEED("Vulkan screenshot readback is only available on the Linux Vulkan backend");
+#endif
+}
+
 TEST_CASE("Linux Vulkan redraws fewer GPU commands for localized widget damage", "[app][render]") {
 #if defined(__linux__)
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
@@ -3056,6 +3247,18 @@ TEST_CASE("Window retains frame history and exports trace JSON", "[app][debug]")
             manifest_buffer << manifest_in.rdbuf();
             REQUIRE(manifest_buffer.str().find("nk-debug-bundle-v1") != std::string::npos);
             REQUIRE(manifest_buffer.str().find("screenshot.ppm") != std::string::npos);
+            const std::string expected_source =
+                std::string("\"screenshot_source\": \"") +
+                std::string(nk::renderer_backend_name(bundle_window.renderer_backend())) + "\"";
+            REQUIRE(manifest_buffer.str().find(expected_source) != std::string::npos);
+        }
+        {
+            const auto header = read_ppm_header(bundle_dir / "screenshot.ppm");
+            REQUIRE(header.has_value());
+            REQUIRE(header->width > 0);
+            REQUIRE(header->height > 0);
+            REQUIRE(header->payload_bytes == static_cast<std::size_t>(header->width) *
+                                                 static_cast<std::size_t>(header->height) * 3);
         }
         {
             std::ifstream widget_tree_in(bundle_dir / "widget_tree.txt");

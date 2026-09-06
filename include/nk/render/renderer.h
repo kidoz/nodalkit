@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace nk {
 
@@ -37,6 +38,14 @@ struct RendererBackendSupport {
 [[nodiscard]] bool renderer_backend_supported(RendererBackendSupport support,
                                               RendererBackend backend) noexcept;
 [[nodiscard]] bool renderer_backend_available(RendererBackend backend) noexcept;
+
+/// CPU-side copy of a rendered frame.
+/// Format: RGBA8, row-major, top-left origin, tightly packed.
+struct FramePixels {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> rgba;
+};
 
 /// Abstract renderer backend. The MVP ships a software renderer that
 /// rasterizes render nodes to a pixel buffer. Future backends will
@@ -75,6 +84,11 @@ public:
     /// Renderer-side hotspot counters captured for the most recently rendered frame.
     [[nodiscard]] virtual RenderHotspotCounters last_hotspot_counters() const;
 
+    /// Copy the most recently presented frame into CPU memory. Backends that
+    /// cannot read their presented pixels back return nullopt so callers can
+    /// fall back to a software re-render of the scene.
+    [[nodiscard]] virtual std::optional<FramePixels> read_back_frame();
+
 protected:
     Renderer();
 };
@@ -94,6 +108,7 @@ public:
     void end_frame() override;
     void present(NativeSurface& surface) override;
     [[nodiscard]] RenderHotspotCounters last_hotspot_counters() const override;
+    [[nodiscard]] std::optional<FramePixels> read_back_frame() override;
 
     /// Set the text shaper used for rendering TextNode.
     void set_text_shaper(TextShaper* shaper) override;

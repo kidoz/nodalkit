@@ -2937,7 +2937,15 @@ Result<void> WindowInspector::save_debug_bundle(std::string_view directory_path)
         !result) {
         return result;
     }
-    if (const auto result = save_debug_screenshot_ppm_file(screenshot_path.string()); !result) {
+    auto screenshot = capture_debug_screenshot();
+    if (!screenshot) {
+        return Unexpected(std::string(screenshot.error()));
+    }
+    if (const auto result = save_ppm_file(screenshot_path.string(),
+                                          screenshot->rgba.data(),
+                                          screenshot->width,
+                                          screenshot->height);
+        !result) {
         return result;
     }
 
@@ -2946,6 +2954,8 @@ Result<void> WindowInspector::save_debug_bundle(std::string_view directory_path)
     manifest << "  \"format\": \"nk-debug-bundle-v1\",\n";
     manifest << "  \"title\": \"" << window_.impl_->config.title << "\",\n";
     manifest << "  \"renderer_backend\": \"" << renderer_backend_name(window_.renderer_backend())
+             << "\",\n";
+    manifest << "  \"screenshot_source\": \"" << renderer_backend_name(screenshot->source_backend)
              << "\",\n";
     manifest << "  \"files\": {\n";
     manifest << "    \"widget_tree\": \"" << widget_tree_path.filename().string() << "\",\n";
@@ -3162,46 +3172,82 @@ Result<void> WindowInspector::save_selected_widget_details_json_file(std::string
     return save_widget_debug_json_file(debug_selected_widget_info(), path);
 }
 
-Result<void> WindowInspector::save_debug_screenshot_ppm_file(std::string_view path) const {
-    const auto* renderer = dynamic_cast<const SoftwareRenderer*>(window_.impl_->renderer.get());
-    if (renderer == nullptr) {
-        if (window_.impl_->child == nullptr) {
-            return Unexpected(std::string("debug screenshot capture requires a root widget"));
-        }
+Result<DebugScreenshot> WindowInspector::capture_debug_screenshot() const {
+    auto* renderer = window_.impl_->renderer.get();
 
-        const auto viewport_size = window_.size();
-        const float scale_factor =
-            window_.impl_->surface != nullptr ? window_.impl_->surface->scale_factor() : 1.0F;
-        const auto content_area = apply_surface_content_insets(
-            compute_debug_content_area(viewport_size,
-                                       window_.impl_->debug_overlay_flags,
-                                       window_.impl_->debug_inspector_presentation),
-            window_.impl_->surface.get());
-
-        auto* self = const_cast<Window*>(&window_);
-        if (window_.impl_->needs_layout) {
-            self->perform_window_layout(content_area);
+    // Prefer the frame the live renderer actually presented. GPU backends
+    // that can read their scene back return it here, so captures reflect the
+    // real render path instead of a software approximation of it.
+    if (renderer != nullptr) {
+        if (auto frame = renderer->read_back_frame();
+            frame.has_value() && frame->width > 0 && frame->height > 0 &&
+            frame->rgba.size() == static_cast<std::size_t>(frame->width) *
+                                      static_cast<std::size_t>(frame->height) * 4) {
+            return DebugScreenshot{
+                .width = frame->width,
+                .height = frame->height,
+                .rgba = std::move(frame->rgba),
+                .source_backend = renderer->backend(),
+            };
         }
-
-        auto root_node = self->build_window_debug_render_tree(viewport_size, content_area);
-        auto screenshot_renderer = create_renderer(RendererBackend::Software);
-        auto* software = dynamic_cast<SoftwareRenderer*>(screenshot_renderer.get());
-        if (software == nullptr) {
-            return Unexpected(std::string("failed to create software renderer for screenshot"));
+        if (renderer->backend() == RendererBackend::Software) {
+            return Unexpected(std::string("no readable frame buffer available for screenshot"));
         }
-        if (window_.impl_->text_shaper != nullptr) {
-            software->set_text_shaper(window_.impl_->text_shaper.get());
-        }
-        software->begin_frame(viewport_size, scale_factor);
-        if (root_node) {
-            software->render(*root_node);
-        }
-        software->end_frame();
-        return save_ppm_file(
-            path, software->pixel_data(), software->pixel_width(), software->pixel_height());
     }
-    return save_ppm_file(
-        path, renderer->pixel_data(), renderer->pixel_width(), renderer->pixel_height());
+
+    // Fallback: re-render the current scene through a private software
+    // renderer so a capture is always available.
+    if (window_.impl_->child == nullptr) {
+        return Unexpected(std::string("debug screenshot capture requires a root widget"));
+    }
+
+    const auto viewport_size = window_.size();
+    const float scale_factor =
+        window_.impl_->surface != nullptr ? window_.impl_->surface->scale_factor() : 1.0F;
+    const auto content_area = apply_surface_content_insets(
+        compute_debug_content_area(viewport_size,
+                                   window_.impl_->debug_overlay_flags,
+                                   window_.impl_->debug_inspector_presentation),
+        window_.impl_->surface.get());
+
+    auto* self = const_cast<Window*>(&window_);
+    if (window_.impl_->needs_layout) {
+        self->perform_window_layout(content_area);
+    }
+
+    auto root_node = self->build_window_debug_render_tree(viewport_size, content_area);
+    auto screenshot_renderer = create_renderer(RendererBackend::Software);
+    auto* software = dynamic_cast<SoftwareRenderer*>(screenshot_renderer.get());
+    if (software == nullptr) {
+        return Unexpected(std::string("failed to create software renderer for screenshot"));
+    }
+    if (window_.impl_->text_shaper != nullptr) {
+        software->set_text_shaper(window_.impl_->text_shaper.get());
+    }
+    software->begin_frame(viewport_size, scale_factor);
+    if (root_node) {
+        software->render(*root_node);
+    }
+    software->end_frame();
+
+    auto frame = software->read_back_frame();
+    if (!frame.has_value()) {
+        return Unexpected(std::string("no readable frame buffer available for screenshot"));
+    }
+    return DebugScreenshot{
+        .width = frame->width,
+        .height = frame->height,
+        .rgba = std::move(frame->rgba),
+        .source_backend = RendererBackend::Software,
+    };
+}
+
+Result<void> WindowInspector::save_debug_screenshot_ppm_file(std::string_view path) const {
+    auto screenshot = capture_debug_screenshot();
+    if (!screenshot) {
+        return Unexpected(std::string(screenshot.error()));
+    }
+    return save_ppm_file(path, screenshot->rgba.data(), screenshot->width, screenshot->height);
 }
 
 void Window::note_widget_redraw_request(Widget& widget) {

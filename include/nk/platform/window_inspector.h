@@ -3,6 +3,7 @@
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/result.h>
 #include <nk/foundation/types.h>
+#include <nk/render/renderer.h>
 #include <span>
 #include <string>
 #include <string_view>
@@ -13,6 +14,18 @@ namespace nk {
 class Window;
 class Widget;
 class RenderNode;
+
+/// A window frame captured for debugging. `rgba` is RGBA8, row-major,
+/// top-left origin, `width * height * 4` bytes. `source_backend` names the
+/// renderer whose output the pixels came from: the window's live renderer
+/// when it can read its presented frame back, otherwise a software re-render
+/// of the current scene.
+struct DebugScreenshot {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> rgba;
+    RendererBackend source_backend = RendererBackend::Software;
+};
 
 class WindowInspector {
 public:
@@ -60,6 +73,10 @@ public:
     [[nodiscard]] Result<void> copy_selected_widget_details_to_clipboard() const;
     [[nodiscard]] Result<void> save_selected_widget_details_file(std::string_view path) const;
     [[nodiscard]] Result<void> save_selected_widget_details_json_file(std::string_view path) const;
+    /// Capture the window contents. Prefers the live renderer's presented
+    /// frame (including GPU backends that support readback) and falls back to
+    /// a software re-render so a capture is always available.
+    [[nodiscard]] Result<DebugScreenshot> capture_debug_screenshot() const;
     [[nodiscard]] Result<void> save_debug_screenshot_ppm_file(std::string_view path) const;
 
     void sync_debug_selected_render_path();
