@@ -99,7 +99,9 @@ void BreakpointBin::remove_breakpoint(Breakpoint& breakpoint) {
     if (iterator == impl_->breakpoints.end()) {
         return;
     }
-    auto removed = *iterator;
+    // Move the ownership out before erasing so the breakpoint outlives the
+    // vector slot and can still be deactivated below.
+    auto removed = std::move(*iterator);
     impl_->breakpoints.erase(iterator);
     removed->set_active(false);
     queue_layout();
