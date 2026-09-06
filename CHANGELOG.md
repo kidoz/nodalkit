@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 ### Added
 *   **Live Renderer Screenshots:** `Renderer::read_back_frame()` copies the last presented frame to CPU memory (software and Vulkan), and `WindowInspector::capture_debug_screenshot()` exposes it with the `source_backend` it came from. Debug screenshots and bundles now capture real Vulkan output instead of a software re-render; the bundle manifest records the source under `screenshot_source`.
 
+### Fixed
+*   **Sanitizer Test Budget:** The `basic_app` suite carries an explicit Meson timeout so instrumented Vulkan drivers no longer trip the default 30s limit.
+
 ## [0.2.0] - 2026-08-30
 
 The second normal release of the NodalKit framework. 0.2.0 keeps the widget

@@ -45,7 +45,9 @@ test_app = executable('test_basic_app',
 # that LSAN reports as (<unknown module>) on CI images, so no stack-based
 # suppression can ever match them. Memory-error detection stays on, and every
 # other sanitized test keeps the full leak gate for NodalKit code.
-basic_app_test_kwargs = {}
+# The suite drives real Wayland/Vulkan frames across ~140 cases; instrumented
+# drivers on a sanitizer build push it past meson's default 30s budget.
+basic_app_test_kwargs = {'timeout': 180}
 if get_option('b_sanitize') != 'none'
     basic_app_test_kwargs += {'env': {'ASAN_OPTIONS': 'detect_leaks=0'}}
 endif
