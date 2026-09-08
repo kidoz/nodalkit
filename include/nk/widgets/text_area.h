@@ -3,6 +3,7 @@
 /// @file text_area.h
 /// @brief Multi-line text editor widget.
 
+#include <cstddef>
 #include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
@@ -11,7 +12,7 @@
 
 namespace nk {
 
-/// A multi-line, scrollable text editing area.
+/// A multi-line text editing area with an unwrapped, scrollable viewport.
 class TextArea : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<TextArea> create();
@@ -26,6 +27,12 @@ public:
     [[nodiscard]] bool is_editable() const;
     void set_editable(bool editable);
 
+    /// Caret byte offset within the current UTF-8 buffer.
+    [[nodiscard]] std::size_t cursor_position() const;
+    /// Caret bounds in window coordinates, accounting for viewport scrolling.
+    /// The bounds can lie outside the viewport after manual scrolling.
+    [[nodiscard]] Rect text_input_caret_rect() const;
+
     /// Number of visible rows for size hint.
     [[nodiscard]] int visible_rows() const;
     void set_visible_rows(int rows);
@@ -34,6 +41,7 @@ public:
 
     // --- Widget overrides ---
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
     bool handle_key_event(const KeyEvent& event) override;
     bool handle_text_input_event(const TextInputEvent& event) override;
@@ -45,6 +53,15 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    [[nodiscard]] Rect text_rect() const;
+    [[nodiscard]] float line_height() const;
+    [[nodiscard]] std::size_t cursor_line() const;
+    [[nodiscard]] std::size_t position_at_x(std::string_view line, float x) const;
+    [[nodiscard]] std::size_t hit_test_cursor(Point point) const;
+    void refresh_content_metrics();
+    void clamp_scroll();
+    void ensure_caret_visible();
+    void did_edit();
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

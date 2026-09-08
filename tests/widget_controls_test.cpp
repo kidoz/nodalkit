@@ -3,15 +3,20 @@
 /// round-trips, change-signal emission, idempotence, range clamping, and
 /// radio-group exclusivity. No Window/event loop required.
 
+#include <algorithm>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/types.h>
 #include <nk/platform/events.h>
 #include <nk/render/render_node.h>
+#include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/text/text_shaper.h>
 #include <nk/widgets/about_dialog.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/calendar.h>
@@ -26,6 +31,7 @@
 #include <nk/widgets/switch_widget.h>
 #include <nk/widgets/text_area.h>
 #include <string>
+#include <vector>
 
 TEST_CASE("CheckBox toggles state and emits on change only", "[widgets][check_box]") {
     auto check = nk::CheckBox::create("Enable");
@@ -249,7 +255,7 @@ TEST_CASE("TextArea moves and deletes complete character clusters", "[widgets][t
     }
 }
 
-TEST_CASE("TextArea vertical navigation preserves character columns",
+TEST_CASE("TextArea vertical navigation lands on complete character clusters",
           "[widgets][text_area][text]") {
     auto area = nk::TextArea::create();
     auto key = [&](nk::KeyCode code) {
@@ -260,17 +266,19 @@ TEST_CASE("TextArea vertical navigation preserves character columns",
             area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
     };
 
-    area->set_text("\u00E9x\na");
+    area->set_text("\u00E9x\n\u00E9");
     key(nk::KeyCode::Up);
     insert_marker();
-    CHECK(area->text() == "\u00E9|x\na");
+    CHECK(area->text() == "\u00E9|x\n\u00E9");
 
-    area->set_text("a\ne\u0301x");
-    key(nk::KeyCode::Home);
+    area->set_text("e\u0301\ne\u0301x");
+    REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press,
+                                    .key = nk::KeyCode::Home,
+                                    .modifiers = nk::Modifiers::Ctrl}));
     key(nk::KeyCode::Right);
     key(nk::KeyCode::Down);
     insert_marker();
-    CHECK(area->text() == "a\ne\u0301|x");
+    CHECK(area->text() == "e\u0301\ne\u0301|x");
 
     area->set_text("\u754C\n");
     key(nk::KeyCode::Up);
@@ -290,6 +298,232 @@ TEST_CASE("TextArea keeps newline edits separate from adjacent combining marks",
     REQUIRE(
         area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace}));
     CHECK(area->text() == "x");
+}
+
+TEST_CASE("TextArea places the caret on the clicked line", "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->allocate({30, 40, 220, 100});
+    area->set_text("first\nsecond\nthird");
+    REQUIRE(area->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 38, .y = 69, .button = 1}));
+    REQUIRE(area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
+    CHECK(area->text() == "first\n|second\nthird");
+}
+
+TEST_CASE("TextArea keeps a preferred horizontal position across short lines",
+          "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 240, 100});
+    area->set_text("abcdef\nx\nabcdef");
+    for (int i = 0; i < 2; ++i) {
+        REQUIRE(
+            area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Up}));
+    }
+    REQUIRE(area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
+    CHECK(area->text() == "abcdef|\nx\nabcdef");
+}
+
+TEST_CASE(
+    "TextArea allows navigation while read-only and keeps line and document commands distinct",
+    "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->set_text("first\nlast");
+    area->set_editable(false);
+    REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    CHECK_FALSE(area->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Commit, .text = "blocked"}));
+    CHECK_FALSE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace}));
+    area->set_editable(true);
+    REQUIRE(area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
+    CHECK(area->text() == "first\n|last");
+    REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press,
+                                    .key = nk::KeyCode::Home,
+                                    .modifiers = nk::Modifiers::Ctrl}));
+    REQUIRE(area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
+    CHECK(area->text() == "|first\n|last");
+}
+
+TEST_CASE("TextArea scrolls overflowing content and yields at its edge",
+          "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 160, 56});
+    area->set_text("zero\none\ntwo\nthree\nfour\nfive");
+    const nk::MouseEvent scroll_up{
+        .type = nk::MouseEvent::Type::Scroll, .x = 40, .y = 20, .scroll_dy = 100};
+    REQUIRE(area->handle_mouse_event(scroll_up));
+    CHECK_FALSE(area->handle_mouse_event(scroll_up));
+    REQUIRE(area->handle_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                      .x = 40,
+                                      .y = 20,
+                                      .scroll_dy = -20,
+                                      .precise_scrolling = true}));
+    REQUIRE(area->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 8, .y = 9, .button = 1}));
+    REQUIRE(area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
+    CHECK(area->text() == "zero\n|one\ntwo\nthree\nfour\nfive");
+}
+
+TEST_CASE("TextArea reveals its caret after edits and viewport resizing",
+          "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->allocate({30, 40, 160, 56});
+    area->set_text(std::string(100, 'w') + "\n\n\n" + std::string(100, 'w'));
+    const auto check_visible = [&] {
+        const auto caret = area->text_input_caret_rect();
+        const auto a = area->allocation();
+        CHECK(caret.x >= a.x + 8);
+        CHECK(caret.right() <= a.right() - 8 + 0.001F);
+        CHECK(caret.y >= a.y + 8);
+        CHECK(caret.bottom() <= a.bottom() - 8 + 0.001F);
+    };
+    check_visible();
+    REQUIRE(area->cursor_position() == area->text().size());
+    area->allocate({30, 40, 100, 40});
+    check_visible();
+    REQUIRE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    check_visible();
+    REQUIRE(
+        area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "end"}));
+    check_visible();
+    REQUIRE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace}));
+    check_visible();
+    area->allocate({30, 40, 1200, 200});
+    check_visible();
+    area->set_text("");
+    const auto empty = area->text_input_caret_rect();
+    CHECK(empty.x == 38);
+    CHECK(empty.y == 48);
+    CHECK(area->cursor_position() == 0);
+}
+
+TEST_CASE("TextArea pages through lines without losing the preferred x position",
+          "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 200, 56});
+    area->set_text("abcdef\nx\nabcdef\nx\nabcdef");
+    int changes = 0;
+    auto connection = area->on_text_changed().connect([&] { ++changes; });
+    area->set_editable(false);
+    REQUIRE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::PageUp}));
+    CHECK(area->cursor_position() == 15);
+    REQUIRE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::PageUp}));
+    CHECK(area->cursor_position() == 6);
+    REQUIRE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::PageDown}));
+    CHECK(area->cursor_position() == 15);
+    REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    CHECK(area->cursor_position() == 9);
+    REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(area->cursor_position() == 16);
+    REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press,
+                                    .key = nk::KeyCode::End,
+                                    .modifiers = nk::Modifiers::Super}));
+    CHECK(area->cursor_position() == area->text().size());
+    CHECK(changes == 0);
+    CHECK(connection.connected());
+}
+
+TEST_CASE("TextArea hit testing only chooses UTF-8 cluster boundaries",
+          "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 400, 56});
+    for (const std::string cluster :
+         {"\u00E9", "\u754C", "e\u0301", "\U0001F469\u200D\U0001F4BB"}) {
+        area->set_text(cluster + "x");
+        for (int x = 1; x < 150; ++x) {
+            REQUIRE(area->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                              .x = static_cast<float>(x),
+                                              .y = 10,
+                                              .button = 1}));
+            const auto position = area->cursor_position();
+            CHECK((position == 0 || position == cluster.size() || position == cluster.size() + 1));
+        }
+    }
+}
+
+TEST_CASE("TextArea horizontal scrolling works in read-only mode and clamps invalid input",
+          "[widgets][text_area][viewport]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 160, 56});
+    area->set_text(std::string(100, 'w'));
+    area->set_editable(false);
+    REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    const auto before = area->text_input_caret_rect();
+    REQUIRE(area->handle_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                      .x = 40,
+                                      .y = 20,
+                                      .scroll_dy = -20,
+                                      .precise_scrolling = true,
+                                      .modifiers = nk::Modifiers::Shift}));
+    CHECK(area->text_input_caret_rect().x == before.x - 20);
+    CHECK_FALSE(area->handle_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                          .x = 40,
+                                          .y = 20,
+                                          .scroll_dx = std::numeric_limits<float>::quiet_NaN()}));
+    CHECK(area->text_input_caret_rect().x == before.x - 20);
+    REQUIRE(area->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Scroll, .x = 40, .y = 20, .scroll_dx = 1000}));
+    CHECK(area->text_input_caret_rect().x == before.x);
+    CHECK_FALSE(area->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Scroll, .x = 40, .y = 20, .scroll_dx = 1000}));
+    CHECK(area->cursor_position() == 0);
+}
+
+TEST_CASE("TextArea clips scrolled text to its viewport and paints an empty caret",
+          "[widgets][text_area][render]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 160, 56});
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+    const auto pixels = [&] {
+        nk::SnapshotContext context;
+        static_cast<nk::Widget&>(*area).snapshot(context);
+        const auto root = context.take_root();
+        nk::SoftwareRenderer renderer;
+        renderer.set_text_shaper(shaper.get());
+        renderer.begin_frame({160, 56}, 1.0F);
+        renderer.render(*root);
+        renderer.end_frame();
+        return std::vector<uint8_t>(renderer.pixel_data(), renderer.pixel_data() + 160 * 56 * 4);
+    };
+    const auto empty = pixels();
+    area->set_text(std::string(100, 'W') + "\n" + std::string(100, 'W') + "\nlast");
+    REQUIRE(area->handle_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                      .x = 40,
+                                      .y = 20,
+                                      .scroll_dx = -20,
+                                      .scroll_dy = 5,
+                                      .precise_scrolling = true}));
+    const auto scrolled = pixels();
+    bool changed_inside = false;
+    for (int y = 0; y < 56; ++y) {
+        for (int x = 0; x < 160; ++x) {
+            const auto i = static_cast<std::size_t>((y * 160 + x) * 4);
+            const bool same =
+                std::equal(empty.data() + i, empty.data() + i + 4, scrolled.data() + i);
+            if (x < 8 || x >= 152 || y < 8 || y >= 48) {
+                REQUIRE(same);
+            } else {
+                changed_inside = changed_inside || !same;
+            }
+        }
+    }
+    CHECK(changed_inside);
+    area->set_text("");
+    area->set_placeholder("Write something");
+    const auto placeholder = pixels();
+    area->on_focus_changed(true);
+    const auto focused = pixels();
+    CHECK(placeholder != focused);
+    area->allocate({0, 0, 0, 0});
+    nk::SnapshotContext context;
+    static_cast<nk::Widget&>(*area).snapshot(context);
+    CHECK(context.take_root() != nullptr);
 }
 
 TEST_CASE("ColorWell round-trips its color", "[widgets][color_well]") {

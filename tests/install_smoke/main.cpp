@@ -40,6 +40,7 @@
 #include <nk/widgets/search_field.h>
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
+#include <nk/widgets/text_area.h>
 #include <nk/widgets/text_field.h>
 #include <nk/widgets/tree_view.h>
 #include <string>
@@ -205,6 +206,14 @@ void check_widgets() {
     });
     editor.on_activate().emit();
     check(search_connection.connected() && searches == 1, "SearchField bridges activation once");
+
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 160, 56});
+    area->set_text("first\nlast");
+    const auto caret = area->text_input_caret_rect();
+    check(area->cursor_position() == area->text().size() && caret.x >= 8 && caret.right() <= 152 &&
+              caret.y >= 8 && caret.bottom() <= 48,
+          "TextArea exports caret queries and reveals the caret through the installed SDK");
 
     auto canvas = nk::CanvasWidget::create();
     check(canvas != nullptr, "CanvasWidget::create");

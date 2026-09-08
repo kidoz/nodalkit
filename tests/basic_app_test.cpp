@@ -4074,6 +4074,61 @@ TEST_CASE("Window routes multiline Unicode editing and ignores disabled editors"
     connection.disconnect();
 }
 
+TEST_CASE("Window routes TextArea scrolling and clicks against the visible viewport",
+          "[app][text][viewport]") {
+    nk::Window window({.title = "Multiline viewport", .width = 320, .height = 160});
+    auto area = nk::TextArea::create();
+    // Measure once before attachment; allocation must refresh using the real shaper.
+    area->set_text("zero\none\ntwo\nthree\nfour\nfive");
+    window.set_child(area);
+    area->allocate({20, 20, 200, 56});
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Scroll, .x = 40, .y = 40, .scroll_dy = 100});
+    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                 .x = 40,
+                                 .y = 40,
+                                 .scroll_dy = -20,
+                                 .precise_scrolling = true});
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 28, .y = 29, .button = 1});
+    CHECK(area->cursor_position() == 5);
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 28, .y = 29, .button = 1});
+    window.dispatch_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"});
+    CHECK(area->text() == "zero\n|one\ntwo\nthree\nfour\nfive");
+    area->set_editable(false);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press,
+                               .key = nk::KeyCode::End,
+                               .modifiers = nk::Modifiers::Ctrl});
+    CHECK(area->cursor_position() == area->text().size());
+    const auto caret = area->text_input_caret_rect();
+    CHECK(caret.y >= 28);
+    CHECK(caret.bottom() <= 68);
+    window.dispatch_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "blocked"});
+    CHECK(area->text() == "zero\n|one\ntwo\nthree\nfour\nfive");
+}
+
+TEST_CASE("TextArea vertical movement uses shaped width instead of character count",
+          "[app][text][viewport]") {
+    nk::Window window({.title = "Multiline columns", .width = 320, .height = 160});
+    auto area = nk::TextArea::create();
+    window.set_child(area);
+    area->allocate({0, 0, 320, 100});
+    area->set_text("WWWWWW\niiiiiiiiiiiiiiiiiiii");
+    area->grab_focus();
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press,
+                               .key = nk::KeyCode::Home,
+                               .modifiers = nk::Modifiers::Ctrl});
+    for (int i = 0; i < 2; ++i) {
+        window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right});
+    }
+    CHECK(area->cursor_position() == 2);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    CHECK(area->cursor_position() > 9);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Up});
+    CHECK(area->cursor_position() == 2);
+}
+
 TEST_CASE("TextField moves and deletes by grapheme cluster", "[app][text]") {
     auto field = nk::TextField::create(std::string("e\xCC\x81") + "x");
     field->allocate({0.0F, 0.0F, 220.0F, 36.0F});

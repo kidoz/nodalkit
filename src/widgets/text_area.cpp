@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
 #include <nk/widgets/text_area.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -85,7 +87,11 @@ struct TextArea::Impl {
     int visible_rows = 4;
     Signal<> text_changed;
     std::size_t cursor_pos = 0;
-    float scroll_offset = 0.0F;
+    float scroll_x = 0.0F;
+    float scroll_y = 0.0F;
+    float content_width = 0.0F;
+    std::vector<std::size_t> line_starts{0};
+    std::optional<float> preferred_x;
     bool focused_state = false;
 };
 
@@ -110,12 +116,8 @@ std::string_view TextArea::text() const {
 void TextArea::set_text(std::string text) {
     if (impl_->text != text) {
         impl_->text = std::move(text);
-        ensure_accessible().set_value(impl_->text);
         impl_->cursor_pos = impl_->text.size();
-        impl_->scroll_offset = 0.0F;
-        impl_->text_changed.emit();
-        queue_layout();
-        queue_redraw();
+        did_edit();
     }
 }
 
@@ -159,36 +161,167 @@ Signal<>& TextArea::on_text_changed() {
 }
 
 SizeRequest TextArea::measure(const Constraints& /*constraints*/) const {
-    const float line_height = theme_number("line-height", 20.0F);
+    const float row_height = line_height();
     const float min_width = theme_number("min-width", 300.0F);
     const float padding = theme_number("padding", 8.0F);
-    const float h = static_cast<float>(impl_->visible_rows) * line_height + (padding * 2.0F);
+    const float h = static_cast<float>(impl_->visible_rows) * row_height + (padding * 2.0F);
     return {min_width, h, min_width, h};
 }
 
-bool TextArea::handle_mouse_event(const MouseEvent& event) {
-    if (event.button != 1) {
-        return false;
-    }
+void TextArea::allocate(const Rect& allocation) {
+    Widget::allocate(allocation);
+    // Attachment can replace estimated text widths with the window's shaper.
+    refresh_content_metrics();
+    ensure_caret_visible();
+}
 
-    switch (event.type) {
-    case MouseEvent::Type::Press:
-        if (allocation().contains({event.x, event.y})) {
-            grab_focus();
-            return true;
+std::size_t TextArea::cursor_position() const {
+    return impl_->cursor_pos;
+}
+
+Rect TextArea::text_rect() const {
+    const auto a = allocation();
+    const float padding = std::max(0.0F, theme_number("padding", 8.0F));
+    // Focus decorations must not move hit-testing or the scroll origin.
+    return {a.x + padding,
+            a.y + padding,
+            std::max(0.0F, a.width - 2.0F * padding),
+            std::max(0.0F, a.height - 2.0F * padding)};
+}
+
+float TextArea::line_height() const {
+    return std::max(1.0F, theme_number("line-height", 20.0F));
+}
+
+std::size_t TextArea::cursor_line() const {
+    return static_cast<std::size_t>(
+        std::upper_bound(impl_->line_starts.begin(), impl_->line_starts.end(), impl_->cursor_pos) -
+        impl_->line_starts.begin() - 1);
+}
+
+Rect TextArea::text_input_caret_rect() const {
+    const auto viewport = text_rect();
+    const auto line = line_at(impl_->text, impl_->cursor_pos);
+    const float x =
+        measure_text(line.text.substr(0, impl_->cursor_pos - line.start), text_area_font()).width;
+    return {viewport.x + x - impl_->scroll_x,
+            viewport.y + static_cast<float>(cursor_line()) * line_height() - impl_->scroll_y,
+            1.5F,
+            line_height()};
+}
+
+void TextArea::refresh_content_metrics() {
+    impl_->line_starts.clear();
+    impl_->content_width = 0.0F;
+    std::size_t start = 0;
+    for (const auto line : split_lines(impl_->text)) {
+        impl_->line_starts.push_back(start);
+        impl_->content_width =
+            std::max(impl_->content_width, measure_text(line, text_area_font()).width);
+        start += line.size() + 1;
+    }
+}
+
+void TextArea::clamp_scroll() {
+    const auto viewport = text_rect();
+    const float width = impl_->content_width + 2.0F;
+    const float height = static_cast<float>(impl_->line_starts.size()) * line_height();
+    impl_->scroll_x = std::clamp(impl_->scroll_x, 0.0F, std::max(0.0F, width - viewport.width));
+    impl_->scroll_y = std::clamp(impl_->scroll_y, 0.0F, std::max(0.0F, height - viewport.height));
+}
+
+void TextArea::ensure_caret_visible() {
+    const auto viewport = text_rect();
+    clamp_scroll();
+    if (viewport.width <= 0.0F || viewport.height <= 0.0F) {
+        return;
+    }
+    const auto caret = text_input_caret_rect();
+    if (caret.x < viewport.x) {
+        impl_->scroll_x -= viewport.x - caret.x;
+    } else if (caret.right() > viewport.right()) {
+        impl_->scroll_x += caret.right() - viewport.right();
+    }
+    if (caret.y < viewport.y) {
+        impl_->scroll_y -= viewport.y - caret.y;
+    } else if (caret.bottom() > viewport.bottom()) {
+        impl_->scroll_y += caret.bottom() - viewport.bottom();
+    }
+    clamp_scroll();
+}
+
+void TextArea::did_edit() {
+    impl_->preferred_x.reset();
+    refresh_content_metrics();
+    ensure_caret_visible();
+    ensure_accessible().set_value(impl_->text);
+    impl_->text_changed.emit();
+    queue_redraw();
+}
+
+std::size_t TextArea::position_at_x(std::string_view line, float x) const {
+    const auto font = text_area_font();
+    std::size_t best = 0;
+    float distance = std::numeric_limits<float>::infinity();
+    for (const auto boundary : detail::grapheme_boundaries(line)) {
+        const float candidate = std::fabs(measure_text(line.substr(0, boundary), font).width - x);
+        if (candidate < distance) {
+            best = boundary;
+            distance = candidate;
         }
-        return false;
-    case MouseEvent::Type::Release:
-    case MouseEvent::Type::Move:
-    case MouseEvent::Type::Enter:
-    case MouseEvent::Type::Leave:
-    case MouseEvent::Type::Scroll:
-    case MouseEvent::Type::DragStart:
-    case MouseEvent::Type::DragUpdate:
-    case MouseEvent::Type::DragEnd:
+    }
+    return best;
+}
+
+std::size_t TextArea::hit_test_cursor(Point point) const {
+    const auto viewport = text_rect();
+    const float row =
+        std::clamp(std::floor((point.y - viewport.y + impl_->scroll_y) / line_height()),
+                   0.0F,
+                   static_cast<float>(impl_->line_starts.size() - 1));
+    const auto line = line_at(impl_->text, impl_->line_starts[static_cast<std::size_t>(row)]);
+    return line.start + position_at_x(line.text, point.x - viewport.x + impl_->scroll_x);
+}
+
+bool TextArea::handle_mouse_event(const MouseEvent& event) {
+    if (!allocation().contains({event.x, event.y})) {
         return false;
     }
-
+    if (event.type == MouseEvent::Type::Scroll) {
+        if (!std::isfinite(event.scroll_dx) || !std::isfinite(event.scroll_dy)) {
+            return false;
+        }
+        const auto viewport = text_rect();
+        if (viewport.width <= 0.0F || viewport.height <= 0.0F) {
+            return false;
+        }
+        const float old_x = impl_->scroll_x;
+        const float old_y = impl_->scroll_y;
+        const float step = event.precise_scrolling ? 1.0F : 40.0F;
+        float dx = event.scroll_dx;
+        float dy = event.scroll_dy;
+        if (((event.modifiers & Modifiers::Shift) != Modifiers::None) && dx == 0.0F) {
+            dx = dy;
+            dy = 0.0F;
+        }
+        impl_->scroll_x -= dx * step;
+        impl_->scroll_y -= dy * step;
+        clamp_scroll();
+        if (old_x == impl_->scroll_x && old_y == impl_->scroll_y) {
+            return false;
+        }
+        queue_redraw();
+        return true;
+    }
+    if (event.type == MouseEvent::Type::Press && event.button == 1) {
+        // Resolve against the scrolled viewport before focus can reveal the old caret.
+        impl_->cursor_pos = hit_test_cursor({event.x, event.y});
+        impl_->preferred_x.reset();
+        grab_focus();
+        ensure_caret_visible();
+        queue_redraw();
+        return true;
+    }
     return false;
 }
 
@@ -196,109 +329,96 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
     if (event.type != KeyEvent::Type::Press) {
         return false;
     }
-
-    if (!impl_->editable) {
-        return false;
-    }
-
+    const bool document = ((event.modifiers & Modifiers::Ctrl) != Modifiers::None) ||
+                          ((event.modifiers & Modifiers::Super) != Modifiers::None);
     switch (event.key) {
-    case KeyCode::Return: {
+    case KeyCode::Return:
+        if (!impl_->editable) {
+            return false;
+        }
         impl_->text.insert(impl_->cursor_pos, 1, '\n');
-        impl_->cursor_pos += 1;
-        ensure_accessible().set_value(impl_->text);
-        impl_->text_changed.emit();
-        queue_redraw();
+        ++impl_->cursor_pos;
+        did_edit();
         return true;
-    }
     case KeyCode::Backspace:
+        if (!impl_->editable) {
+            return false;
+        }
         if (impl_->cursor_pos > 0) {
             const auto previous = previous_text_boundary(impl_->text, impl_->cursor_pos);
             impl_->text.erase(previous, impl_->cursor_pos - previous);
             impl_->cursor_pos = previous;
-            ensure_accessible().set_value(impl_->text);
-            impl_->text_changed.emit();
-            queue_redraw();
+            did_edit();
         }
         return true;
     case KeyCode::Delete:
+        if (!impl_->editable) {
+            return false;
+        }
         if (impl_->cursor_pos < impl_->text.size()) {
             const auto next = next_text_boundary(impl_->text, impl_->cursor_pos);
             impl_->text.erase(impl_->cursor_pos, next - impl_->cursor_pos);
-            ensure_accessible().set_value(impl_->text);
-            impl_->text_changed.emit();
-            queue_redraw();
+            did_edit();
         }
         return true;
     case KeyCode::Left:
-        if (impl_->cursor_pos > 0) {
-            impl_->cursor_pos = previous_text_boundary(impl_->text, impl_->cursor_pos);
-            queue_redraw();
-        }
-        return true;
+        impl_->cursor_pos = previous_text_boundary(impl_->text, impl_->cursor_pos);
+        break;
     case KeyCode::Right:
-        if (impl_->cursor_pos < impl_->text.size()) {
-            impl_->cursor_pos = next_text_boundary(impl_->text, impl_->cursor_pos);
-            queue_redraw();
-        }
-        return true;
+        impl_->cursor_pos = next_text_boundary(impl_->text, impl_->cursor_pos);
+        break;
     case KeyCode::Up:
-    case KeyCode::Down: {
+    case KeyCode::Down:
+    case KeyCode::PageUp:
+    case KeyCode::PageDown: {
         const auto current = line_at(impl_->text, impl_->cursor_pos);
-        const auto current_end = current.start + current.text.size();
-        const bool up = event.key == KeyCode::Up;
-        if ((up && current.start == 0) || (!up && current_end == impl_->text.size())) {
-            return true;
+        if (!impl_->preferred_x) {
+            impl_->preferred_x =
+                measure_text(current.text.substr(0, impl_->cursor_pos - current.start),
+                             text_area_font())
+                    .width;
         }
-        const auto boundaries = detail::grapheme_boundaries(current.text);
-        const auto column = static_cast<std::size_t>(
-            std::lower_bound(
-                boundaries.begin(), boundaries.end(), impl_->cursor_pos - current.start) -
-            boundaries.begin());
-        const auto target = line_at(impl_->text, up ? current.start - 1 : current_end + 1);
-        const auto target_boundaries = detail::grapheme_boundaries(target.text);
-        impl_->cursor_pos =
-            target.start + target_boundaries[std::min(column, target_boundaries.size() - 1)];
+        const bool up = event.key == KeyCode::Up || event.key == KeyCode::PageUp;
+        const bool page = event.key == KeyCode::PageUp || event.key == KeyCode::PageDown;
+        const auto count = page ? static_cast<std::size_t>(
+                                      std::clamp(std::floor(text_rect().height / line_height()),
+                                                 1.0F,
+                                                 static_cast<float>(impl_->line_starts.size())))
+                                : 1;
+        const auto row = cursor_line();
+        const auto target_row = up ? row - std::min(count, row)
+                                   : row + std::min(count, impl_->line_starts.size() - 1 - row);
+        const auto target = line_at(impl_->text, impl_->line_starts[target_row]);
+        impl_->cursor_pos = target.start + position_at_x(target.text, *impl_->preferred_x);
+        ensure_caret_visible();
         queue_redraw();
         return true;
     }
     case KeyCode::Home:
-        impl_->cursor_pos = 0;
-        queue_redraw();
-        return true;
-    case KeyCode::End:
-        impl_->cursor_pos = impl_->text.size();
-        queue_redraw();
-        return true;
-    default:
+        impl_->cursor_pos = document ? 0 : line_at(impl_->text, impl_->cursor_pos).start;
+        break;
+    case KeyCode::End: {
+        const auto line = line_at(impl_->text, impl_->cursor_pos);
+        impl_->cursor_pos = document ? impl_->text.size() : line.start + line.text.size();
         break;
     }
-
-    return false;
+    default:
+        return false;
+    }
+    impl_->preferred_x.reset();
+    ensure_caret_visible();
+    queue_redraw();
+    return true;
 }
 
 bool TextArea::handle_text_input_event(const TextInputEvent& event) {
-    if (!impl_->editable) {
+    if (!impl_->editable || event.type != TextInputEvent::Type::Commit || event.text.empty()) {
         return false;
     }
-
-    switch (event.type) {
-    case TextInputEvent::Type::Commit:
-        if (event.text.empty()) {
-            return false;
-        }
-        impl_->text.insert(impl_->cursor_pos, event.text);
-        impl_->cursor_pos += event.text.size();
-        ensure_accessible().set_value(impl_->text);
-        impl_->text_changed.emit();
-        queue_redraw();
-        return true;
-    case TextInputEvent::Type::Preedit:
-    case TextInputEvent::Type::ClearPreedit:
-    case TextInputEvent::Type::DeleteSurrounding:
-        return false;
-    }
-
-    return false;
+    impl_->text.insert(impl_->cursor_pos, event.text);
+    impl_->cursor_pos += event.text.size();
+    did_edit();
+    return true;
 }
 
 CursorShape TextArea::cursor_shape() const {
@@ -307,78 +427,64 @@ CursorShape TextArea::cursor_shape() const {
 
 void TextArea::on_focus_changed(bool focused) {
     impl_->focused_state = focused;
+    // Window sets Pressed before assigning pointer focus. Keep that viewport
+    // intact until the ensuing press places the caret in the clicked line.
+    if (focused && !has_flag(state_flags(), StateFlags::Pressed)) {
+        ensure_caret_visible();
+    } else if (!focused) {
+        impl_->preferred_x.reset();
+    }
     queue_redraw();
 }
 
 void TextArea::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     const float corner_radius = theme_number("corner-radius", 8.0F);
-    const float padding = theme_number("padding", 8.0F);
-    const float line_height = theme_number("line-height", 20.0F);
     const auto font = text_area_font();
-
     auto body = a;
     if (has_flag(state_flags(), StateFlags::Focused)) {
         ctx.add_rounded_rect(a, theme_color("focus-ring-color"), corner_radius + 2.0F);
-        body = {a.x + 2.0F, a.y + 2.0F, a.width - 4.0F, a.height - 4.0F};
+        body = {a.x + 2.0F,
+                a.y + 2.0F,
+                std::max(0.0F, a.width - 4.0F),
+                std::max(0.0F, a.height - 4.0F)};
     }
-
-    // Background and border.
     ctx.add_rounded_rect(
         body, theme_color("background", Color{1.0F, 1.0F, 1.0F, 1.0F}), corner_radius);
     ctx.add_border(
         body, theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}), 1.0F, corner_radius);
 
-    const Rect text_area{body.x + padding,
-                         body.y + padding,
-                         std::max(0.0F, body.width - padding * 2.0F),
-                         std::max(0.0F, body.height - padding * 2.0F)};
-
-    ctx.push_rounded_clip(body, corner_radius);
-
+    const auto viewport = text_rect();
+    if (viewport.width <= 0.0F || viewport.height <= 0.0F) {
+        return;
+    }
+    ctx.push_rounded_clip(viewport, 0.0F);
     if (impl_->text.empty() && !impl_->placeholder.empty()) {
-        // Draw placeholder.
-        const auto ph_color = theme_color("placeholder-color");
-        ctx.add_text({text_area.x, text_area.y - impl_->scroll_offset},
-                     std::string(impl_->placeholder),
-                     ph_color,
-                     font);
+        ctx.add_text(
+            {viewport.x, viewport.y}, impl_->placeholder, theme_color("placeholder-color"), font);
     } else {
-        // Draw text lines.
-        const auto lines = split_lines(impl_->text);
-        const auto text_color = theme_color("text-color");
-        float y_offset = text_area.y - impl_->scroll_offset;
-        for (const auto& line : lines) {
-            if (y_offset + line_height > body.y && y_offset < body.bottom()) {
-                ctx.add_text({text_area.x, y_offset}, std::string(line), text_color, font);
+        const float height = line_height();
+        const auto first =
+            static_cast<std::size_t>(std::max(0.0F, std::floor(impl_->scroll_y / height)));
+        for (std::size_t row = first; row < impl_->line_starts.size(); ++row) {
+            const float y = viewport.y + static_cast<float>(row) * height - impl_->scroll_y;
+            if (y >= viewport.bottom()) {
+                break;
             }
-            y_offset += line_height;
-        }
-
-        // Draw cursor if focused.
-        if (impl_->focused_state) {
-            const auto cursor_color = theme_color("caret-color");
-            // Find cursor line and column.
-            std::size_t pos = 0;
-            std::size_t cursor_line = 0;
-            std::size_t cursor_col = 0;
-            for (std::size_t i = 0; i < lines.size(); ++i) {
-                if (pos + lines[i].size() >= impl_->cursor_pos &&
-                    (i + 1 == lines.size() || pos + lines[i].size() + 1 > impl_->cursor_pos)) {
-                    cursor_line = i;
-                    cursor_col = impl_->cursor_pos - pos;
-                    break;
-                }
-                pos += lines[i].size() + 1;
-            }
-            const auto prefix = lines[cursor_line].substr(0, cursor_col);
-            const float cursor_x = text_area.x + measure_text(prefix, font).width;
-            const float cursor_y =
-                text_area.y - impl_->scroll_offset + static_cast<float>(cursor_line) * line_height;
-            ctx.add_color_rect({cursor_x, cursor_y + 2.0F, 1.5F, line_height - 4.0F}, cursor_color);
+            const auto line = line_at(impl_->text, impl_->line_starts[row]);
+            ctx.add_text({viewport.x - impl_->scroll_x, y},
+                         std::string(line.text),
+                         theme_color("text-color"),
+                         font);
         }
     }
-
+    // Empty editors, including those with placeholders, still show the caret.
+    if (impl_->focused_state) {
+        auto caret = text_input_caret_rect();
+        caret.y += std::min(2.0F, caret.height * 0.25F);
+        caret.height = std::max(1.0F, caret.height - 4.0F);
+        ctx.add_color_rect(caret, theme_color("caret-color"));
+    }
     ctx.pop_container();
 }
 
