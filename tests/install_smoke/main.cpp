@@ -37,6 +37,7 @@
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/scroll_area.h>
+#include <nk/widgets/search_field.h>
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
@@ -189,6 +190,21 @@ void check_widgets() {
 
     auto text_field = nk::TextField::create("seed");
     check(text_field != nullptr && text_field->text() == "seed", "TextField::create");
+
+    auto search = nk::SearchField::create("Search records");
+    search->set_text("query");
+    nk::TextField& editor = *search;
+    editor.select_all();
+    check(search->placeholder() == "Search records" && editor.has_selection() &&
+              editor.selection_end() == search->text().size(),
+          "SearchField exposes the shared TextField editor through the installed SDK");
+    int searches = 0;
+    auto search_connection = search->on_search().connect([&](std::string_view query) {
+        check(query == "query", "SearchField activation carries current text");
+        ++searches;
+    });
+    editor.on_activate().emit();
+    check(search_connection.connected() && searches == 1, "SearchField bridges activation once");
 
     auto canvas = nk::CanvasWidget::create();
     check(canvas != nullptr, "CanvasWidget::create");

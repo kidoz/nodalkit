@@ -121,6 +121,12 @@ test_widget_controls = executable('test_widget_controls',
 )
 test('widget_controls', test_widget_controls)
 
+test_search_field = executable('test_search_field',
+    'search_field_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('search_field', test_search_field)
+
 test_widget_views = executable('test_widget_views',
     'widget_views_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

@@ -77,9 +77,18 @@ protected:
     explicit TextField(std::string text);
     void snapshot(SnapshotContext& ctx) const override;
 
-private:
+    /// Bounds of the field body inside its focus ring.
     [[nodiscard]] Rect inner_body_rect() const;
-    [[nodiscard]] Rect text_rect() const;
+    /// Shared bounds for text rendering, hit testing, scrolling, and IME geometry.
+    [[nodiscard]] virtual Rect text_rect() const;
+    /// Draw the editor content inside text_rect(), without field decorations.
+    void snapshot_text(SnapshotContext& ctx) const;
+    /// Whether uncommitted composition text is present.
+    [[nodiscard]] bool has_preedit() const;
+    /// Cancel uncommitted composition without changing the stored text.
+    void clear_preedit();
+
+private:
     [[nodiscard]] Rect local_text_damage_rect() const;
     [[nodiscard]] std::size_t hit_test_cursor(Point point) const;
     void queue_text_redraw();
@@ -99,7 +108,6 @@ private:
     bool delete_forward_word();
     bool paste_from_clipboard();
     bool paste_from_primary_selection(std::optional<std::size_t> cursor_position = std::nullopt);
-    void clear_preedit();
     void reset_mouse_selection_state();
     bool delete_surrounding_text(std::size_t before_length, std::size_t after_length);
     [[nodiscard]] std::string composed_display_text() const;

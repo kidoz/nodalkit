@@ -5,14 +5,15 @@
 
 #include <memory>
 #include <nk/foundation/signal.h>
-#include <nk/ui_core/widget.h>
+#include <nk/widgets/text_field.h>
 #include <string>
 #include <string_view>
 
 namespace nk {
 
-/// A text input field with search icon and clear button.
-class SearchField : public Widget {
+/// A single-line editor with a search icon and an undoable clear control.
+/// Inherits TextField selection, clipboard, undo/redo, and text-input behavior.
+class SearchField : public TextField {
 public:
     [[nodiscard]] static std::shared_ptr<SearchField> create(std::string placeholder = {});
     ~SearchField() override;
@@ -26,7 +27,7 @@ public:
     /// Emitted when the text changes.
     Signal<std::string_view>& on_text_changed();
 
-    /// Emitted when Enter is pressed.
+    /// Emitted when Enter is pressed, including activation through TextField.
     Signal<std::string_view>& on_search();
 
     // --- Widget overrides ---
@@ -40,8 +41,11 @@ public:
 protected:
     explicit SearchField(std::string placeholder);
     void snapshot(SnapshotContext& ctx) const override;
+    [[nodiscard]] Rect text_rect() const override;
 
 private:
+    [[nodiscard]] Rect clear_button_rect() const;
+    bool clear_query();
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

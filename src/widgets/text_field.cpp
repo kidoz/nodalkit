@@ -381,6 +381,7 @@ void TextField::set_text(std::string text) {
         impl_->selection_anchor = impl_->cursor;
         clear_preedit();
         impl_->scroll_x = 0.0F;
+        ensure_caret_visible();
         sync_primary_selection_ownership();
         reset_history();
         impl_->text_changed.emit(impl_->text);
@@ -408,7 +409,11 @@ void TextField::set_editable(bool editable) {
         return;
     }
     impl_->editable = editable;
-    queue_text_redraw();
+    if (!editable) {
+        clear_preedit();
+    }
+    ensure_caret_visible();
+    queue_redraw();
 }
 
 std::size_t TextField::cursor_position() const {
@@ -717,6 +722,9 @@ bool TextField::handle_text_input_event(const TextInputEvent& event) {
         clear_preedit();
         return true;
     case TextInputEvent::Type::Preedit:
+        if (!impl_->editable) {
+            return false;
+        }
         reset_history_grouping();
         impl_->preedit_text = event.text;
         impl_->preedit_selection_start =
@@ -803,7 +811,6 @@ void TextField::on_focus_changed(bool focused) {
 void TextField::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     const auto body = inner_body_rect();
-    const auto text_bounds = text_rect();
     const float corner_radius = theme_number("corner-radius", 10.0F);
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
@@ -815,6 +822,15 @@ void TextField::snapshot(SnapshotContext& ctx) const {
     ctx.add_border(
         body, theme_color("border-color", Color{0.8F, 0.82F, 0.86F, 1.0F}), 1.0F, corner_radius);
 
+    snapshot_text(ctx);
+}
+
+void TextField::snapshot_text(SnapshotContext& ctx) const {
+    const auto text_bounds = text_rect();
+    if (text_bounds.width <= 0.0F || text_bounds.height <= 0.0F) {
+        return;
+    }
+    ctx.push_rounded_clip(text_bounds, 0.0F);
     const auto display_text = composed_display_text();
     Color text_color =
         impl_->text.empty() ? theme_color("placeholder-color") : theme_color("text-color");
@@ -842,7 +858,6 @@ void TextField::snapshot(SnapshotContext& ctx) const {
                                  6.0F);
         }
 
-        ctx.push_rounded_clip(body, corner_radius);
         ctx.add_text({text_bounds.x - impl_->scroll_x, text_y}, display_text, text_color, font);
 
         if (impl_->spell_check_enabled && impl_->preedit_text.empty() && !impl_->text.empty()) {
@@ -892,12 +907,12 @@ void TextField::snapshot(SnapshotContext& ctx) const {
                 {caret_x, text_bounds.y + 4.0F, 1.5F, std::max(0.0F, text_bounds.height - 8.0F)},
                 theme_color("caret-color", text_color));
         }
-        ctx.pop_container();
     } else if (has_flag(state_flags(), StateFlags::Focused)) {
         ctx.add_color_rect(
             {text_bounds.x, text_bounds.y + 4.0F, 1.5F, std::max(0.0F, text_bounds.height - 8.0F)},
             theme_color("caret-color", text_color));
     }
+    ctx.pop_container();
 }
 
 Rect TextField::inner_body_rect() const {
@@ -1035,7 +1050,8 @@ void TextField::ensure_caret_visible() {
     const float caret_x =
         measure_text(display_text.substr(0, display_caret_position()), font).width;
     const float total_width = measure_text(display_text, font).width;
-    const float max_scroll = std::max(0.0F, total_width - content_width);
+    // Keep the full caret inside the clip even at the end of a long query.
+    const float max_scroll = std::max(0.0F, total_width + 2.0F - content_width);
 
     if (caret_x < impl_->scroll_x) {
         impl_->scroll_x = caret_x;
@@ -1083,10 +1099,11 @@ void TextField::push_history_state() {
 }
 
 bool TextField::undo() {
-    if (impl_->history_index == 0) {
+    if (!impl_->editable || impl_->history_index == 0) {
         return false;
     }
 
+    clear_preedit();
     reset_mouse_selection_state();
     reset_history_grouping();
     --impl_->history_index;
@@ -1102,10 +1119,11 @@ bool TextField::undo() {
 }
 
 bool TextField::redo() {
-    if (impl_->history_index + 1 >= impl_->history.size()) {
+    if (!impl_->editable || impl_->history_index + 1 >= impl_->history.size()) {
         return false;
     }
 
+    clear_preedit();
     reset_mouse_selection_state();
     reset_history_grouping();
     ++impl_->history_index;
@@ -1252,6 +1270,10 @@ bool TextField::paste_from_primary_selection(std::optional<std::size_t> cursor_p
     return true;
 }
 
+bool TextField::has_preedit() const {
+    return !impl_->preedit_text.empty();
+}
+
 void TextField::clear_preedit() {
     if (impl_->preedit_text.empty() && impl_->preedit_selection_start == 0 &&
         impl_->preedit_selection_end == 0) {
@@ -1260,6 +1282,7 @@ void TextField::clear_preedit() {
     impl_->preedit_text.clear();
     impl_->preedit_selection_start = 0;
     impl_->preedit_selection_end = 0;
+    ensure_caret_visible();
     queue_text_redraw();
 }
 
@@ -1280,18 +1303,13 @@ bool TextField::delete_surrounding_text(std::size_t before_length, std::size_t a
         return false;
     }
 
-    reset_mouse_selection_state();
     reset_history_grouping();
-    push_history_state();
-    const std::size_t start = impl_->cursor - safe_before;
-    const std::size_t end = impl_->cursor + safe_after;
-    impl_->text.erase(start, end - start);
-    impl_->cursor = start;
-    impl_->selection_anchor = start;
-    sync_primary_selection_ownership();
-    ensure_caret_visible();
-    queue_text_redraw();
-    impl_->text_changed.emit(impl_->text);
+    // Platform offsets are bytes. Round the deletion out to cluster boundaries
+    // so a partial offset cannot leave a broken UTF-8 sequence behind.
+    impl_->selection_anchor =
+        previous_grapheme_boundary(impl_->text, impl_->cursor - safe_before + 1);
+    impl_->cursor = next_grapheme_boundary(impl_->text, impl_->cursor + safe_after - 1);
+    replace_selection({}, true, false);
     return true;
 }
 

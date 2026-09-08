@@ -5,15 +5,21 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+*   **Search Editing Example:** `search_input` demonstrates toolkit search editing, change notifications, and submission. Dedicated regressions cover selection, clipboard, undo/redo, composition events, caret scrolling, clear cancellation, and rendering bounds; the installed SDK smoke test now exercises search through `TextField`.
 *   **Live Renderer Screenshots:** `Renderer::read_back_frame()` copies the last presented frame to CPU memory (software and Vulkan), and `WindowInspector::capture_debug_screenshot()` exposes it with the `source_backend` it came from. Debug screenshots and bundles now capture real Vulkan output instead of a software re-render; the bundle manifest records the source under `screenshot_source`.
 
 ### Fixed
+*   **SearchField Editing:** Search now reuses the single-line editor for pointer and keyboard selection, clipboard shortcuts, undo/redo, composition events, and horizontal caret scrolling. Enter emits the current query once. Escape cancels composition before clearing the query; the clear button clears on release inside its bounds. Clearing is undoable.
+*   **Single-Line Editor State:** Surrounding-text deletion preserves UTF-8 character boundaries and can be undone. Read-only editors reject undo/redo and preedit input, switching to read-only cancels composition, and undo/redo discard stale preedit. Programmatic text replacement reveals the caret, and text/selection painting stays inside editor bounds.
 *   **Multiline Unicode Editing:** `TextArea` now shares `TextField`'s character-boundary helpers for deletion and horizontal navigation, and moves vertically by character columns instead of byte offsets. Editing accented text, Cyrillic, CJK, combining marks, and supported emoji clusters no longer splits their UTF-8 bytes. Navigation after a trailing newline stays within the text instead of allowing a later insertion to throw.
 *   **Disabled ComboBox Styling:** Disabled combo boxes use muted borders and chevrons across theme families. The macOS chevron capsule also loses its active accent fill in light and dark mode.
 *   **Dangling Dirty Widgets:** A widget that queued a redraw and was destroyed before the next frame (for example a dialog closing inside key dispatch) stayed in the window's dirty list as a raw pointer and was dereferenced during damage collection. Widget destruction and detachment now purge the entry, and `Window` tears its widget tree and overlays down while its own state is still alive so the purge never touches a half-destroyed window.
 *   **macOS Accessibility Crash:** Any assistive-technology query (VoiceOver, Accessibility Inspector) crashed with `SIGTRAP` in `NSAccessibilityChildren` because the per-query widget bridge handed AppKit ephemeral nodes that its accessibility cache outlived. The window is now exposed as a single accessibility group carrying the window title. This is a deliberate interim regression: per-widget accessibility elements on macOS return once they are anchored and thread-safe. Linux AT-SPI is unaffected.
 *   **Sanitizer Test Budget:** The `basic_app` suite carries an explicit Meson timeout so instrumented Vulkan drivers no longer trip the default 30s limit.
 *   **Build:** Removed the orphaned `src/platform/window_inspector.cpp`, whose contents had already moved into `window.cpp`.
+
+### Changed
+*   **C++ ABI:** `SearchField` now derives from `TextField`, retaining its existing public methods and adding inherited editor operations. `TextField` exposes protected content-rendering and geometry hooks. Rebuild the library and all C++ consumers together: the class layout and virtual interface changed.
 
 ## [0.2.0] - 2026-08-30
 

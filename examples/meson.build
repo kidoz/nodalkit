@@ -8,6 +8,11 @@ executable('counter',
     dependencies : nk_dep,
 )
 
+executable('search_input',
+    'search_input.cpp',
+    dependencies : nk_dep,
+)
+
 executable('long_task',
     'long_task.cpp',
     dependencies : nk_dep,
