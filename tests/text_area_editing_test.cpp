@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
+#include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/text_area.h>
@@ -20,6 +21,23 @@ bool key(nk::Widget& widget, nk::KeyCode code, nk::Modifiers modifiers = nk::Mod
 bool commit(nk::Widget& widget, std::string text) {
     return widget.handle_text_input_event(
         {.type = nk::TextInputEvent::Type::Commit, .text = std::move(text)});
+}
+
+std::vector<std::string> painted_text(nk::Widget& widget) {
+    nk::SnapshotContext context;
+    widget.snapshot(context);
+    const auto root = context.take_root();
+    std::vector<std::string> result;
+    const auto collect = [&](const auto& self, const nk::RenderNode& node) -> void {
+        if (node.kind() == nk::RenderNodeKind::Text) {
+            result.push_back(static_cast<const nk::TextNode&>(node).text());
+        }
+        for (const auto& child : node.children()) {
+            self(self, *child);
+        }
+    };
+    collect(collect, *root);
+    return result;
 }
 } // namespace
 
@@ -317,3 +335,15 @@ TEST_CASE("Window sends captured motion to a single-line editor outside its boun
     REQUIRE(commit(*field, "done"));
     CHECK(field->text() == "done");
 }
+
+TEST_CASE("Secure single-line composition does not paint preedit characters",
+          "[text][ime][render]") {
+    auto field = nk::TextField::create("secret");
+    field->allocate({0, 0, 240, 36});
+    field->set_secure_text_entry(true);
+    field->select_all();
+    REQUIRE(field->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Preedit, .text = "\u5019\u88DC", .selection_end = 6}));
+    CHECK(painted_text(*field) == std::vector<std::string>{"\u2022\u2022"});
+}
+

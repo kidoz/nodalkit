@@ -16,6 +16,9 @@ public:
     std::string text;
     std::size_t cursor = 0;
     std::size_t selection_anchor = 0;
+    std::string preedit_text;
+    std::size_t preedit_selection_start = 0;
+    std::size_t preedit_selection_end = 0;
 
     [[nodiscard]] std::size_t selection_start() const;
     [[nodiscard]] std::size_t selection_end() const;
@@ -30,6 +33,13 @@ public:
     bool redo();
     void reset_history();
     void break_undo_group();
+    void set_preedit(std::string text, std::size_t start, std::size_t end);
+    bool clear_preedit();
+    [[nodiscard]] bool has_preedit() const;
+    [[nodiscard]] std::string display_text() const;
+    [[nodiscard]] std::size_t display_caret_position() const;
+    [[nodiscard]] std::size_t text_position_from_display(std::size_t position) const;
+    bool delete_surrounding(std::size_t before, std::size_t after);
 
 private:
     struct State {

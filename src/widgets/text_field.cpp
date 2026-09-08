@@ -120,9 +120,6 @@ struct TextField::Impl {
     detail::TextEditBuffer edit;
     std::string placeholder;
     bool editable = true;
-    std::string preedit_text;
-    std::size_t preedit_selection_start = 0;
-    std::size_t preedit_selection_end = 0;
     bool selecting_with_mouse = false;
     bool selecting_word_with_mouse = false;
     bool selecting_line_with_mouse = false;
@@ -403,7 +400,14 @@ bool TextField::handle_key_event(const KeyEvent& event) {
         return false;
     }
 
+    if (event.key == KeyCode::Escape && has_preedit()) {
+        clear_preedit();
+        return true;
+    }
     if (event.key == KeyCode::Return) {
+        if (has_preedit()) {
+            return true;
+        }
         reset_history_grouping();
         impl_->activate.emit();
         return true;
@@ -519,17 +523,15 @@ bool TextField::handle_text_input_event(const TextInputEvent& event) {
             return false;
         }
         reset_history_grouping();
-        impl_->preedit_text = event.text;
-        impl_->preedit_selection_start =
-            std::min(event.selection_start, impl_->preedit_text.size());
-        impl_->preedit_selection_end = std::min(event.selection_end, impl_->preedit_text.size());
+        impl_->edit.set_preedit(event.text, event.selection_start, event.selection_end);
         ensure_caret_visible();
         queue_text_redraw();
         return true;
     case TextInputEvent::Type::Commit:
-        clear_preedit();
         if (!impl_->editable || event.text.empty()) {
-            return false;
+            const bool canceled = has_preedit();
+            clear_preedit();
+            return canceled;
         }
         impl_->history_group = event.text.size() == 1 && !has_selection()
                                    ? Impl::HistoryGroup::Insert
@@ -625,35 +627,43 @@ void TextField::snapshot_text(SnapshotContext& ctx) const {
     }
     ctx.push_rounded_clip(text_bounds, 0.0F);
     const auto display_text = composed_display_text();
-    Color text_color =
-        impl_->edit.text.empty() ? theme_color("placeholder-color") : theme_color("text-color");
+    Color text_color = impl_->edit.text.empty() && !has_preedit() ? theme_color("placeholder-color")
+                                                                  : theme_color("text-color");
     if (!display_text.empty()) {
         const auto font = text_field_font();
         const auto measured = measure_text(display_text, font);
         const float text_y =
             text_bounds.y + std::max(0.0F, (text_bounds.height - measured.height) * 0.5F);
 
-        if (!impl_->edit.text.empty() && has_selection()) {
-            const auto selection_bg =
-                theme_color("selection-background-color", Color{0.3F, 0.56F, 0.9F, 0.24F});
-            const auto selection_left =
-                measure_text(impl_->edit.text.substr(0, selection_start()), font).width;
-            const auto selection_width =
-                measure_text(
-                    impl_->edit.text.substr(selection_start(), selection_end() - selection_start()),
-                    font)
-                    .width;
-            ctx.add_rounded_rect({text_bounds.x + selection_left - impl_->scroll_x,
-                                  text_bounds.y + 2.0F,
-                                  selection_width,
-                                  std::max(0.0F, text_bounds.height - 4.0F)},
-                                 selection_bg,
-                                 6.0F);
+        const auto paint_offset = [&](std::size_t position) {
+            return impl_->secure_text_entry
+                       ? decode_utf8_units(impl_->edit.display_text().substr(0, position)).size() *
+                             3
+                       : position;
+        };
+        const auto selection_base = has_preedit() ? selection_start() : 0;
+        const auto selection_start_pos =
+            paint_offset(has_preedit() ? selection_base + impl_->edit.preedit_selection_start
+                                       : selection_start());
+        const auto selection_end_pos = paint_offset(
+            has_preedit() ? selection_base + impl_->edit.preedit_selection_end : selection_end());
+        const auto left_pos = std::min(selection_start_pos, selection_end_pos);
+        const auto right_pos = std::max(selection_start_pos, selection_end_pos);
+        if (left_pos != right_pos) {
+            const auto left = measure_text(display_text.substr(0, left_pos), font).width;
+            const auto right = measure_text(display_text.substr(0, right_pos), font).width;
+            ctx.add_rounded_rect(
+                {text_bounds.x + left - impl_->scroll_x,
+                 text_bounds.y + 2.0F,
+                 std::max(0.0F, right - left),
+                 std::max(0.0F, text_bounds.height - 4.0F)},
+                theme_color("selection-background-color", Color{0.3F, 0.56F, 0.9F, 0.24F}),
+                6.0F);
         }
 
         ctx.add_text({text_bounds.x - impl_->scroll_x, text_y}, display_text, text_color, font);
 
-        if (impl_->spell_check_enabled && impl_->preedit_text.empty() &&
+        if (impl_->spell_check_enabled && impl_->edit.preedit_text.empty() &&
             !impl_->edit.text.empty()) {
             if (!impl_->spell_check_cache_valid ||
                 impl_->spell_check_cache_text != impl_->edit.text) {
@@ -685,14 +695,15 @@ void TextField::snapshot_text(SnapshotContext& ctx) const {
             }
         }
 
-        if (!impl_->preedit_text.empty()) {
-            const float preedit_x =
-                text_bounds.x +
-                measure_text(impl_->edit.text.substr(0, impl_->edit.cursor), font).width -
-                impl_->scroll_x;
-            const float preedit_width = measure_text(impl_->preedit_text, font).width;
-            const float underline_y = text_bounds.bottom() - 3.0F;
-            ctx.add_color_rect({preedit_x, underline_y, preedit_width, 1.5F},
+        if (has_preedit()) {
+            const auto start = paint_offset(selection_start());
+            const auto end = paint_offset(selection_start() + impl_->edit.preedit_text.size());
+            const auto left = measure_text(display_text.substr(0, start), font).width;
+            const auto right = measure_text(display_text.substr(0, end), font).width;
+            ctx.add_color_rect({text_bounds.x + left - impl_->scroll_x,
+                                text_bounds.bottom() - 3.0F,
+                                std::max(0.0F, right - left),
+                                1.5F},
                                theme_color("caret-color", text_color));
         }
         if (has_flag(state_flags(), StateFlags::Focused)) {
@@ -793,8 +804,9 @@ void TextField::replace_range(std::size_t start,
                               std::string_view text,
                               bool coalesce_history) {
     reset_mouse_selection_state();
+    const auto group =
+        coalesce_history && !has_preedit() ? impl_->history_group : Impl::HistoryGroup::None;
     clear_preedit();
-    const auto group = coalesce_history ? impl_->history_group : Impl::HistoryGroup::None;
     if (!impl_->edit.replace(start, end, text, group)) {
         return;
     }
@@ -836,10 +848,14 @@ void TextField::reset_history() {
 }
 
 bool TextField::undo() {
-    if (!impl_->editable || !impl_->edit.undo()) {
+    if (!impl_->editable) {
         return false;
     }
+    const bool canceled = has_preedit();
     clear_preedit();
+    if (!impl_->edit.undo()) {
+        return canceled;
+    }
     reset_mouse_selection_state();
     reset_history_grouping();
     sync_primary_selection_ownership();
@@ -851,10 +867,14 @@ bool TextField::undo() {
 }
 
 bool TextField::redo() {
-    if (!impl_->editable || !impl_->edit.redo()) {
+    if (!impl_->editable) {
         return false;
     }
+    const bool canceled = has_preedit();
     clear_preedit();
+    if (!impl_->edit.redo()) {
+        return canceled;
+    }
     reset_mouse_selection_state();
     reset_history_grouping();
     sync_primary_selection_ownership();
@@ -981,19 +1001,14 @@ bool TextField::paste_from_primary_selection(std::optional<std::size_t> cursor_p
 }
 
 bool TextField::has_preedit() const {
-    return !impl_->preedit_text.empty();
+    return impl_->edit.has_preedit();
 }
 
 void TextField::clear_preedit() {
-    if (impl_->preedit_text.empty() && impl_->preedit_selection_start == 0 &&
-        impl_->preedit_selection_end == 0) {
-        return;
+    if (impl_->edit.clear_preedit()) {
+        ensure_caret_visible();
+        queue_text_redraw();
     }
-    impl_->preedit_text.clear();
-    impl_->preedit_selection_start = 0;
-    impl_->preedit_selection_end = 0;
-    ensure_caret_visible();
-    queue_text_redraw();
 }
 
 void TextField::reset_mouse_selection_state() {
@@ -1003,62 +1018,37 @@ void TextField::reset_mouse_selection_state() {
 }
 
 bool TextField::delete_surrounding_text(std::size_t before_length, std::size_t after_length) {
-    if (before_length == 0 && after_length == 0) {
+    if (!impl_->edit.delete_surrounding(before_length, after_length)) {
         return false;
     }
-
-    const std::size_t safe_before = std::min(before_length, impl_->edit.cursor);
-    const std::size_t safe_after =
-        std::min(after_length, impl_->edit.text.size() - impl_->edit.cursor);
-    if (safe_before == 0 && safe_after == 0) {
-        return false;
-    }
-
+    reset_mouse_selection_state();
     reset_history_grouping();
-    // Platform offsets are bytes. Round the deletion out to cluster boundaries
-    // so a partial offset cannot leave a broken UTF-8 sequence behind.
-    const auto start =
-        previous_grapheme_boundary(impl_->edit.text, impl_->edit.cursor - safe_before + 1);
-    const auto end = next_grapheme_boundary(impl_->edit.text, impl_->edit.cursor + safe_after - 1);
-    replace_range(start, end, {});
+    sync_primary_selection_ownership();
+    ensure_caret_visible();
+    ensure_accessible().set_value(impl_->edit.text);
+    impl_->text_changed.emit(impl_->edit.text);
+    queue_text_redraw();
     return true;
 }
 
 std::string TextField::composed_display_text() const {
-    std::string text_to_show = impl_->edit.text;
-    if (impl_->secure_text_entry && !impl_->edit.text.empty()) {
-        const std::size_t num_chars = decode_utf8_units(impl_->edit.text).size();
-        text_to_show.clear();
-        text_to_show.reserve(num_chars * 3);
-        for (std::size_t i = 0; i < num_chars; ++i) {
-            text_to_show.append("\xE2\x80\xA2");
+    auto display = impl_->edit.display_text();
+    if (impl_->secure_text_entry && !display.empty()) {
+        const auto count = decode_utf8_units(display).size();
+        display.clear();
+        for (std::size_t i = 0; i < count; ++i) {
+            display.append("\xE2\x80\xA2");
         }
     }
-
-    if (impl_->preedit_text.empty()) {
-        return text_to_show.empty() ? impl_->placeholder : text_to_show;
-    }
-
-    std::string display = text_to_show;
-    std::size_t insert_pos = impl_->edit.cursor;
-    if (impl_->secure_text_entry) {
-        insert_pos = decode_utf8_units(impl_->edit.text.substr(0, impl_->edit.cursor)).size() * 3;
-    }
-    display.insert(insert_pos, impl_->preedit_text);
-    return display;
+    return display.empty() ? impl_->placeholder : display;
 }
 
 std::size_t TextField::display_caret_position() const {
-    std::size_t base_cursor = impl_->edit.cursor;
+    const auto position = impl_->edit.display_caret_position();
     if (impl_->secure_text_entry) {
-        base_cursor = decode_utf8_units(impl_->edit.text.substr(0, impl_->edit.cursor)).size() * 3;
+        return decode_utf8_units(impl_->edit.display_text().substr(0, position)).size() * 3;
     }
-
-    if (impl_->preedit_text.empty()) {
-        return base_cursor;
-    }
-
-    return base_cursor + std::min(impl_->preedit_selection_end, impl_->preedit_text.size());
+    return position;
 }
 
 } // namespace nk

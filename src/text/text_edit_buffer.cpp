@@ -1,6 +1,9 @@
 #include "text_edit_buffer.h"
 
+#include "text_boundaries.h"
+
 #include <algorithm>
+#include <utility>
 
 namespace nk::detail {
 
@@ -17,6 +20,7 @@ bool TextEditBuffer::has_selection() const {
 }
 
 void TextEditBuffer::move_cursor(std::size_t position, bool extend) {
+    clear_preedit();
     cursor = std::min(position, text.size());
     if (!extend) {
         selection_anchor = cursor;
@@ -25,6 +29,7 @@ void TextEditBuffer::move_cursor(std::size_t position, bool extend) {
 }
 
 void TextEditBuffer::select_all() {
+    clear_preedit();
     selection_anchor = 0;
     cursor = text.size();
     break_undo_group();
@@ -49,9 +54,10 @@ bool TextEditBuffer::replace(std::size_t start,
     if (start == end && inserted.empty()) {
         return false;
     }
-    if (has_selection()) {
+    if (has_selection() || has_preedit()) {
         group = EditGroup::None;
     }
+    clear_preedit();
     const bool coalesce = group != EditGroup::None && group == last_group_ &&
                           history_index_ + 1 == history_.size() && history_.size() > 1 &&
                           !has_selection() && cursor == history_.back().cursor &&
@@ -76,6 +82,7 @@ bool TextEditBuffer::replace(std::size_t start,
 }
 
 bool TextEditBuffer::undo() {
+    clear_preedit();
     break_undo_group();
     if (history_index_ == 0) {
         return false;
@@ -85,6 +92,7 @@ bool TextEditBuffer::undo() {
 }
 
 bool TextEditBuffer::redo() {
+    clear_preedit();
     break_undo_group();
     if (history_index_ + 1 == history_.size()) {
         return false;
@@ -94,6 +102,7 @@ bool TextEditBuffer::redo() {
 }
 
 void TextEditBuffer::reset_history() {
+    clear_preedit();
     history_ = {state()};
     history_index_ = 0;
     break_undo_group();
@@ -101,6 +110,96 @@ void TextEditBuffer::reset_history() {
 
 void TextEditBuffer::break_undo_group() {
     last_group_ = EditGroup::None;
+}
+
+void TextEditBuffer::set_preedit(std::string value, std::size_t start, std::size_t end) {
+    preedit_text = std::move(value);
+    start = std::min(start, preedit_text.size());
+    end = std::min(end, preedit_text.size());
+    // Platform offsets are bytes. Do not slice a UTF-8 code point if an input
+    // context supplies a partial or out-of-range offset.
+    while (start > 0 && start < preedit_text.size() &&
+           (static_cast<unsigned char>(preedit_text[start]) & 0xC0U) == 0x80U) {
+        --start;
+    }
+    while (end < preedit_text.size() &&
+           (static_cast<unsigned char>(preedit_text[end]) & 0xC0U) == 0x80U) {
+        ++end;
+    }
+    preedit_selection_start = start;
+    preedit_selection_end = end;
+    break_undo_group();
+}
+
+bool TextEditBuffer::clear_preedit() {
+    const bool changed = has_preedit();
+    preedit_text.clear();
+    preedit_selection_start = 0;
+    preedit_selection_end = 0;
+    if (changed) {
+        break_undo_group();
+    }
+    return changed;
+}
+
+bool TextEditBuffer::has_preedit() const {
+    return !preedit_text.empty();
+}
+
+std::string TextEditBuffer::display_text() const {
+    if (!has_preedit()) {
+        return text;
+    }
+    auto display = text;
+    display.replace(selection_start(), selection_end() - selection_start(), preedit_text);
+    return display;
+}
+
+std::size_t TextEditBuffer::display_caret_position() const {
+    return has_preedit() ? selection_start() + preedit_selection_end : cursor;
+}
+
+std::size_t TextEditBuffer::text_position_from_display(std::size_t position) const {
+    if (!has_preedit()) {
+        return std::min(position, text.size());
+    }
+    const auto start = selection_start();
+    if (position <= start) {
+        return position;
+    }
+    if (position <= start + preedit_text.size()) {
+        return start;
+    }
+    return std::min(text.size(), position - preedit_text.size() + selection_end() - start);
+}
+
+bool TextEditBuffer::delete_surrounding(std::size_t before, std::size_t after) {
+    before = std::min(before, cursor);
+    after = std::min(after, text.size() - cursor);
+    if (before == 0 && after == 0) {
+        return false;
+    }
+    auto start = cursor - before;
+    auto end = cursor + after;
+    // Segment each hard line separately: a combining mark following a newline
+    // must not cause the newline to be swallowed by outward range rounding.
+    if (start < text.size() && text[start] != '\n') {
+        const auto newline = start > 0 ? text.rfind('\n', start - 1) : std::string::npos;
+        const auto line_start = newline == std::string::npos ? 0 : newline + 1;
+        const auto line_end = text.find('\n', start);
+        const auto line = std::string_view(text).substr(
+            line_start, (line_end == std::string::npos ? text.size() : line_end) - line_start);
+        start = line_start + previous_grapheme_boundary(line, start - line_start + 1);
+    }
+    if (end > 0 && text[end - 1] != '\n') {
+        const auto newline = text.rfind('\n', end - 1);
+        const auto line_start = newline == std::string::npos ? 0 : newline + 1;
+        const auto line_end = text.find('\n', end);
+        const auto line = std::string_view(text).substr(
+            line_start, (line_end == std::string::npos ? text.size() : line_end) - line_start);
+        end = line_start + next_grapheme_boundary(line, end - line_start - 1);
+    }
+    return replace(start, end, {});
 }
 
 } // namespace nk::detail
