@@ -3599,8 +3599,15 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
             impl_->pressed_widget->set_state_flag(StateFlags::Pressed,
                                                   impl_->pressed_widget == target);
         }
-        if (target != nullptr) {
-            (void)dispatch_mouse_bubble(target);
+        // Keep drag motion with the press owner, matching release routing.
+        // Hover tracking still follows the widget under the pointer.
+        auto* recipient = event.type == MouseEvent::Type::Move && impl_->pressed_widget != nullptr
+                              ? impl_->pressed_widget
+                              : target;
+        if (recipient != nullptr) {
+            auto keep_alive = recipient->weak_from_this().lock();
+            (void)keep_alive;
+            (void)dispatch_mouse_bubble(recipient);
         }
         break;
     }
