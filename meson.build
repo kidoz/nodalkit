@@ -72,6 +72,8 @@ nk_sources = files(
     'src/model/tree_model.cpp',
     'src/text/shaped_text.cpp',
     'src/text/text_boundaries.cpp',
+    'src/text/text_edit_buffer.cpp',
+    'src/text/text_clipboard.cpp',
     'src/text/text_shaper.cpp',
     'src/widgets/label.cpp',
     'src/widgets/button.cpp',

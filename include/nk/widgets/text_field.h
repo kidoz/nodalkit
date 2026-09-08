@@ -93,11 +93,14 @@ private:
     [[nodiscard]] std::size_t hit_test_cursor(Point point) const;
     void queue_text_redraw();
     void move_cursor(std::size_t position, bool extend_selection);
-    void replace_selection(std::string_view text, bool record_history, bool coalesce_history);
+    void replace_selection(std::string_view text, bool coalesce_history = false);
+    void replace_range(std::size_t start,
+                       std::size_t end,
+                       std::string_view text,
+                       bool coalesce_history = false);
     void ensure_caret_visible();
     void reset_history_grouping();
     void reset_history();
-    void push_history_state();
     bool undo();
     bool redo();
     void copy_selection_to_clipboard() const;

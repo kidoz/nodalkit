@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <optional>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace nk::detail {
@@ -22,5 +23,10 @@ std::vector<std::size_t> grapheme_boundaries(std::string_view text);
 std::size_t previous_grapheme_boundary(std::string_view text, std::size_t position);
 std::size_t next_grapheme_boundary(std::string_view text, std::size_t position);
 std::size_t nearest_grapheme_boundary(std::string_view text, std::size_t position);
+
+std::size_t previous_word_boundary(std::string_view text, std::size_t position);
+std::size_t next_word_boundary(std::string_view text, std::size_t position);
+std::pair<std::size_t, std::size_t> word_selection_range(std::string_view text,
+                                                         std::size_t position);
 
 } // namespace nk::detail

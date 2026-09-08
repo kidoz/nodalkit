@@ -1,7 +1,8 @@
 #include "../text/text_boundaries.h"
+#include "../text/text_clipboard.h"
+#include "../text/text_edit_buffer.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -20,23 +21,14 @@ namespace nk {
 
 namespace {
 
-using detail::decode_utf8_unit;
 using detail::decode_utf8_units;
 using detail::grapheme_boundaries;
 using detail::nearest_grapheme_boundary;
 using detail::next_grapheme_boundary;
+using detail::next_word_boundary;
 using detail::previous_grapheme_boundary;
-using detail::Utf8Unit;
-
-std::string& fallback_clipboard_text() {
-    static std::string clipboard;
-    return clipboard;
-}
-
-std::string& fallback_primary_selection_text() {
-    static std::string selection;
-    return selection;
-}
+using detail::previous_word_boundary;
+using detail::word_selection_range;
 
 FontDescriptor text_field_font() {
     const float scale = Application::instance() != nullptr
@@ -121,213 +113,13 @@ std::optional<char> key_to_ascii(const KeyEvent& event) {
     }
 }
 
-bool is_unicode_whitespace(char32_t cp) {
-    switch (cp) {
-    case 0x0009:
-    case 0x000A:
-    case 0x000B:
-    case 0x000C:
-    case 0x000D:
-    case 0x0020:
-    case 0x0085:
-    case 0x00A0:
-    case 0x1680:
-    case 0x2000:
-    case 0x2001:
-    case 0x2002:
-    case 0x2003:
-    case 0x2004:
-    case 0x2005:
-    case 0x2006:
-    case 0x2007:
-    case 0x2008:
-    case 0x2009:
-    case 0x200A:
-    case 0x2028:
-    case 0x2029:
-    case 0x202F:
-    case 0x205F:
-    case 0x3000:
-        return true;
-    default:
-        return false;
-    }
-}
-
-enum class GraphemeKind : uint8_t {
-    Word,
-    Space,
-    Punctuation,
-};
-
-GraphemeKind classify_grapheme(char32_t cp) {
-    if (is_unicode_whitespace(cp)) {
-        return GraphemeKind::Space;
-    }
-    if (cp > 0x7FU) {
-        return GraphemeKind::Word;
-    }
-    if (std::isalnum(static_cast<unsigned char>(cp)) != 0 || cp == '_') {
-        return GraphemeKind::Word;
-    }
-    return GraphemeKind::Punctuation;
-}
-
-std::vector<GraphemeKind> grapheme_kinds(std::string_view text,
-                                         const std::vector<std::size_t>& boundaries) {
-    std::vector<GraphemeKind> kinds;
-    kinds.reserve(boundaries.size() > 0 ? boundaries.size() - 1 : 0);
-    for (std::size_t i = 0; i + 1 < boundaries.size(); ++i) {
-        const auto unit = decode_utf8_unit(text, boundaries[i])
-                              .value_or(Utf8Unit{boundaries[i], boundaries[i] + 1, 0xFFFD});
-        kinds.push_back(classify_grapheme(unit.code_point));
-    }
-    return kinds;
-}
-
-std::size_t previous_word_boundary(std::string_view text, std::size_t position) {
-    const auto boundaries = grapheme_boundaries(text);
-    if (boundaries.size() <= 1 || position == 0) {
-        return 0;
-    }
-
-    const auto kinds = grapheme_kinds(text, boundaries);
-    auto it = std::lower_bound(boundaries.begin(), boundaries.end(), position);
-    std::size_t cluster = 0;
-    if (it == boundaries.end()) {
-        cluster = kinds.size();
-    } else if (*it == position) {
-        cluster = static_cast<std::size_t>(std::distance(boundaries.begin(), it));
-    } else {
-        cluster = static_cast<std::size_t>(std::distance(boundaries.begin(), it));
-    }
-
-    while (cluster > 0 && kinds[cluster - 1] == GraphemeKind::Space) {
-        --cluster;
-    }
-    if (cluster == 0) {
-        return 0;
-    }
-
-    while (cluster > 0 && kinds[cluster - 1] != GraphemeKind::Word) {
-        --cluster;
-    }
-    while (cluster > 0 && kinds[cluster - 1] == GraphemeKind::Word) {
-        --cluster;
-    }
-    return boundaries[cluster];
-}
-
-std::size_t next_word_boundary(std::string_view text, std::size_t position) {
-    const auto boundaries = grapheme_boundaries(text);
-    if (boundaries.size() <= 1 || position >= text.size()) {
-        return text.size();
-    }
-
-    const auto kinds = grapheme_kinds(text, boundaries);
-    auto it = std::lower_bound(boundaries.begin(), boundaries.end(), position);
-    std::size_t cluster = 0;
-    if (it == boundaries.end()) {
-        return text.size();
-    }
-    if (*it == position) {
-        cluster = static_cast<std::size_t>(std::distance(boundaries.begin(), it));
-    } else {
-        cluster = static_cast<std::size_t>(std::distance(boundaries.begin(), it));
-    }
-    if (cluster >= kinds.size()) {
-        return text.size();
-    }
-
-    if (kinds[cluster] != GraphemeKind::Word) {
-        while (cluster < kinds.size() && kinds[cluster] != GraphemeKind::Word) {
-            ++cluster;
-        }
-    }
-    while (cluster < kinds.size() && kinds[cluster] == GraphemeKind::Word) {
-        ++cluster;
-    }
-    return boundaries[cluster];
-}
-
-std::pair<std::size_t, std::size_t> word_selection_range(std::string_view text,
-                                                         std::size_t position) {
-    const auto boundaries = grapheme_boundaries(text);
-    if (boundaries.size() <= 1) {
-        return {0, text.size()};
-    }
-
-    const auto kinds = grapheme_kinds(text, boundaries);
-    auto it = std::lower_bound(boundaries.begin(), boundaries.end(), position);
-    std::size_t cluster = 0;
-    if (it == boundaries.end()) {
-        cluster = kinds.size() - 1;
-    } else if (*it == position) {
-        cluster = static_cast<std::size_t>(std::distance(boundaries.begin(), it));
-        if (cluster == kinds.size()) {
-            cluster = kinds.size() - 1;
-        } else if (cluster > 0) {
-            --cluster;
-        }
-    } else {
-        cluster = static_cast<std::size_t>(std::distance(boundaries.begin(), it));
-        if (cluster > 0) {
-            --cluster;
-        }
-    }
-
-    if (kinds[cluster] != GraphemeKind::Word) {
-        std::size_t forward = cluster;
-        while (forward < kinds.size() && kinds[forward] != GraphemeKind::Word) {
-            ++forward;
-        }
-        if (forward < kinds.size()) {
-            cluster = forward;
-        } else {
-            std::size_t backward = cluster;
-            while (backward > 0 && kinds[backward] != GraphemeKind::Word) {
-                --backward;
-            }
-            if (kinds[backward] == GraphemeKind::Word) {
-                cluster = backward;
-            } else {
-                return {boundaries[cluster], boundaries[cluster + 1]};
-            }
-        }
-    }
-
-    std::size_t start_cluster = cluster;
-    while (start_cluster > 0 && kinds[start_cluster - 1] == GraphemeKind::Word) {
-        --start_cluster;
-    }
-    std::size_t end_cluster = cluster + 1;
-    while (end_cluster < kinds.size() && kinds[end_cluster] == GraphemeKind::Word) {
-        ++end_cluster;
-    }
-    return {boundaries[start_cluster], boundaries[end_cluster]};
-}
-
 } // namespace
 
 struct TextField::Impl {
-    struct HistoryState {
-        std::string text;
-        std::size_t cursor = 0;
-        std::size_t selection_anchor = 0;
-    };
-
-    enum class HistoryGroup : uint8_t {
-        None,
-        Insert,
-        DeleteBackward,
-        DeleteForward,
-    };
-
-    std::string text;
+    using HistoryGroup = detail::EditGroup;
+    detail::TextEditBuffer edit;
     std::string placeholder;
     bool editable = true;
-    std::size_t cursor = 0;
-    std::size_t selection_anchor = 0;
     std::string preedit_text;
     std::size_t preedit_selection_start = 0;
     std::size_t preedit_selection_end = 0;
@@ -337,8 +129,6 @@ struct TextField::Impl {
     std::size_t mouse_selection_base_start = 0;
     std::size_t mouse_selection_base_end = 0;
     float scroll_x = 0.0F;
-    std::vector<HistoryState> history;
-    std::size_t history_index = 0;
     HistoryGroup history_group = HistoryGroup::None;
     bool spell_check_enabled = false;
     bool secure_text_entry = false;
@@ -354,37 +144,37 @@ std::shared_ptr<TextField> TextField::create(std::string initial_text) {
 }
 
 TextField::TextField(std::string text) : impl_(std::make_unique<Impl>()) {
-    impl_->text = std::move(text);
-    impl_->cursor = impl_->text.size();
-    impl_->selection_anchor = impl_->cursor;
+    impl_->edit.text = std::move(text);
+    impl_->edit.cursor = impl_->edit.text.size();
+    impl_->edit.selection_anchor = impl_->edit.cursor;
     set_focusable(true);
     add_style_class("text-field");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::TextInput);
     accessible.set_name(default_text_field_accessible_name(impl_->placeholder));
-    accessible.set_value(impl_->text);
+    accessible.set_value(impl_->edit.text);
     reset_history();
 }
 
 TextField::~TextField() = default;
 
 std::string_view TextField::text() const {
-    return impl_->text;
+    return impl_->edit.text;
 }
 
 void TextField::set_text(std::string text) {
-    if (impl_->text != text) {
+    if (impl_->edit.text != text) {
         reset_mouse_selection_state();
-        impl_->text = std::move(text);
-        ensure_accessible().set_value(impl_->text);
-        impl_->cursor = impl_->text.size();
-        impl_->selection_anchor = impl_->cursor;
+        impl_->edit.text = std::move(text);
+        ensure_accessible().set_value(impl_->edit.text);
+        impl_->edit.cursor = impl_->edit.text.size();
+        impl_->edit.selection_anchor = impl_->edit.cursor;
         clear_preedit();
         impl_->scroll_x = 0.0F;
         ensure_caret_visible();
         sync_primary_selection_ownership();
         reset_history();
-        impl_->text_changed.emit(impl_->text);
+        impl_->text_changed.emit(impl_->edit.text);
         queue_text_redraw();
     }
 }
@@ -417,26 +207,25 @@ void TextField::set_editable(bool editable) {
 }
 
 std::size_t TextField::cursor_position() const {
-    return impl_->cursor;
+    return impl_->edit.cursor;
 }
 
 std::size_t TextField::selection_start() const {
-    return std::min(impl_->cursor, impl_->selection_anchor);
+    return impl_->edit.selection_start();
 }
 
 std::size_t TextField::selection_end() const {
-    return std::max(impl_->cursor, impl_->selection_anchor);
+    return impl_->edit.selection_end();
 }
 
 bool TextField::has_selection() const {
-    return impl_->cursor != impl_->selection_anchor;
+    return impl_->edit.has_selection();
 }
 
 void TextField::select_all() {
     clear_preedit();
     reset_history_grouping();
-    impl_->selection_anchor = 0;
-    impl_->cursor = impl_->text.size();
+    impl_->edit.select_all();
     sync_primary_selection_ownership();
     ensure_caret_visible();
     queue_text_redraw();
@@ -510,21 +299,22 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
         if (event.click_count >= 3) {
             impl_->selecting_with_mouse = true;
             impl_->selecting_line_with_mouse = true;
-            impl_->selection_anchor = 0;
-            impl_->cursor = impl_->text.size();
+            impl_->edit.selection_anchor = 0;
+            impl_->edit.cursor = impl_->edit.text.size();
             sync_primary_selection_ownership();
             ensure_caret_visible();
             queue_text_redraw();
             return true;
         }
         if (event.click_count >= 2) {
-            const auto [start, end] = word_selection_range(impl_->text, hit_test_cursor(point));
+            const auto [start, end] =
+                word_selection_range(impl_->edit.text, hit_test_cursor(point));
             impl_->selecting_with_mouse = true;
             impl_->selecting_word_with_mouse = true;
             impl_->mouse_selection_base_start = start;
             impl_->mouse_selection_base_end = end;
-            impl_->selection_anchor = start;
-            impl_->cursor = end;
+            impl_->edit.selection_anchor = start;
+            impl_->edit.cursor = end;
             sync_primary_selection_ownership();
             ensure_caret_visible();
             queue_text_redraw();
@@ -538,21 +328,22 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             return false;
         }
         if (impl_->selecting_line_with_mouse) {
-            impl_->selection_anchor = 0;
-            impl_->cursor = impl_->text.size();
+            impl_->edit.selection_anchor = 0;
+            impl_->edit.cursor = impl_->edit.text.size();
             sync_primary_selection_ownership();
             ensure_caret_visible();
             queue_text_redraw();
             return true;
         }
         if (impl_->selecting_word_with_mouse) {
-            const auto [start, end] = word_selection_range(impl_->text, hit_test_cursor(point));
+            const auto [start, end] =
+                word_selection_range(impl_->edit.text, hit_test_cursor(point));
             if (end <= impl_->mouse_selection_base_start) {
-                impl_->selection_anchor = impl_->mouse_selection_base_end;
-                impl_->cursor = start;
+                impl_->edit.selection_anchor = impl_->mouse_selection_base_end;
+                impl_->edit.cursor = start;
             } else {
-                impl_->selection_anchor = impl_->mouse_selection_base_start;
-                impl_->cursor = end;
+                impl_->edit.selection_anchor = impl_->mouse_selection_base_start;
+                impl_->edit.cursor = end;
             }
             sync_primary_selection_ownership();
             ensure_caret_visible();
@@ -566,8 +357,8 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             return false;
         }
         if (impl_->selecting_line_with_mouse) {
-            impl_->selection_anchor = 0;
-            impl_->cursor = impl_->text.size();
+            impl_->edit.selection_anchor = 0;
+            impl_->edit.cursor = impl_->edit.text.size();
             impl_->selecting_with_mouse = false;
             impl_->selecting_line_with_mouse = false;
             sync_primary_selection_ownership();
@@ -576,13 +367,14 @@ bool TextField::handle_mouse_event(const MouseEvent& event) {
             return true;
         }
         if (impl_->selecting_word_with_mouse) {
-            const auto [start, end] = word_selection_range(impl_->text, hit_test_cursor(point));
+            const auto [start, end] =
+                word_selection_range(impl_->edit.text, hit_test_cursor(point));
             if (end <= impl_->mouse_selection_base_start) {
-                impl_->selection_anchor = impl_->mouse_selection_base_end;
-                impl_->cursor = start;
+                impl_->edit.selection_anchor = impl_->mouse_selection_base_end;
+                impl_->edit.cursor = start;
             } else {
-                impl_->selection_anchor = impl_->mouse_selection_base_start;
-                impl_->cursor = end;
+                impl_->edit.selection_anchor = impl_->mouse_selection_base_start;
+                impl_->edit.cursor = end;
             }
             impl_->selecting_with_mouse = false;
             impl_->selecting_word_with_mouse = false;
@@ -632,7 +424,7 @@ bool TextField::handle_key_event(const KeyEvent& event) {
             }
             reset_history_grouping();
             copy_selection_to_clipboard();
-            replace_selection({}, true, false);
+            replace_selection({});
             return true;
         case KeyCode::V:
             return impl_->editable && paste_from_clipboard();
@@ -654,11 +446,11 @@ bool TextField::handle_key_event(const KeyEvent& event) {
         reset_history_grouping();
         if (!has_shift(event.modifiers) && has_selection()) {
             move_cursor(selection_start(), false);
-        } else if ((event.modifiers & Modifiers::Alt) == Modifiers::Alt && impl_->cursor > 0) {
-            move_cursor(previous_word_boundary(impl_->text, impl_->cursor),
+        } else if ((event.modifiers & Modifiers::Alt) == Modifiers::Alt && impl_->edit.cursor > 0) {
+            move_cursor(previous_word_boundary(impl_->edit.text, impl_->edit.cursor),
                         has_shift(event.modifiers));
-        } else if (impl_->cursor > 0) {
-            move_cursor(previous_grapheme_boundary(impl_->text, impl_->cursor),
+        } else if (impl_->edit.cursor > 0) {
+            move_cursor(previous_grapheme_boundary(impl_->edit.text, impl_->edit.cursor),
                         has_shift(event.modifiers));
         }
         return true;
@@ -668,10 +460,11 @@ bool TextField::handle_key_event(const KeyEvent& event) {
         if (!has_shift(event.modifiers) && has_selection()) {
             move_cursor(selection_end(), false);
         } else if ((event.modifiers & Modifiers::Alt) == Modifiers::Alt &&
-                   impl_->cursor < impl_->text.size()) {
-            move_cursor(next_word_boundary(impl_->text, impl_->cursor), has_shift(event.modifiers));
-        } else if (impl_->cursor < impl_->text.size()) {
-            move_cursor(next_grapheme_boundary(impl_->text, impl_->cursor),
+                   impl_->edit.cursor < impl_->edit.text.size()) {
+            move_cursor(next_word_boundary(impl_->edit.text, impl_->edit.cursor),
+                        has_shift(event.modifiers));
+        } else if (impl_->edit.cursor < impl_->edit.text.size()) {
+            move_cursor(next_grapheme_boundary(impl_->edit.text, impl_->edit.cursor),
                         has_shift(event.modifiers));
         }
         return true;
@@ -683,7 +476,7 @@ bool TextField::handle_key_event(const KeyEvent& event) {
     case KeyCode::End:
         clear_preedit();
         reset_history_grouping();
-        move_cursor(impl_->text.size(), has_shift(event.modifiers));
+        move_cursor(impl_->edit.text.size(), has_shift(event.modifiers));
         return true;
     case KeyCode::Backspace:
         clear_preedit();
@@ -712,7 +505,7 @@ bool TextField::handle_key_event(const KeyEvent& event) {
 
     std::string inserted(1, *character);
     impl_->history_group = Impl::HistoryGroup::Insert;
-    replace_selection(inserted, true, true);
+    replace_selection(inserted, true);
     return true;
 }
 
@@ -741,7 +534,7 @@ bool TextField::handle_text_input_event(const TextInputEvent& event) {
         impl_->history_group = event.text.size() == 1 && !has_selection()
                                    ? Impl::HistoryGroup::Insert
                                    : Impl::HistoryGroup::None;
-        replace_selection(event.text, true, event.text.size() == 1 && !has_selection());
+        replace_selection(event.text, event.text.size() == 1 && !has_selection());
         return true;
     case TextInputEvent::Type::DeleteSurrounding:
         if (!impl_->editable) {
@@ -833,21 +626,21 @@ void TextField::snapshot_text(SnapshotContext& ctx) const {
     ctx.push_rounded_clip(text_bounds, 0.0F);
     const auto display_text = composed_display_text();
     Color text_color =
-        impl_->text.empty() ? theme_color("placeholder-color") : theme_color("text-color");
+        impl_->edit.text.empty() ? theme_color("placeholder-color") : theme_color("text-color");
     if (!display_text.empty()) {
         const auto font = text_field_font();
         const auto measured = measure_text(display_text, font);
         const float text_y =
             text_bounds.y + std::max(0.0F, (text_bounds.height - measured.height) * 0.5F);
 
-        if (!impl_->text.empty() && has_selection()) {
+        if (!impl_->edit.text.empty() && has_selection()) {
             const auto selection_bg =
                 theme_color("selection-background-color", Color{0.3F, 0.56F, 0.9F, 0.24F});
             const auto selection_left =
-                measure_text(impl_->text.substr(0, selection_start()), font).width;
+                measure_text(impl_->edit.text.substr(0, selection_start()), font).width;
             const auto selection_width =
                 measure_text(
-                    impl_->text.substr(selection_start(), selection_end() - selection_start()),
+                    impl_->edit.text.substr(selection_start(), selection_end() - selection_start()),
                     font)
                     .width;
             ctx.add_rounded_rect({text_bounds.x + selection_left - impl_->scroll_x,
@@ -860,16 +653,18 @@ void TextField::snapshot_text(SnapshotContext& ctx) const {
 
         ctx.add_text({text_bounds.x - impl_->scroll_x, text_y}, display_text, text_color, font);
 
-        if (impl_->spell_check_enabled && impl_->preedit_text.empty() && !impl_->text.empty()) {
-            if (!impl_->spell_check_cache_valid || impl_->spell_check_cache_text != impl_->text) {
+        if (impl_->spell_check_enabled && impl_->preedit_text.empty() &&
+            !impl_->edit.text.empty()) {
+            if (!impl_->spell_check_cache_valid ||
+                impl_->spell_check_cache_text != impl_->edit.text) {
                 impl_->spell_check_ranges.clear();
                 if (auto* app = Application::instance(); app != nullptr) {
                     if (auto* checker = app->platform_backend().spell_checker();
                         checker != nullptr) {
-                        impl_->spell_check_ranges = checker->check(impl_->text);
+                        impl_->spell_check_ranges = checker->check(impl_->edit.text);
                     }
                 }
-                impl_->spell_check_cache_text = impl_->text;
+                impl_->spell_check_cache_text = impl_->edit.text;
                 impl_->spell_check_cache_valid = true;
             }
 
@@ -877,12 +672,13 @@ void TextField::snapshot_text(SnapshotContext& ctx) const {
                 theme_color("misspelling-underline-color", Color{0.92F, 0.25F, 0.25F, 1.0F});
             const float underline_y = text_bounds.bottom() - 2.0F;
             for (const auto& range : impl_->spell_check_ranges) {
-                if (range.length == 0 || range.start + range.length > impl_->text.size()) {
+                if (range.length == 0 || range.start + range.length > impl_->edit.text.size()) {
                     continue;
                 }
-                const float left = measure_text(impl_->text.substr(0, range.start), font).width;
+                const float left =
+                    measure_text(impl_->edit.text.substr(0, range.start), font).width;
                 const float width =
-                    measure_text(impl_->text.substr(range.start, range.length), font).width;
+                    measure_text(impl_->edit.text.substr(range.start, range.length), font).width;
                 ctx.add_color_rect(
                     {text_bounds.x + left - impl_->scroll_x, underline_y, width, 1.5F},
                     misspelling_color);
@@ -890,9 +686,10 @@ void TextField::snapshot_text(SnapshotContext& ctx) const {
         }
 
         if (!impl_->preedit_text.empty()) {
-            const float preedit_x = text_bounds.x +
-                                    measure_text(impl_->text.substr(0, impl_->cursor), font).width -
-                                    impl_->scroll_x;
+            const float preedit_x =
+                text_bounds.x +
+                measure_text(impl_->edit.text.substr(0, impl_->edit.cursor), font).width -
+                impl_->scroll_x;
             const float preedit_width = measure_text(impl_->preedit_text, font).width;
             const float underline_y = text_bounds.bottom() - 3.0F;
             ctx.add_color_rect({preedit_x, underline_y, preedit_width, 1.5F},
@@ -963,12 +760,12 @@ std::size_t TextField::hit_test_cursor(Point point) const {
     const auto bounds = text_rect();
     const auto font = text_field_font();
     const float local_x = std::max(0.0F, point.x - bounds.x + impl_->scroll_x);
-    const auto boundaries = grapheme_boundaries(impl_->text);
+    const auto boundaries = grapheme_boundaries(impl_->edit.text);
 
     std::size_t best_index = 0;
     float best_distance = std::numeric_limits<float>::infinity();
     for (const auto index : boundaries) {
-        const float caret_x = measure_text(impl_->text.substr(0, index), font).width;
+        const float caret_x = measure_text(impl_->edit.text.substr(0, index), font).width;
         const float distance = std::fabs(caret_x - local_x);
         if (distance < best_distance) {
             best_distance = distance;
@@ -979,66 +776,32 @@ std::size_t TextField::hit_test_cursor(Point point) const {
 }
 
 void TextField::move_cursor(std::size_t position, bool extend_selection) {
-    position = nearest_grapheme_boundary(impl_->text, std::min(position, impl_->text.size()));
-    impl_->cursor = position;
-    if (!extend_selection) {
-        impl_->selection_anchor = position;
-    }
+    position =
+        nearest_grapheme_boundary(impl_->edit.text, std::min(position, impl_->edit.text.size()));
+    impl_->edit.move_cursor(position, extend_selection);
     sync_primary_selection_ownership();
     ensure_caret_visible();
     queue_text_redraw();
 }
 
-void TextField::replace_selection(std::string_view text,
-                                  bool record_history,
-                                  bool coalesce_history) {
+void TextField::replace_selection(std::string_view text, bool coalesce_history) {
+    replace_range(selection_start(), selection_end(), text, coalesce_history);
+}
+
+void TextField::replace_range(std::size_t start,
+                              std::size_t end,
+                              std::string_view text,
+                              bool coalesce_history) {
     reset_mouse_selection_state();
     clear_preedit();
-    const auto cursor_before = impl_->cursor;
-    const auto anchor_before = impl_->selection_anchor;
-    const auto history_group = impl_->history_group;
-    const auto start = selection_start();
-    const auto end = selection_end();
-    const auto had_selection = has_selection();
-    const auto changing_text = had_selection || !text.empty();
-    if (!changing_text) {
+    const auto group = coalesce_history ? impl_->history_group : Impl::HistoryGroup::None;
+    if (!impl_->edit.replace(start, end, text, group)) {
         return;
     }
-
-    if (!had_selection) {
-        impl_->selection_anchor = impl_->cursor;
-    }
-
-    impl_->text.replace(start, end - start, text);
-    impl_->cursor = start + text.size();
-    impl_->selection_anchor = impl_->cursor;
     ensure_caret_visible();
-    if (record_history) {
-        const bool cursor_matches_history = cursor_before == impl_->history.back().cursor;
-        const bool anchor_matches_history = anchor_before == impl_->history.back().selection_anchor;
-        const bool has_internal_delete_selection =
-            history_group == Impl::HistoryGroup::DeleteBackward ||
-            history_group == Impl::HistoryGroup::DeleteForward;
-        const bool selection_matches_group =
-            has_internal_delete_selection ||
-            (!had_selection && cursor_before == anchor_before && anchor_matches_history);
-        const bool can_coalesce = coalesce_history && history_group != Impl::HistoryGroup::None &&
-                                  impl_->history_index + 1 == impl_->history.size() &&
-                                  impl_->history.size() > 1 && cursor_matches_history &&
-                                  selection_matches_group;
-
-        if (can_coalesce) {
-            auto& state = impl_->history.back();
-            state.text = impl_->text;
-            state.cursor = impl_->cursor;
-            state.selection_anchor = impl_->selection_anchor;
-        } else {
-            push_history_state();
-        }
-        impl_->history_group = coalesce_history ? history_group : Impl::HistoryGroup::None;
-    }
     sync_primary_selection_ownership();
-    impl_->text_changed.emit(impl_->text);
+    ensure_accessible().set_value(impl_->edit.text);
+    impl_->text_changed.emit(impl_->edit.text);
     queue_text_redraw();
 }
 
@@ -1064,76 +827,40 @@ void TextField::ensure_caret_visible() {
 
 void TextField::reset_history_grouping() {
     impl_->history_group = Impl::HistoryGroup::None;
+    impl_->edit.break_undo_group();
 }
 
 void TextField::reset_history() {
-    impl_->history.clear();
-    impl_->history.push_back({impl_->text, impl_->cursor, impl_->selection_anchor});
-    impl_->history_index = 0;
-    reset_history_grouping();
-}
-
-void TextField::push_history_state() {
-    if (impl_->history_index + 1 < impl_->history.size()) {
-        impl_->history.erase(impl_->history.begin() +
-                                 static_cast<std::ptrdiff_t>(impl_->history_index + 1),
-                             impl_->history.end());
-    }
-
-    const auto state = Impl::HistoryState{
-        impl_->text,
-        impl_->cursor,
-        impl_->selection_anchor,
-    };
-    if (!impl_->history.empty()) {
-        const auto& current = impl_->history.back();
-        if (current.text == state.text && current.cursor == state.cursor &&
-            current.selection_anchor == state.selection_anchor) {
-            return;
-        }
-    }
-
-    impl_->history.push_back(state);
-    impl_->history_index = impl_->history.size() - 1;
+    impl_->edit.reset_history();
     reset_history_grouping();
 }
 
 bool TextField::undo() {
-    if (!impl_->editable || impl_->history_index == 0) {
+    if (!impl_->editable || !impl_->edit.undo()) {
         return false;
     }
-
     clear_preedit();
     reset_mouse_selection_state();
     reset_history_grouping();
-    --impl_->history_index;
-    const auto& state = impl_->history[impl_->history_index];
-    impl_->text = state.text;
-    impl_->cursor = state.cursor;
-    impl_->selection_anchor = state.selection_anchor;
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    impl_->text_changed.emit(impl_->text);
+    ensure_accessible().set_value(impl_->edit.text);
+    impl_->text_changed.emit(impl_->edit.text);
     queue_text_redraw();
     return true;
 }
 
 bool TextField::redo() {
-    if (!impl_->editable || impl_->history_index + 1 >= impl_->history.size()) {
+    if (!impl_->editable || !impl_->edit.redo()) {
         return false;
     }
-
     clear_preedit();
     reset_mouse_selection_state();
     reset_history_grouping();
-    ++impl_->history_index;
-    const auto& state = impl_->history[impl_->history_index];
-    impl_->text = state.text;
-    impl_->cursor = state.cursor;
-    impl_->selection_anchor = state.selection_anchor;
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    impl_->text_changed.emit(impl_->text);
+    ensure_accessible().set_value(impl_->edit.text);
+    impl_->text_changed.emit(impl_->edit.text);
     queue_text_redraw();
     return true;
 }
@@ -1144,115 +871,98 @@ void TextField::copy_selection_to_clipboard() const {
     }
 
     const auto selected =
-        impl_->text.substr(selection_start(), selection_end() - selection_start());
-    if (auto* app = Application::instance()) {
-        app->set_clipboard_text(selected);
-    } else {
-        fallback_clipboard_text() = selected;
-    }
+        impl_->edit.text.substr(selection_start(), selection_end() - selection_start());
+    detail::write_text_clipboard(selected);
 }
 
 void TextField::sync_primary_selection_ownership() const {
     std::string selected;
     if (has_selection()) {
-        selected = impl_->text.substr(selection_start(), selection_end() - selection_start());
+        selected = impl_->edit.text.substr(selection_start(), selection_end() - selection_start());
     }
 
-    if (auto* app = Application::instance()) {
-        app->set_primary_selection_text(std::move(selected));
-    } else {
-        fallback_primary_selection_text() = std::move(selected);
-    }
+    detail::write_text_clipboard(std::move(selected), true);
 }
 
 bool TextField::delete_backward() {
     if (has_selection()) {
         reset_history_grouping();
-        replace_selection({}, true, false);
+        replace_selection({});
         return true;
     }
-    if (impl_->cursor == 0) {
+    if (impl_->edit.cursor == 0) {
         return false;
     }
 
     impl_->history_group = Impl::HistoryGroup::DeleteBackward;
-    impl_->selection_anchor = previous_grapheme_boundary(impl_->text, impl_->cursor);
-    replace_selection({}, true, true);
+    replace_range(previous_grapheme_boundary(impl_->edit.text, impl_->edit.cursor),
+                  impl_->edit.cursor,
+                  {},
+                  true);
     return true;
 }
 
 bool TextField::delete_forward() {
     if (has_selection()) {
         reset_history_grouping();
-        replace_selection({}, true, false);
+        replace_selection({});
         return true;
     }
-    if (impl_->cursor >= impl_->text.size()) {
+    if (impl_->edit.cursor >= impl_->edit.text.size()) {
         return false;
     }
 
     impl_->history_group = Impl::HistoryGroup::DeleteForward;
-    impl_->selection_anchor = next_grapheme_boundary(impl_->text, impl_->cursor);
-    replace_selection({}, true, true);
+    replace_range(
+        impl_->edit.cursor, next_grapheme_boundary(impl_->edit.text, impl_->edit.cursor), {}, true);
     return true;
 }
 
 bool TextField::delete_backward_word() {
     if (has_selection()) {
         reset_history_grouping();
-        replace_selection({}, true, false);
+        replace_selection({});
         return true;
     }
-    if (impl_->cursor == 0) {
+    if (impl_->edit.cursor == 0) {
         return false;
     }
 
     reset_history_grouping();
-    impl_->selection_anchor = previous_word_boundary(impl_->text, impl_->cursor);
-    replace_selection({}, true, false);
+    replace_range(
+        previous_word_boundary(impl_->edit.text, impl_->edit.cursor), impl_->edit.cursor, {});
     return true;
 }
 
 bool TextField::delete_forward_word() {
     if (has_selection()) {
         reset_history_grouping();
-        replace_selection({}, true, false);
+        replace_selection({});
         return true;
     }
-    if (impl_->cursor >= impl_->text.size()) {
+    if (impl_->edit.cursor >= impl_->edit.text.size()) {
         return false;
     }
 
     reset_history_grouping();
-    impl_->selection_anchor = next_word_boundary(impl_->text, impl_->cursor);
-    replace_selection({}, true, false);
+    replace_range(impl_->edit.cursor, next_word_boundary(impl_->edit.text, impl_->edit.cursor), {});
     return true;
 }
 
 bool TextField::paste_from_clipboard() {
-    std::string text;
-    if (auto* app = Application::instance()) {
-        text = app->clipboard_text();
-    } else {
-        text = fallback_clipboard_text();
-    }
+    const auto text = detail::read_text_clipboard();
 
     if (text.empty()) {
         return false;
     }
 
     reset_history_grouping();
-    replace_selection(text, true, false);
+    replace_selection(text);
     return true;
 }
 
 bool TextField::paste_from_primary_selection(std::optional<std::size_t> cursor_position) {
-    std::string text;
-    if (auto* app = Application::instance()) {
-        text = app->primary_selection_text();
-    } else {
-        text = fallback_primary_selection_text();
-    }
+    const auto text = detail::read_text_clipboard(true);
 
     if (text.empty()) {
         return false;
@@ -1261,12 +971,12 @@ bool TextField::paste_from_primary_selection(std::optional<std::size_t> cursor_p
     reset_history_grouping();
     if (cursor_position.has_value()) {
         reset_mouse_selection_state();
-        const auto bounded =
-            nearest_grapheme_boundary(impl_->text, std::min(*cursor_position, impl_->text.size()));
-        impl_->cursor = bounded;
-        impl_->selection_anchor = bounded;
+        const auto bounded = nearest_grapheme_boundary(
+            impl_->edit.text, std::min(*cursor_position, impl_->edit.text.size()));
+        impl_->edit.cursor = bounded;
+        impl_->edit.selection_anchor = bounded;
     }
-    replace_selection(text, true, false);
+    replace_selection(text);
     return true;
 }
 
@@ -1297,8 +1007,9 @@ bool TextField::delete_surrounding_text(std::size_t before_length, std::size_t a
         return false;
     }
 
-    const std::size_t safe_before = std::min(before_length, impl_->cursor);
-    const std::size_t safe_after = std::min(after_length, impl_->text.size() - impl_->cursor);
+    const std::size_t safe_before = std::min(before_length, impl_->edit.cursor);
+    const std::size_t safe_after =
+        std::min(after_length, impl_->edit.text.size() - impl_->edit.cursor);
     if (safe_before == 0 && safe_after == 0) {
         return false;
     }
@@ -1306,17 +1017,17 @@ bool TextField::delete_surrounding_text(std::size_t before_length, std::size_t a
     reset_history_grouping();
     // Platform offsets are bytes. Round the deletion out to cluster boundaries
     // so a partial offset cannot leave a broken UTF-8 sequence behind.
-    impl_->selection_anchor =
-        previous_grapheme_boundary(impl_->text, impl_->cursor - safe_before + 1);
-    impl_->cursor = next_grapheme_boundary(impl_->text, impl_->cursor + safe_after - 1);
-    replace_selection({}, true, false);
+    const auto start =
+        previous_grapheme_boundary(impl_->edit.text, impl_->edit.cursor - safe_before + 1);
+    const auto end = next_grapheme_boundary(impl_->edit.text, impl_->edit.cursor + safe_after - 1);
+    replace_range(start, end, {});
     return true;
 }
 
 std::string TextField::composed_display_text() const {
-    std::string text_to_show = impl_->text;
-    if (impl_->secure_text_entry && !impl_->text.empty()) {
-        const std::size_t num_chars = decode_utf8_units(impl_->text).size();
+    std::string text_to_show = impl_->edit.text;
+    if (impl_->secure_text_entry && !impl_->edit.text.empty()) {
+        const std::size_t num_chars = decode_utf8_units(impl_->edit.text).size();
         text_to_show.clear();
         text_to_show.reserve(num_chars * 3);
         for (std::size_t i = 0; i < num_chars; ++i) {
@@ -1329,18 +1040,18 @@ std::string TextField::composed_display_text() const {
     }
 
     std::string display = text_to_show;
-    std::size_t insert_pos = impl_->cursor;
+    std::size_t insert_pos = impl_->edit.cursor;
     if (impl_->secure_text_entry) {
-        insert_pos = decode_utf8_units(impl_->text.substr(0, impl_->cursor)).size() * 3;
+        insert_pos = decode_utf8_units(impl_->edit.text.substr(0, impl_->edit.cursor)).size() * 3;
     }
     display.insert(insert_pos, impl_->preedit_text);
     return display;
 }
 
 std::size_t TextField::display_caret_position() const {
-    std::size_t base_cursor = impl_->cursor;
+    std::size_t base_cursor = impl_->edit.cursor;
     if (impl_->secure_text_entry) {
-        base_cursor = decode_utf8_units(impl_->text.substr(0, impl_->cursor)).size() * 3;
+        base_cursor = decode_utf8_units(impl_->edit.text.substr(0, impl_->edit.cursor)).size() * 3;
     }
 
     if (impl_->preedit_text.empty()) {
