@@ -29,4 +29,9 @@ std::size_t next_word_boundary(std::string_view text, std::size_t position);
 std::pair<std::size_t, std::size_t> word_selection_range(std::string_view text,
                                                          std::size_t position);
 
+// Native macOS ranges use UTF-16 units, while editor offsets use UTF-8 bytes.
+std::size_t
+utf8_offset_from_utf16(std::string_view text, std::size_t offset, bool round_up = false);
+std::size_t utf16_offset_from_utf8(std::string_view text, std::size_t offset);
+
 } // namespace nk::detail

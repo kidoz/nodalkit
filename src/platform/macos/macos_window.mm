@@ -1,3 +1,5 @@
+#include "../../text/text_boundaries.h"
+#include "text_input_routing.h"
 /// @file macos_window.mm
 /// @brief macOS Cocoa native surface implementation.
 
@@ -510,46 +512,6 @@ static std::string objc_text_to_utf8(id value) {
     return utf8 != nullptr ? std::string(utf8) : std::string{};
 }
 
-static bool should_dispatch_key_directly(nk::KeyCode key, nk::Modifiers modifiers) {
-    if ((modifiers & nk::Modifiers::Super) == nk::Modifiers::Super ||
-        (modifiers & nk::Modifiers::Ctrl) == nk::Modifiers::Ctrl) {
-        return true;
-    }
-
-    switch (key) {
-    case nk::KeyCode::Unknown:
-        return false;
-    case nk::KeyCode::Return:
-    case nk::KeyCode::Escape:
-    case nk::KeyCode::Backspace:
-    case nk::KeyCode::Delete:
-    case nk::KeyCode::Tab:
-    case nk::KeyCode::Home:
-    case nk::KeyCode::End:
-    case nk::KeyCode::PageUp:
-    case nk::KeyCode::PageDown:
-    case nk::KeyCode::Left:
-    case nk::KeyCode::Right:
-    case nk::KeyCode::Up:
-    case nk::KeyCode::Down:
-    case nk::KeyCode::F1:
-    case nk::KeyCode::F2:
-    case nk::KeyCode::F3:
-    case nk::KeyCode::F4:
-    case nk::KeyCode::F5:
-    case nk::KeyCode::F6:
-    case nk::KeyCode::F7:
-    case nk::KeyCode::F8:
-    case nk::KeyCode::F9:
-    case nk::KeyCode::F10:
-    case nk::KeyCode::F11:
-    case nk::KeyCode::F12:
-        return true;
-    default:
-        return false;
-    }
-}
-
 static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugNode& node) {
     if (node.focused) {
         return &node;
@@ -933,7 +895,8 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     const auto modifiers = macos_modifiers(event.modifierFlags);
     const auto key = macos_keycode_to_nk(event.keyCode);
     const bool text_input_active = _surface->owner().current_text_input_state().has_value();
-    if (text_input_active && !should_dispatch_key_directly(key, modifiers)) {
+    if (text_input_active &&
+        !nk::detail::macos_dispatch_key_directly(key, modifiers, [self hasMarkedText])) {
         [self interpretKeyEvents:@[ event ]];
         return;
     }
@@ -966,7 +929,19 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
 }
 
 - (NSRange)selectedRange {
-    return selected_range_;
+    if ([self hasMarkedText]) {
+        return selected_range_;
+    }
+    if (_surface) {
+        if (const auto state = _surface->owner().current_text_input_state(); state.has_value()) {
+            const auto start = nk::detail::utf16_offset_from_utf8(
+                state->text, std::min(state->cursor, state->anchor));
+            const auto end = nk::detail::utf16_offset_from_utf8(
+                state->text, std::max(state->cursor, state->anchor));
+            return NSMakeRange(start, end - start);
+        }
+    }
+    return NSMakeRange(NSNotFound, 0);
 }
 
 - (void)setMarkedText:(id)string
@@ -976,15 +951,25 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     if (!_surface) {
         return;
     }
+    const auto state = _surface->owner().current_text_input_state();
+    if (!state.has_value()) {
+        marked_range_ = NSMakeRange(NSNotFound, 0);
+        selected_range_ = NSMakeRange(NSNotFound, 0);
+        return;
+    }
     auto text = objc_text_to_utf8(string);
-    marked_range_ = text.empty() ? NSMakeRange(NSNotFound, 0) : NSMakeRange(0, text.size());
-    selected_range_ = selectedRange;
+    const auto length = nk::detail::utf16_offset_from_utf8(text, text.size());
+    const auto start = std::min<std::size_t>(selectedRange.location, length);
+    const auto end = start + std::min<std::size_t>(selectedRange.length, length - start);
+    const auto base =
+        nk::detail::utf16_offset_from_utf8(state->text, std::min(state->cursor, state->anchor));
+    marked_range_ = text.empty() ? NSMakeRange(NSNotFound, 0) : NSMakeRange(base, length);
+    selected_range_ = NSMakeRange(base + start, end - start);
     nk::TextInputEvent te{};
     te.type = nk::TextInputEvent::Type::Preedit;
     te.text = std::move(text);
-    te.selection_start = std::min<std::size_t>(selectedRange.location, te.text.size());
-    te.selection_end =
-        std::min<std::size_t>(selectedRange.location + selectedRange.length, te.text.size());
+    te.selection_start = nk::detail::utf8_offset_from_utf16(te.text, start);
+    te.selection_end = nk::detail::utf8_offset_from_utf16(te.text, end, true);
     _surface->owner().dispatch_text_input_event(te);
 }
 
@@ -1018,11 +1003,8 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
         return;
     }
     auto text = objc_text_to_utf8(string);
-    if (text.empty()) {
-        return;
-    }
     marked_range_ = NSMakeRange(NSNotFound, 0);
-    selected_range_ = NSMakeRange(text.size(), 0);
+    selected_range_ = NSMakeRange(NSNotFound, 0);
     nk::TextInputEvent te{};
     te.type = nk::TextInputEvent::Type::Commit;
     te.text = std::move(text);

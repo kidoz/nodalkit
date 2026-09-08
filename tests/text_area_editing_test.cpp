@@ -1,3 +1,6 @@
+#include "../src/platform/macos/text_input_routing.h"
+#include "../src/text/text_boundaries.h"
+
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
@@ -562,3 +565,38 @@ TEST_CASE("Secure single-line composition does not paint preedit characters",
     CHECK(painted_text(*field) == std::vector<std::string>{"\u2022\u2022"});
 }
 
+TEST_CASE("macOS gives marked-text navigation to the input context", "[text][ime][macos]") {
+    for (const auto code : {nk::KeyCode::Return,
+                            nk::KeyCode::Escape,
+                            nk::KeyCode::Left,
+                            nk::KeyCode::Right,
+                            nk::KeyCode::Up,
+                            nk::KeyCode::Down,
+                            nk::KeyCode::Backspace,
+                            nk::KeyCode::Delete}) {
+        CHECK(nk::detail::macos_dispatch_key_directly(code, nk::Modifiers::None, false));
+        CHECK_FALSE(nk::detail::macos_dispatch_key_directly(code, nk::Modifiers::None, true));
+    }
+    CHECK_FALSE(
+        nk::detail::macos_dispatch_key_directly(nk::KeyCode::A, nk::Modifiers::None, false));
+    CHECK(nk::detail::macos_dispatch_key_directly(nk::KeyCode::C, nk::Modifiers::Super, true));
+    CHECK(nk::detail::macos_dispatch_key_directly(nk::KeyCode::Z, nk::Modifiers::Ctrl, true));
+}
+
+TEST_CASE("Native UTF-16 ranges map to editor byte offsets", "[text][ime][macos]") {
+    const std::string text = "a\U0001F600\u00E9\u4E2D";
+    CHECK(nk::detail::utf16_offset_from_utf8(text, text.size()) == 5);
+    CHECK(nk::detail::utf8_offset_from_utf16(text, 1) == 1);
+    CHECK(nk::detail::utf8_offset_from_utf16(text, 2) == 1);
+    CHECK(nk::detail::utf8_offset_from_utf16(text, 2, true) == 5);
+    CHECK(nk::detail::utf8_offset_from_utf16(text, 3) == 5);
+    CHECK(nk::detail::utf8_offset_from_utf16(text, 4) == 7);
+    CHECK(nk::detail::utf8_offset_from_utf16(text, std::numeric_limits<std::size_t>::max()) ==
+          text.size());
+    CHECK(nk::detail::utf16_offset_from_utf8(text, 6) == 3);
+    CHECK(nk::detail::utf16_offset_from_utf8(text, std::numeric_limits<std::size_t>::max()) == 5);
+    for (const auto byte : {0U, 1U, 5U, 7U, 10U}) {
+        CHECK(nk::detail::utf8_offset_from_utf16(
+                  text, nk::detail::utf16_offset_from_utf8(text, byte)) == byte);
+    }
+}

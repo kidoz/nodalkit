@@ -371,4 +371,34 @@ std::pair<std::size_t, std::size_t> word_selection_range(std::string_view text,
     return {boundaries[start_cluster], boundaries[end_cluster]};
 }
 
+std::size_t utf8_offset_from_utf16(std::string_view text, std::size_t offset, bool round_up) {
+    std::size_t units = 0;
+    std::size_t byte = 0;
+    while (byte < text.size() && units < offset) {
+        const auto unit = decode_utf8_unit(text, byte).value_or(Utf8Unit{byte, byte + 1, 0xFFFD});
+        const std::size_t length = unit.code_point > 0xFFFF ? 2 : 1;
+        if (offset - units < length) {
+            return round_up ? unit.next_index : byte;
+        }
+        units += length;
+        byte = unit.next_index;
+    }
+    return byte;
+}
+
+std::size_t utf16_offset_from_utf8(std::string_view text, std::size_t offset) {
+    offset = std::min(offset, text.size());
+    std::size_t units = 0;
+    std::size_t byte = 0;
+    while (byte < offset) {
+        const auto unit = decode_utf8_unit(text, byte).value_or(Utf8Unit{byte, byte + 1, 0xFFFD});
+        if (unit.next_index > offset) {
+            break;
+        }
+        units += unit.code_point > 0xFFFF ? 2 : 1;
+        byte = unit.next_index;
+    }
+    return units;
+}
+
 } // namespace nk::detail
