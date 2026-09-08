@@ -214,6 +214,10 @@ void check_widgets() {
     check(area->cursor_position() == area->text().size() && caret.x >= 8 && caret.right() <= 152 &&
               caret.y >= 8 && caret.bottom() <= 48,
           "TextArea exports caret queries and reveals the caret through the installed SDK");
+    area->select_all();
+    check(area->has_selection() && area->selection_start() == 0 &&
+              area->selection_end() == area->text().size(),
+          "TextArea exports selection queries through the installed SDK");
 
     auto canvas = nk::CanvasWidget::create();
     check(canvas != nullptr, "CanvasWidget::create");

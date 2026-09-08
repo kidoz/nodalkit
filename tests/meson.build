@@ -127,6 +127,12 @@ test_search_field = executable('test_search_field',
 )
 test('search_field', test_search_field)
 
+test_text_area_editing = executable('test_text_area_editing',
+    'text_area_editing_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('text_area_editing', test_text_area_editing)
+
 test_widget_views = executable('test_widget_views',
     'widget_views_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

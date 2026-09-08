@@ -29,6 +29,12 @@ public:
 
     /// Caret byte offset within the current UTF-8 buffer.
     [[nodiscard]] std::size_t cursor_position() const;
+    /// Inclusive selection start and exclusive selection end, in UTF-8 bytes.
+    [[nodiscard]] std::size_t selection_start() const;
+    [[nodiscard]] std::size_t selection_end() const;
+    [[nodiscard]] bool has_selection() const;
+    /// Select the entire document, including in read-only mode.
+    void select_all();
     /// Caret bounds in window coordinates, accounting for viewport scrolling.
     /// The bounds can lie outside the viewport after manual scrolling.
     [[nodiscard]] Rect text_input_caret_rect() const;
@@ -62,6 +68,10 @@ private:
     void clamp_scroll();
     void ensure_caret_visible();
     void did_edit();
+    void did_select();
+    void extend_mouse_selection(Point point);
+    void sync_primary_selection() const;
+    bool replace_selection(std::string_view text, bool typing = false);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

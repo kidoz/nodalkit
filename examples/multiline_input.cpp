@@ -60,7 +60,8 @@ int main(int argc, char** argv) {
         });
     (void)toggle_connection;
     panel->append(
-        nk::Label::create("Click to place the caret. Use arrows or Page Up / Page Down."));
+        nk::Label::create("Drag or Shift + arrows to select. Double-click selects a word."));
+    panel->append(nk::Label::create("Use standard copy, cut, paste, and undo shortcuts."));
     panel->append(nk::Label::create("Scroll long lines horizontally with Shift + wheel."));
     panel->append(nk::Label::create(
         "Home / End moves within a line; Control + Home / End moves through the document."));

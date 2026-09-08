@@ -1,4 +1,6 @@
 #include "../text/text_boundaries.h"
+#include "../text/text_clipboard.h"
+#include "../text/text_edit_buffer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -81,12 +83,16 @@ std::size_t next_text_boundary(std::string_view text, std::size_t position) {
 } // namespace
 
 struct TextArea::Impl {
-    std::string text;
+    detail::TextEditBuffer edit;
     std::string placeholder;
     bool editable = true;
     int visible_rows = 4;
     Signal<> text_changed;
-    std::size_t cursor_pos = 0;
+    enum class MouseSelection { Character, Word, Line };
+    bool selecting = false;
+    MouseSelection selection_mode = MouseSelection::Character;
+    std::size_t mouse_base_start = 0;
+    std::size_t mouse_base_end = 0;
     float scroll_x = 0.0F;
     float scroll_y = 0.0F;
     float content_width = 0.0F;
@@ -104,19 +110,21 @@ TextArea::TextArea() : impl_(std::make_unique<Impl>()) {
     add_style_class("text-area");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::TextInput);
-    accessible.set_value(impl_->text);
+    accessible.set_value(impl_->edit.text);
 }
 
 TextArea::~TextArea() = default;
 
 std::string_view TextArea::text() const {
-    return impl_->text;
+    return impl_->edit.text;
 }
 
 void TextArea::set_text(std::string text) {
-    if (impl_->text != text) {
-        impl_->text = std::move(text);
-        impl_->cursor_pos = impl_->text.size();
+    if (impl_->edit.text != text) {
+        impl_->edit.text = std::move(text);
+        impl_->edit.cursor = impl_->edit.text.size();
+        impl_->edit.selection_anchor = impl_->edit.cursor;
+        impl_->edit.reset_history();
         did_edit();
     }
 }
@@ -139,6 +147,8 @@ bool TextArea::is_editable() const {
 void TextArea::set_editable(bool editable) {
     if (impl_->editable != editable) {
         impl_->editable = editable;
+        impl_->edit.break_undo_group();
+        impl_->selecting = false;
         queue_redraw();
     }
 }
@@ -176,7 +186,47 @@ void TextArea::allocate(const Rect& allocation) {
 }
 
 std::size_t TextArea::cursor_position() const {
-    return impl_->cursor_pos;
+    return impl_->edit.cursor;
+}
+
+std::size_t TextArea::selection_start() const {
+    return impl_->edit.selection_start();
+}
+
+std::size_t TextArea::selection_end() const {
+    return impl_->edit.selection_end();
+}
+
+bool TextArea::has_selection() const {
+    return impl_->edit.has_selection();
+}
+
+void TextArea::select_all() {
+    impl_->edit.select_all();
+    impl_->selecting = false;
+    impl_->preferred_x.reset();
+    did_select();
+}
+
+void TextArea::sync_primary_selection() const {
+    detail::write_text_clipboard(
+        impl_->edit.text.substr(selection_start(), selection_end() - selection_start()), true);
+}
+
+void TextArea::did_select() {
+    sync_primary_selection();
+    ensure_caret_visible();
+    queue_redraw();
+}
+
+bool TextArea::replace_selection(std::string_view text, bool typing) {
+    const auto group =
+        typing && !has_selection() ? detail::EditGroup::Insert : detail::EditGroup::None;
+    if (!impl_->edit.replace(selection_start(), selection_end(), text, group)) {
+        return false;
+    }
+    did_edit();
+    return true;
 }
 
 Rect TextArea::text_rect() const {
@@ -195,15 +245,15 @@ float TextArea::line_height() const {
 
 std::size_t TextArea::cursor_line() const {
     return static_cast<std::size_t>(
-        std::upper_bound(impl_->line_starts.begin(), impl_->line_starts.end(), impl_->cursor_pos) -
+        std::upper_bound(impl_->line_starts.begin(), impl_->line_starts.end(), impl_->edit.cursor) -
         impl_->line_starts.begin() - 1);
 }
 
 Rect TextArea::text_input_caret_rect() const {
     const auto viewport = text_rect();
-    const auto line = line_at(impl_->text, impl_->cursor_pos);
+    const auto line = line_at(impl_->edit.text, impl_->edit.cursor);
     const float x =
-        measure_text(line.text.substr(0, impl_->cursor_pos - line.start), text_area_font()).width;
+        measure_text(line.text.substr(0, impl_->edit.cursor - line.start), text_area_font()).width;
     return {viewport.x + x - impl_->scroll_x,
             viewport.y + static_cast<float>(cursor_line()) * line_height() - impl_->scroll_y,
             1.5F,
@@ -214,7 +264,7 @@ void TextArea::refresh_content_metrics() {
     impl_->line_starts.clear();
     impl_->content_width = 0.0F;
     std::size_t start = 0;
-    for (const auto line : split_lines(impl_->text)) {
+    for (const auto line : split_lines(impl_->edit.text)) {
         impl_->line_starts.push_back(start);
         impl_->content_width =
             std::max(impl_->content_width, measure_text(line, text_area_font()).width);
@@ -251,10 +301,12 @@ void TextArea::ensure_caret_visible() {
 }
 
 void TextArea::did_edit() {
+    impl_->selecting = false;
     impl_->preferred_x.reset();
     refresh_content_metrics();
     ensure_caret_visible();
-    ensure_accessible().set_value(impl_->text);
+    ensure_accessible().set_value(impl_->edit.text);
+    sync_primary_selection();
     impl_->text_changed.emit();
     queue_redraw();
 }
@@ -279,11 +331,47 @@ std::size_t TextArea::hit_test_cursor(Point point) const {
         std::clamp(std::floor((point.y - viewport.y + impl_->scroll_y) / line_height()),
                    0.0F,
                    static_cast<float>(impl_->line_starts.size() - 1));
-    const auto line = line_at(impl_->text, impl_->line_starts[static_cast<std::size_t>(row)]);
+    const auto line = line_at(impl_->edit.text, impl_->line_starts[static_cast<std::size_t>(row)]);
     return line.start + position_at_x(line.text, point.x - viewport.x + impl_->scroll_x);
 }
 
+void TextArea::extend_mouse_selection(Point point) {
+    const auto position = hit_test_cursor(point);
+    if (impl_->selection_mode == Impl::MouseSelection::Character) {
+        impl_->edit.move_cursor(position, true);
+    } else {
+        const auto line = line_at(impl_->edit.text, position);
+        auto start = line.start;
+        auto end = line.start + line.text.size();
+        if (impl_->selection_mode == Impl::MouseSelection::Word) {
+            const auto range = detail::word_selection_range(line.text, position - line.start);
+            start += range.first;
+            end = line.start + range.second;
+        } else if (end < impl_->edit.text.size()) {
+            ++end;
+        }
+        if (end <= impl_->mouse_base_start) {
+            impl_->edit.selection_anchor = impl_->mouse_base_end;
+            impl_->edit.cursor = start;
+        } else {
+            impl_->edit.selection_anchor = impl_->mouse_base_start;
+            impl_->edit.cursor = end;
+        }
+        impl_->edit.break_undo_group();
+    }
+    impl_->preferred_x.reset();
+    did_select();
+}
+
 bool TextArea::handle_mouse_event(const MouseEvent& event) {
+    if (impl_->selecting && (event.type == MouseEvent::Type::Move ||
+                             (event.type == MouseEvent::Type::Release && event.button == 1))) {
+        extend_mouse_selection({event.x, event.y});
+        if (event.type == MouseEvent::Type::Release) {
+            impl_->selecting = false;
+        }
+        return true;
+    }
     if (!allocation().contains({event.x, event.y})) {
         return false;
     }
@@ -313,13 +401,42 @@ bool TextArea::handle_mouse_event(const MouseEvent& event) {
         queue_redraw();
         return true;
     }
+    if (event.type == MouseEvent::Type::Press && event.button == 3 && impl_->editable) {
+        // Read before moving the caret changes primary-selection ownership.
+        const auto pasted = detail::read_text_clipboard(true);
+        if (pasted.empty()) {
+            return false;
+        }
+        impl_->edit.move_cursor(hit_test_cursor({event.x, event.y}), false);
+        return replace_selection(pasted);
+    }
     if (event.type == MouseEvent::Type::Press && event.button == 1) {
-        // Resolve against the scrolled viewport before focus can reveal the old caret.
-        impl_->cursor_pos = hit_test_cursor({event.x, event.y});
+        const auto position = hit_test_cursor({event.x, event.y});
+        impl_->edit.break_undo_group();
+        impl_->selecting = true;
+        impl_->selection_mode = Impl::MouseSelection::Character;
+        if (event.click_count >= 2) {
+            impl_->selection_mode =
+                event.click_count >= 3 ? Impl::MouseSelection::Line : Impl::MouseSelection::Word;
+            const auto line = line_at(impl_->edit.text, position);
+            auto start = line.start;
+            auto end = line.start + line.text.size();
+            if (impl_->selection_mode == Impl::MouseSelection::Word) {
+                const auto range = detail::word_selection_range(line.text, position - line.start);
+                start += range.first;
+                end = line.start + range.second;
+            } else if (end < impl_->edit.text.size()) {
+                ++end;
+            }
+            impl_->mouse_base_start = impl_->edit.selection_anchor = start;
+            impl_->mouse_base_end = impl_->edit.cursor = end;
+        } else {
+            impl_->edit.move_cursor(position,
+                                    (event.modifiers & Modifiers::Shift) != Modifiers::None);
+        }
         impl_->preferred_x.reset();
         grab_focus();
-        ensure_caret_visible();
-        queue_redraw();
+        did_select();
         return true;
     }
     return false;
@@ -331,50 +448,99 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
     }
     const bool document = ((event.modifiers & Modifiers::Ctrl) != Modifiers::None) ||
                           ((event.modifiers & Modifiers::Super) != Modifiers::None);
+    const bool extend = (event.modifiers & Modifiers::Shift) != Modifiers::None;
+    const bool word = (event.modifiers & (Modifiers::Alt | Modifiers::Ctrl)) != Modifiers::None;
+    impl_->selecting = false;
+    if (document && (event.modifiers & Modifiers::Alt) == Modifiers::None) {
+        switch (event.key) {
+        case KeyCode::A:
+            select_all();
+            return true;
+        case KeyCode::C:
+        case KeyCode::X:
+            impl_->edit.break_undo_group();
+            if (!has_selection() || (event.key == KeyCode::X && !impl_->editable)) {
+                return false;
+            }
+            detail::write_text_clipboard(
+                impl_->edit.text.substr(selection_start(), selection_end() - selection_start()));
+            return event.key == KeyCode::C || replace_selection({});
+        case KeyCode::V:
+            if (!impl_->editable) {
+                return false;
+            }
+            if (const auto pasted = detail::read_text_clipboard(); !pasted.empty()) {
+                return replace_selection(pasted);
+            }
+            return false;
+        case KeyCode::Z:
+        case KeyCode::Y:
+            if (!impl_->editable) {
+                return false;
+            }
+            if ((event.key == KeyCode::Y || extend) ? impl_->edit.redo() : impl_->edit.undo()) {
+                did_edit();
+                return true;
+            }
+            return false;
+        default:
+            break;
+        }
+    }
+    const auto current_line = line_at(impl_->edit.text, impl_->edit.cursor);
+    const auto previous = [&] {
+        if (word && impl_->edit.cursor > current_line.start) {
+            return current_line.start +
+                   detail::previous_word_boundary(current_line.text,
+                                                  impl_->edit.cursor - current_line.start);
+        }
+        return previous_text_boundary(impl_->edit.text, impl_->edit.cursor);
+    };
+    const auto next = [&] {
+        if (word && impl_->edit.cursor < current_line.start + current_line.text.size()) {
+            return current_line.start +
+                   detail::next_word_boundary(current_line.text,
+                                              impl_->edit.cursor - current_line.start);
+        }
+        return next_text_boundary(impl_->edit.text, impl_->edit.cursor);
+    };
     switch (event.key) {
     case KeyCode::Return:
-        if (!impl_->editable) {
-            return false;
-        }
-        impl_->text.insert(impl_->cursor_pos, 1, '\n');
-        ++impl_->cursor_pos;
-        did_edit();
-        return true;
+        return impl_->editable && replace_selection("\n");
     case KeyCode::Backspace:
+    case KeyCode::Delete: {
         if (!impl_->editable) {
             return false;
         }
-        if (impl_->cursor_pos > 0) {
-            const auto previous = previous_text_boundary(impl_->text, impl_->cursor_pos);
-            impl_->text.erase(previous, impl_->cursor_pos - previous);
-            impl_->cursor_pos = previous;
+        if (has_selection()) {
+            return replace_selection({});
+        }
+        const bool backward = event.key == KeyCode::Backspace;
+        const auto group = word       ? detail::EditGroup::None
+                           : backward ? detail::EditGroup::DeleteBackward
+                                      : detail::EditGroup::DeleteForward;
+        if (impl_->edit.replace(backward ? previous() : impl_->edit.cursor,
+                                backward ? impl_->edit.cursor : next(),
+                                {},
+                                group)) {
             did_edit();
         }
         return true;
-    case KeyCode::Delete:
-        if (!impl_->editable) {
-            return false;
-        }
-        if (impl_->cursor_pos < impl_->text.size()) {
-            const auto next = next_text_boundary(impl_->text, impl_->cursor_pos);
-            impl_->text.erase(impl_->cursor_pos, next - impl_->cursor_pos);
-            did_edit();
-        }
-        return true;
+    }
     case KeyCode::Left:
-        impl_->cursor_pos = previous_text_boundary(impl_->text, impl_->cursor_pos);
+        impl_->edit.cursor = !extend && has_selection() ? selection_start() : previous();
         break;
     case KeyCode::Right:
-        impl_->cursor_pos = next_text_boundary(impl_->text, impl_->cursor_pos);
+        impl_->edit.cursor = !extend && has_selection() ? selection_end() : next();
         break;
     case KeyCode::Up:
     case KeyCode::Down:
     case KeyCode::PageUp:
     case KeyCode::PageDown: {
-        const auto current = line_at(impl_->text, impl_->cursor_pos);
+        const auto current = line_at(impl_->edit.text, impl_->edit.cursor);
         if (!impl_->preferred_x) {
             impl_->preferred_x =
-                measure_text(current.text.substr(0, impl_->cursor_pos - current.start),
+                measure_text(current.text.substr(0, impl_->edit.cursor - current.start),
                              text_area_font())
                     .width;
         }
@@ -388,26 +554,26 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
         const auto row = cursor_line();
         const auto target_row = up ? row - std::min(count, row)
                                    : row + std::min(count, impl_->line_starts.size() - 1 - row);
-        const auto target = line_at(impl_->text, impl_->line_starts[target_row]);
-        impl_->cursor_pos = target.start + position_at_x(target.text, *impl_->preferred_x);
-        ensure_caret_visible();
-        queue_redraw();
+        const auto target = line_at(impl_->edit.text, impl_->line_starts[target_row]);
+        impl_->edit.move_cursor(target.start + position_at_x(target.text, *impl_->preferred_x),
+                                extend);
+        did_select();
         return true;
     }
     case KeyCode::Home:
-        impl_->cursor_pos = document ? 0 : line_at(impl_->text, impl_->cursor_pos).start;
+        impl_->edit.cursor = document ? 0 : line_at(impl_->edit.text, impl_->edit.cursor).start;
         break;
     case KeyCode::End: {
-        const auto line = line_at(impl_->text, impl_->cursor_pos);
-        impl_->cursor_pos = document ? impl_->text.size() : line.start + line.text.size();
+        const auto line = line_at(impl_->edit.text, impl_->edit.cursor);
+        impl_->edit.cursor = document ? impl_->edit.text.size() : line.start + line.text.size();
         break;
     }
     default:
         return false;
     }
+    impl_->edit.move_cursor(impl_->edit.cursor, extend);
     impl_->preferred_x.reset();
-    ensure_caret_visible();
-    queue_redraw();
+    did_select();
     return true;
 }
 
@@ -415,10 +581,7 @@ bool TextArea::handle_text_input_event(const TextInputEvent& event) {
     if (!impl_->editable || event.type != TextInputEvent::Type::Commit || event.text.empty()) {
         return false;
     }
-    impl_->text.insert(impl_->cursor_pos, event.text);
-    impl_->cursor_pos += event.text.size();
-    did_edit();
-    return true;
+    return replace_selection(event.text, event.text.find('\n') == std::string::npos);
 }
 
 CursorShape TextArea::cursor_shape() const {
@@ -432,6 +595,8 @@ void TextArea::on_focus_changed(bool focused) {
     if (focused && !has_flag(state_flags(), StateFlags::Pressed)) {
         ensure_caret_visible();
     } else if (!focused) {
+        impl_->selecting = false;
+        impl_->edit.break_undo_group();
         impl_->preferred_x.reset();
     }
     queue_redraw();
@@ -459,7 +624,7 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
         return;
     }
     ctx.push_rounded_clip(viewport, 0.0F);
-    if (impl_->text.empty() && !impl_->placeholder.empty()) {
+    if (impl_->edit.text.empty() && !impl_->placeholder.empty()) {
         ctx.add_text(
             {viewport.x, viewport.y}, impl_->placeholder, theme_color("placeholder-color"), font);
     } else {
@@ -471,7 +636,20 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
             if (y >= viewport.bottom()) {
                 break;
             }
-            const auto line = line_at(impl_->text, impl_->line_starts[row]);
+            const auto line = line_at(impl_->edit.text, impl_->line_starts[row]);
+            const auto line_end = line.start + line.text.size();
+            if (has_selection() && selection_start() <= line_end && selection_end() > line.start) {
+                const auto start = std::clamp(selection_start(), line.start, line_end) - line.start;
+                const auto end = std::clamp(selection_end(), line.start, line_end) - line.start;
+                const float left = measure_text(line.text.substr(0, start), font).width;
+                float right = measure_text(line.text.substr(0, end), font).width;
+                if (selection_end() > line_end && line_end < impl_->edit.text.size()) {
+                    right += measure_text(" ", font).width;
+                }
+                ctx.add_color_rect(
+                    {viewport.x + left - impl_->scroll_x, y, std::max(0.0F, right - left), height},
+                    theme_color("selection-background-color", Color{0.3F, 0.56F, 0.9F, 0.24F}));
+            }
             ctx.add_text({viewport.x - impl_->scroll_x, y},
                          std::string(line.text),
                          theme_color("text-color"),
