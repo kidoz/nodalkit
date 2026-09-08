@@ -9,6 +9,7 @@
 #include <memory>
 #include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/types.h>
+#include <nk/platform/events.h>
 #include <nk/render/render_node.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/about_dialog.h>
@@ -206,6 +207,89 @@ TEST_CASE("TextArea round-trips text and editable/visible-rows state", "[widgets
     area->set_placeholder("Notes");
     REQUIRE(area->placeholder() == "Notes");
     conn.disconnect();
+}
+
+TEST_CASE("TextArea moves and deletes complete character clusters", "[widgets][text_area][text]") {
+    for (const std::string cluster : {"\u00E9",
+                                      "\u0416",
+                                      "\u754C",
+                                      "e\u0301",
+                                      "\U0001F44D\U0001F3FD",
+                                      "\U0001F469\u200D\U0001F4BB",
+                                      "\U0001F1FA\U0001F1F8"}) {
+        INFO("cluster: " << cluster);
+        auto area = nk::TextArea::create();
+        auto key = [&](nk::KeyCode code) {
+            REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = code}));
+        };
+        auto insert_marker = [&] {
+            REQUIRE(area->handle_text_input_event(
+                {.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
+        };
+
+        area->set_text(cluster);
+        key(nk::KeyCode::Backspace);
+        CHECK(area->text().empty());
+
+        area->set_text(cluster);
+        key(nk::KeyCode::Home);
+        key(nk::KeyCode::Delete);
+        CHECK(area->text().empty());
+
+        area->set_text(cluster);
+        key(nk::KeyCode::Left);
+        insert_marker();
+        CHECK(area->text() == "|" + cluster);
+
+        area->set_text(cluster);
+        key(nk::KeyCode::Home);
+        key(nk::KeyCode::Right);
+        insert_marker();
+        CHECK(area->text() == cluster + "|");
+    }
+}
+
+TEST_CASE("TextArea vertical navigation preserves character columns",
+          "[widgets][text_area][text]") {
+    auto area = nk::TextArea::create();
+    auto key = [&](nk::KeyCode code) {
+        REQUIRE(area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = code}));
+    };
+    auto insert_marker = [&] {
+        REQUIRE(
+            area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit, .text = "|"}));
+    };
+
+    area->set_text("\u00E9x\na");
+    key(nk::KeyCode::Up);
+    insert_marker();
+    CHECK(area->text() == "\u00E9|x\na");
+
+    area->set_text("a\ne\u0301x");
+    key(nk::KeyCode::Home);
+    key(nk::KeyCode::Right);
+    key(nk::KeyCode::Down);
+    insert_marker();
+    CHECK(area->text() == "a\ne\u0301|x");
+
+    area->set_text("\u754C\n");
+    key(nk::KeyCode::Up);
+    key(nk::KeyCode::Down);
+    key(nk::KeyCode::Down);
+    insert_marker();
+    CHECK(area->text() == "\u754C\n|");
+}
+
+TEST_CASE("TextArea keeps newline edits separate from adjacent combining marks",
+          "[widgets][text_area][text]") {
+    auto area = nk::TextArea::create();
+    area->set_text("x\n\u0301");
+    REQUIRE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace}));
+    CHECK(area->text() == "x\n");
+    REQUIRE(
+        area->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace}));
+    CHECK(area->text() == "x");
 }
 
 TEST_CASE("ColorWell round-trips its color", "[widgets][color_well]") {

@@ -46,6 +46,7 @@
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
+#include <nk/widgets/text_area.h>
 #include <nk/widgets/text_field.h>
 #include <nk/widgets/tree_view.h>
 #include <optional>
@@ -4048,6 +4049,29 @@ TEST_CASE("Window exposes the focused text input state", "[app][text]") {
     REQUIRE(state->cursor == field->cursor_position());
     REQUIRE(state->anchor != state->cursor);
     REQUIRE(state->caret_rect.width > 0.0F);
+}
+
+TEST_CASE("Window routes multiline Unicode editing and ignores disabled editors", "[app][text]") {
+    nk::Window window({.title = "Multiline editing", .width = 320, .height = 160});
+    auto area = nk::TextArea::create();
+    window.set_child(area);
+    area->allocate({0.0F, 0.0F, 320.0F, 160.0F});
+    area->grab_focus();
+    area->set_text("\u00E9x\na");
+
+    int changes = 0;
+    auto connection = area->on_text_changed().connect([&] { ++changes; });
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Up});
+    CHECK(changes == 0);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Backspace});
+    CHECK(area->text() == "x\na");
+    CHECK(changes == 1);
+
+    area->set_sensitive(false);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Delete});
+    CHECK(area->text() == "x\na");
+    CHECK(changes == 1);
+    connection.disconnect();
 }
 
 TEST_CASE("TextField moves and deletes by grapheme cluster", "[app][text]") {

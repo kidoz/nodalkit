@@ -1,3 +1,5 @@
+#include "../text/text_boundaries.h"
+
 #include <algorithm>
 #include <cmath>
 #include <nk/platform/events.h>
@@ -31,14 +33,47 @@ std::vector<std::string_view> split_lines(std::string_view text) {
         }
         lines.push_back(text.substr(start, pos - start));
         start = pos + 1;
-        if (start == text.size()) {
-            lines.emplace_back();
-        }
     }
     if (lines.empty()) {
         lines.emplace_back();
     }
     return lines;
+}
+
+struct TextLine {
+    std::size_t start;
+    std::string_view text;
+};
+
+TextLine line_at(std::string_view text, std::size_t position) {
+    const auto previous_newline =
+        position > 0 ? text.rfind('\n', position - 1) : std::string_view::npos;
+    const auto start = previous_newline == std::string_view::npos ? 0 : previous_newline + 1;
+    const auto next_newline = text.find('\n', position);
+    const auto end = next_newline == std::string_view::npos ? text.size() : next_newline;
+    return {.start = start, .text = text.substr(start, end - start)};
+}
+
+std::size_t previous_text_boundary(std::string_view text, std::size_t position) {
+    if (position == 0) {
+        return 0;
+    }
+    if (text[position - 1] == '\n') {
+        return position - 1;
+    }
+    const auto line = line_at(text, position);
+    return line.start + detail::previous_grapheme_boundary(line.text, position - line.start);
+}
+
+std::size_t next_text_boundary(std::string_view text, std::size_t position) {
+    if (position == text.size()) {
+        return position;
+    }
+    if (text[position] == '\n') {
+        return position + 1;
+    }
+    const auto line = line_at(text, position);
+    return line.start + detail::next_grapheme_boundary(line.text, position - line.start);
 }
 
 } // namespace
@@ -177,8 +212,9 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
     }
     case KeyCode::Backspace:
         if (impl_->cursor_pos > 0) {
-            impl_->text.erase(impl_->cursor_pos - 1, 1);
-            --impl_->cursor_pos;
+            const auto previous = previous_text_boundary(impl_->text, impl_->cursor_pos);
+            impl_->text.erase(previous, impl_->cursor_pos - previous);
+            impl_->cursor_pos = previous;
             ensure_accessible().set_value(impl_->text);
             impl_->text_changed.emit();
             queue_redraw();
@@ -186,7 +222,8 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
         return true;
     case KeyCode::Delete:
         if (impl_->cursor_pos < impl_->text.size()) {
-            impl_->text.erase(impl_->cursor_pos, 1);
+            const auto next = next_text_boundary(impl_->text, impl_->cursor_pos);
+            impl_->text.erase(impl_->cursor_pos, next - impl_->cursor_pos);
             ensure_accessible().set_value(impl_->text);
             impl_->text_changed.emit();
             queue_redraw();
@@ -194,64 +231,34 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
         return true;
     case KeyCode::Left:
         if (impl_->cursor_pos > 0) {
-            --impl_->cursor_pos;
+            impl_->cursor_pos = previous_text_boundary(impl_->text, impl_->cursor_pos);
             queue_redraw();
         }
         return true;
     case KeyCode::Right:
         if (impl_->cursor_pos < impl_->text.size()) {
-            ++impl_->cursor_pos;
+            impl_->cursor_pos = next_text_boundary(impl_->text, impl_->cursor_pos);
             queue_redraw();
         }
         return true;
-    case KeyCode::Up: {
-        // Move cursor up one line.
-        const auto lines = split_lines(impl_->text);
-        std::size_t pos = 0;
-        std::size_t line_idx = 0;
-        std::size_t col = 0;
-        for (std::size_t i = 0; i < lines.size(); ++i) {
-            if (pos + lines[i].size() >= impl_->cursor_pos &&
-                (i + 1 == lines.size() || pos + lines[i].size() + 1 > impl_->cursor_pos)) {
-                line_idx = i;
-                col = impl_->cursor_pos - pos;
-                break;
-            }
-            pos += lines[i].size() + 1;
-        }
-        if (line_idx > 0) {
-            std::size_t prev_start = 0;
-            for (std::size_t i = 0; i < line_idx - 1; ++i) {
-                prev_start += lines[i].size() + 1;
-            }
-            impl_->cursor_pos = prev_start + std::min(col, lines[line_idx - 1].size());
-            queue_redraw();
-        }
-        return true;
-    }
+    case KeyCode::Up:
     case KeyCode::Down: {
-        // Move cursor down one line.
-        const auto lines = split_lines(impl_->text);
-        std::size_t pos = 0;
-        std::size_t line_idx = 0;
-        std::size_t col = 0;
-        for (std::size_t i = 0; i < lines.size(); ++i) {
-            if (pos + lines[i].size() >= impl_->cursor_pos &&
-                (i + 1 == lines.size() || pos + lines[i].size() + 1 > impl_->cursor_pos)) {
-                line_idx = i;
-                col = impl_->cursor_pos - pos;
-                break;
-            }
-            pos += lines[i].size() + 1;
+        const auto current = line_at(impl_->text, impl_->cursor_pos);
+        const auto current_end = current.start + current.text.size();
+        const bool up = event.key == KeyCode::Up;
+        if ((up && current.start == 0) || (!up && current_end == impl_->text.size())) {
+            return true;
         }
-        if (line_idx + 1 < lines.size()) {
-            std::size_t next_start = 0;
-            for (std::size_t i = 0; i <= line_idx; ++i) {
-                next_start += lines[i].size() + 1;
-            }
-            impl_->cursor_pos = next_start + std::min(col, lines[line_idx + 1].size());
-            queue_redraw();
-        }
+        const auto boundaries = detail::grapheme_boundaries(current.text);
+        const auto column = static_cast<std::size_t>(
+            std::lower_bound(
+                boundaries.begin(), boundaries.end(), impl_->cursor_pos - current.start) -
+            boundaries.begin());
+        const auto target = line_at(impl_->text, up ? current.start - 1 : current_end + 1);
+        const auto target_boundaries = detail::grapheme_boundaries(target.text);
+        impl_->cursor_pos =
+            target.start + target_boundaries[std::min(column, target_boundaries.size() - 1)];
+        queue_redraw();
         return true;
     }
     case KeyCode::Home:
