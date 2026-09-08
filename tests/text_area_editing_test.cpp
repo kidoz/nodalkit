@@ -1,11 +1,13 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <limits>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/widgets/search_field.h>
 #include <nk/widgets/text_area.h>
 #include <nk/widgets/text_field.h>
 #include <string>
@@ -334,6 +336,219 @@ TEST_CASE("Window sends captured motion to a single-line editor outside its boun
         {.type = nk::MouseEvent::Type::Release, .x = 500, .y = 150, .button = 1});
     REQUIRE(commit(*field, "done"));
     CHECK(field->text() == "done");
+}
+
+TEST_CASE("TextArea composition stays separate until one undoable commit", "[text_area][ime]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 220, 100});
+    area->set_text("first\nold");
+    REQUIRE(key(*area, nk::KeyCode::Home, nk::Modifiers::Shift));
+    int changes = 0;
+    auto connection = area->on_text_changed().connect([&] { ++changes; });
+    REQUIRE(area->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Preedit, .text = "\u5019\u88DC", .selection_end = 6}));
+    CHECK(area->text() == "first\nold");
+    CHECK(changes == 0);
+    REQUIRE(commit(*area, "\u88DC"));
+    CHECK(area->text() == "first\n\u88DC");
+    CHECK(changes == 1);
+    REQUIRE(key(*area, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+    CHECK(area->text() == "first\nold");
+    CHECK(area->selection_start() == 6);
+    CHECK(area->selection_end() == 9);
+    CHECK(connection.connected());
+}
+
+TEST_CASE("TextArea cancels composition without editing the query", "[text_area][ime]") {
+    auto area = nk::TextArea::create();
+    area->set_text("kept");
+    REQUIRE(area->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Preedit, .text = "pending"}));
+    REQUIRE(key(*area, nk::KeyCode::Escape));
+    CHECK(area->text() == "kept");
+    CHECK_FALSE(key(*area, nk::KeyCode::Escape));
+    CHECK_FALSE(key(*area, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+}
+
+TEST_CASE("TextArea surrounding deletion is safe across Unicode and hard newlines",
+          "[text_area][ime]") {
+    auto area = nk::TextArea::create();
+    area->set_text("a\ne\u0301");
+    REQUIRE(area->handle_text_input_event({.type = nk::TextInputEvent::Type::DeleteSurrounding,
+                                           .text = {},
+                                           .delete_before_length = 1}));
+    CHECK(area->text() == "a\n");
+    REQUIRE(key(*area, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+    CHECK(area->text() == "a\ne\u0301");
+}
+
+TEST_CASE("Window exposes TextArea composition caret and committed surrounding state",
+          "[text_area][ime]") {
+    nk::Window window({.title = "Multiline composition", .width = 240, .height = 100});
+    auto area = nk::TextArea::create();
+    window.set_child(area);
+    area->allocate({10, 10, 220, 56});
+    area->set_text("a\nb");
+    area->grab_focus();
+    auto state = window.current_text_input_state();
+    REQUIRE(state.has_value());
+    CHECK(state->text == "a\nb");
+    CHECK(state->cursor == 3);
+    window.dispatch_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                      .text = "\u754C\n" + std::string(100, 'w'),
+                                      .selection_end = 104});
+    state = window.current_text_input_state();
+    REQUIRE(state.has_value());
+    CHECK(state->text == "a\nb");
+    CHECK(state->cursor == 3);
+    CHECK(state->caret_rect.x >= 18);
+    CHECK(state->caret_rect.right() <= 222.001F);
+    CHECK(state->caret_rect.y >= 18);
+    CHECK(state->caret_rect.bottom() <= 58.001F);
+}
+
+TEST_CASE("Editors paint preedit in place of a reversed selection", "[text][ime][render]") {
+    const auto check = [](auto editor) {
+        editor->allocate({0, 0, 240, 100});
+        editor->set_text("old");
+        REQUIRE(key(*editor, nk::KeyCode::Home, nk::Modifiers::Shift));
+        int changes = 0;
+        auto connection = editor->on_text_changed().connect([&](auto&&...) { ++changes; });
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                                 .text = "\u5019\u88DC",
+                                                 .selection_start = 3,
+                                                 .selection_end = 6}));
+        CHECK(painted_text(*editor) == std::vector<std::string>{"\u5019\u88DC"});
+        CHECK(editor->text() == "old");
+        const auto state = editor->text_input_state();
+        REQUIRE(state.has_value());
+        CHECK(state->text == "old");
+        CHECK(state->cursor == 0);
+        CHECK(state->anchor == 3);
+        CHECK(changes == 0);
+        REQUIRE(commit(*editor, "x"));
+        REQUIRE(commit(*editor, "y"));
+        REQUIRE(key(*editor, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+        CHECK(editor->text() == "x");
+        REQUIRE(key(*editor, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+        CHECK(editor->text() == "old");
+        CHECK(editor->cursor_position() == 0);
+        CHECK(editor->selection_end() == 3);
+        CHECK(connection.connected());
+    };
+    check(nk::TextArea::create());
+    check(nk::TextField::create());
+    check(nk::SearchField::create());
+}
+
+TEST_CASE("Editors cancel preedit on read-only transitions and empty commits", "[text][ime]") {
+    const auto check = [](auto editor) {
+        editor->allocate({0, 0, 240, 100});
+        editor->set_text("kept");
+        REQUIRE(editor->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::Preedit, .text = "pending"}));
+        REQUIRE(commit(*editor, ""));
+        CHECK(painted_text(*editor) == std::vector<std::string>{"kept"});
+        REQUIRE(editor->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::Preedit, .text = "pending"}));
+        editor->set_editable(false);
+        CHECK_FALSE(editor->text_input_state().has_value());
+        CHECK_FALSE(editor->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::Preedit, .text = "blocked"}));
+        CHECK_FALSE(
+            editor->handle_text_input_event({.type = nk::TextInputEvent::Type::DeleteSurrounding,
+                                             .text = {},
+                                             .delete_before_length = 1}));
+        CHECK(painted_text(*editor) == std::vector<std::string>{"kept"});
+        editor->set_editable(true);
+        REQUIRE(editor->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::Preedit, .text = "pending"}));
+        editor->on_focus_changed(false);
+        CHECK(painted_text(*editor) == std::vector<std::string>{"kept"});
+        CHECK_FALSE(key(*editor, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+    };
+    check(nk::TextArea::create());
+    check(nk::TextField::create());
+}
+
+TEST_CASE("Editors bound partial UTF-8 preedit offsets and surrounding deletion", "[text][ime]") {
+    const auto check = [](auto editor) {
+        editor->allocate({0, 0, 240, 100});
+        editor->set_text("a");
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                                 .text = "\u00E9x",
+                                                 .selection_start = 1,
+                                                 .selection_end = 1}));
+        const auto partial = editor->text_input_state();
+        REQUIRE(partial.has_value());
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                                 .text = "\u00E9x",
+                                                 .selection_start = 0,
+                                                 .selection_end = 2}));
+        CHECK(editor->text_input_state()->caret_rect.x == partial->caret_rect.x);
+        REQUIRE(editor->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::ClearPreedit, .text = {}}));
+        editor->set_text("a\n\u0301");
+        REQUIRE(
+            editor->handle_text_input_event({.type = nk::TextInputEvent::Type::DeleteSurrounding,
+                                             .text = {},
+                                             .delete_before_length = 1}));
+        CHECK(editor->text() == "a\n");
+        REQUIRE(key(*editor, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+        CHECK(editor->text() == "a\n\u0301");
+        REQUIRE(editor->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::DeleteSurrounding,
+             .text = {},
+             .delete_before_length = std::numeric_limits<std::size_t>::max(),
+             .delete_after_length = std::numeric_limits<std::size_t>::max()}));
+        CHECK(editor->text().empty());
+        CHECK_FALSE(
+            editor->handle_text_input_event({.type = nk::TextInputEvent::Type::DeleteSurrounding,
+                                             .text = {},
+                                             .delete_before_length = 1}));
+    };
+    check(nk::TextArea::create());
+    check(nk::TextField::create());
+}
+
+TEST_CASE("TextArea maps clicks after multiline preedit back to committed offsets",
+          "[text_area][ime]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 240, 100});
+    area->set_text("old\nsuffix");
+    REQUIRE(key(*area, nk::KeyCode::Home, nk::Modifiers::Ctrl));
+    REQUIRE(key(*area, nk::KeyCode::End, nk::Modifiers::Shift));
+    REQUIRE(area->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Preedit, .text = "one\ntwo", .selection_end = 7}));
+    CHECK(painted_text(*area) == std::vector<std::string>{"one", "two", "suffix"});
+    REQUIRE(area->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 8, .y = 50, .button = 1}));
+    CHECK(area->cursor_position() == 4);
+    REQUIRE(commit(*area, "|"));
+    CHECK(area->text() == "old\n|suffix");
+}
+
+TEST_CASE("Composition reserves Return for the input context", "[text][ime]") {
+    auto search = nk::SearchField::create();
+    auto area = nk::TextArea::create();
+    int submitted = 0;
+    auto connection = search->on_search().connect([&](std::string_view) { ++submitted; });
+    for (auto* widget :
+         {static_cast<nk::Widget*>(search.get()), static_cast<nk::Widget*>(area.get())}) {
+        REQUIRE(widget->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::Preedit, .text = "pending"}));
+        REQUIRE(key(*widget, nk::KeyCode::Return));
+    }
+    CHECK(submitted == 0);
+    CHECK(area->text().empty());
+    CHECK_FALSE(key(*area, nk::KeyCode::Unknown));
+    CHECK(painted_text(*area).empty()); // Unallocated widgets do not paint content.
+    area->allocate({0, 0, 240, 100});
+    CHECK(painted_text(*area) == std::vector<std::string>{"pending"});
+    REQUIRE(commit(*search, "query"));
+    REQUIRE(key(*search, nk::KeyCode::Return));
+    CHECK(submitted == 1);
+    CHECK(connection.connected());
 }
 
 TEST_CASE("Secure single-line composition does not paint preedit characters",

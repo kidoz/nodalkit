@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+*   **Multiline Composition:** `TextArea` renders preedit text and its selection, reveals the composed caret across lines, and reports committed surrounding text through `text_input_state()`. Composition commits are undoable as one step; cancellation preserves committed text and selection.
 *   **Multiline Selection and History:** `TextArea` supports Shift navigation, drag/Shift-click selection, double-click word selection, triple-click line selection, select-all, clipboard cut/copy/paste, primary-selection paste, and undo/redo. Public selection queries return UTF-8 byte offsets. The multiline example and installed-SDK smoke test exercise the expanded API.
 *   **Multiline Viewport Example and Queries:** `multiline_input` demonstrates scrolling, pointer placement, navigation, and read-only behavior. `TextArea::cursor_position()` and `text_input_caret_rect()` expose the caret byte offset and scrolled window-coordinate bounds.
 *   **Search Editing Example:** `search_input` demonstrates toolkit search editing, change notifications, and submission. Dedicated regressions cover selection, clipboard, undo/redo, composition events, caret scrolling, clear cancellation, and rendering bounds; the installed SDK smoke test now exercises search through `TextField`.
@@ -25,7 +26,7 @@ All notable changes to this project will be documented in this file.
 *   **Build:** Removed the orphaned `src/platform/window_inspector.cpp`, whose contents had already moved into `window.cpp`.
 
 ### Changed
-*   **Multiline Navigation:** Home/End move within the current line; Control or Command plus Home/End moves through the document. Up/Down and Page Up/Page Down use a retained horizontal position measured in pixels, including across short lines. Lines remain unwrapped and overflow horizontally. TextArea composition and native IME integration remain planned work.
+*   **Multiline Navigation:** Home/End move within the current line; Control or Command plus Home/End moves through the document. Up/Down and Page Up/Page Down use a retained horizontal position measured in pixels, including across short lines. Lines remain unwrapped and overflow horizontally. TextArea supports toolkit composition events; complete native IME integration and platform validation remain open.
 *   **C++ ABI:** `SearchField` now derives from `TextField`, retaining its existing public methods and adding inherited editor operations. `TextField` exposes protected content-rendering and geometry hooks. Rebuild the library and all C++ consumers together: the class layout and virtual interface changed.
 
 ## [0.2.0] - 2026-08-30

@@ -218,6 +218,12 @@ void check_widgets() {
     check(area->has_selection() && area->selection_start() == 0 &&
               area->selection_end() == area->text().size(),
           "TextArea exports selection queries through the installed SDK");
+    const auto input_state = area->text_input_state();
+    check(input_state && input_state->text == area->text() &&
+              input_state->cursor == area->text().size() && input_state->anchor == 0,
+          "TextArea exports committed surrounding text and selection through the installed SDK");
+    area->set_editable(false);
+    check(!area->text_input_state(), "Read-only TextArea does not request native text input");
 
     auto canvas = nk::CanvasWidget::create();
     check(canvas != nullptr, "CanvasWidget::create");

@@ -97,6 +97,8 @@ struct TextArea::Impl {
     float scroll_y = 0.0F;
     float content_width = 0.0F;
     std::vector<std::size_t> line_starts{0};
+    std::vector<std::size_t> display_line_starts{0};
+    std::string display_text;
     std::optional<float> preferred_x;
     bool focused_state = false;
 };
@@ -147,6 +149,9 @@ bool TextArea::is_editable() const {
 void TextArea::set_editable(bool editable) {
     if (impl_->editable != editable) {
         impl_->editable = editable;
+        if (!editable) {
+            clear_preedit();
+        }
         impl_->edit.break_undo_group();
         impl_->selecting = false;
         queue_redraw();
@@ -202,6 +207,7 @@ bool TextArea::has_selection() const {
 }
 
 void TextArea::select_all() {
+    clear_preedit();
     impl_->edit.select_all();
     impl_->selecting = false;
     impl_->preferred_x.reset();
@@ -251,31 +257,63 @@ std::size_t TextArea::cursor_line() const {
 
 Rect TextArea::text_input_caret_rect() const {
     const auto viewport = text_rect();
-    const auto line = line_at(impl_->edit.text, impl_->edit.cursor);
+    const auto position = impl_->edit.display_caret_position();
+    const auto line = line_at(impl_->display_text, position);
+    const auto row = static_cast<std::size_t>(std::upper_bound(impl_->display_line_starts.begin(),
+                                                               impl_->display_line_starts.end(),
+                                                               position) -
+                                              impl_->display_line_starts.begin() - 1);
     const float x =
-        measure_text(line.text.substr(0, impl_->edit.cursor - line.start), text_area_font()).width;
+        measure_text(line.text.substr(0, position - line.start), text_area_font()).width;
     return {viewport.x + x - impl_->scroll_x,
-            viewport.y + static_cast<float>(cursor_line()) * line_height() - impl_->scroll_y,
+            viewport.y + static_cast<float>(row) * line_height() - impl_->scroll_y,
             1.5F,
             line_height()};
 }
 
+std::optional<WidgetTextInputState> TextArea::text_input_state() const {
+    if (!impl_->editable) {
+        return std::nullopt;
+    }
+    return WidgetTextInputState{.text = impl_->edit.text,
+                                .cursor = impl_->edit.cursor,
+                                .anchor = impl_->edit.selection_anchor,
+                                .caret_rect = text_input_caret_rect()};
+}
+
 void TextArea::refresh_content_metrics() {
     impl_->line_starts.clear();
-    impl_->content_width = 0.0F;
     std::size_t start = 0;
     for (const auto line : split_lines(impl_->edit.text)) {
         impl_->line_starts.push_back(start);
+        start += line.size() + 1;
+    }
+    impl_->display_text = impl_->edit.display_text();
+    impl_->display_line_starts.clear();
+    impl_->content_width = 0.0F;
+    start = 0;
+    for (const auto line : split_lines(impl_->display_text)) {
+        impl_->display_line_starts.push_back(start);
         impl_->content_width =
             std::max(impl_->content_width, measure_text(line, text_area_font()).width);
         start += line.size() + 1;
     }
 }
 
+bool TextArea::clear_preedit() {
+    if (!impl_->edit.clear_preedit()) {
+        return false;
+    }
+    refresh_content_metrics();
+    ensure_caret_visible();
+    queue_redraw();
+    return true;
+}
+
 void TextArea::clamp_scroll() {
     const auto viewport = text_rect();
     const float width = impl_->content_width + 2.0F;
-    const float height = static_cast<float>(impl_->line_starts.size()) * line_height();
+    const float height = static_cast<float>(impl_->display_line_starts.size()) * line_height();
     impl_->scroll_x = std::clamp(impl_->scroll_x, 0.0F, std::max(0.0F, width - viewport.width));
     impl_->scroll_y = std::clamp(impl_->scroll_y, 0.0F, std::max(0.0F, height - viewport.height));
 }
@@ -330,9 +368,12 @@ std::size_t TextArea::hit_test_cursor(Point point) const {
     const float row =
         std::clamp(std::floor((point.y - viewport.y + impl_->scroll_y) / line_height()),
                    0.0F,
-                   static_cast<float>(impl_->line_starts.size() - 1));
-    const auto line = line_at(impl_->edit.text, impl_->line_starts[static_cast<std::size_t>(row)]);
-    return line.start + position_at_x(line.text, point.x - viewport.x + impl_->scroll_x);
+                   static_cast<float>(impl_->display_line_starts.size() - 1));
+    const auto line =
+        line_at(impl_->display_text, impl_->display_line_starts[static_cast<std::size_t>(row)]);
+    const auto position =
+        line.start + position_at_x(line.text, point.x - viewport.x + impl_->scroll_x);
+    return impl_->edit.text_position_from_display(position);
 }
 
 void TextArea::extend_mouse_selection(Point point) {
@@ -407,11 +448,14 @@ bool TextArea::handle_mouse_event(const MouseEvent& event) {
         if (pasted.empty()) {
             return false;
         }
-        impl_->edit.move_cursor(hit_test_cursor({event.x, event.y}), false);
+        const auto position = hit_test_cursor({event.x, event.y});
+        clear_preedit();
+        impl_->edit.move_cursor(position, false);
         return replace_selection(pasted);
     }
     if (event.type == MouseEvent::Type::Press && event.button == 1) {
         const auto position = hit_test_cursor({event.x, event.y});
+        clear_preedit();
         impl_->edit.break_undo_group();
         impl_->selecting = true;
         impl_->selection_mode = Impl::MouseSelection::Character;
@@ -446,10 +490,27 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
     if (event.type != KeyEvent::Type::Press) {
         return false;
     }
+    if (event.key == KeyCode::Escape) {
+        return clear_preedit();
+    }
+    if (event.key == KeyCode::Return && impl_->edit.has_preedit()) {
+        // The input context must commit or cancel composition before a newline.
+        return true;
+    }
     const bool document = ((event.modifiers & Modifiers::Ctrl) != Modifiers::None) ||
                           ((event.modifiers & Modifiers::Super) != Modifiers::None);
     const bool extend = (event.modifiers & Modifiers::Shift) != Modifiers::None;
     const bool word = (event.modifiers & (Modifiers::Alt | Modifiers::Ctrl)) != Modifiers::None;
+    const bool shortcut =
+        document && (event.modifiers & Modifiers::Alt) == Modifiers::None &&
+        (event.key == KeyCode::A || event.key == KeyCode::C || event.key == KeyCode::X ||
+         event.key == KeyCode::V || event.key == KeyCode::Z || event.key == KeyCode::Y);
+    const bool navigation = event.key == KeyCode::Left || event.key == KeyCode::Right ||
+                            event.key == KeyCode::Up || event.key == KeyCode::Down ||
+                            event.key == KeyCode::Home || event.key == KeyCode::End ||
+                            event.key == KeyCode::PageUp || event.key == KeyCode::PageDown ||
+                            event.key == KeyCode::Backspace || event.key == KeyCode::Delete;
+    const bool canceled_composition = (shortcut || navigation) && clear_preedit();
     impl_->selecting = false;
     if (document && (event.modifiers & Modifiers::Alt) == Modifiers::None) {
         switch (event.key) {
@@ -482,7 +543,7 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
                 did_edit();
                 return true;
             }
-            return false;
+            return canceled_composition;
         default:
             break;
         }
@@ -578,10 +639,37 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
 }
 
 bool TextArea::handle_text_input_event(const TextInputEvent& event) {
-    if (!impl_->editable || event.type != TextInputEvent::Type::Commit || event.text.empty()) {
+    if (event.type == TextInputEvent::Type::ClearPreedit) {
+        clear_preedit();
+        return true;
+    }
+    if (!impl_->editable) {
         return false;
     }
-    return replace_selection(event.text, event.text.find('\n') == std::string::npos);
+    switch (event.type) {
+    case TextInputEvent::Type::Preedit:
+        impl_->selecting = false;
+        impl_->edit.set_preedit(event.text, event.selection_start, event.selection_end);
+        refresh_content_metrics();
+        ensure_caret_visible();
+        queue_redraw();
+        return true;
+    case TextInputEvent::Type::Commit:
+        if (event.text.empty()) {
+            return clear_preedit();
+        }
+        return replace_selection(
+            event.text, !impl_->edit.has_preedit() && event.text.find('\n') == std::string::npos);
+    case TextInputEvent::Type::DeleteSurrounding:
+        if (impl_->edit.delete_surrounding(event.delete_before_length, event.delete_after_length)) {
+            did_edit();
+            return true;
+        }
+        return false;
+    case TextInputEvent::Type::ClearPreedit:
+        return true;
+    }
+    return false;
 }
 
 CursorShape TextArea::cursor_shape() const {
@@ -595,6 +683,7 @@ void TextArea::on_focus_changed(bool focused) {
     if (focused && !has_flag(state_flags(), StateFlags::Pressed)) {
         ensure_caret_visible();
     } else if (!focused) {
+        clear_preedit();
         impl_->selecting = false;
         impl_->edit.break_undo_group();
         impl_->preferred_x.reset();
@@ -624,31 +713,58 @@ void TextArea::snapshot(SnapshotContext& ctx) const {
         return;
     }
     ctx.push_rounded_clip(viewport, 0.0F);
-    if (impl_->edit.text.empty() && !impl_->placeholder.empty()) {
+    if (impl_->display_text.empty() && !impl_->placeholder.empty()) {
         ctx.add_text(
             {viewport.x, viewport.y}, impl_->placeholder, theme_color("placeholder-color"), font);
     } else {
         const float height = line_height();
         const auto first =
             static_cast<std::size_t>(std::max(0.0F, std::floor(impl_->scroll_y / height)));
-        for (std::size_t row = first; row < impl_->line_starts.size(); ++row) {
+        const auto selection_base = impl_->edit.has_preedit() ? selection_start() : 0;
+        const auto selected_start =
+            impl_->edit.has_preedit()
+                ? selection_base + std::min(impl_->edit.preedit_selection_start,
+                                            impl_->edit.preedit_selection_end)
+                : selection_start();
+        const auto selected_end =
+            impl_->edit.has_preedit()
+                ? selection_base + std::max(impl_->edit.preedit_selection_start,
+                                            impl_->edit.preedit_selection_end)
+                : selection_end();
+        for (std::size_t row = first; row < impl_->display_line_starts.size(); ++row) {
             const float y = viewport.y + static_cast<float>(row) * height - impl_->scroll_y;
             if (y >= viewport.bottom()) {
                 break;
             }
-            const auto line = line_at(impl_->edit.text, impl_->line_starts[row]);
+            const auto line = line_at(impl_->display_text, impl_->display_line_starts[row]);
             const auto line_end = line.start + line.text.size();
-            if (has_selection() && selection_start() <= line_end && selection_end() > line.start) {
-                const auto start = std::clamp(selection_start(), line.start, line_end) - line.start;
-                const auto end = std::clamp(selection_end(), line.start, line_end) - line.start;
+            if (selected_start != selected_end && selected_start <= line_end &&
+                selected_end > line.start) {
+                const auto start = std::clamp(selected_start, line.start, line_end) - line.start;
+                const auto end = std::clamp(selected_end, line.start, line_end) - line.start;
                 const float left = measure_text(line.text.substr(0, start), font).width;
                 float right = measure_text(line.text.substr(0, end), font).width;
-                if (selection_end() > line_end && line_end < impl_->edit.text.size()) {
+                if (selected_end > line_end && line_end < impl_->display_text.size()) {
                     right += measure_text(" ", font).width;
                 }
                 ctx.add_color_rect(
                     {viewport.x + left - impl_->scroll_x, y, std::max(0.0F, right - left), height},
                     theme_color("selection-background-color", Color{0.3F, 0.56F, 0.9F, 0.24F}));
+            }
+            if (impl_->edit.has_preedit()) {
+                const auto preedit_start = selection_start();
+                const auto preedit_end = preedit_start + impl_->edit.preedit_text.size();
+                const auto start = std::clamp(preedit_start, line.start, line_end) - line.start;
+                const auto end = std::clamp(preedit_end, line.start, line_end) - line.start;
+                const auto left = measure_text(line.text.substr(0, start), font).width;
+                const auto right = measure_text(line.text.substr(0, end), font).width;
+                if (end > start) {
+                    ctx.add_color_rect({viewport.x + left - impl_->scroll_x,
+                                        y + height - 2.0F,
+                                        std::max(0.0F, right - left),
+                                        1.5F},
+                                       theme_color("caret-color"));
+                }
             }
             ctx.add_text({viewport.x - impl_->scroll_x, y},
                          std::string(line.text),
