@@ -361,6 +361,15 @@ void install_shared_rules(Theme& theme) {
              {"combo-box"},
              StateFlags::Focused,
              {{"border-color", StyleValue{std::string("focus-ring")}}});
+    add_rule(theme,
+             {"combo-box"},
+             StateFlags::Disabled,
+             {
+                 {"border-color", token_ref("border-subtle")},
+                 {"text-color", token_ref("text-disabled")},
+                 {"chevron-color", token_ref("text-disabled")},
+                 {"chevron-background", token_ref("surface-panel")},
+             });
 
     add_rule(theme,
              {"scroll-area"},

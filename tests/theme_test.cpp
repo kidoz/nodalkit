@@ -63,9 +63,9 @@ float resolved_metric(const nk::Theme& theme,
 
 nk::Color resolved_color(const nk::Theme& theme,
                          const std::vector<std::string>& classes,
-                         std::string_view property) {
-    const auto* value =
-        deref_aliases(theme, theme.resolve("", classes, nk::StateFlags::None, property));
+                         std::string_view property,
+                         nk::StateFlags state = nk::StateFlags::None) {
+    const auto* value = deref_aliases(theme, theme.resolve("", classes, state, property));
     REQUIRE(value != nullptr);
     REQUIRE(std::holds_alternative<nk::Color>(*value));
     return std::get<nk::Color>(*value);
@@ -107,6 +107,35 @@ std::string resolved_string(const nk::Theme& theme,
 }
 
 } // namespace
+
+TEST_CASE("Disabled combo boxes use muted borders and chevrons across theme families",
+          "[theme][combo-box][disabled]") {
+    for (const auto make_theme : {nk::Theme::make_linux_gnome,
+                                  nk::Theme::make_macos_26,
+                                  nk::Theme::make_windows_10,
+                                  nk::Theme::make_windows_11}) {
+        for (const auto scheme : {nk::ColorScheme::Light, nk::ColorScheme::Dark}) {
+            const auto theme = make_theme(scheme);
+            INFO("theme: " << theme->name());
+            for (const auto additional_state : {nk::StateFlags::None,
+                                                nk::StateFlags::Hovered,
+                                                nk::StateFlags::Pressed,
+                                                nk::StateFlags::Focused}) {
+                const auto state = nk::StateFlags::Disabled | additional_state;
+                CHECK(resolved_color(*theme, {"combo-box"}, "text-color", state) ==
+                      color_token(*theme, "text-disabled"));
+                CHECK(resolved_color(*theme, {"combo-box"}, "border-color", state) ==
+                      color_token(*theme, "border-subtle"));
+                CHECK(resolved_color(*theme, {"combo-box"}, "chevron-color", state) ==
+                      color_token(*theme, "text-disabled"));
+                if (resolved_string(*theme, {"combo-box"}, "chevron-style") == "capsule") {
+                    CHECK(resolved_color(*theme, {"combo-box"}, "chevron-background", state) ==
+                          color_token(*theme, "surface-panel"));
+                }
+            }
+        }
+    }
+}
 
 TEST_CASE("GTK palette parsing validates literals and honors later overrides",
           "[theme][gtk-palette]") {
