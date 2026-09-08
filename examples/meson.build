@@ -13,6 +13,11 @@ executable('search_input',
     dependencies : nk_dep,
 )
 
+executable('multiline_input',
+    'multiline_input.cpp',
+    dependencies : nk_dep,
+)
+
 executable('long_task',
     'long_task.cpp',
     dependencies : nk_dep,
