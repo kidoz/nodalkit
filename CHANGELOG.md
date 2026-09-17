@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 *   **Dangling Dirty Widgets:** A widget that queued a redraw and was destroyed before the next frame (for example a dialog closing inside key dispatch) stayed in the window's dirty list as a raw pointer and was dereferenced during damage collection. Widget destruction and detachment now purge the entry, and `Window` tears its widget tree and overlays down while its own state is still alive so the purge never touches a half-destroyed window.
 *   **macOS Accessibility Crash:** Any assistive-technology query (VoiceOver, Accessibility Inspector) crashed with `SIGTRAP` in `NSAccessibilityChildren` because the per-query widget bridge handed AppKit ephemeral nodes that its accessibility cache outlived. The window is now exposed as a single accessibility group carrying the window title. This is a deliberate interim regression: per-widget accessibility elements on macOS return once they are anchored and thread-safe. Linux AT-SPI is unaffected.
 *   **Sanitizer Test Budget:** The `basic_app` suite carries an explicit Meson timeout so instrumented Vulkan drivers no longer trip the default 30s limit.
+*   **Build:** The Vulkan renderer no longer redefines `WIN32_LEAN_AND_MEAN` and `NOMINMAX` on Windows, which failed every Vulkan-enabled Windows build under `-Werror` because the build already defines both on the command line.
 *   **Build:** Removed the orphaned `src/platform/window_inspector.cpp`, whose contents had already moved into `window.cpp`.
 
 ### Changed
