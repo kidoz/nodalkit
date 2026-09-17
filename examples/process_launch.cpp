@@ -1,8 +1,8 @@
 /// @file process_launch.cpp
 /// @brief Launch and monitor an external process without blocking the UI.
 ///
-/// NodalKit does not ship a process API (see docs/PROCESS_LAUNCH.md for the
-/// rationale). The supported pattern, demonstrated here, is: own the child
+/// NodalKit does not ship a process API (see docs/explanation/toolkit-boundaries.md
+/// for the rationale). The supported pattern, demonstrated here, is: own the child
 /// process in application code, drive it from a worker thread, and marshal every
 /// UI-affecting result back onto the event-loop thread with EventLoop::post().
 ///

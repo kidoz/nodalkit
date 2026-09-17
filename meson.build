@@ -133,7 +133,7 @@ nk_cpp_args = ['-DBUILDING_NK_LIBRARY']
 
 # System libraries that a static NodalKit exposes transitively. These must be
 # published in nodalkit.pc as Libs.private so consumers of the installed SDK
-# link cleanly (see docs/BUILDING_APPLICATIONS.md). Populated per platform below;
+# link cleanly (see docs/how-to/consume-the-installed-sdk.md). Populated per platform below;
 # empty on platforms where NodalKit is a shared library.
 nk_pkgconfig_private_deps = []
 

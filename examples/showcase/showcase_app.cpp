@@ -482,7 +482,8 @@ int run_showcase(int argc, char** argv) {
     (void)tree_model->append_child(source_node, "model");
     (void)tree_model->append_child(source_node, "widgets");
     const auto docs_node = tree_model->add_root("docs");
-    (void)tree_model->append_child(docs_node, "BUILDING_APPLICATIONS.md");
+    (void)tree_model->append_child(docs_node, "README.md");
+    (void)tree_model->append_child(docs_node, "tutorials");
     auto tree_selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
     tree_selection->select(project_node);
     tree_selection->set_current_row(project_node);

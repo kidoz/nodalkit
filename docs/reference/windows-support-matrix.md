@@ -1,8 +1,8 @@
 # Windows support matrix
 
-Windows is an **experimental, actively developed** target. This page makes the
-"experimental" label granular so consumers (e.g. a 32-bit emulator frontend) can
-see exactly what is covered.
+Windows is an experimental, actively developed target. This page makes the
+"experimental" label granular so consumers (e.g. a 32-bit emulator frontend)
+can see exactly what is covered.
 
 Status legend: ✅ implemented and CI-built · 🧪 implemented, experimental /
 lightly tested · ❌ not implemented.
@@ -12,7 +12,7 @@ lightly tested · ❌ not implemented.
 | Architecture | Status | Notes |
 | ------------ | ------ | ----- |
 | x86-64 (x64) | ✅ | Built in CI (debug + release). |
-| i686 (x86)   | 🧪 | Cross-built in CI via `ci/windows-i686-clang.ini`. The import libraries are arch-independent; the 32-bit CRT/SDK comes from the toolchain. This is the target a classic 32-bit HLE emulator process needs. |
+| i686 (x86)   | 🧪 | Cross-built in CI via [`ci/windows-i686-clang.ini`](../../ci/windows-i686-clang.ini). The import libraries are arch-independent; the 32-bit CRT/SDK comes from the toolchain. This is the target a classic 32-bit HLE emulator process needs. |
 | ARM64        | ❌ | Not built or tested. |
 
 ## Toolchains
@@ -43,21 +43,23 @@ lightly tested · ❌ not implemented.
 | High-DPI | 🧪 | Per-monitor DPI awareness; scale tracked per window. |
 | Fullscreen | 🧪 | Borderless-on-monitor toggle. |
 | Text shaping | 🧪 | DirectWrite, with a GDI fallback shaper. |
-| Native window handle | ✅ | `HWND` / `HINSTANCE` via [`windows_interop.h`](../include/nk/platform/windows_interop.h). See [NATIVE_INTEROP.md](NATIVE_INTEROP.md). |
+| Native window handle | ✅ | `HWND` / `HINSTANCE` via [`windows_interop.h`](../../include/nk/platform/windows_interop.h). See the [Native handle contract](native-handles.md). |
 | Accessibility | ❌ | No UI Automation provider yet. The accessibility model (`nk/accessibility`) is populated, but only the Linux AT-SPI bridge is wired. |
-| Spell checking | 🧪 | Windows Spell Checking API (`ISpellCheckerFactory` / `ISpellChecker`) in `win32_spell_checker.cpp`. Lazily picks the first supported language; returns empty results (no crash) when no spell-check language is installed. Returned `SpellCheckRange` offsets are UTF-8 bytes. |
+| Spell checking | 🧪 | Windows Spell Checking API (`ISpellCheckerFactory` / `ISpellChecker`) in `src/platform/windows/win32_spell_checker.cpp`. Lazily picks the first supported language; returns empty results (no crash) when no spell-check language is installed. Returned `SpellCheckRange` offsets are UTF-8 bytes. |
 
 ## Release gating
 
-Windows is **not** a release gate today: CI builds and tests it, but a Windows
-regression does not block a release the way a Linux one does. Treat the 🧪 rows
-as "works in our testing, please file issues," not "guaranteed."
+Windows is not a release gate today: CI builds and tests it, but a Windows
+regression does not block a release the way a Linux one does. Treat the 🧪
+rows as "works in our testing, please file issues," not "guaranteed."
 
-## Packaging notes
+## Packaging
 
-- On Windows, NodalKit builds as a **static library**. `nodalkit.pc` publishes
-  the transitive Win32 import libraries (`user32`, `gdi32`, `d3d11`, `dwrite`,
-  …) on its link line, so a pkg-config consumer links cleanly with no manual
-  `-l` flags. See [MESON_INTEGRATION.md](MESON_INTEGRATION.md).
-- Building a C++23 GUI target alongside a C++17 emulator core in one process is
-  supported; see the mixed-standard section of [MESON_INTEGRATION.md](MESON_INTEGRATION.md).
+- On Windows, NodalKit builds as a static library. `nodalkit.pc` publishes
+  the transitive Win32 import libraries (`user32`, `gdi32`, `d3d11`,
+  `dwrite`, …) on its link line, so a `pkg-config` consumer links cleanly
+  with no manual `-l` flags. See
+  [Integrate NodalKit into a Meson build](../how-to/integrate-with-meson.md).
+- Building a C++23 GUI target alongside a C++17 emulator core in one process
+  is supported; see the same guide and
+  [Mixing C++ standards in one process](../explanation/mixing-cpp-standards.md).

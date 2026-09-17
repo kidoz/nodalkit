@@ -1,13 +1,14 @@
-# Accessibility & keyboard checklist for tool UIs
+# Validate accessibility and keyboard behavior
 
-Dense tool UIs — settings dialogs, binding lists, log panels — are where
-accessibility regressions hide. NodalKit populates an accessibility model
-([`nk/accessibility/accessible.h`](../include/nk/accessibility/accessible.h),
-roles in [`role.h`](../include/nk/accessibility/role.h)) and bridges it to AT-SPI
-on Linux. Use this checklist to validate a screen before shipping it.
+Dense tool UIs such as settings dialogs, binding lists, and log panels are
+where accessibility regressions hide. NodalKit populates an accessibility
+model ([`nk/accessibility/accessible.h`](../../include/nk/accessibility/accessible.h),
+roles in [`role.h`](../../include/nk/accessibility/role.h)) and bridges it
+to AT-SPI on Linux. Use this checklist to validate a screen before shipping
+it.
 
-See [`examples/accessibility_probe.cpp`](../examples/accessibility_probe.cpp) for
-a worked example of labels, relations, and focus order.
+See [`examples/accessibility_probe.cpp`](../../examples/accessibility_probe.cpp)
+for a worked example of labels, relations, and focus order.
 
 ## Menus and shortcuts
 
@@ -25,7 +26,7 @@ a worked example of labels, relations, and focus order.
       `Esc`).
 - [ ] Closing the dialog returns focus to the control that opened it.
 
-## Tree / table / list navigation
+## Tree, table, and list navigation
 
 - [ ] Arrow keys move the selection; `Home`/`End` jump to ends; `PageUp`/
       `PageDown` page.
@@ -36,7 +37,7 @@ a worked example of labels, relations, and focus order.
 
 ## Accessible names for custom controls
 
-- [ ] Every interactive widget has a non-empty accessible **name**
+- [ ] Every interactive widget has a non-empty accessible name
       (`ensure_accessible().set_name(...)`), not just visible text.
 - [ ] Icon-only buttons set an explicit name.
 - [ ] Inputs are tied to their labels with a `LabelledBy` relation.
@@ -51,11 +52,15 @@ a worked example of labels, relations, and focus order.
 - [ ] Severity in a `LogView` is conveyed by more than color (text/prefix), so
       it survives for low-vision users.
 
-## How to validate
+## Run the validation passes
 
 - **Keyboard-only pass:** unplug the mouse and complete the primary flow.
-- **Linux / AT-SPI:** run under Accerciser or Orca and confirm names, roles, and
-  focus order match the checklist.
+- **Linux / AT-SPI:** run under Accerciser or Orca and confirm names, roles,
+  and focus order match the checklist.
 - **Debug dump:** `format_widget_debug_tree` (see
-  [DIAGNOSTICS.md](DIAGNOSTICS.md)) prints each node's role/name/state/relations
-  — diff it against expectations in a test.
+  [Diagnostics facilities](../reference/diagnostics.md)) prints each node's
+  role, name, state, and relations. Diff it against expectations in a test.
+
+Platform coverage of the accessibility bridges is recorded in
+[Platform support](../reference/platform-support.md) and the
+[Windows support matrix](../reference/windows-support-matrix.md).

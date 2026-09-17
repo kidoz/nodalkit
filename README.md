@@ -72,8 +72,21 @@ The `showcase` example is the current best overview of the toolkit surface:
 menus, layout, text entry, list/model behavior, image presentation, dialogs,
 and status surfaces in one window.
 
-For public best practices on building real applications with NodalKit, read
-[docs/BUILDING_APPLICATIONS.md](docs/BUILDING_APPLICATIONS.md).
+## Documentation
+
+The [documentation](docs/README.md) follows the [Diátaxis](https://diataxis.fr/)
+framework:
+
+- **Tutorials** teach by doing. Start with
+  [Your first NodalKit application](docs/tutorials/your-first-application.md).
+- **How-to guides** solve one task each: consuming the installed SDK,
+  Meson integration, external processes, native window handles, support
+  bundles, accessibility validation, and an emulator frontend walkthrough.
+- **Reference** records platform support, the Windows support matrix, the
+  native handle contract, and the diagnostics facilities.
+- **Explanation** covers
+  [application architecture](docs/explanation/application-architecture.md),
+  toolkit boundaries, and mixing C++ standards in one process.
 
 ## Architecture at a Glance
 

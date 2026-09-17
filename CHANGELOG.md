@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 *   **Build:** Removed the orphaned `src/platform/window_inspector.cpp`, whose contents had already moved into `window.cpp`.
 
 ### Changed
+*   **Documentation:** `docs/` is reorganized along the Diátaxis framework into `tutorials/`, `how-to/`, `reference/`, and `explanation/` with an index at `docs/README.md`. The former guides are split by purpose; the application skeleton is now a tutorial whose code compiles against the current headers (the previous version constructed `nk::Widget` directly, which its protected constructor forbids), and the support-bundle snippet passes a string to `save_debug_bundle()` as its signature requires.
 *   **Multiline Navigation:** Home/End move within the current line; Control or Command plus Home/End moves through the document. Up/Down and Page Up/Page Down use a retained horizontal position measured in pixels, including across short lines. Lines remain unwrapped and overflow horizontally. TextArea supports toolkit composition events; complete native IME integration and platform validation remain open.
 *   **C++ ABI:** `SearchField` now derives from `TextField`, retaining its existing public methods and adding inherited editor operations. `TextField` exposes protected content-rendering and geometry hooks. Rebuild the library and all C++ consumers together: the class layout and virtual interface changed.
 

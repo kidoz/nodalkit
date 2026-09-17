@@ -6,7 +6,8 @@
 /// These let application code that is staging a migration from Win32 obtain the
 /// backing `HWND`/`HINSTANCE` of a NodalKit window without depending on private
 /// backend types or including `<windows.h>` from a public header. See
-/// docs/NATIVE_INTEROP.md for the full contract and usage patterns.
+/// docs/reference/native-handles.md for the contract and
+/// docs/how-to/use-native-window-handles.md for usage patterns.
 
 #if defined(_WIN32)
 
