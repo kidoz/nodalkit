@@ -134,6 +134,21 @@ struct TextField::Impl {
     mutable std::vector<SpellCheckRange> spell_check_ranges;
     Signal<std::string_view> text_changed;
     Signal<> activate;
+
+    // Assistive technology and diagnostics read this; secure entry exposes
+    // one bullet per character, matching the painted text.
+    [[nodiscard]] std::string accessible_value() const {
+        if (!secure_text_entry) {
+            return edit.text;
+        }
+        const auto count = decode_utf8_units(edit.text).size();
+        std::string masked;
+        masked.reserve(count * 3);
+        for (std::size_t i = 0; i < count; ++i) {
+            masked.append("\xE2\x80\xA2");
+        }
+        return masked;
+    }
 };
 
 std::shared_ptr<TextField> TextField::create(std::string initial_text) {
@@ -149,7 +164,7 @@ TextField::TextField(std::string text) : impl_(std::make_unique<Impl>()) {
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::TextInput);
     accessible.set_name(default_text_field_accessible_name(impl_->placeholder));
-    accessible.set_value(impl_->edit.text);
+    accessible.set_value(impl_->accessible_value());
     reset_history();
 }
 
@@ -163,7 +178,7 @@ void TextField::set_text(std::string text) {
     if (impl_->edit.text != text) {
         reset_mouse_selection_state();
         impl_->edit.text = std::move(text);
-        ensure_accessible().set_value(impl_->edit.text);
+        ensure_accessible().set_value(impl_->accessible_value());
         impl_->edit.cursor = impl_->edit.text.size();
         impl_->edit.selection_anchor = impl_->edit.cursor;
         clear_preedit();
@@ -247,6 +262,7 @@ void TextField::set_secure_text_entry(bool secure) {
         return;
     }
     impl_->secure_text_entry = secure;
+    ensure_accessible().set_value(impl_->accessible_value());
     queue_text_redraw();
 }
 
@@ -827,7 +843,7 @@ void TextField::replace_range(std::size_t start,
     }
     ensure_caret_visible();
     sync_primary_selection_ownership();
-    ensure_accessible().set_value(impl_->edit.text);
+    ensure_accessible().set_value(impl_->accessible_value());
     impl_->text_changed.emit(impl_->edit.text);
     queue_text_redraw();
 }
@@ -875,7 +891,7 @@ bool TextField::undo() {
     reset_history_grouping();
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    ensure_accessible().set_value(impl_->edit.text);
+    ensure_accessible().set_value(impl_->accessible_value());
     impl_->text_changed.emit(impl_->edit.text);
     queue_text_redraw();
     return true;
@@ -894,7 +910,7 @@ bool TextField::redo() {
     reset_history_grouping();
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    ensure_accessible().set_value(impl_->edit.text);
+    ensure_accessible().set_value(impl_->accessible_value());
     impl_->text_changed.emit(impl_->edit.text);
     queue_text_redraw();
     return true;
@@ -1040,7 +1056,7 @@ bool TextField::delete_surrounding_text(std::size_t before_length, std::size_t a
     reset_history_grouping();
     sync_primary_selection_ownership();
     ensure_caret_visible();
-    ensure_accessible().set_value(impl_->edit.text);
+    ensure_accessible().set_value(impl_->accessible_value());
     impl_->text_changed.emit(impl_->edit.text);
     queue_text_redraw();
     return true;

@@ -7,6 +7,7 @@
 #include <nk/widgets/button.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/text_field.h>
 #include <vector>
 
 namespace {
@@ -199,4 +200,16 @@ TEST_CASE("Accessibility reports focus, bounds, and hit-test targets", "[accessi
     CHECK(tree.focus(button_id));
     CHECK(tree.focused() == button_id);
     CHECK(tree.info(button_id)->focused);
+}
+
+TEST_CASE("Secure text fields never expose their text as an accessible value",
+          "[accessibility][text]") {
+    auto field = nk::TextField::create("hunter2");
+    CHECK(field->accessible()->value() == "hunter2");
+    field->set_secure_text_entry(true);
+    CHECK(field->accessible()->value() == "\u2022\u2022\u2022\u2022\u2022\u2022\u2022");
+    field->set_text("pa\u00DF");
+    CHECK(field->accessible()->value() == "\u2022\u2022\u2022");
+    field->set_secure_text_entry(false);
+    CHECK(field->accessible()->value() == "pa\u00DF");
 }
