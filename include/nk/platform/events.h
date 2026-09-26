@@ -73,7 +73,7 @@ struct TextInputEvent {
     /// Committed text that a Commit or Preedit replaces instead of the current
     /// selection, such as the base character an accent picker substitutes.
     /// A Commit with empty `text` and a non-empty range deletes that range.
-    std::optional<TextInputRange> replacement_range;
+    std::optional<TextInputRange> replacement_range{};
 };
 
 /// Keyboard event.
