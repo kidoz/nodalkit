@@ -151,6 +151,10 @@ TEST_CASE("macOS bridge routes presses and blocks disabled or covered controls",
         save->set_sensitive(true);
 
         auto dialog = nk::Dialog::create("Discard changes?");
+        dialog->add_button("Keep", nk::DialogResponse::Cancel);
+        auto response = nk::DialogResponse::None;
+        auto response_connection =
+            dialog->on_response().connect([&](nk::DialogResponse value) { response = value; });
         dialog->present(window);
         settle(app);
         NSArray* modal = [root accessibilityChildren];
@@ -161,7 +165,15 @@ TEST_CASE("macOS bridge routes presses and blocks disabled or covered controls",
         CHECK_FALSE([button accessibilityPerformPress]);
         CHECK(saves == 1);
 
-        dialog->close();
+        // The dialog's own response button is reachable and closes it.
+        id keep =
+            find_element([modal[0] accessibilityChildren], NSAccessibilityButtonRole, @"Keep");
+        REQUIRE(keep != nil);
+        CHECK([root accessibilityFocusedUIElement] == keep);
+        CHECK([keep accessibilityPerformPress]);
+        CHECK(response == nk::DialogResponse::Cancel);
+        CHECK_FALSE(dialog->is_presented());
+        CHECK(response_connection.connected());
         settle(app);
         CHECK([[root accessibilityChildren] containsObject:button]);
         CHECK([button accessibilityPerformPress]);

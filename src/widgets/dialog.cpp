@@ -3,6 +3,7 @@
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
+#include <nk/widgets/button.h>
 #include <nk/widgets/dialog.h>
 
 namespace nk {
@@ -25,13 +26,9 @@ FontDescriptor dialog_body_font() {
     };
 }
 
-FontDescriptor dialog_button_font() {
-    return FontDescriptor{
-        .family = {},
-        .size = 13.5F,
-        .weight = FontWeight::Medium,
-    };
-}
+constexpr float ButtonHeight = 36.0F;
+constexpr float ButtonMinimumWidth = 88.0F;
+constexpr float ButtonSpacing = 8.0F;
 
 } // namespace
 
@@ -42,20 +39,27 @@ struct Dialog::Impl {
     Window* parent_window = nullptr;
     bool presented = false;
     mutable bool backdrop_dirty = false;
-    int armed_button = -1;
     DialogPresentationStyle presentation_style = DialogPresentationStyle::Default;
     float minimum_panel_width = 280.0F;
     Rect panel_bounds{};
     Rect previous_panel_bounds{};
     bool has_previous_panel_bounds = false;
-    std::vector<Rect> button_bounds;
 
+    // Response buttons are real child widgets, so they take focus, Tab
+    // traversal, and pointer input like any button, and assistive technology
+    // can find and press them.
     struct ButtonEntry {
-        std::string label;
-        DialogResponse response;
+        std::shared_ptr<Button> button;
+        DialogResponse response = DialogResponse::None;
     };
 
     std::vector<ButtonEntry> buttons;
+
+    [[nodiscard]] float button_width(const ButtonEntry& entry) const {
+        return std::max(
+            ButtonMinimumWidth,
+            entry.button->measure_for_diagnostics(Constraints::unbounded()).natural_width);
+    }
 
     Signal<DialogResponse> on_response;
 };
@@ -77,7 +81,12 @@ Dialog::Dialog(std::string title, std::string message) : impl_(std::make_unique<
 Dialog::~Dialog() = default;
 
 void Dialog::add_button(std::string label, DialogResponse response) {
-    impl_->buttons.push_back({std::move(label), response});
+    auto button = Button::create(std::move(label));
+    button->add_style_class("dialog-button");
+    // The button is a child of this dialog, so the connection cannot outlive it.
+    (void)button->on_clicked().connect([this, response] { close(response); });
+    append_child(button);
+    impl_->buttons.push_back({std::move(button), response});
     queue_layout();
     queue_redraw();
 }
@@ -88,7 +97,8 @@ void Dialog::set_content(std::shared_ptr<Widget> content) {
     }
     impl_->content = std::move(content);
     if (impl_->content) {
-        append_child(impl_->content);
+        // Content precedes the buttons in focus and reading order.
+        insert_child(0, impl_->content);
     }
     queue_layout();
     queue_redraw();
@@ -125,8 +135,17 @@ void Dialog::present(Window& parent) {
     impl_->parent_window = &parent;
     impl_->presented = true;
     impl_->backdrop_dirty = true;
-    impl_->armed_button = -1;
     parent.show_overlay(shared_from_this(), true);
+
+    // Move focus into the dialog so keyboard and assistive-technology users
+    // land on it; the window restores the previous focus when it closes.
+    const auto default_button =
+        std::ranges::find(impl_->buttons, DialogResponse::Accept, &Impl::ButtonEntry::response);
+    if (default_button != impl_->buttons.end()) {
+        default_button->button->grab_focus();
+    } else if (!impl_->buttons.empty()) {
+        impl_->buttons.front().button->grab_focus();
+    }
 }
 
 bool Dialog::is_presented() const {
@@ -142,7 +161,6 @@ void Dialog::close(DialogResponse response) {
     }
     impl_->parent_window = nullptr;
     impl_->presented = false;
-    impl_->armed_button = -1;
     impl_->on_response.emit(response);
 }
 
@@ -161,13 +179,11 @@ SizeRequest Dialog::measure(const Constraints& /*constraints*/) const {
         impl_->message.empty() ? Size{} : measure_text(impl_->message, dialog_body_font());
 
     float buttons_width = 0.0F;
-    float buttons_height = 36.0F;
-    for (std::size_t index = 0; index < impl_->buttons.size(); ++index) {
-        const auto label_size = measure_text(impl_->buttons[index].label, dialog_button_font());
-        buttons_width += std::max(88.0F, label_size.width + 32.0F);
-        if (index + 1 < impl_->buttons.size()) {
-            buttons_width += 8.0F;
-        }
+    for (const auto& entry : impl_->buttons) {
+        buttons_width += impl_->button_width(entry);
+    }
+    if (!impl_->buttons.empty()) {
+        buttons_width += ButtonSpacing * static_cast<float>(impl_->buttons.size() - 1);
     }
 
     SizeRequest content_req{};
@@ -186,7 +202,7 @@ SizeRequest Dialog::measure(const Constraints& /*constraints*/) const {
     }
     natural_height += impl_->content ? content_req.natural_height : message_size.height;
     if (!impl_->buttons.empty()) {
-        natural_height += spacing + buttons_height;
+        natural_height += spacing + ButtonHeight;
     }
     natural_height += padding;
 
@@ -199,7 +215,6 @@ void Dialog::allocate(const Rect& allocation) {
     constexpr float margin = 24.0F;
     constexpr float padding = 20.0F;
     constexpr float spacing = 12.0F;
-    constexpr float button_height = 36.0F;
 
     const auto preferred = measure(Constraints::tight(allocation.size()));
     // Honor the dialog's minimum size even when the allocation minus margins would be smaller
@@ -226,7 +241,6 @@ void Dialog::allocate(const Rect& allocation) {
     }
     impl_->panel_bounds = next_panel_bounds;
 
-    impl_->button_bounds.clear();
     float inner_x = impl_->panel_bounds.x + padding;
     float inner_width = std::max(0.0F, impl_->panel_bounds.width - (padding * 2.0F));
     float current_y = impl_->panel_bounds.y + padding;
@@ -240,19 +254,17 @@ void Dialog::allocate(const Rect& allocation) {
     float buttons_total_width = 0.0F;
     std::vector<float> button_widths;
     button_widths.reserve(impl_->buttons.size());
-    for (std::size_t index = 0; index < impl_->buttons.size(); ++index) {
-        const auto label_size = measure_text(impl_->buttons[index].label, dialog_button_font());
-        const float button_width = std::max(88.0F, label_size.width + 32.0F);
-        button_widths.push_back(button_width);
-        buttons_total_width += button_width;
-        if (index + 1 < impl_->buttons.size()) {
-            buttons_total_width += 8.0F;
-        }
+    for (const auto& entry : impl_->buttons) {
+        button_widths.push_back(impl_->button_width(entry));
+        buttons_total_width += button_widths.back();
+    }
+    if (!impl_->buttons.empty()) {
+        buttons_total_width += ButtonSpacing * static_cast<float>(impl_->buttons.size() - 1);
     }
 
     float content_bottom = impl_->panel_bounds.bottom() - padding;
     if (!impl_->buttons.empty()) {
-        content_bottom -= button_height + spacing;
+        content_bottom -= ButtonHeight + spacing;
     }
     float content_height = std::max(0.0F, content_bottom - current_y);
 
@@ -260,61 +272,19 @@ void Dialog::allocate(const Rect& allocation) {
         impl_->content->allocate({inner_x, current_y, inner_width, content_height});
     }
 
-    if (!impl_->buttons.empty()) {
-        float button_x = impl_->panel_bounds.right() - padding - buttons_total_width;
-        float button_y = impl_->panel_bounds.bottom() - padding - button_height;
-        for (float button_width : button_widths) {
-            impl_->button_bounds.push_back({button_x, button_y, button_width, button_height});
-            button_x += button_width + 8.0F;
-        }
+    float button_x = impl_->panel_bounds.right() - padding - buttons_total_width;
+    const float button_y = impl_->panel_bounds.bottom() - padding - ButtonHeight;
+    for (std::size_t index = 0; index < impl_->buttons.size(); ++index) {
+        impl_->buttons[index].button->allocate(
+            {button_x, button_y, button_widths[index], ButtonHeight});
+        button_x += button_widths[index] + ButtonSpacing;
     }
 }
 
 bool Dialog::handle_mouse_event(const MouseEvent& event) {
-    if (!impl_->presented) {
-        return false;
-    }
-
-    const auto point = Point{event.x, event.y};
-    if (event.button != 1 && event.type != MouseEvent::Type::Move &&
-        event.type != MouseEvent::Type::Leave) {
-        return allocation().contains(point);
-    }
-
-    auto button_at = [this, point]() -> int {
-        for (std::size_t index = 0; index < impl_->button_bounds.size(); ++index) {
-            if (impl_->button_bounds[index].contains(point)) {
-                return static_cast<int>(index);
-            }
-        }
-        return -1;
-    };
-
-    switch (event.type) {
-    case MouseEvent::Type::Press:
-        impl_->armed_button = button_at();
-        return allocation().contains(point);
-    case MouseEvent::Type::Release: {
-        const int released_button = button_at();
-        const int activated_button = impl_->armed_button;
-        impl_->armed_button = -1;
-        if (activated_button >= 0 && activated_button == released_button &&
-            activated_button < static_cast<int>(impl_->buttons.size())) {
-            close(impl_->buttons[static_cast<std::size_t>(activated_button)].response);
-        }
-        return allocation().contains(point);
-    }
-    case MouseEvent::Type::Move:
-    case MouseEvent::Type::Enter:
-    case MouseEvent::Type::Leave:
-    case MouseEvent::Type::Scroll:
-    case MouseEvent::Type::DragStart:
-    case MouseEvent::Type::DragUpdate:
-    case MouseEvent::Type::DragEnd:
-        return allocation().contains(point);
-    }
-
-    return false;
+    // Buttons and content handle their own input; the dialog swallows the
+    // rest so nothing behind the modal panel reacts.
+    return impl_->presented && allocation().contains({event.x, event.y});
 }
 
 bool Dialog::handle_key_event(const KeyEvent& event) {
@@ -323,19 +293,15 @@ bool Dialog::handle_key_event(const KeyEvent& event) {
     }
 
     if (event.key == KeyCode::Escape) {
-        auto cancel = std::find_if(
-            impl_->buttons.begin(), impl_->buttons.end(), [](const Impl::ButtonEntry& button) {
-                return button.response == DialogResponse::Cancel;
-            });
+        auto cancel =
+            std::ranges::find(impl_->buttons, DialogResponse::Cancel, &Impl::ButtonEntry::response);
         close(cancel != impl_->buttons.end() ? cancel->response : DialogResponse::Close);
         return true;
     }
 
     if (event.key == KeyCode::Return || event.key == KeyCode::Space) {
-        auto accept = std::find_if(
-            impl_->buttons.begin(), impl_->buttons.end(), [](const Impl::ButtonEntry& button) {
-                return button.response == DialogResponse::Accept;
-            });
+        auto accept =
+            std::ranges::find(impl_->buttons, DialogResponse::Accept, &Impl::ButtonEntry::response);
         if (accept != impl_->buttons.end()) {
             close(accept->response);
             return true;
@@ -396,7 +362,6 @@ void Dialog::snapshot(SnapshotContext& ctx) const {
     constexpr float padding = 20.0F;
     constexpr float spacing = 12.0F;
     constexpr float corner_radius = 16.0F;
-    constexpr float button_radius = 10.0F;
 
     ctx.push_overlay_container(allocation());
     ctx.add_color_rect(allocation(), Color{0.07F, 0.09F, 0.12F, 0.28F});
@@ -416,7 +381,6 @@ void Dialog::snapshot(SnapshotContext& ctx) const {
 
     const auto title_font = dialog_title_font();
     const auto body_font = dialog_body_font();
-    const auto button_font = dialog_button_font();
     const auto title_size = measure_text(impl_->title, title_font);
     const float inner_x = impl_->panel_bounds.x + padding;
     float current_y = impl_->panel_bounds.y + padding;
@@ -436,30 +400,7 @@ void Dialog::snapshot(SnapshotContext& ctx) const {
         current_y += message_size.height;
     }
 
-    if (impl_->content) {
-        Widget::snapshot(ctx);
-    }
-
-    for (std::size_t index = 0; index < impl_->button_bounds.size(); ++index) {
-        const auto& button = impl_->buttons[index];
-        const auto& bounds = impl_->button_bounds[index];
-        ctx.add_rounded_rect(
-            bounds,
-            theme_color("dialog-button-background", Color{0.94F, 0.95F, 0.97F, 1.0F}),
-            button_radius);
-        ctx.add_border(bounds,
-                       theme_color("dialog-button-border", Color{0.8F, 0.82F, 0.86F, 1.0F}),
-                       1.0F,
-                       button_radius);
-
-        const auto label_size = measure_text(button.label, button_font);
-        const float text_x = bounds.x + std::max(0.0F, (bounds.width - label_size.width) * 0.5F);
-        const float text_y = bounds.y + std::max(0.0F, (bounds.height - label_size.height) * 0.5F);
-        ctx.add_text({text_x, text_y},
-                     button.label,
-                     theme_color("dialog-button-text", Color{0.1F, 0.1F, 0.12F, 1.0F}),
-                     button_font);
-    }
+    Widget::snapshot(ctx);
     ctx.pop_container();
     impl_->backdrop_dirty = false;
     impl_->has_previous_panel_bounds = false;

@@ -51,10 +51,13 @@ public:
 
     ~Dialog() override;
 
-    /// Add a response button. Buttons are drawn in insertion order.
-    /// Keyboard activation uses the response kind: Escape picks the first
-    /// Cancel button (fallback Close), Return/Space picks the first Accept
-    /// button (fallback: the first button, or Close if none).
+    /// Add a response button. Buttons are real child widgets laid out in
+    /// insertion order after any content, so they take focus, Tab traversal,
+    /// and assistive-technology activation like other buttons. Activating one
+    /// closes the dialog with its response. Keys that reach the dialog itself
+    /// use the response kind: Escape picks the first Cancel button (fallback
+    /// Close), Return/Space picks the first Accept button (fallback: the first
+    /// button, or Close if none).
     void add_button(std::string label, DialogResponse response);
 
     /// Replace the default message label with a custom content widget.
@@ -72,9 +75,9 @@ public:
     /// Present the dialog as a modal overlay on the given parent window.
     /// Idempotent for the same parent — repeated calls with the same
     /// window are a no-op. Re-presenting on a different parent dismisses
-    /// from the old parent first. Focus is saved from the parent on
-    /// present and restored on close. Returns immediately; the response
-    /// arrives via on_response().
+    /// from the old parent first. Focus moves to the Accept button (else the
+    /// first button) and the parent's previous focus is restored on close.
+    /// Returns immediately; the response arrives via on_response().
     void present(Window& parent);
     [[nodiscard]] bool is_presented() const;
 

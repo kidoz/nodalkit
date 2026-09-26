@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
+#include <nk/platform/events.h>
 #include <nk/platform/window.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
@@ -450,4 +451,75 @@ TEST_CASE("AT-SPI text events carry only the changed characters", "[accessibilit
     CHECK(events[1].detail == "insert");
     CHECK(events[1].detail1 == 0);
     CHECK(events[1].data_value == "x");
+}
+
+TEST_CASE("Dialog response buttons are accessible and close the dialog when pressed",
+          "[accessibility][dialog]") {
+    nk::Window window({.title = "Dialog buttons", .width = 480, .height = 320});
+    auto root = Container::create();
+    root->append(nk::Button::create("Behind"));
+    window.set_child(root);
+
+    auto dialog = nk::Dialog::create("Discard changes?", "Unsaved edits will be lost.");
+    dialog->add_button("Cancel", nk::DialogResponse::Cancel);
+    dialog->add_button("Discard", nk::DialogResponse::Accept);
+    auto response = nk::DialogResponse::None;
+    auto connection =
+        dialog->on_response().connect([&](nk::DialogResponse value) { response = value; });
+    dialog->present(window);
+
+    nk::detail::AccessibilityTree tree(window);
+    const auto roots = tree.root_children();
+    REQUIRE(roots.size() == 1);
+    const auto buttons = tree.children(roots[0]);
+    REQUIRE(buttons.size() == 2);
+    CHECK(tree.info(buttons[0])->role == nk::AccessibleRole::Button);
+    CHECK(tree.info(buttons[0])->name == "Cancel");
+    CHECK(tree.info(buttons[1])->name == "Discard");
+    // The default response takes focus so screen readers land inside the dialog.
+    CHECK(tree.focused() == buttons[1]);
+
+    REQUIRE(tree.perform(buttons[1], nk::AccessibleAction::Activate));
+    CHECK(response == nk::DialogResponse::Accept);
+    CHECK_FALSE(dialog->is_presented());
+    REQUIRE(tree.root_children().size() == 1);
+    CHECK(tree.info(tree.root_children()[0])->name == "Behind");
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Dialog focus starts on the default button, stays inside, and is restored",
+          "[accessibility][dialog][focus]") {
+    nk::Window window({.title = "Dialog focus", .width = 480, .height = 320});
+    auto root = Container::create();
+    auto field = nk::TextField::create("draft");
+    root->append(field);
+    window.set_child(root);
+    field->grab_focus();
+    REQUIRE((field->accessible()->state() & nk::StateFlags::Focused) == nk::StateFlags::Focused);
+
+    auto dialog = nk::Dialog::create("Save changes?");
+    dialog->add_button("Cancel", nk::DialogResponse::Cancel);
+    dialog->add_button("Save", nk::DialogResponse::Accept);
+    auto response = nk::DialogResponse::None;
+    auto connection =
+        dialog->on_response().connect([&](nk::DialogResponse value) { response = value; });
+    dialog->present(window);
+
+    nk::detail::AccessibilityTree tree(window);
+    const auto buttons = tree.children(tree.root_children().at(0));
+    REQUIRE(buttons.size() == 2);
+    CHECK(tree.focused() == buttons[1]);
+
+    for (int i = 0; i < 4; ++i) {
+        window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+        const auto focused = tree.focused();
+        REQUIRE(focused.has_value());
+        CHECK((*focused == buttons[0] || *focused == buttons[1]));
+    }
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    CHECK(response == nk::DialogResponse::Cancel);
+    CHECK_FALSE(dialog->is_presented());
+    CHECK(tree.info(tree.root_children().at(0))->focused);
+    CHECK(connection.connected());
 }
