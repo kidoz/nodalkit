@@ -6,6 +6,7 @@
 #include <memory>
 #include <nk/platform/window.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/check_box.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/text_field.h>
@@ -252,7 +253,7 @@ TEST_CASE("AT-SPI paths embed stable identities as the tree changes", "[accessib
     CHECK(nodes[0].node.child_paths == std::vector{second_path});
     CHECK(nodes[1].node.parent_path == nodes[0].node.object_path);
     CHECK(nodes[1].node.role_name == "push button");
-    CHECK(nodes[1].node.action_names == std::vector<std::string>{"focus", "activate"});
+    CHECK(nodes[1].node.action_names == std::vector<std::string>{"activate", "focus"});
 }
 
 TEST_CASE("AT-SPI snapshots follow modality, enabled state, and text interfaces",
@@ -295,4 +296,158 @@ TEST_CASE("AT-SPI text offsets count characters", "[accessibility][atspi][text]"
     CHECK(nk::detail::atspi_text_slice(text, 7, 3).empty());
     CHECK(nk::detail::atspi_action_from_name("toggle") == nk::AccessibleAction::Toggle);
     CHECK_FALSE(nk::detail::atspi_action_from_name("click").has_value());
+}
+
+TEST_CASE("AT-SPI nodes carry wire roles, state sets, and automation ids",
+          "[accessibility][atspi]") {
+    using nk::detail::AtspiRoleValue;
+    using nk::detail::AtspiStateValue;
+    using nk::detail::has_atspi_state;
+    nk::Window window({.title = "Roles", .width = 320, .height = 240});
+    auto root = Container::create();
+    auto mute = nk::CheckBox::create("Mute");
+    mute->set_debug_name("mute-check");
+    auto field = nk::TextField::create("query");
+    root->append(mute);
+    root->append(field);
+    window.set_child(root);
+    mute->set_checked(true);
+
+    nk::detail::AccessibilityTree tree(window);
+    auto nodes = nk::detail::build_atspi_tree_nodes(
+        tree, "/root", "window0", "Roles", {0, 0, 320, 240}, true);
+    REQUIRE(nodes.size() == 3);
+    CHECK(nodes[0].role == AtspiRoleValue::Frame);
+    CHECK(has_atspi_state(nodes[0].states, AtspiStateValue::Active));
+    CHECK(nodes[1].role == AtspiRoleValue::CheckBox);
+    CHECK(nodes[1].accessible_id == "mute-check");
+    CHECK(has_atspi_state(nodes[1].states, AtspiStateValue::Checkable));
+    CHECK(has_atspi_state(nodes[1].states, AtspiStateValue::Checked));
+    CHECK(has_atspi_state(nodes[1].states, AtspiStateValue::Enabled));
+    CHECK(nodes[2].role == AtspiRoleValue::Entry);
+    CHECK(nodes[2].node.role_name == "entry");
+    CHECK(has_atspi_state(nodes[2].states, AtspiStateValue::Editable));
+    CHECK(has_atspi_state(nodes[2].states, AtspiStateValue::SingleLine));
+    CHECK_FALSE(has_atspi_state(nodes[2].states, AtspiStateValue::Focused));
+
+    field->grab_focus();
+    mute->set_checked(false);
+    nodes = nk::detail::build_atspi_tree_nodes(tree, "/root", "window0", "Roles", {0, 0, 320, 240});
+    CHECK_FALSE(has_atspi_state(nodes[0].states, AtspiStateValue::Active));
+    CHECK_FALSE(has_atspi_state(nodes[1].states, AtspiStateValue::Checked));
+    CHECK(has_atspi_state(nodes[2].states, AtspiStateValue::Focused));
+    // Bit 41 lives in the second word of the set.
+    CHECK(nodes[1].states[1] == 1U << 9U);
+}
+
+TEST_CASE("AT-SPI event diff reports focus, state, children, names, and windows",
+          "[accessibility][atspi]") {
+    using nk::detail::AtspiEvent;
+    nk::Window window({.title = "Events", .width = 320, .height = 240});
+    auto root = Container::create();
+    auto first = nk::Button::create("First");
+    auto second = nk::Button::create("Second");
+    auto mute = nk::CheckBox::create("Mute");
+    root->append(first);
+    root->append(second);
+    root->append(mute);
+    window.set_child(root);
+    first->grab_focus();
+
+    nk::detail::AccessibilityTree tree(window);
+    const auto build = [&](bool active) {
+        return nk::detail::build_atspi_tree_nodes(
+            tree, "/root", "window0", "Events", {0, 0, 320, 240}, active);
+    };
+    const auto before = build(false);
+    const auto first_path = before[1].node.object_path;
+    const auto second_path = before[2].node.object_path;
+    const auto mute_path = before[3].node.object_path;
+    CHECK(nk::detail::diff_atspi_nodes(before, before).empty());
+
+    second->grab_focus();
+    mute->set_checked(true);
+    first->set_label("Renamed");
+    auto events = nk::detail::diff_atspi_nodes(before, build(true));
+    const auto index_of = [&](std::string_view path, std::string_view detail, int value) {
+        for (std::size_t i = 0; i < events.size(); ++i) {
+            if (events[i].object_path == path && events[i].detail == detail &&
+                events[i].detail1 == value) {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    };
+    REQUIRE(index_of(first_path, "focused", 0) >= 0);
+    REQUIRE(index_of(second_path, "focused", 1) >= 0);
+    CHECK(index_of(first_path, "focused", 0) < index_of(second_path, "focused", 1));
+    CHECK(index_of(mute_path, "checked", 1) >= 0);
+    CHECK(index_of(first_path, "accessible-name", 0) >= 0);
+    CHECK(events[static_cast<std::size_t>(index_of(first_path, "accessible-name", 0))].data_value ==
+          "Renamed");
+    CHECK(index_of("/root/window0", "active", 1) >= 0);
+    CHECK(std::ranges::any_of(events, [](const AtspiEvent& event) {
+        return event.interface_name == "org.a11y.atspi.Event.Window" &&
+               event.member == "Activate" && event.object_path == "/root/window0";
+    }));
+
+    const auto with_second = build(true);
+    root->remove(*second);
+    second.reset();
+    auto added = nk::Button::create("Added");
+    root->append(added);
+    events = nk::detail::diff_atspi_nodes(with_second, build(true));
+    REQUIRE(events.size() >= 2);
+    CHECK(events[0].member == "ChildrenChanged");
+    CHECK(events[0].detail == "remove");
+    CHECK(events[0].detail1 == 1);
+    CHECK(events[0].data == AtspiEvent::Data::Object);
+    CHECK(events[0].data_value == second_path);
+    CHECK(events[1].detail == "add");
+    CHECK(events[1].detail1 == 2);
+    CHECK(events[1].object_path == "/root/window0");
+}
+
+TEST_CASE("AT-SPI text events carry only the changed characters", "[accessibility][atspi][text]") {
+    using nk::detail::AtspiEvent;
+    nk::Window window({.title = "Text", .width = 320, .height = 240});
+    auto root = Container::create();
+    auto field = nk::TextField::create("caf");
+    root->append(field);
+    window.set_child(root);
+    nk::detail::AccessibilityTree tree(window);
+    const auto build = [&] {
+        return nk::detail::build_atspi_tree_nodes(
+            tree, "/root", "window0", "Text", {0, 0, 320, 240});
+    };
+
+    auto before = build();
+    field->set_text("caf\u00E9");
+    auto events = nk::detail::diff_atspi_nodes(before, build());
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].member == "TextChanged");
+    CHECK(events[0].detail == "insert");
+    CHECK(events[0].detail1 == 3);
+    CHECK(events[0].detail2 == 1);
+    CHECK(events[0].data == AtspiEvent::Data::Text);
+    CHECK(events[0].data_value == "\u00E9");
+
+    before = build();
+    field->set_text("c\u00E9");
+    events = nk::detail::diff_atspi_nodes(before, build());
+    REQUIRE(events.size() == 1);
+    CHECK(events[0].detail == "delete");
+    CHECK(events[0].detail1 == 1);
+    CHECK(events[0].detail2 == 2);
+    CHECK(events[0].data_value == "af");
+
+    before = build();
+    field->set_text("x\u00E9");
+    events = nk::detail::diff_atspi_nodes(before, build());
+    REQUIRE(events.size() == 2);
+    CHECK(events[0].detail == "delete");
+    CHECK(events[0].data_value == "c");
+    CHECK(events[1].detail == "insert");
+    CHECK(events[1].detail1 == 0);
+    CHECK(events[1].data_value == "x");
 }
