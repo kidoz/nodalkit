@@ -35,6 +35,33 @@ void TextEditBuffer::select_all() {
     break_undo_group();
 }
 
+TextInputRange TextEditBuffer::code_point_range(TextInputRange range) const {
+    const auto is_continuation = [this](std::size_t index) {
+        return index < text.size() && (static_cast<unsigned char>(text[index]) & 0xC0U) == 0x80U;
+    };
+    range.start = std::min(range.start, text.size());
+    range.end = std::clamp(range.end, range.start, text.size());
+    while (range.start > 0 && is_continuation(range.start)) {
+        --range.start;
+    }
+    while (is_continuation(range.end)) {
+        ++range.end;
+    }
+    return range;
+}
+
+void TextEditBuffer::set_preedit_target(TextInputRange range) {
+    clear_preedit();
+    const auto origin_cursor = cursor;
+    const auto origin_anchor = selection_anchor;
+    range = code_point_range(range);
+    selection_anchor = range.start;
+    cursor = range.end;
+    preedit_origin_ =
+        PreeditOrigin{origin_cursor, origin_anchor, cursor, selection_anchor, text.size()};
+    break_undo_group();
+}
+
 TextEditBuffer::State TextEditBuffer::state() const {
     return {text, cursor, selection_anchor};
 }
@@ -113,6 +140,10 @@ void TextEditBuffer::break_undo_group() {
 }
 
 void TextEditBuffer::set_preedit(std::string value, std::size_t start, std::size_t end) {
+    if (value.empty()) {
+        clear_preedit();
+        return;
+    }
     preedit_text = std::move(value);
     start = std::min(start, preedit_text.size());
     end = std::min(end, preedit_text.size());
@@ -132,10 +163,20 @@ void TextEditBuffer::set_preedit(std::string value, std::size_t start, std::size
 }
 
 bool TextEditBuffer::clear_preedit() {
-    const bool changed = has_preedit();
+    bool changed = has_preedit();
     preedit_text.clear();
     preedit_selection_start = 0;
     preedit_selection_end = 0;
+    // Restore only an untouched target: callers that moved the caret or replaced
+    // the text win. replace() passes its range explicitly, so this also makes
+    // undo return to the caret from before the composition.
+    if (const auto origin = std::exchange(preedit_origin_, std::nullopt);
+        origin.has_value() && cursor == origin->target_cursor &&
+        selection_anchor == origin->target_anchor && text.size() == origin->text_size) {
+        changed = changed || cursor != origin->cursor || selection_anchor != origin->anchor;
+        cursor = origin->cursor;
+        selection_anchor = origin->anchor;
+    }
     if (changed) {
         break_undo_group();
     }

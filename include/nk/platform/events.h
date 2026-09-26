@@ -6,9 +6,11 @@
 /// Platform backends convert native events into these types and
 /// deliver them through Window to the controller system.
 
+#include <cstddef>
 #include <cstdint>
 #include <nk/actions/shortcut.h>
 #include <nk/platform/key_codes.h>
+#include <optional>
 #include <string>
 
 namespace nk {
@@ -41,6 +43,14 @@ struct MouseEvent {
     std::uint32_t native_serial = 0;
 };
 
+/// Byte range `[start, end)` in an editor's committed UTF-8 text.
+struct TextInputRange {
+    std::size_t start = 0;
+    std::size_t end = 0;
+
+    constexpr bool operator==(const TextInputRange&) const = default;
+};
+
 /// Platform text-input event.
 ///
 /// This is distinct from key events: key events describe physical key presses,
@@ -60,6 +70,10 @@ struct TextInputEvent {
     std::size_t selection_end = 0;        ///< Relative selection end within `text` for preedit.
     std::size_t delete_before_length = 0; ///< Bytes before the cursor to remove.
     std::size_t delete_after_length = 0;  ///< Bytes after the cursor to remove.
+    /// Committed text that a Commit or Preedit replaces instead of the current
+    /// selection, such as the base character an accent picker substitutes.
+    /// A Commit with empty `text` and a non-empty range deletes that range.
+    std::optional<TextInputRange> replacement_range;
 };
 
 /// Keyboard event.

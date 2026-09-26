@@ -601,6 +601,94 @@ TEST_CASE("Native UTF-16 ranges map to editor byte offsets", "[text][ime][macos]
     }
 }
 
+TEST_CASE("Editors apply input-method replacement ranges as one undoable edit", "[text][ime]") {
+    const auto check = [](auto editor) {
+        editor->allocate({0, 0, 240, 100});
+        editor->set_text("cafe");
+        int changes = 0;
+        auto connection = editor->on_text_changed().connect([&](auto&&...) { ++changes; });
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit,
+                                                 .text = "\u00E9",
+                                                 .replacement_range = nk::TextInputRange{3, 4}}));
+        CHECK(editor->text() == "caf\u00E9");
+        CHECK(editor->cursor_position() == 5);
+        CHECK(changes == 1);
+        REQUIRE(key(*editor, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+        CHECK(editor->text() == "cafe");
+        CHECK(editor->cursor_position() == 4);
+        CHECK_FALSE(editor->has_selection());
+        CHECK(connection.connected());
+    };
+    check(nk::TextArea::create());
+    check(nk::TextField::create());
+}
+
+TEST_CASE("Preedit replacement ranges compose over committed text", "[text][ime]") {
+    const auto check = [](auto editor) {
+        editor->allocate({0, 0, 240, 100});
+        editor->set_text("ka");
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                                 .text = "\u304B",
+                                                 .selection_start = 3,
+                                                 .selection_end = 3,
+                                                 .replacement_range = nk::TextInputRange{0, 2}}));
+        CHECK(editor->text() == "ka");
+        CHECK(painted_text(*editor) == std::vector<std::string>{"\u304B"});
+        REQUIRE(commit(*editor, "\u304B"));
+        CHECK(editor->text() == "\u304B");
+        REQUIRE(key(*editor, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+        CHECK(editor->text() == "ka");
+        CHECK(editor->cursor_position() == 2);
+        CHECK_FALSE(editor->has_selection());
+        // Cancelling restores the caret, so later typing does not replace the target.
+        for (const auto type :
+             {nk::TextInputEvent::Type::ClearPreedit, nk::TextInputEvent::Type::Preedit}) {
+            REQUIRE(
+                editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                                 .text = "x",
+                                                 .replacement_range = nk::TextInputRange{0, 1}}));
+            REQUIRE(editor->handle_text_input_event({.type = type, .text = {}}));
+            CHECK(editor->text() == "ka");
+            CHECK(editor->cursor_position() == 2);
+            CHECK_FALSE(editor->has_selection());
+            CHECK(painted_text(*editor) == std::vector<std::string>{"ka"});
+        }
+        REQUIRE(commit(*editor, "!"));
+        CHECK(editor->text() == "ka!");
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                                 .text = "x",
+                                                 .replacement_range = nk::TextInputRange{0, 1}}));
+        editor->set_text("fresh");
+        CHECK(editor->cursor_position() == 5);
+        CHECK_FALSE(editor->has_selection());
+    };
+    check(nk::TextArea::create());
+    check(nk::TextField::create());
+}
+
+TEST_CASE("Input-method replacement ranges keep code points and read-only guards", "[text][ime]") {
+    const auto check = [](auto editor) {
+        editor->allocate({0, 0, 240, 100});
+        editor->set_text("a\u00E9b");
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit,
+                                                 .text = "x",
+                                                 .replacement_range = nk::TextInputRange{2, 99}}));
+        CHECK(editor->text() == "ax");
+        REQUIRE(editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit,
+                                                 .text = {},
+                                                 .replacement_range = nk::TextInputRange{0, 1}}));
+        CHECK(editor->text() == "x");
+        editor->set_editable(false);
+        CHECK_FALSE(
+            editor->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit,
+                                             .text = "y",
+                                             .replacement_range = nk::TextInputRange{0, 1}}));
+        CHECK(editor->text() == "x");
+    };
+    check(nk::TextArea::create());
+    check(nk::TextField::create());
+}
+
 TEST_CASE("Window reports composition and withholds secure text from input methods",
           "[text][ime]") {
     nk::Window window({.title = "Input state", .width = 240, .height = 100});

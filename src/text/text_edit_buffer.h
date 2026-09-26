@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <nk/platform/events.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +27,11 @@ public:
     [[nodiscard]] bool has_selection() const;
     void move_cursor(std::size_t position, bool extend);
     void select_all();
+    // Clamp an input-method byte range to the text and widen it to whole code points.
+    [[nodiscard]] TextInputRange code_point_range(TextInputRange range) const;
+    // Compose over `range` instead of the selection. Clearing the composition
+    // restores the previous caret and selection.
+    void set_preedit_target(TextInputRange range);
     bool replace(std::size_t start,
                  std::size_t end,
                  std::string_view inserted,
@@ -53,6 +60,16 @@ private:
     std::vector<State> history_{{}};
     std::size_t history_index_ = 0;
     EditGroup last_group_ = EditGroup::None;
+
+    struct PreeditOrigin {
+        std::size_t cursor = 0;
+        std::size_t anchor = 0;
+        std::size_t target_cursor = 0;
+        std::size_t target_anchor = 0;
+        std::size_t text_size = 0;
+    };
+
+    std::optional<PreeditOrigin> preedit_origin_;
 };
 
 } // namespace nk::detail

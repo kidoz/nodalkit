@@ -24,6 +24,7 @@
 #include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
 #include <nk/model/tree_model.h>
+#include <nk/platform/events.h>
 #include <nk/style/theme.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/canvas_widget.h>
@@ -223,6 +224,15 @@ void check_widgets() {
               input_state->cursor == area->text().size() && input_state->anchor == 0 &&
               !input_state->composing,
           "TextArea exports committed surrounding text and selection through the installed SDK");
+    area->set_text("cafe");
+    check(area->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                         .text = "e",
+                                         .replacement_range = nk::TextInputRange{3, 4}}) &&
+              area->text_input_state()->composing &&
+              area->handle_text_input_event(
+                  {.type = nk::TextInputEvent::Type::Commit, .text = "\u00E9"}) &&
+              area->text() == "caf\u00E9" && !area->text_input_state()->composing,
+          "TextArea applies input-method replacement ranges through the installed SDK");
     area->set_editable(false);
     check(!area->text_input_state(), "Read-only TextArea does not request native text input");
 

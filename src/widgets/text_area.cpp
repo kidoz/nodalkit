@@ -650,12 +650,25 @@ bool TextArea::handle_text_input_event(const TextInputEvent& event) {
     switch (event.type) {
     case TextInputEvent::Type::Preedit:
         impl_->selecting = false;
+        if (event.replacement_range.has_value()) {
+            impl_->edit.set_preedit_target(*event.replacement_range);
+            impl_->preferred_x.reset();
+        }
         impl_->edit.set_preedit(event.text, event.selection_start, event.selection_end);
         refresh_content_metrics();
         ensure_caret_visible();
         queue_redraw();
         return true;
     case TextInputEvent::Type::Commit:
+        if (event.replacement_range.has_value()) {
+            const auto range = impl_->edit.code_point_range(*event.replacement_range);
+            if (range.start != range.end || !event.text.empty()) {
+                if (impl_->edit.replace(range.start, range.end, event.text)) {
+                    did_edit();
+                }
+                return true;
+            }
+        }
         if (event.text.empty()) {
             return clear_preedit();
         }

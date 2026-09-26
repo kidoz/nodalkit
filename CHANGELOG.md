@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+*   **Input-Method Replacement Ranges:** `TextInputEvent::replacement_range` (a `TextInputRange` of committed UTF-8 byte offsets) lets a Commit or Preedit replace existing text instead of the selection, as accent pickers and reconversion require. TextField, SearchField, and TextArea apply a replacement commit as one undo step, widen ranges to whole code points, and restore the previous caret when a composition over existing text is cancelled.
 *   **Composition State:** `WidgetTextInputState` and `WindowTextInputState` report `composing` so platform backends can drop native composition state after an editor ends it.
 *   **Multiline Composition:** `TextArea` renders preedit text and its selection, reveals the composed caret across lines, and reports committed surrounding text through `text_input_state()`. Composition commits are undoable as one step; cancellation preserves committed text and selection.
 *   **Multiline Selection and History:** `TextArea` supports Shift navigation, drag/Shift-click selection, double-click word selection, triple-click line selection, select-all, clipboard cut/copy/paste, primary-selection paste, and undo/redo. Public selection queries return UTF-8 byte offsets. The multiline example and installed-SDK smoke test exercise the expanded API.
@@ -32,7 +33,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 *   **Documentation:** `docs/` is reorganized along the Diátaxis framework into `tutorials/`, `how-to/`, `reference/`, and `explanation/` with an index at `docs/README.md`. The former guides are split by purpose; the application skeleton is now a tutorial whose code compiles against the current headers (the previous version constructed `nk::Widget` directly, which its protected constructor forbids), and the support-bundle snippet passes a string to `save_debug_bundle()` as its signature requires.
 *   **Multiline Navigation:** Home/End move within the current line; Control or Command plus Home/End moves through the document. Up/Down and Page Up/Page Down use a retained horizontal position measured in pixels, including across short lines. Lines remain unwrapped and overflow horizontally. TextArea supports toolkit composition events; complete native IME integration and platform validation remain open.
-*   **C++ ABI:** `SearchField` now derives from `TextField`, retaining its existing public methods and adding inherited editor operations. `TextField` exposes protected content-rendering and geometry hooks. `WidgetTextInputState` and `WindowTextInputState` gained a member. Rebuild the library and all C++ consumers together: the class layout and virtual interface changed.
+*   **C++ ABI:** `SearchField` now derives from `TextField`, retaining its existing public methods and adding inherited editor operations. `TextField` exposes protected content-rendering and geometry hooks. `TextInputEvent`, `WidgetTextInputState`, and `WindowTextInputState` gained members. Rebuild the library and all C++ consumers together: the class layout and virtual interface changed.
 
 ## [0.2.0] - 2026-08-30
 

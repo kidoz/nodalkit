@@ -523,11 +523,22 @@ bool TextField::handle_text_input_event(const TextInputEvent& event) {
             return false;
         }
         reset_history_grouping();
+        if (event.replacement_range.has_value()) {
+            reset_mouse_selection_state();
+            impl_->edit.set_preedit_target(*event.replacement_range);
+        }
         impl_->edit.set_preedit(event.text, event.selection_start, event.selection_end);
         ensure_caret_visible();
         queue_text_redraw();
         return true;
     case TextInputEvent::Type::Commit:
+        if (impl_->editable && event.replacement_range.has_value()) {
+            const auto range = impl_->edit.code_point_range(*event.replacement_range);
+            if (range.start != range.end || !event.text.empty()) {
+                replace_range(range.start, range.end, event.text);
+                return true;
+            }
+        }
         if (!impl_->editable || event.text.empty()) {
             const bool canceled = has_preedit();
             clear_preedit();
