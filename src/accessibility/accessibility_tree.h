@@ -8,6 +8,7 @@
 #include <nk/ui_core/state_flags.h>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -19,6 +20,9 @@ class Window;
 namespace nk::detail {
 
 using AccessibleId = std::uint64_t;
+
+// Stable lowercase role token used by diagnostics and the AT-SPI role mapping.
+[[nodiscard]] std::string_view accessible_role_name(AccessibleRole role);
 
 // Attributes of one exposed element, copied out of the live widget.
 struct AccessibleNodeInfo {

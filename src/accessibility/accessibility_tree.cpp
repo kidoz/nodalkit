@@ -47,6 +47,74 @@ bool is_enabled(const Widget& widget) {
 
 } // namespace
 
+std::string_view accessible_role_name(AccessibleRole role) {
+    switch (role) {
+    case AccessibleRole::None:
+        return "none";
+    case AccessibleRole::Button:
+        return "button";
+    case AccessibleRole::CheckBox:
+        return "checkbox";
+    case AccessibleRole::Dialog:
+        return "dialog";
+    case AccessibleRole::Grid:
+        return "grid";
+    case AccessibleRole::GridCell:
+        return "gridcell";
+    case AccessibleRole::Group:
+        return "group";
+    case AccessibleRole::Image:
+        return "image";
+    case AccessibleRole::Label:
+        return "label";
+    case AccessibleRole::Link:
+        return "link";
+    case AccessibleRole::List:
+        return "list";
+    case AccessibleRole::ListItem:
+        return "listitem";
+    case AccessibleRole::Menu:
+        return "menu";
+    case AccessibleRole::MenuBar:
+        return "menubar";
+    case AccessibleRole::MenuItem:
+        return "menuitem";
+    case AccessibleRole::ProgressBar:
+        return "progressbar";
+    case AccessibleRole::RadioButton:
+        return "radiobutton";
+    case AccessibleRole::ScrollBar:
+        return "scrollbar";
+    case AccessibleRole::Separator:
+        return "separator";
+    case AccessibleRole::Slider:
+        return "slider";
+    case AccessibleRole::SpinButton:
+        return "spinbutton";
+    case AccessibleRole::Status:
+        return "status";
+    case AccessibleRole::Tab:
+        return "tab";
+    case AccessibleRole::TabList:
+        return "tablist";
+    case AccessibleRole::TabPanel:
+        return "tabpanel";
+    case AccessibleRole::TextInput:
+        return "textinput";
+    case AccessibleRole::ToggleButton:
+        return "togglebutton";
+    case AccessibleRole::Toolbar:
+        return "toolbar";
+    case AccessibleRole::Tree:
+        return "tree";
+    case AccessibleRole::TreeItem:
+        return "treeitem";
+    case AccessibleRole::Window:
+        return "window";
+    }
+    return "none";
+}
+
 AccessibilityTree::AccessibilityTree(Window& window) : window_(window) {}
 
 std::vector<AccessibleId> AccessibilityTree::root_children() {

@@ -1,4 +1,5 @@
 #include "../src/accessibility/accessibility_tree.h"
+#include "../src/accessibility/atspi_tree_snapshot.h"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
@@ -212,4 +213,86 @@ TEST_CASE("Secure text fields never expose their text as an accessible value",
     CHECK(field->accessible()->value() == "\u2022\u2022\u2022");
     field->set_secure_text_entry(false);
     CHECK(field->accessible()->value() == "pa\u00DF");
+}
+
+TEST_CASE("AT-SPI paths embed stable identities as the tree changes", "[accessibility][atspi]") {
+    nk::Window window({.title = "Paths", .width = 320, .height = 240});
+    auto root = Container::create();
+    auto first = nk::Button::create("First");
+    auto second = nk::Button::create("Second");
+    root->append(first);
+    root->append(second);
+    window.set_child(root);
+
+    nk::detail::AccessibilityTree tree(window);
+    const auto path_of = [&](std::string_view name) {
+        for (const auto& entry : nk::detail::build_atspi_tree_nodes(
+                 tree, "/org/a11y/atspi/accessible/root", "window0", "Paths", {0, 0, 320, 240})) {
+            if (entry.node.name == name) {
+                return entry.node.object_path;
+            }
+        }
+        return std::string{};
+    };
+    const auto second_path = path_of("Second");
+    REQUIRE_FALSE(second_path.empty());
+
+    // Removing an earlier sibling must not shift the path of a later one.
+    root->remove(*first);
+    first.reset();
+    CHECK(path_of("Second") == second_path);
+    CHECK(path_of("First").empty());
+
+    const auto nodes = nk::detail::build_atspi_tree_nodes(
+        tree, "/org/a11y/atspi/accessible/root", "window0", "Paths", {0, 0, 320, 240});
+    REQUIRE(nodes.size() == 2);
+    CHECK(nodes[0].id == 0);
+    CHECK(nodes[0].node.role_name == "frame");
+    CHECK(nodes[0].node.parent_path == "/org/a11y/atspi/accessible/root");
+    CHECK(nodes[0].node.child_paths == std::vector{second_path});
+    CHECK(nodes[1].node.parent_path == nodes[0].node.object_path);
+    CHECK(nodes[1].node.role_name == "push button");
+    CHECK(nodes[1].node.action_names == std::vector<std::string>{"focus", "activate"});
+}
+
+TEST_CASE("AT-SPI snapshots follow modality, enabled state, and text interfaces",
+          "[accessibility][atspi]") {
+    nk::Window window({.title = "State", .width = 320, .height = 240});
+    auto root = Container::create();
+    auto save = nk::Button::create("Save");
+    auto field = nk::TextField::create();
+    root->append(save);
+    root->append(field);
+    window.set_child(root);
+    save->set_sensitive(false);
+
+    nk::detail::AccessibilityTree tree(window);
+    auto nodes =
+        nk::detail::build_atspi_tree_nodes(tree, "/root", "window0", "State", {0, 0, 320, 240});
+    REQUIRE(nodes.size() == 3);
+    CHECK_FALSE(nk::has_atspi_state(nodes[1].node.state, nk::AtspiStateBit::Enabled));
+    CHECK(nk::has_atspi_state(nodes[1].node.state, nk::AtspiStateBit::Showing));
+    CHECK(nk::has_atspi_state(nodes[2].node.state, nk::AtspiStateBit::Enabled));
+    CHECK(std::ranges::find(nodes[2].node.interfaces, "org.a11y.atspi.Text") !=
+          nodes[2].node.interfaces.end());
+
+    auto dialog = nk::Dialog::create("Confirm");
+    dialog->present(window);
+    nodes = nk::detail::build_atspi_tree_nodes(tree, "/root", "window0", "State", {0, 0, 320, 240});
+    REQUIRE(nodes.size() == 2);
+    CHECK(nodes[1].node.role_name == "dialog");
+    dialog->close();
+}
+
+TEST_CASE("AT-SPI text offsets count characters", "[accessibility][atspi][text]") {
+    const std::string text = "caf\u00E9 \u043C\u0438\u0440 \U0001F600!";
+    CHECK(nk::detail::atspi_character_count(text) == 11);
+    CHECK(nk::detail::atspi_text_slice(text, 3, 4) == "\u00E9");
+    CHECK(nk::detail::atspi_text_slice(text, 5, 8) == "\u043C\u0438\u0440");
+    CHECK(nk::detail::atspi_text_slice(text, 9, -1) == "\U0001F600!");
+    CHECK(nk::detail::atspi_text_slice(text, -5, 2) == "ca");
+    CHECK(nk::detail::atspi_text_slice(text, 8, 99) == " \U0001F600!");
+    CHECK(nk::detail::atspi_text_slice(text, 7, 3).empty());
+    CHECK(nk::detail::atspi_action_from_name("toggle") == nk::AccessibleAction::Toggle);
+    CHECK_FALSE(nk::detail::atspi_action_from_name("click").has_value());
 }

@@ -65,6 +65,7 @@ nk_sources = files(
     # Compiled on every platform intentionally so the snapshot logic is unit-tested under
     # Windows/macOS too. Only the Linux Wayland backend actually consumes the snapshot.
     'src/accessibility/atspi_bridge.cpp',
+    'src/accessibility/atspi_tree_snapshot.cpp',
     'src/model/abstract_list_model.cpp',
     'src/model/abstract_table_model.cpp',
     'src/model/abstract_tree_model.cpp',

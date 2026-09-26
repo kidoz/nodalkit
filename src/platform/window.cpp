@@ -1,3 +1,4 @@
+#include "../accessibility/accessibility_tree.h"
 #include "../ui_core/widget_type_name.h"
 
 #include <algorithm>
@@ -579,74 +580,6 @@ std::string truncate_for_overlay(std::string value, std::size_t max_chars) {
     return value.substr(0, max_chars - 3) + "...";
 }
 
-std::string_view accessible_role_name(AccessibleRole role) {
-    switch (role) {
-    case AccessibleRole::None:
-        return "none";
-    case AccessibleRole::Button:
-        return "button";
-    case AccessibleRole::CheckBox:
-        return "checkbox";
-    case AccessibleRole::Dialog:
-        return "dialog";
-    case AccessibleRole::Grid:
-        return "grid";
-    case AccessibleRole::GridCell:
-        return "gridcell";
-    case AccessibleRole::Group:
-        return "group";
-    case AccessibleRole::Image:
-        return "image";
-    case AccessibleRole::Label:
-        return "label";
-    case AccessibleRole::Link:
-        return "link";
-    case AccessibleRole::List:
-        return "list";
-    case AccessibleRole::ListItem:
-        return "listitem";
-    case AccessibleRole::Menu:
-        return "menu";
-    case AccessibleRole::MenuBar:
-        return "menubar";
-    case AccessibleRole::MenuItem:
-        return "menuitem";
-    case AccessibleRole::ProgressBar:
-        return "progressbar";
-    case AccessibleRole::RadioButton:
-        return "radiobutton";
-    case AccessibleRole::ScrollBar:
-        return "scrollbar";
-    case AccessibleRole::Separator:
-        return "separator";
-    case AccessibleRole::Slider:
-        return "slider";
-    case AccessibleRole::SpinButton:
-        return "spinbutton";
-    case AccessibleRole::Status:
-        return "status";
-    case AccessibleRole::Tab:
-        return "tab";
-    case AccessibleRole::TabList:
-        return "tablist";
-    case AccessibleRole::TabPanel:
-        return "tabpanel";
-    case AccessibleRole::TextInput:
-        return "textinput";
-    case AccessibleRole::ToggleButton:
-        return "togglebutton";
-    case AccessibleRole::Toolbar:
-        return "toolbar";
-    case AccessibleRole::Tree:
-        return "tree";
-    case AccessibleRole::TreeItem:
-        return "treeitem";
-    case AccessibleRole::Window:
-        return "window";
-    }
-    return "none";
-}
-
 WidgetDebugNode build_widget_debug_node(const Widget& widget,
                                         std::vector<std::size_t> tree_path,
                                         const Widget* focused_widget,
@@ -686,7 +619,7 @@ WidgetDebugNode build_widget_debug_node(const Widget& widget,
     node.vertical_stretch = widget.vertical_stretch();
     node.hotspot_counters = widget.debug_hotspot_counters();
     if (const auto* accessible = widget.accessible(); accessible != nullptr) {
-        node.accessible_role = std::string(accessible_role_name(accessible->role()));
+        node.accessible_role = std::string(detail::accessible_role_name(accessible->role()));
         node.accessible_name = std::string(accessible->name());
         node.accessible_description = std::string(accessible->description());
         node.accessible_value = std::string(accessible->value());
@@ -1416,7 +1349,7 @@ void append_widget_panel_lines(std::vector<std::string>& lines,
 
     if (const auto* accessible = widget->accessible(); accessible != nullptr) {
         std::ostringstream accessibility;
-        accessibility << "a11y role " << accessible_role_name(accessible->role());
+        accessibility << "a11y role " << detail::accessible_role_name(accessible->role());
         if (!accessible->name().empty()) {
             accessibility << "  name " << truncate_for_overlay(std::string(accessible->name()), 18);
         }
