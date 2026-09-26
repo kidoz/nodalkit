@@ -56,7 +56,11 @@ for a worked example of labels, relations, and focus order.
 
 - **Keyboard-only pass:** unplug the mouse and complete the primary flow.
 - **Linux / AT-SPI:** run under Accerciser or Orca and confirm names, roles,
-  and focus order match the checklist.
+  and focus order match the checklist. For a scripted protocol check, run
+  `tools/atspi_live_check.sh <binary> "<Application Name>"`. It starts the
+  application on a private accessibility bus (and a headless Weston unless
+  `WAYLAND_DISPLAY` is set) and drives it with libatspi, the library Orca uses.
+  It needs `at-spi2-core`, `python3-gi`, `gir1.2-atspi-2.0`, and Weston.
 - **macOS:** inspect the window with Accessibility Inspector (Xcode → Open
   Developer Tool), then walk the flow with VoiceOver (`Cmd+F5`). Widget debug
   names appear as each element's identifier, which UI automation can target.

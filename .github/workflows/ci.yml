@@ -117,6 +117,13 @@ jobs:
           echo "WAYLAND_DISPLAY=nodalkit-ci" >> "$GITHUB_ENV"
       - name: Test
         run: meson test -C build-${{ matrix.os }}-${{ matrix.buildtype }} --print-errorlogs
+      # Drive a running application with libatspi, the library screen readers use: the app
+      # must be discoverable, walkable, operable, and announce focus and name changes.
+      - name: Live AT-SPI check
+        if: runner.os == 'Linux' && matrix.buildtype == 'debug'
+        run: |
+          sudo apt-get install -y at-spi2-core python3-gi gir1.2-atspi-2.0 dbus
+          tools/atspi_live_check.sh ./build-${{ matrix.os }}-debug/examples/accessibility_probe "NodalKit Accessibility Probe"
       - name: Install
         run: meson install -C build-${{ matrix.os }}-${{ matrix.buildtype }}
       - name: Install smoke
