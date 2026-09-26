@@ -53,7 +53,8 @@ graduates from experimental status.
 ## Accessibility bridges
 
 The accessibility model under `nk/accessibility` is populated on every
-platform. Only the Linux AT-SPI bridge is wired today; per-widget
-accessibility elements on macOS are an interim regression documented in the
-[changelog](../../CHANGELOG.md), and Windows has no UI Automation provider
+platform. Linux exposes it through AT-SPI and macOS through NSAccessibility
+elements, one per widget with a role, below the window's content view. While a
+modal dialog is open, macOS exposes only that dialog, and disabled or covered
+controls reject accessibility actions. Windows has no UI Automation provider
 yet.

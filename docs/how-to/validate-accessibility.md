@@ -4,8 +4,8 @@ Dense tool UIs such as settings dialogs, binding lists, and log panels are
 where accessibility regressions hide. NodalKit populates an accessibility
 model ([`nk/accessibility/accessible.h`](../../include/nk/accessibility/accessible.h),
 roles in [`role.h`](../../include/nk/accessibility/role.h)) and bridges it
-to AT-SPI on Linux. Use this checklist to validate a screen before shipping
-it.
+to AT-SPI on Linux and NSAccessibility on macOS. Use this checklist to
+validate a screen before shipping it.
 
 See [`examples/accessibility_probe.cpp`](../../examples/accessibility_probe.cpp)
 for a worked example of labels, relations, and focus order.
@@ -57,6 +57,9 @@ for a worked example of labels, relations, and focus order.
 - **Keyboard-only pass:** unplug the mouse and complete the primary flow.
 - **Linux / AT-SPI:** run under Accerciser or Orca and confirm names, roles,
   and focus order match the checklist.
+- **macOS:** inspect the window with Accessibility Inspector (Xcode → Open
+  Developer Tool), then walk the flow with VoiceOver (`Cmd+F5`). Widget debug
+  names appear as each element's identifier, which UI automation can target.
 - **Debug dump:** `format_widget_debug_tree` (see
   [Diagnostics facilities](../reference/diagnostics.md)) prints each node's
   role, name, state, and relations. Diff it against expectations in a test.

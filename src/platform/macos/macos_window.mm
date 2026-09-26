@@ -1,3 +1,4 @@
+#include "../../accessibility/accessibility_tree.h"
 #include "../../text/native_input_document.h"
 #include "../../text/text_boundaries.h"
 #include "text_input_routing.h"
@@ -8,6 +9,9 @@
 
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -19,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -355,150 +360,33 @@ static nk::Modifiers current_drag_modifiers() {
     return event != nil ? macos_modifiers(event.modifierFlags) : nk::Modifiers::None;
 }
 
-static bool debug_node_is_accessible(const nk::WidgetDebugNode& node) {
-    return !node.accessible_hidden && !node.accessible_role.empty() &&
-           node.accessible_role != "none";
-}
-
 static NSString* ns_string(std::string_view value) {
     return [NSString stringWithUTF8String:std::string(value).c_str()];
-}
-
-static bool debug_type_matches(const nk::WidgetDebugNode& node, std::string_view suffix) {
-    return node.type_name == suffix ||
-           (node.type_name.size() > suffix.size() &&
-            node.type_name.ends_with(std::string("::") + std::string(suffix)));
-}
-
-static NSString* macos_accessibility_role(const nk::WidgetDebugNode& node) {
-    if (debug_type_matches(node, "ComboBox")) {
-        return NSAccessibilityPopUpButtonRole;
-    }
-    const std::string_view role = node.accessible_role;
-    if (role == "button" || role == "togglebutton") {
-        return NSAccessibilityButtonRole;
-    }
-    if (role == "checkbox") {
-        return NSAccessibilityCheckBoxRole;
-    }
-    if (role == "dialog" || role == "tabpanel" || role == "window") {
-        return NSAccessibilityGroupRole;
-    }
-    if (role == "grid") {
-        return NSAccessibilityTableRole;
-    }
-    if (role == "gridcell") {
-        return NSAccessibilityCellRole;
-    }
-    if (role == "image") {
-        return NSAccessibilityImageRole;
-    }
-    if (role == "label") {
-        return NSAccessibilityStaticTextRole;
-    }
-    if (role == "link") {
-        return NSAccessibilityLinkRole;
-    }
-    if (role == "list") {
-        return NSAccessibilityListRole;
-    }
-    if (role == "listitem" || role == "treeitem") {
-        return NSAccessibilityRowRole;
-    }
-    if (role == "menu") {
-        return NSAccessibilityMenuRole;
-    }
-    if (role == "menubar") {
-        return NSAccessibilityMenuBarRole;
-    }
-    if (role == "menuitem") {
-        return NSAccessibilityMenuItemRole;
-    }
-    if (role == "progressbar") {
-        return NSAccessibilityProgressIndicatorRole;
-    }
-    if (role == "radiobutton") {
-        return NSAccessibilityRadioButtonRole;
-    }
-    if (role == "scrollbar") {
-        return NSAccessibilityScrollBarRole;
-    }
-    if (role == "slider" || role == "spinbutton") {
-        return NSAccessibilitySliderRole;
-    }
-    if (role == "tab" || role == "tablist") {
-        return NSAccessibilityTabGroupRole;
-    }
-    if (role == "textinput") {
-        return NSAccessibilityTextFieldRole;
-    }
-    if (role == "toolbar") {
-        return NSAccessibilityToolbarRole;
-    }
-    if (role == "tree") {
-        return NSAccessibilityOutlineRole;
-    }
-    return NSAccessibilityGroupRole;
-}
-
-static NSString* macos_accessibility_label(const nk::WidgetDebugNode& node) {
-    if (!node.accessible_name.empty()) {
-        return ns_string(node.accessible_name);
-    }
-    if (!node.debug_name.empty()) {
-        return ns_string(node.debug_name);
-    }
-    if (!node.type_name.empty()) {
-        return ns_string(node.type_name);
-    }
-    return @"widget";
-}
-
-static NSString* macos_accessibility_title(const nk::WidgetDebugNode& node) {
-    return macos_accessibility_label(node);
-}
-
-static bool macos_accessibility_enabled(const nk::WidgetDebugNode& node) {
-    return node.sensitive &&
-           (node.accessible_state & nk::StateFlags::Disabled) == nk::StateFlags::None;
-}
-
-static nk::Widget* resolve_widget_by_tree_path(nk::Window& window,
-                                               std::span<const std::size_t> tree_path) {
-    nk::Widget* current = window.child();
-    if (current == nullptr) {
-        return nullptr;
-    }
-    for (const auto index : tree_path) {
-        const auto children = current->children();
-        if (index >= children.size() || children[index] == nullptr) {
-            return nullptr;
-        }
-        current = children[index].get();
-    }
-    return current;
 }
 
 // ---------------------------------------------------------------------------
 // NKView — custom NSView for rendering and input
 // ---------------------------------------------------------------------------
 
-@class NKAccessibilityNode;
+@class NKAccessibilityElement;
 
 @interface NKView : NSView <NSTextInputClient, NSDraggingDestination>
 @property(nonatomic, assign) nk::MacosSurface* surface;
-- (void)synchronizeInputContext:(BOOL)moved;
+- (void)synchronizeNativeState:(BOOL)moved;
+- (nk::detail::AccessibilityTree*)accessibilityTree;
+- (NKAccessibilityElement*)accessibilityElementForNode:(nk::detail::AccessibleId)node;
+- (NSArray<id>*)accessibilityElementsForNodes:(const std::vector<nk::detail::AccessibleId>&)nodes;
+- (NSRect)screenRectFromWindowRect:(nk::Rect)rect;
 @end
 
-@interface NKAccessibilityNode : NSAccessibilityElement
-- (instancetype)initWithNode:(const nk::WidgetDebugNode&)node parent:(id)parent view:(NKView*)view;
-- (BOOL)matchesFocusedState;
+// Native proxy for one exposed widget. It holds only an identity and reads every
+// attribute from the view's AccessibilityTree when AppKit asks, so a proxy that
+// AppKit keeps after its widget is gone answers as a defunct element instead of
+// touching freed memory.
+@interface NKAccessibilityElement : NSAccessibilityElement
+- (instancetype)initWithNode:(nk::detail::AccessibleId)node view:(NKView*)view;
+- (void)invalidate;
 @end
-
-static NSArray<id>*
-build_accessibility_children(const nk::WidgetDebugNode& root, id parent, NKView* view);
-static id accessibility_hit_test(NSArray<id>* elements, NSPoint point);
-static id accessibility_focused_element(NSArray<id>* elements);
 
 static std::string objc_text_to_utf8(id value) {
     NSString* string = nil;
@@ -543,6 +431,12 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     std::size_t marked_selection_start_;
     std::size_t marked_selection_end_;
     std::optional<nk::Rect> input_caret_rect_;
+    // The view retains one proxy per identity until its widget is destroyed.
+    std::unique_ptr<nk::detail::AccessibilityTree> accessibility_tree_;
+    std::unordered_map<nk::detail::AccessibleId, NKAccessibilityElement*> accessibility_elements_;
+    std::optional<nk::detail::AccessibleId> accessibility_focus_;
+    std::string accessibility_focus_value_;
+    BOOL accessibility_active_;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame surface:(nk::MacosSurface*)surface {
@@ -569,12 +463,23 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     return YES;
 }
 
+- (void)dealloc {
+    [self releaseAccessibilityElements];
+    [super dealloc];
+}
+
+- (void)setSurface:(nk::MacosSurface*)surface {
+    if (surface != _surface) {
+        // The tree and every proxy refer to the owning Window through the surface.
+        [self releaseAccessibilityElements];
+        _surface = surface;
+    }
+}
+
+// -- Accessibility --
+
+// The view is the window's accessibility root; widget proxies hang below it.
 - (BOOL)isAccessibilityElement {
-    // AX-safe stub (S1): expose the window itself as one group. The previous
-    // per-query NKAccessibilityNode tree handed AppKit ephemeral objects that
-    // AppKit's AX cache outlives, crashing any assistive-tech query
-    // (SIGTRAP in NSAccessibilityChildren). The full widget bridge returns in
-    // the accessibility slice once elements are anchored and thread-safe.
     return YES;
 }
 
@@ -586,8 +491,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     if (!_surface) {
         return @"NodalKit window";
     }
-    const auto title = _surface->owner().title();
-    return [NSString stringWithUTF8String:std::string(title).c_str()];
+    return ns_string(_surface->owner().title());
 }
 
 - (NSString*)accessibilityTitle {
@@ -595,16 +499,141 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
 }
 
 - (NSArray<id>*)accessibilityChildren {
-    return @[];
+    auto* tree = [self accessibilityTree];
+    if (tree == nullptr) {
+        return @[];
+    }
+    [self purgeAccessibilityElements];
+    return [self accessibilityElementsForNodes:tree->root_children()];
 }
 
 - (id)accessibilityFocusedUIElement {
+    if (auto* tree = [self accessibilityTree]; tree != nullptr) {
+        if (const auto focused = tree->focused(); focused.has_value()) {
+            return [self accessibilityElementForNode:*focused];
+        }
+    }
     return self;
 }
 
 - (id)accessibilityHitTest:(NSPoint)point {
-    (void)point;
+    auto* tree = [self accessibilityTree];
+    if (tree == nullptr || self.window == nil) {
+        return self;
+    }
+    const NSPoint local = [self convertPoint:[self.window convertPointFromScreen:point]
+                                    fromView:nil];
+    if (const auto hit =
+            tree->hit_test({.x = static_cast<float>(local.x), .y = static_cast<float>(local.y)});
+        hit.has_value()) {
+        return [self accessibilityElementForNode:*hit];
+    }
     return self;
+}
+
+// AppKit services accessibility requests on the main thread. Any other thread
+// gets no tree rather than a racing walk of the widget hierarchy.
+- (nk::detail::AccessibilityTree*)accessibilityTree {
+    if (!_surface || ![NSThread isMainThread]) {
+        return nullptr;
+    }
+    if (!accessibility_tree_) {
+        accessibility_tree_ = std::make_unique<nk::detail::AccessibilityTree>(_surface->owner());
+    }
+    accessibility_active_ = YES;
+    return accessibility_tree_.get();
+}
+
+- (NKAccessibilityElement*)accessibilityElementForNode:(nk::detail::AccessibleId)node {
+    if (const auto found = accessibility_elements_.find(node);
+        found != accessibility_elements_.end()) {
+        return found->second;
+    }
+    auto* element = [[NKAccessibilityElement alloc] initWithNode:node view:self];
+    accessibility_elements_.emplace(node, element);
+    return element;
+}
+
+- (NSArray<id>*)accessibilityElementsForNodes:(const std::vector<nk::detail::AccessibleId>&)nodes {
+    NSMutableArray<id>* elements = [NSMutableArray arrayWithCapacity:nodes.size()];
+    for (const auto node : nodes) {
+        [elements addObject:[self accessibilityElementForNode:node]];
+    }
+    return elements;
+}
+
+- (NSRect)screenRectFromWindowRect:(nk::Rect)rect {
+    if (self.window == nil) {
+        return NSZeroRect;
+    }
+    const NSRect local = NSMakeRect(rect.x, rect.y, rect.width, rect.height);
+    return [self.window convertRectToScreen:[self convertRect:local toView:nil]];
+}
+
+- (void)retireAccessibilityElement:(NKAccessibilityElement*)element {
+    NSAccessibilityPostNotification(element, NSAccessibilityUIElementDestroyedNotification);
+    [element invalidate];
+    // AppKit may still be delivering the notification; drop our ownership later.
+    [element autorelease];
+}
+
+- (void)purgeAccessibilityElements {
+    if (!accessibility_tree_) {
+        return;
+    }
+    for (const auto node : accessibility_tree_->purge()) {
+        if (const auto found = accessibility_elements_.find(node);
+            found != accessibility_elements_.end()) {
+            [self retireAccessibilityElement:found->second];
+            accessibility_elements_.erase(found);
+        }
+    }
+}
+
+- (void)releaseAccessibilityElements {
+    for (const auto& [node, element] : accessibility_elements_) {
+        [self retireAccessibilityElement:element];
+    }
+    accessibility_elements_.clear();
+    accessibility_tree_.reset();
+    accessibility_focus_.reset();
+    accessibility_focus_value_.clear();
+    accessibility_active_ = NO;
+}
+
+// Announce focus and value changes caused by toolkit events. Nothing is posted
+// until an assistive technology has asked for the tree.
+- (void)synchronizeAccessibility {
+    if (!accessibility_active_) {
+        return;
+    }
+    auto* tree = [self accessibilityTree];
+    if (tree == nullptr) {
+        return;
+    }
+    [self purgeAccessibilityElements];
+    const auto focused = tree->focused();
+    std::string value;
+    if (focused.has_value()) {
+        if (const auto info = tree->info(*focused); info.has_value()) {
+            value = info->value;
+        }
+    }
+    if (focused != accessibility_focus_) {
+        accessibility_focus_ = focused;
+        accessibility_focus_value_ = std::move(value);
+        id target = focused.has_value() ? [self accessibilityElementForNode:*focused] : self;
+        NSAccessibilityPostNotification(target, NSAccessibilityFocusedUIElementChangedNotification);
+    } else if (focused.has_value() && value != accessibility_focus_value_) {
+        accessibility_focus_value_ = std::move(value);
+        NSAccessibilityPostNotification([self accessibilityElementForNode:*focused],
+                                        NSAccessibilityValueChangedNotification);
+    }
+}
+
+- (void)synchronizeNativeState:(BOOL)moved {
+    [self synchronizeInputContext:moved];
+    [self synchronizeAccessibility];
 }
 
 // -- Tracking areas --
@@ -688,7 +717,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
-    [self synchronizeInputContext:NO];
+    [self synchronizeNativeState:NO];
 }
 
 - (void)mouseUp:(NSEvent*)event {
@@ -704,6 +733,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+    [self synchronizeNativeState:NO];
 }
 
 - (void)rightMouseDown:(NSEvent*)event {
@@ -720,7 +750,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
-    [self synchronizeInputContext:NO];
+    [self synchronizeNativeState:NO];
 }
 
 - (void)rightMouseUp:(NSEvent*)event {
@@ -736,6 +766,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+    [self synchronizeNativeState:NO];
 }
 
 - (void)otherMouseDown:(NSEvent*)event {
@@ -752,7 +783,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
-    [self synchronizeInputContext:NO];
+    [self synchronizeNativeState:NO];
 }
 
 - (void)otherMouseUp:(NSEvent*)event {
@@ -768,6 +799,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+    [self synchronizeNativeState:NO];
 }
 
 - (void)mouseMoved:(NSEvent*)event {
@@ -836,7 +868,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     me.precise_scrolling = event.hasPreciseScrollingDeltas;
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
-    [self synchronizeInputContext:NO];
+    [self synchronizeNativeState:NO];
 }
 
 // -- Drag destination events --
@@ -912,22 +944,22 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     if (!_surface) {
         return;
     }
-    [self synchronizeInputContext:NO];
+    [self synchronizeNativeState:NO];
     const auto modifiers = macos_modifiers(event.modifierFlags);
     const auto key = macos_keycode_to_nk(event.keyCode);
     const bool text_input_active = _surface->owner().current_text_input_state().has_value();
     if (text_input_active &&
         !nk::detail::macos_dispatch_key_directly(key, modifiers, [self hasMarkedText])) {
         [self interpretKeyEvents:@[ event ]];
-        return;
+    } else {
+        nk::KeyEvent ke{};
+        ke.type = nk::KeyEvent::Type::Press;
+        ke.key = key;
+        ke.modifiers = modifiers;
+        ke.is_repeat = event.isARepeat;
+        _surface->owner().dispatch_key_event(ke);
     }
-    nk::KeyEvent ke{};
-    ke.type = nk::KeyEvent::Type::Press;
-    ke.key = key;
-    ke.modifiers = modifiers;
-    ke.is_repeat = event.isARepeat;
-    _surface->owner().dispatch_key_event(ke);
-    [self synchronizeInputContext:NO];
+    [self synchronizeNativeState:NO];
 }
 
 - (void)keyUp:(NSEvent*)event {
@@ -940,6 +972,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     ke.modifiers = macos_modifiers(event.modifierFlags);
     ke.is_repeat = false;
     _surface->owner().dispatch_key_event(ke);
+    [self synchronizeNativeState:NO];
 }
 
 // -- Text input client --
@@ -1193,174 +1226,344 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
 
 @end
 
-@implementation NKAccessibilityNode {
-    nk::WidgetDebugNode node_;
-    id parent_;
-    NKView* view_;
-    NSArray<id>* children_;
+// ---------------------------------------------------------------------------
+// NKAccessibilityElement — native proxy for an exposed widget
+// ---------------------------------------------------------------------------
+
+static bool accessibility_type_is(const nk::detail::AccessibleNodeInfo& info,
+                                  std::string_view type) {
+    return info.type_name == type || info.type_name.ends_with("::" + std::string(type));
 }
 
-- (instancetype)initWithNode:(const nk::WidgetDebugNode&)node parent:(id)parent view:(NKView*)view {
+static bool accessibility_has_state(const nk::detail::AccessibleNodeInfo& info,
+                                    nk::StateFlags flag) {
+    return (info.state & flag) == flag;
+}
+
+static NSString* macos_accessibility_role(const nk::detail::AccessibleNodeInfo& info) {
+    using Role = nk::AccessibleRole;
+    if (accessibility_type_is(info, "ComboBox")) {
+        return NSAccessibilityPopUpButtonRole;
+    }
+    if (accessibility_type_is(info, "Expander")) {
+        return NSAccessibilityDisclosureTriangleRole;
+    }
+    if (accessibility_type_is(info, "TextArea")) {
+        return NSAccessibilityTextAreaRole;
+    }
+    switch (info.role) {
+    case Role::Button:
+        return NSAccessibilityButtonRole;
+    case Role::CheckBox:
+    case Role::ToggleButton:
+        return NSAccessibilityCheckBoxRole;
+    case Role::Grid:
+        return NSAccessibilityTableRole;
+    case Role::GridCell:
+        return NSAccessibilityCellRole;
+    case Role::Image:
+        return NSAccessibilityImageRole;
+    case Role::Label:
+        return NSAccessibilityStaticTextRole;
+    case Role::Link:
+        return NSAccessibilityLinkRole;
+    case Role::List:
+        return NSAccessibilityListRole;
+    case Role::ListItem:
+    case Role::TreeItem:
+        return NSAccessibilityRowRole;
+    case Role::Menu:
+        return NSAccessibilityMenuRole;
+    case Role::MenuBar:
+        return NSAccessibilityMenuBarRole;
+    case Role::MenuItem:
+        return NSAccessibilityMenuItemRole;
+    case Role::ProgressBar:
+        return NSAccessibilityProgressIndicatorRole;
+    case Role::RadioButton:
+    case Role::Tab:
+        return NSAccessibilityRadioButtonRole;
+    case Role::ScrollBar:
+        return NSAccessibilityScrollBarRole;
+    case Role::Slider:
+    case Role::SpinButton:
+        return NSAccessibilitySliderRole;
+    case Role::TabList:
+        return NSAccessibilityTabGroupRole;
+    case Role::TextInput:
+        return NSAccessibilityTextFieldRole;
+    case Role::Toolbar:
+        return NSAccessibilityToolbarRole;
+    case Role::Tree:
+        return NSAccessibilityOutlineRole;
+    case Role::None:
+    case Role::Dialog:
+    case Role::Group:
+    case Role::Separator:
+    case Role::Status:
+    case Role::TabPanel:
+    case Role::Window:
+        return NSAccessibilityGroupRole;
+    }
+    return NSAccessibilityGroupRole;
+}
+
+static NSString* macos_accessibility_subrole(const nk::detail::AccessibleNodeInfo& info) {
+    if (accessibility_type_is(info, "Switch")) {
+        return NSAccessibilitySwitchSubrole;
+    }
+    switch (info.role) {
+    case nk::AccessibleRole::ToggleButton:
+        return accessibility_type_is(info, "Expander") ? nil : NSAccessibilityToggleSubrole;
+    case nk::AccessibleRole::Tab:
+        return NSAccessibilityTabButtonSubrole;
+    case nk::AccessibleRole::TreeItem:
+        return NSAccessibilityOutlineRowSubrole;
+    default:
+        return nil;
+    }
+}
+
+static std::optional<double> accessibility_number(const std::string& text) {
+    if (text.empty()) {
+        return std::nullopt;
+    }
+    char* end = nullptr;
+    const double value = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || *end != '\0' || !std::isfinite(value)) {
+        return std::nullopt;
+    }
+    return value;
+}
+
+@implementation NKAccessibilityElement {
+    nk::detail::AccessibleId node_;
+    NKView* view_; // Not retained: the view invalidates its proxies before it goes away.
+}
+
+- (instancetype)initWithNode:(nk::detail::AccessibleId)node view:(NKView*)view {
     self = [super init];
     if (self) {
         node_ = node;
-        parent_ = parent;
         view_ = view;
-        children_ = build_accessibility_children(node_, self, view);
     }
     return self;
 }
 
+- (void)invalidate {
+    view_ = nil;
+}
+
+- (nk::detail::AccessibilityTree*)tree {
+    return view_ != nil ? [view_ accessibilityTree] : nullptr;
+}
+
+- (std::optional<nk::detail::AccessibleNodeInfo>)info {
+    auto* tree = [self tree];
+    return tree != nullptr ? tree->info(node_) : std::nullopt;
+}
+
 - (BOOL)isAccessibilityElement {
-    return YES;
+    const auto info = [self info];
+    return info.has_value() && info->role != nk::AccessibleRole::Separator;
 }
 
 - (id)accessibilityParent {
-    return parent_;
+    auto* tree = [self tree];
+    if (tree == nullptr || !tree->is_exposed(node_)) {
+        return nil;
+    }
+    if (const auto parent = tree->parent(node_); parent.has_value()) {
+        return [view_ accessibilityElementForNode:*parent];
+    }
+    return view_;
 }
 
 - (NSArray<id>*)accessibilityChildren {
-    return children_;
+    auto* tree = [self tree];
+    return tree != nullptr ? [view_ accessibilityElementsForNodes:tree->children(node_)] : @[];
+}
+
+- (id)accessibilityWindow {
+    return view_.window;
+}
+
+- (id)accessibilityTopLevelUIElement {
+    return view_.window;
 }
 
 - (NSString*)accessibilityRole {
-    return macos_accessibility_role(node_);
+    const auto info = [self info];
+    return info.has_value() ? macos_accessibility_role(*info) : NSAccessibilityUnknownRole;
+}
+
+- (NSString*)accessibilitySubrole {
+    const auto info = [self info];
+    return info.has_value() ? macos_accessibility_subrole(*info) : nil;
+}
+
+- (NSString*)accessibilityRoleDescription {
+    return NSAccessibilityRoleDescription(self.accessibilityRole, self.accessibilitySubrole);
 }
 
 - (NSString*)accessibilityLabel {
-    return macos_accessibility_label(node_);
-}
-
-- (NSString*)accessibilityTitle {
-    return macos_accessibility_title(node_);
-}
-
-- (NSString*)accessibilityHelp {
-    if (node_.accessible_description.empty()) {
+    const auto info = [self info];
+    // Static text carries its text as the value, like AppKit labels.
+    if (!info.has_value() || info->name.empty() || info->role == nk::AccessibleRole::Label) {
         return nil;
     }
-    return ns_string(node_.accessible_description);
+    return ns_string(info->name);
 }
 
 - (id)accessibilityValue {
-    if (!node_.accessible_value.empty()) {
-        return ns_string(node_.accessible_value);
+    const auto info = [self info];
+    if (!info.has_value()) {
+        return nil;
     }
-    if (node_.accessible_role == "label" || debug_type_matches(node_, "Label")) {
-        return macos_accessibility_label(node_);
+    using Role = nk::AccessibleRole;
+    switch (info->role) {
+    case Role::CheckBox:
+    case Role::RadioButton:
+    case Role::ToggleButton:
+        return @(accessibility_has_state(*info, nk::StateFlags::Checked) ? 1 : 0);
+    case Role::Tab:
+        return @(accessibility_has_state(*info, nk::StateFlags::Selected) ||
+                         accessibility_has_state(*info, nk::StateFlags::Checked)
+                     ? 1
+                     : 0);
+    case Role::Label:
+        return ns_string(info->name);
+    case Role::TextInput:
+        return ns_string(info->value);
+    case Role::ProgressBar:
+    case Role::Slider:
+    case Role::SpinButton:
+        if (const auto number = accessibility_number(info->value); number.has_value()) {
+            return @(*number);
+        }
+        break;
+    default:
+        break;
     }
-    if (debug_type_matches(node_, "ComboBox") && !node_.accessible_name.empty()) {
-        return ns_string(node_.accessible_name);
-    }
-    return nil;
+    return info->value.empty() ? nil : ns_string(info->value);
 }
 
-- (BOOL)accessibilityEnabled {
-    return macos_accessibility_enabled(node_);
+- (NSString*)accessibilityHelp {
+    const auto info = [self info];
+    return info.has_value() && !info->description.empty() ? ns_string(info->description) : nil;
+}
+
+// Debug names identify elements for UI automation; they are never spoken.
+- (NSString*)accessibilityIdentifier {
+    const auto info = [self info];
+    return info.has_value() && !info->debug_name.empty() ? ns_string(info->debug_name) : nil;
+}
+
+- (BOOL)isAccessibilityEnabled {
+    const auto info = [self info];
+    return info.has_value() && info->enabled;
+}
+
+- (BOOL)isAccessibilityFocused {
+    const auto info = [self info];
+    return info.has_value() && info->focused;
+}
+
+- (void)setAccessibilityFocused:(BOOL)focused {
+    auto* tree = [self tree];
+    if (focused && tree != nullptr && tree->focus(node_)) {
+        [view_ synchronizeNativeState:NO];
+    }
+}
+
+- (BOOL)isAccessibilitySelected {
+    const auto info = [self info];
+    return info.has_value() && accessibility_has_state(*info, nk::StateFlags::Selected);
 }
 
 - (NSRect)accessibilityFrame {
-    if (view_ == nil || view_.window == nil) {
-        return NSZeroRect;
-    }
-    const auto& allocation = node_.allocation;
-    NSRect local_rect = NSMakeRect(static_cast<CGFloat>(allocation.x),
-                                   static_cast<CGFloat>(allocation.y),
-                                   static_cast<CGFloat>(allocation.width),
-                                   static_cast<CGFloat>(allocation.height));
-    NSRect window_rect = [view_ convertRect:local_rect toView:nil];
-    return [view_.window convertRectToScreen:window_rect];
-}
-
-- (id)accessibilityFocusedUIElement {
-    id focused = accessibility_focused_element(children_);
-    return focused != nil ? focused : (node_.focused ? self : nil);
+    const auto info = [self info];
+    return info.has_value() ? [view_ screenRectFromWindowRect:info->bounds] : NSZeroRect;
 }
 
 - (id)accessibilityHitTest:(NSPoint)point {
-    id hit = accessibility_hit_test(children_, point);
-    if (hit != nil) {
-        return hit;
-    }
-    return NSPointInRect(point, self.accessibilityFrame) ? self : nil;
+    return view_ != nil ? [view_ accessibilityHitTest:point] : nil;
 }
 
-- (BOOL)matchesFocusedState {
-    return node_.focused;
+- (id)accessibilityFocusedUIElement {
+    return view_ != nil ? [view_ accessibilityFocusedUIElement] : nil;
 }
 
 - (BOOL)accessibilityPerformPress {
-    if (view_ == nil || view_.surface == nullptr) {
+    auto* tree = [self tree];
+    if (tree == nullptr) {
         return NO;
     }
-    auto* widget = resolve_widget_by_tree_path(view_.surface->owner(), node_.tree_path);
-    if (widget == nullptr || widget->accessible() == nullptr) {
-        return NO;
+    const bool performed = tree->perform(node_, nk::AccessibleAction::Activate) ||
+                           tree->perform(node_, nk::AccessibleAction::Toggle);
+    // The action may have closed this window, which invalidates the proxy.
+    [view_ synchronizeNativeState:NO];
+    return performed ? YES : NO;
+}
+
+- (BOOL)isAccessibilitySelectorAllowed:(SEL)selector {
+    if (selector == @selector(accessibilityPerformPress)) {
+        const auto info = [self info];
+        return info.has_value() && info->enabled &&
+               std::ranges::any_of(info->actions, [](nk::AccessibleAction action) {
+                   return action == nk::AccessibleAction::Activate ||
+                          action == nk::AccessibleAction::Toggle;
+               });
     }
-    if (widget->accessible()->supports_action(nk::AccessibleAction::Activate)) {
-        return widget->accessible()->perform_action(nk::AccessibleAction::Activate) ? YES : NO;
+    if (selector == @selector(setAccessibilityFocused:)) {
+        const auto info = [self info];
+        return info.has_value() && info->enabled && info->focusable;
     }
-    if (widget->accessible()->supports_action(nk::AccessibleAction::Toggle)) {
-        return widget->accessible()->perform_action(nk::AccessibleAction::Toggle) ? YES : NO;
+    return [super isAccessibilitySelectorAllowed:selector];
+}
+
+// -- Text --
+
+- (NSInteger)accessibilityNumberOfCharacters {
+    const auto info = [self info];
+    return info.has_value() ? static_cast<NSInteger>(nk::detail::utf16_offset_from_utf8(
+                                  info->value, info->value.size()))
+                            : 0;
+}
+
+- (NSRange)accessibilityVisibleCharacterRange {
+    return NSMakeRange(0, static_cast<NSUInteger>(self.accessibilityNumberOfCharacters));
+}
+
+- (NSRange)accessibilitySelectedTextRange {
+    const auto info = [self info];
+    if (!info.has_value() || info->role != nk::AccessibleRole::TextInput) {
+        return NSMakeRange(0, 0);
     }
-    if (widget->accessible()->supports_action(nk::AccessibleAction::Focus)) {
-        return widget->accessible()->perform_action(nk::AccessibleAction::Focus) ? YES : NO;
+    // Secure editors publish no committed text, so their state never matches the masked value.
+    if (info->focused && view_.surface != nullptr) {
+        if (const auto state = view_.surface->owner().current_text_input_state();
+            state.has_value() && state->text == info->value) {
+            return ns_range(
+                nk::detail::NativeInputDocument(state->text, state->cursor, state->anchor)
+                    .selected_range());
+        }
     }
-    return NO;
+    return NSMakeRange(static_cast<NSUInteger>(self.accessibilityNumberOfCharacters), 0);
+}
+
+- (NSString*)accessibilitySelectedText {
+    const auto info = [self info];
+    if (!info.has_value()) {
+        return nil;
+    }
+    const auto range = self.accessibilitySelectedTextRange;
+    const auto substring =
+        nk::detail::NativeInputDocument(info->value, 0, 0).substring(utf16_range(range));
+    return substring.has_value() ? ns_string(substring->text) : nil;
 }
 
 @end
-
-static void append_accessibility_descendants(const nk::WidgetDebugNode& node,
-                                             id parent,
-                                             NKView* view,
-                                             NSMutableArray<id>* out) {
-    if (debug_node_is_accessible(node)) {
-        [out addObject:[[NKAccessibilityNode alloc] initWithNode:node parent:parent view:view]];
-        return;
-    }
-    for (const auto& child : node.children) {
-        append_accessibility_descendants(child, parent, view, out);
-    }
-}
-
-static NSArray<id>*
-build_accessibility_children(const nk::WidgetDebugNode& root, id parent, NKView* view) {
-    NSMutableArray<id>* children = [NSMutableArray array];
-    for (const auto& child : root.children) {
-        append_accessibility_descendants(child, parent, view, children);
-    }
-    return children;
-}
-
-static id accessibility_hit_test(NSArray<id>* elements, NSPoint point) {
-    for (id candidate in [elements reverseObjectEnumerator]) {
-        if (![candidate isKindOfClass:[NKAccessibilityNode class]]) {
-            continue;
-        }
-        id nested = [candidate accessibilityHitTest:point];
-        if (nested != nil) {
-            return nested;
-        }
-    }
-    return nil;
-}
-
-static id accessibility_focused_element(NSArray<id>* elements) {
-    for (id candidate in elements) {
-        if (![candidate isKindOfClass:[NKAccessibilityNode class]]) {
-            continue;
-        }
-        if ([(NKAccessibilityNode*)candidate matchesFocusedState]) {
-            return candidate;
-        }
-        id nested = accessibility_focused_element([candidate accessibilityChildren]);
-        if (nested != nil) {
-            return nested;
-        }
-    }
-    return nil;
-}
 
 // ---------------------------------------------------------------------------
 // NKWindowDelegate — handles window-level events
@@ -1392,12 +1595,12 @@ static id accessibility_focused_element(NSArray<id>* elements) {
     we.width = static_cast<int>(sz.width);
     we.height = static_cast<int>(sz.height);
     _surface->owner().dispatch_window_event(we);
-    _surface->sync_text_input(true);
+    _surface->sync_native_state(true);
 }
 
 - (void)windowDidMove:(NSNotification*)notification {
     if (_surface) {
-        _surface->sync_text_input(true);
+        _surface->sync_native_state(true);
     }
 }
 
@@ -1408,6 +1611,7 @@ static id accessibility_focused_element(NSArray<id>* elements) {
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::FocusIn;
     _surface->owner().dispatch_window_event(we);
+    _surface->sync_native_state(false);
 }
 
 - (void)windowDidResignKey:(NSNotification*)notification {
@@ -1417,7 +1621,7 @@ static id accessibility_focused_element(NSArray<id>* elements) {
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::FocusOut;
     _surface->owner().dispatch_window_event(we);
-    _surface->sync_text_input(false);
+    _surface->sync_native_state(false);
 }
 
 - (void)windowDidExpose:(NSNotification*)notification {
@@ -1436,7 +1640,7 @@ static id accessibility_focused_element(NSArray<id>* elements) {
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::Expose;
     _surface->owner().dispatch_window_event(we);
-    _surface->sync_text_input(true);
+    _surface->sync_native_state(true);
 }
 
 @end
@@ -1812,9 +2016,9 @@ void MacosSurface::present(const uint8_t* rgba,
     }
 }
 
-void MacosSurface::sync_text_input(bool coordinates_changed) {
+void MacosSurface::sync_native_state(bool moved) {
     @autoreleasepool {
-        [view_ synchronizeInputContext:coordinates_changed ? YES : NO];
+        [view_ synchronizeNativeState:moved ? YES : NO];
     }
 }
 
