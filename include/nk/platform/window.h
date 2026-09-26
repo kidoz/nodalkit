@@ -69,11 +69,13 @@ struct WindowConfig {
 };
 
 /// Focused text-input state exposed to platform backends for IME integration.
+/// Mirrors the focused widget's `WidgetTextInputState`.
 struct WindowTextInputState {
     std::string text;
     std::size_t cursor = 0;
     std::size_t anchor = 0;
     Rect caret_rect{};
+    bool composing = false; ///< Uncommitted composition text is displayed.
 };
 
 /// A top-level application window. Owns a root widget and manages

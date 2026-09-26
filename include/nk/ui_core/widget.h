@@ -45,12 +45,18 @@ enum class SizePolicy {
 
 /// Active text-input session a focused widget exposes to platform backends
 /// for IME activation, composition, and candidate-window placement.
+///
+/// `text`, `cursor`, and `anchor` describe committed text only. Secure-entry
+/// editors leave them empty so input methods never receive secret text.
 struct WidgetTextInputState {
     std::string text;
     std::size_t cursor = 0;
     std::size_t anchor = 0;
     /// Caret rectangle in window coordinates.
     Rect caret_rect{};
+    /// True while uncommitted composition text is shown in place of the
+    /// selection. Backends discard native composition state once it ends.
+    bool composing = false;
 };
 
 /// Base class for all widgets. Widgets form a tree with unique-pointer

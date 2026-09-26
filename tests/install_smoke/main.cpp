@@ -220,7 +220,8 @@ void check_widgets() {
           "TextArea exports selection queries through the installed SDK");
     const auto input_state = area->text_input_state();
     check(input_state && input_state->text == area->text() &&
-              input_state->cursor == area->text().size() && input_state->anchor == 0,
+              input_state->cursor == area->text().size() && input_state->anchor == 0 &&
+              !input_state->composing,
           "TextArea exports committed surrounding text and selection through the installed SDK");
     area->set_editable(false);
     check(!area->text_input_state(), "Read-only TextArea does not request native text input");

@@ -2768,6 +2768,7 @@ std::optional<WindowTextInputState> Window::current_text_input_state() const {
         .cursor = widget_state->cursor,
         .anchor = widget_state->anchor,
         .caret_rect = widget_state->caret_rect,
+        .composing = widget_state->composing,
     };
 }
 

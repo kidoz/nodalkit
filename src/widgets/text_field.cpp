@@ -559,6 +559,11 @@ std::optional<WidgetTextInputState> TextField::text_input_state() const {
     }
 
     WidgetTextInputState state{};
+    state.caret_rect = *caret_rect;
+    state.composing = has_preedit();
+    if (impl_->secure_text_entry) {
+        return state;
+    }
     state.text = std::string(text());
     state.cursor = cursor_position();
     if (has_selection()) {
@@ -570,7 +575,6 @@ std::optional<WidgetTextInputState> TextField::text_input_state() const {
     } else {
         state.anchor = state.cursor;
     }
-    state.caret_rect = *caret_rect;
     return state;
 }
 

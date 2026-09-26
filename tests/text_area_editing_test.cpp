@@ -600,3 +600,40 @@ TEST_CASE("Native UTF-16 ranges map to editor byte offsets", "[text][ime][macos]
                   text, nk::detail::utf16_offset_from_utf8(text, byte)) == byte);
     }
 }
+
+TEST_CASE("Window reports composition and withholds secure text from input methods",
+          "[text][ime]") {
+    nk::Window window({.title = "Input state", .width = 240, .height = 100});
+    auto field = nk::TextField::create("secret");
+    window.set_child(field);
+    field->allocate({10, 10, 220, 36});
+    field->grab_focus();
+    auto state = window.current_text_input_state();
+    REQUIRE(state.has_value());
+    CHECK_FALSE(state->composing);
+    window.dispatch_text_input_event({.type = nk::TextInputEvent::Type::Preedit, .text = "x"});
+    state = window.current_text_input_state();
+    REQUIRE(state.has_value());
+    CHECK(state->composing);
+    CHECK(state->text == "secret");
+    REQUIRE(key(*field, nk::KeyCode::Escape));
+    state = window.current_text_input_state();
+    REQUIRE(state.has_value());
+    CHECK_FALSE(state->composing);
+
+    field->set_secure_text_entry(true);
+    state = window.current_text_input_state();
+    REQUIRE(state.has_value());
+    CHECK(state->text.empty());
+    CHECK(state->cursor == 0);
+    CHECK(state->anchor == 0);
+    CHECK(state->caret_rect.height > 0);
+
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 240, 100});
+    REQUIRE(area->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Preedit, .text = "pending"}));
+    CHECK(area->text_input_state()->composing);
+    REQUIRE(commit(*area, "done"));
+    CHECK_FALSE(area->text_input_state()->composing);
+}

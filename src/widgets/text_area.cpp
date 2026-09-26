@@ -278,7 +278,8 @@ std::optional<WidgetTextInputState> TextArea::text_input_state() const {
     return WidgetTextInputState{.text = impl_->edit.text,
                                 .cursor = impl_->edit.cursor,
                                 .anchor = impl_->edit.selection_anchor,
-                                .caret_rect = text_input_caret_rect()};
+                                .caret_rect = text_input_caret_rect(),
+                                .composing = impl_->edit.has_preedit()};
 }
 
 void TextArea::refresh_content_metrics() {
