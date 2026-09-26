@@ -43,6 +43,7 @@ nk_sources = files(
     'src/platform/system_preferences.cpp',
     'src/debug/diagnostics.cpp',
     'src/ui_core/widget.cpp',
+    'src/ui_core/widget_type_name.cpp',
     'src/layout/layout_manager.cpp',
     'src/layout/box_layout.cpp',
     'src/layout/breakpoint.cpp',
@@ -58,6 +59,7 @@ nk_sources = files(
     'src/style/theme.cpp',
     'src/style/theme_selection.cpp',
     'src/style/gtk_palette.cpp',
+    'src/accessibility/accessibility_tree.cpp',
     'src/accessibility/accessible.cpp',
     # Pure data conversion (WidgetDebugNode -> AtspiAccessibleSnapshot); no D-Bus/glib deps.
     # Compiled on every platform intentionally so the snapshot logic is unit-tested under

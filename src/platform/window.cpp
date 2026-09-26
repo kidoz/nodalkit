@@ -1,3 +1,5 @@
+#include "../ui_core/widget_type_name.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -27,12 +29,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
-#include <typeinfo>
 #include <vector>
-
-#if defined(__GNUG__)
-#include <cxxabi.h>
-#endif
 
 namespace nk {
 
@@ -544,15 +541,7 @@ std::size_t count_render_nodes_recursive(const RenderNode* node) {
 }
 
 std::string debug_type_name(const Widget& widget) {
-#if defined(__GNUG__)
-    int status = 0;
-    char* demangled = abi::__cxa_demangle(typeid(widget).name(), nullptr, nullptr, &status);
-    std::string result = (status == 0 && demangled != nullptr) ? demangled : typeid(widget).name();
-    std::free(demangled);
-    return result;
-#else
-    return typeid(widget).name();
-#endif
+    return detail::widget_type_name(widget);
 }
 
 std::string_view size_policy_name(SizePolicy policy) {
@@ -2832,6 +2821,28 @@ const FrameDiagnostics& WindowInspector::last_frame_diagnostics() const {
 
 std::span<const FrameDiagnostics> WindowInspector::debug_frame_history() const {
     return window_.impl_->frame_history;
+}
+
+std::vector<Widget*> Window::accessibility_roots() const {
+    for (auto it = impl_->overlays.rbegin(); it != impl_->overlays.rend(); ++it) {
+        if (it->modal && it->widget != nullptr && it->widget->is_visible()) {
+            return {it->widget.get()};
+        }
+    }
+    std::vector<Widget*> roots;
+    if (impl_->child != nullptr) {
+        roots.push_back(impl_->child.get());
+    }
+    for (const auto& overlay : impl_->overlays) {
+        if (overlay.widget != nullptr) {
+            roots.push_back(overlay.widget.get());
+        }
+    }
+    return roots;
+}
+
+Widget* Window::focused_widget() const {
+    return impl_->focused_widget;
 }
 
 WidgetDebugNode WindowInspector::debug_tree() const {

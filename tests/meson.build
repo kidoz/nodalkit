@@ -171,3 +171,9 @@ if host_machine.system() == 'linux'
     )
     test('wayland_portal_contract', test_wayland_portal_contract)
 endif
+
+test_accessibility_tree = executable('test_accessibility_tree',
+    'accessibility_tree_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('accessibility_tree', test_accessibility_tree)

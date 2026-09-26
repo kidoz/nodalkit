@@ -18,6 +18,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace nk {
 
@@ -29,6 +30,10 @@ class Headerbar;
 class ToolbarView;
 class RenderNode;
 class WindowInspector;
+
+namespace detail {
+class AccessibilityTree;
+} // namespace detail
 
 struct SystemPreferences;
 struct MouseEvent;
@@ -233,6 +238,12 @@ private:
     friend class Headerbar;
     friend class ToolbarView;
     friend class WindowInspector;
+    friend class detail::AccessibilityTree;
+
+    // Roots exposed to assistive technology: the topmost visible modal overlay
+    // alone, otherwise the content followed by the overlays in stacking order.
+    [[nodiscard]] std::vector<Widget*> accessibility_roots() const;
+    [[nodiscard]] Widget* focused_widget() const;
 
     [[nodiscard]] TextShaper* text_shaper() const;
     [[nodiscard]] const SystemPreferences& system_preferences() const;
