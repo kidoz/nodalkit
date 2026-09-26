@@ -70,6 +70,7 @@ nk_sources = files(
     'src/model/selection_model.cpp',
     'src/model/settings.cpp',
     'src/model/tree_model.cpp',
+    'src/text/native_input_document.cpp',
     'src/text/shaped_text.cpp',
     'src/text/text_boundaries.cpp',
     'src/text/text_edit_buffer.cpp',

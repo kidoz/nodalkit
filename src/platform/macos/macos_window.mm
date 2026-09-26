@@ -1,3 +1,4 @@
+#include "../../text/native_input_document.h"
 #include "../../text/text_boundaries.h"
 #include "text_input_routing.h"
 /// @file macos_window.mm
@@ -15,6 +16,8 @@
 #include <nk/platform/key_codes.h>
 #include <nk/platform/window_inspector.h>
 #include <nk/ui_core/widget.h>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -484,6 +487,7 @@ static nk::Widget* resolve_widget_by_tree_path(nk::Window& window,
 
 @interface NKView : NSView <NSTextInputClient, NSDraggingDestination>
 @property(nonatomic, assign) nk::MacosSurface* surface;
+- (void)synchronizeInputContext:(BOOL)moved;
 @end
 
 @interface NKAccessibilityNode : NSAccessibilityElement
@@ -524,18 +528,27 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     return nullptr;
 }
 
+static NSRange ns_range(nk::detail::Utf16Range range) {
+    return NSMakeRange(range.location, range.length);
+}
+
+static nk::detail::Utf16Range utf16_range(NSRange range) {
+    return {range.location, range.length};
+}
+
 @implementation NKView {
     NSTrackingArea* tracking_area_;
-    NSRange marked_range_;
-    NSRange selected_range_;
+    // Marked text the input context composes; the focused editor shows it as preedit.
+    std::string marked_text_;
+    std::size_t marked_selection_start_;
+    std::size_t marked_selection_end_;
+    std::optional<nk::Rect> input_caret_rect_;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame surface:(nk::MacosSurface*)surface {
     self = [super initWithFrame:frame];
     if (self) {
         _surface = surface;
-        marked_range_ = NSMakeRange(NSNotFound, 0);
-        selected_range_ = NSMakeRange(0, 0);
         [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
         [self updateTrackingAreas];
     }
@@ -665,6 +678,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     if (!_surface) {
         return;
     }
+    [self commitMarkedText];
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Press;
@@ -674,6 +688,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+    [self synchronizeInputContext:NO];
 }
 
 - (void)mouseUp:(NSEvent*)event {
@@ -695,6 +710,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     if (!_surface) {
         return;
     }
+    [self commitMarkedText];
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Press;
@@ -704,6 +720,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+    [self synchronizeInputContext:NO];
 }
 
 - (void)rightMouseUp:(NSEvent*)event {
@@ -725,6 +742,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     if (!_surface) {
         return;
     }
+    [self commitMarkedText];
     NSPoint loc = [self convertPoint:event.locationInWindow fromView:nil];
     nk::MouseEvent me{};
     me.type = nk::MouseEvent::Type::Press;
@@ -734,6 +752,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     me.click_count = static_cast<int>(event.clickCount);
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+    [self synchronizeInputContext:NO];
 }
 
 - (void)otherMouseUp:(NSEvent*)event {
@@ -817,6 +836,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     me.precise_scrolling = event.hasPreciseScrollingDeltas;
     me.modifiers = macos_modifiers(event.modifierFlags);
     _surface->owner().dispatch_mouse_event(me);
+    [self synchronizeInputContext:NO];
 }
 
 // -- Drag destination events --
@@ -892,6 +912,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     if (!_surface) {
         return;
     }
+    [self synchronizeInputContext:NO];
     const auto modifiers = macos_modifiers(event.modifierFlags);
     const auto key = macos_keycode_to_nk(event.keyCode);
     const bool text_input_active = _surface->owner().current_text_input_state().has_value();
@@ -906,6 +927,7 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     ke.modifiers = modifiers;
     ke.is_repeat = event.isARepeat;
     _surface->owner().dispatch_key_event(ke);
+    [self synchronizeInputContext:NO];
 }
 
 - (void)keyUp:(NSEvent*)event {
@@ -920,67 +942,133 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
     _surface->owner().dispatch_key_event(ke);
 }
 
+// -- Text input client --
+
+// Cocoa addresses the committed text with the marked text in place of the
+// selection it replaces; nullopt when no focused editor accepts text input.
+- (std::optional<nk::detail::NativeInputDocument>)inputDocument {
+    if (!_surface) {
+        return std::nullopt;
+    }
+    const auto state = _surface->owner().current_text_input_state();
+    if (!state.has_value()) {
+        return std::nullopt;
+    }
+    if (!state->composing || marked_text_.empty()) {
+        return nk::detail::NativeInputDocument(state->text, state->cursor, state->anchor);
+    }
+    return nk::detail::NativeInputDocument(state->text,
+                                           state->cursor,
+                                           state->anchor,
+                                           marked_text_,
+                                           marked_selection_start_,
+                                           marked_selection_end_);
+}
+
+- (void)clearMarkedTextState {
+    marked_text_.clear();
+    marked_selection_start_ = 0;
+    marked_selection_end_ = 0;
+}
+
+// The toolkit ends compositions on its own (focus changes, read-only
+// transitions, Escape handled by an editor). Tell the input context so it does
+// not keep composing text that the editor no longer shows, and let candidate
+// windows follow the caret after scrolling or window movement.
+- (void)synchronizeInputContext:(BOOL)moved {
+    if (!_surface) {
+        return;
+    }
+    const auto state = _surface->owner().current_text_input_state();
+    if (!marked_text_.empty() && !(state.has_value() && state->composing)) {
+        [self clearMarkedTextState];
+        [[self inputContext] discardMarkedText];
+    }
+    std::optional<nk::Rect> caret_rect;
+    if (state.has_value()) {
+        caret_rect = state->caret_rect;
+    }
+    if (moved || caret_rect != input_caret_rect_) {
+        input_caret_rect_ = caret_rect;
+        [[self inputContext] invalidateCharacterCoordinates];
+    }
+}
+
+// Cocoa text views keep marked text as typed when a click moves the caret.
+- (void)commitMarkedText {
+    if (![self hasMarkedText]) {
+        return;
+    }
+    nk::TextInputEvent te{};
+    te.type = nk::TextInputEvent::Type::Commit;
+    te.text = marked_text_;
+    [self clearMarkedTextState];
+    [[self inputContext] discardMarkedText];
+    _surface->owner().dispatch_text_input_event(te);
+}
+
 - (BOOL)hasMarkedText {
-    return marked_range_.location != NSNotFound && marked_range_.length > 0;
+    if (marked_text_.empty() || !_surface) {
+        return NO;
+    }
+    const auto state = _surface->owner().current_text_input_state();
+    return state.has_value() && state->composing;
 }
 
 - (NSRange)markedRange {
-    return [self hasMarkedText] ? marked_range_ : NSMakeRange(NSNotFound, 0);
-}
-
-- (NSRange)selectedRange {
-    if ([self hasMarkedText]) {
-        return selected_range_;
-    }
-    if (_surface) {
-        if (const auto state = _surface->owner().current_text_input_state(); state.has_value()) {
-            const auto start = nk::detail::utf16_offset_from_utf8(
-                state->text, std::min(state->cursor, state->anchor));
-            const auto end = nk::detail::utf16_offset_from_utf8(
-                state->text, std::max(state->cursor, state->anchor));
-            return NSMakeRange(start, end - start);
+    const auto document = [self inputDocument];
+    if (document.has_value()) {
+        if (const auto range = document->marked_range(); range.has_value()) {
+            return ns_range(*range);
         }
     }
     return NSMakeRange(NSNotFound, 0);
 }
 
+- (NSRange)selectedRange {
+    const auto document = [self inputDocument];
+    return document.has_value() ? ns_range(document->selected_range()) : NSMakeRange(NSNotFound, 0);
+}
+
 - (void)setMarkedText:(id)string
         selectedRange:(NSRange)selectedRange
      replacementRange:(NSRange)replacementRange {
-    (void)replacementRange;
-    if (!_surface) {
-        return;
-    }
-    const auto state = _surface->owner().current_text_input_state();
-    if (!state.has_value()) {
-        marked_range_ = NSMakeRange(NSNotFound, 0);
-        selected_range_ = NSMakeRange(NSNotFound, 0);
+    const auto document = [self inputDocument];
+    if (!document.has_value()) {
+        [self clearMarkedTextState];
         return;
     }
     auto text = objc_text_to_utf8(string);
     const auto length = nk::detail::utf16_offset_from_utf8(text, text.size());
     const auto start = std::min<std::size_t>(selectedRange.location, length);
     const auto end = start + std::min<std::size_t>(selectedRange.length, length - start);
-    const auto base =
-        nk::detail::utf16_offset_from_utf8(state->text, std::min(state->cursor, state->anchor));
-    marked_range_ = text.empty() ? NSMakeRange(NSNotFound, 0) : NSMakeRange(base, length);
-    selected_range_ = NSMakeRange(base + start, end - start);
     nk::TextInputEvent te{};
     te.type = nk::TextInputEvent::Type::Preedit;
+    te.selection_start = nk::detail::utf8_offset_from_utf16(text, start);
+    te.selection_end = nk::detail::utf8_offset_from_utf16(text, end, true);
+    if (!text.empty() && replacementRange.location != NSNotFound) {
+        te.replacement_range = document->committed_replacement(utf16_range(replacementRange));
+    }
+    marked_text_ = text;
+    marked_selection_start_ = te.selection_start;
+    marked_selection_end_ = te.selection_end;
     te.text = std::move(text);
-    te.selection_start = nk::detail::utf8_offset_from_utf16(te.text, start);
-    te.selection_end = nk::detail::utf8_offset_from_utf16(te.text, end, true);
     _surface->owner().dispatch_text_input_event(te);
 }
 
+// NSTextInputClient contract: accept the marked text as if it had been inserted.
 - (void)unmarkText {
     if (!_surface) {
         return;
     }
-    marked_range_ = NSMakeRange(NSNotFound, 0);
-    selected_range_ = NSMakeRange(0, 0);
+    if (![self hasMarkedText]) {
+        [self clearMarkedTextState];
+        return;
+    }
     nk::TextInputEvent te{};
-    te.type = nk::TextInputEvent::Type::ClearPreedit;
+    te.type = nk::TextInputEvent::Type::Commit;
+    te.text = marked_text_;
+    [self clearMarkedTextState];
     _surface->owner().dispatch_text_input_event(te);
 }
 
@@ -990,36 +1078,51 @@ static const nk::WidgetDebugNode* find_focused_debug_node(const nk::WidgetDebugN
 
 - (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range
                                                actualRange:(NSRangePointer)actualRange {
-    if (actualRange != nullptr) {
-        *actualRange = NSMakeRange(NSNotFound, 0);
+    std::optional<nk::detail::NativeInputSubstring> substring;
+    if (range.location != NSNotFound) {
+        if (const auto document = [self inputDocument]; document.has_value()) {
+            substring = document->substring(utf16_range(range));
+        }
     }
-    (void)range;
-    return nil;
+    if (actualRange != nullptr) {
+        *actualRange =
+            substring.has_value() ? ns_range(substring->range) : NSMakeRange(NSNotFound, 0);
+    }
+    if (!substring.has_value()) {
+        return nil;
+    }
+    return [[[NSAttributedString alloc] initWithString:ns_string(substring->text)] autorelease];
 }
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
-    (void)replacementRange;
     if (!_surface) {
         return;
     }
-    auto text = objc_text_to_utf8(string);
-    marked_range_ = NSMakeRange(NSNotFound, 0);
-    selected_range_ = NSMakeRange(NSNotFound, 0);
     nk::TextInputEvent te{};
     te.type = nk::TextInputEvent::Type::Commit;
-    te.text = std::move(text);
+    te.text = objc_text_to_utf8(string);
+    if (replacementRange.location != NSNotFound) {
+        if (const auto document = [self inputDocument]; document.has_value()) {
+            te.replacement_range = document->committed_replacement(utf16_range(replacementRange));
+        }
+    }
+    [self clearMarkedTextState];
     _surface->owner().dispatch_text_input_event(te);
 }
 
+// Pointer hit testing into editor text is not exposed to backends yet.
 - (NSUInteger)characterIndexForPoint:(NSPoint)point {
     (void)point;
     return NSNotFound;
 }
 
+// Editors expose caret geometry only, so every range maps to the composed caret.
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
-    (void)range;
     if (actualRange != nullptr) {
-        *actualRange = NSMakeRange(NSNotFound, 0);
+        const auto document = [self inputDocument];
+        *actualRange = document.has_value() && range.location != NSNotFound
+                           ? ns_range(document->clamp(utf16_range(range)))
+                           : NSMakeRange(NSNotFound, 0);
     }
 
     NSRect local_rect = NSMakeRect(0.0, 0.0, 1.0, 20.0);
@@ -1289,6 +1392,13 @@ static id accessibility_focused_element(NSArray<id>* elements) {
     we.width = static_cast<int>(sz.width);
     we.height = static_cast<int>(sz.height);
     _surface->owner().dispatch_window_event(we);
+    _surface->sync_text_input(true);
+}
+
+- (void)windowDidMove:(NSNotification*)notification {
+    if (_surface) {
+        _surface->sync_text_input(true);
+    }
 }
 
 - (void)windowDidBecomeKey:(NSNotification*)notification {
@@ -1307,6 +1417,7 @@ static id accessibility_focused_element(NSArray<id>* elements) {
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::FocusOut;
     _surface->owner().dispatch_window_event(we);
+    _surface->sync_text_input(false);
 }
 
 - (void)windowDidExpose:(NSNotification*)notification {
@@ -1325,6 +1436,7 @@ static id accessibility_focused_element(NSArray<id>* elements) {
     nk::WindowEvent we{};
     we.type = nk::WindowEvent::Type::Expose;
     _surface->owner().dispatch_window_event(we);
+    _surface->sync_text_input(true);
 }
 
 @end
@@ -1697,6 +1809,12 @@ void MacosSurface::present(const uint8_t* rgba,
                 NSMakeRect(rect.x / scale, rect.y / scale, rect.width / scale, rect.height / scale);
             [view_ setNeedsDisplayInRect:dirty];
         }
+    }
+}
+
+void MacosSurface::sync_text_input(bool coordinates_changed) {
+    @autoreleasepool {
+        [view_ synchronizeInputContext:coordinates_changed ? YES : NO];
     }
 }
 

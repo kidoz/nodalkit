@@ -54,6 +54,9 @@ public:
     /// Access the owning Window for event delivery from Objective-C code.
     Window& owner() { return owner_; }
 
+    /// Reconcile input-method state after window-level changes.
+    void sync_text_input(bool coordinates_changed);
+
     /// Access the pixel buffer for drawRect painting.
     const uint8_t* pixel_data() const { return pixel_buffer_.data(); }
 

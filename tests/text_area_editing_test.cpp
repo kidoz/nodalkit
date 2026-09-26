@@ -1,4 +1,5 @@
 #include "../src/platform/macos/text_input_routing.h"
+#include "../src/text/native_input_document.h"
 #include "../src/text/text_boundaries.h"
 
 #include <algorithm>
@@ -724,4 +725,48 @@ TEST_CASE("Window reports composition and withholds secure text from input metho
     CHECK(area->text_input_state()->composing);
     REQUIRE(commit(*area, "done"));
     CHECK_FALSE(area->text_input_state()->composing);
+}
+
+TEST_CASE("Native input documents address committed text in UTF-16 units", "[text][ime][native]") {
+    using nk::detail::Utf16Range;
+    const nk::detail::NativeInputDocument document("a\U0001F600\u00E9", 7, 7);
+    CHECK(document.length() == 4);
+    CHECK_FALSE(document.marked_range().has_value());
+    CHECK(document.selected_range() == Utf16Range{4, 0});
+
+    auto substring = document.substring({1, 2});
+    REQUIRE(substring.has_value());
+    CHECK(substring->text == "\U0001F600");
+    CHECK(substring->range == Utf16Range{1, 2});
+    substring = document.substring({2, 1});
+    REQUIRE(substring.has_value());
+    CHECK(substring->range == Utf16Range{1, 2});
+    substring = document.substring({3, std::numeric_limits<std::size_t>::max()});
+    REQUIRE(substring.has_value());
+    CHECK(substring->text == "\u00E9");
+    CHECK_FALSE(document.substring({5, 0}).has_value());
+    CHECK(document.clamp({2, 1}) == Utf16Range{1, 2});
+    CHECK(document.clamp({9, 0}) == Utf16Range{4, 0});
+
+    CHECK(document.committed_replacement({3, 1}) == nk::TextInputRange{5, 7});
+    CHECK_FALSE(document.committed_replacement({4, 0}).has_value());
+    CHECK_FALSE(document.committed_replacement({9, 1}).has_value());
+}
+
+TEST_CASE("Native input documents place composition over the selection", "[text][ime][native]") {
+    using nk::detail::Utf16Range;
+    // "b" is selected; the input method composes two kana with the second active.
+    const nk::detail::NativeInputDocument document("abc", 2, 1, "\u304B\u306A", 3, 6);
+    CHECK(document.length() == 4);
+    CHECK(document.marked_range() == Utf16Range{1, 2});
+    CHECK(document.selected_range() == Utf16Range{2, 1});
+    const auto substring = document.substring({0, 4});
+    REQUIRE(substring.has_value());
+    CHECK(substring->text == "a\u304B\u306Ac");
+
+    CHECK_FALSE(document.committed_replacement({1, 2}).has_value());
+    CHECK_FALSE(document.committed_replacement({2, 1}).has_value());
+    CHECK(document.committed_replacement({0, 1}) == nk::TextInputRange{0, 1});
+    CHECK(document.committed_replacement({0, 3}) == nk::TextInputRange{0, 2});
+    CHECK(document.committed_replacement({3, 1}) == nk::TextInputRange{2, 3});
 }
