@@ -1140,6 +1140,7 @@ void WaylandInput::pointer_button(void* data,
     if (self->pointer_focus_ != nullptr && self->pointer_focus_ == self->keyboard_focus_) {
         self->sync_text_input_state();
     }
+    self->backend_.request_accessibility_sync();
 }
 
 void WaylandInput::pointer_axis(
@@ -1162,6 +1163,7 @@ void WaylandInput::pointer_axis(
     }
 
     self->pointer_focus_->owner().dispatch_mouse_event(me);
+    self->backend_.request_accessibility_sync();
 }
 
 // ---------------------------------------------------------------------------
@@ -1218,6 +1220,7 @@ void WaylandInput::keyboard_enter(void* data,
         self->keyboard_focus_->owner().dispatch_window_event(we);
         self->sync_text_input_state();
     }
+    self->backend_.request_accessibility_sync();
 }
 
 void WaylandInput::forget_surface(WaylandSurface* surface) {
@@ -1254,6 +1257,7 @@ void WaylandInput::keyboard_leave(void* data,
         self->keyboard_focus_->owner().dispatch_window_event(we);
     }
     self->keyboard_focus_ = nullptr;
+    self->backend_.request_accessibility_sync();
 }
 
 void WaylandInput::keyboard_key(void* data,
@@ -1288,6 +1292,7 @@ void WaylandInput::keyboard_key(void* data,
     if (self->can_repeat_key(key)) {
         self->start_key_repeat(key);
     }
+    self->backend_.request_accessibility_sync();
 }
 
 void WaylandInput::keyboard_modifiers(void* data,
@@ -1382,6 +1387,7 @@ void WaylandInput::text_input_done(void* data,
                                    uint32_t /*serial*/) {
     auto* self = static_cast<WaylandInput*>(data);
     self->sync_text_input_state();
+    self->backend_.request_accessibility_sync();
 }
 
 void WaylandInput::clipboard_data_offer(void* data,

@@ -86,6 +86,8 @@ public:
     void register_surface(wl_surface* wl_surf, WaylandSurface* surface);
     void unregister_surface(wl_surface* wl_surf);
     [[nodiscard]] WaylandSurface* find_surface(wl_surface* wl_surf) const;
+    // Thread-safe: refresh the AT-SPI snapshot after toolkit state may have changed.
+    void request_accessibility_sync();
 
     // Public so that C-style Wayland callbacks can cast the data pointer.
     struct Impl;
@@ -93,7 +95,6 @@ public:
 private:
     void start_accessibility_thread();
     void stop_accessibility_thread();
-    void schedule_accessibility_sync();
 
     std::unique_ptr<Impl> impl_;
 };

@@ -3,6 +3,8 @@
 
 #include "wayland_backend.h"
 
+#include "../../accessibility/accessibility_tree.h"
+#include "../../accessibility/atspi_tree_snapshot.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
@@ -68,9 +70,23 @@ constexpr const char* AtspiComponentInterface = "org.a11y.atspi.Component";
 constexpr const char* AtspiActionInterface = "org.a11y.atspi.Action";
 constexpr const char* AtspiTextInterface = "org.a11y.atspi.Text";
 
+struct AtspiActionTarget {
+    std::uint64_t window = 0;
+    detail::AccessibleId node = 0;
+};
+
 struct AtspiSnapshotState {
     AtspiAccessibleNode application;
     std::vector<AtspiAccessibleNode> nodes;
+    // Widget nodes by object path, so actions reach the widget through its stable identity.
+    std::unordered_map<std::string, AtspiActionTarget> targets;
+};
+
+// Per-window identities. Keys are assigned at registration and never reused, so
+// window object paths stay stable while other windows open and close.
+struct AtspiWindowState {
+    std::uint64_t key = 0;
+    std::unique_ptr<detail::AccessibilityTree> tree;
 };
 
 struct PortalRequestState {
@@ -633,6 +649,12 @@ struct WaylandBackend::Impl {
     // the a11y thread's method handlers. Protected by `accessibility_mutex`.
     AtspiSnapshotState cached_accessibility_snapshot;
     bool accessibility_stop_requested = false;
+    // UI thread only.
+    std::unordered_map<WaylandSurface*, AtspiWindowState> accessibility_windows;
+    std::uint64_t next_accessibility_window = 0;
+    // Coalesces refresh requests from input handlers and the a11y thread into one
+    // rebuild per event-loop turn.
+    std::atomic<bool> accessibility_refresh_posted{false};
 };
 
 namespace {
@@ -1022,7 +1044,8 @@ void atspi_method_call(GDBusConnection*,
                        gpointer);
 GVariant* atspi_get_property(
     GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*, GError**, gpointer);
-AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl);
+AtspiSnapshotState build_atspi_snapshot_state(WaylandBackend::Impl& impl);
+void request_accessibility_refresh(WaylandBackend::Impl& impl);
 
 // Returns a thread-safe copy of the cached accessibility snapshot. Built on the main thread via
 // refresh_accessibility_snapshot; the a11y worker reads it via this helper under the mutex. The
@@ -1175,7 +1198,7 @@ gboolean quit_system_preferences_loop(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl) {
+AtspiSnapshotState build_atspi_snapshot_state(WaylandBackend::Impl& impl) {
     AtspiSnapshotState snapshot;
     snapshot.application.object_path = AtspiApplicationRootPath;
     snapshot.application.object_name = AtspiApplicationRootName;
@@ -1186,35 +1209,32 @@ AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl) 
                                  AtspiStateBit::Visible | AtspiStateBit::Showing;
     snapshot.application.interfaces = {AtspiAccessibleInterface, AtspiApplicationInterface};
 
-    std::vector<WaylandSurface*> surfaces;
-    surfaces.reserve(impl.surfaces.size());
-    for (const auto& entry : impl.surfaces) {
-        if (entry.second != nullptr) {
-            surfaces.push_back(entry.second);
-        }
+    std::vector<std::pair<WaylandSurface*, AtspiWindowState*>> windows;
+    windows.reserve(impl.accessibility_windows.size());
+    for (auto& [surface, state] : impl.accessibility_windows) {
+        windows.emplace_back(surface, &state);
     }
-    std::sort(surfaces.begin(), surfaces.end());
+    std::ranges::sort(windows, {}, [](const auto& entry) { return entry.second->key; });
 
-    std::size_t window_index = 0;
-    for (WaylandSurface* surface : surfaces) {
+    for (auto& [surface, state] : windows) {
         const auto size = surface->size();
         std::string title = std::string(surface->owner().title());
         if (title.empty()) {
             title = "Window";
         }
-
-        auto window_snapshot =
-            build_atspi_window_snapshot(AtspiApplicationRootPath,
-                                        "window" + std::to_string(window_index++),
-                                        title,
-                                        {0.0F, 0.0F, size.width, size.height},
-                                        surface->owner().inspector().debug_tree());
-        if (!window_snapshot.nodes.empty()) {
-            snapshot.application.child_paths.push_back(window_snapshot.nodes.front().object_path);
+        auto nodes = detail::build_atspi_tree_nodes(*state->tree,
+                                                    AtspiApplicationRootPath,
+                                                    "window" + std::to_string(state->key),
+                                                    title,
+                                                    {0.0F, 0.0F, size.width, size.height});
+        snapshot.application.child_paths.push_back(nodes.front().node.object_path);
+        for (auto& entry : nodes) {
+            if (entry.id != 0) {
+                snapshot.targets.emplace(entry.node.object_path,
+                                         AtspiActionTarget{.window = state->key, .node = entry.id});
+            }
+            snapshot.nodes.push_back(std::move(entry.node));
         }
-        snapshot.nodes.insert(snapshot.nodes.end(),
-                              std::make_move_iterator(window_snapshot.nodes.begin()),
-                              std::make_move_iterator(window_snapshot.nodes.end()));
     }
 
     if (!snapshot.application.child_paths.empty() && !snapshot.nodes.empty() &&
@@ -1223,6 +1243,39 @@ AtspiSnapshotState build_atspi_snapshot_state(const WaylandBackend::Impl& impl) 
     }
 
     return snapshot;
+}
+
+// Rebuilds the snapshot on the UI thread and hands the immutable copy to the a11y thread.
+void refresh_accessibility_snapshot(WaylandBackend::Impl& impl) {
+    auto snapshot = build_atspi_snapshot_state(impl);
+    GMainContext* context = nullptr;
+    {
+        std::lock_guard lock(impl.accessibility_mutex);
+        impl.cached_accessibility_snapshot = std::move(snapshot);
+        context = impl.accessibility_context;
+    }
+    if (context != nullptr) {
+        g_main_context_invoke(context, sync_accessibility_objects_trampoline, &impl);
+    }
+}
+
+// Thread-safe. Posts at most one pending rebuild to the UI thread, and only while an
+// accessibility bus connection exists.
+void request_accessibility_refresh(WaylandBackend::Impl& impl) {
+    {
+        std::lock_guard lock(impl.accessibility_mutex);
+        if (impl.accessibility_connection == nullptr) {
+            return;
+        }
+    }
+    auto* app = Application::instance();
+    if (app == nullptr || impl.accessibility_refresh_posted.exchange(true)) {
+        return;
+    }
+    app->event_loop().post([impl = &impl]() {
+        impl->accessibility_refresh_posted = false;
+        refresh_accessibility_snapshot(*impl);
+    });
 }
 
 const AtspiAccessibleNode* find_atspi_node(const AtspiSnapshotState& snapshot,
@@ -1237,51 +1290,6 @@ const AtspiAccessibleNode* find_atspi_node(const AtspiSnapshotState& snapshot,
     for (const auto& node : snapshot.nodes) {
         if (node.object_path == object_path) {
             return &node;
-        }
-    }
-    return nullptr;
-}
-
-Widget* resolve_widget_by_tree_path(Window& window, std::span<const std::size_t> tree_path) {
-    Widget* current = window.child();
-    if (current == nullptr) {
-        return nullptr;
-    }
-    for (const auto index : tree_path) {
-        const auto children = current->children();
-        if (index >= children.size() || children[index] == nullptr) {
-            return nullptr;
-        }
-        current = children[index].get();
-    }
-    return current;
-}
-
-Widget* find_live_atspi_widget(WaylandBackend::Impl& impl, std::string_view object_path) {
-    std::vector<WaylandSurface*> surfaces;
-    surfaces.reserve(impl.surfaces.size());
-    for (const auto& entry : impl.surfaces) {
-        if (entry.second != nullptr) {
-            surfaces.push_back(entry.second);
-        }
-    }
-    std::sort(surfaces.begin(), surfaces.end());
-
-    std::size_t window_index = 0;
-    for (WaylandSurface* surface : surfaces) {
-        std::string title = std::string(surface->owner().title());
-        if (title.empty()) {
-            title = "Window";
-        }
-        const auto size = surface->size();
-        const auto snapshot =
-            build_atspi_window_snapshot(AtspiApplicationRootPath,
-                                        "window" + std::to_string(window_index++),
-                                        title,
-                                        {0.0F, 0.0F, size.width, size.height},
-                                        surface->owner().inspector().debug_tree());
-        if (const auto* node = find_atspi_accessible_node(snapshot, object_path); node != nullptr) {
-            return resolve_widget_by_tree_path(surface->owner(), node->tree_path);
         }
     }
     return nullptr;
@@ -1359,6 +1367,7 @@ void atspi_method_call(GDBusConnection* connection,
                        GDBusMethodInvocation* invocation,
                        gpointer user_data) {
     auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
+    request_accessibility_refresh(*impl);
     const auto snapshot = copy_cached_accessibility_snapshot(impl);
     const auto* node = find_atspi_node(snapshot, object_path);
     if (node == nullptr) {
@@ -1445,23 +1454,29 @@ void atspi_method_call(GDBusConnection* connection,
             // widget tree or impl->surfaces (both owned by the main/UI thread). Decide the reply
             // from the thread-safe cached snapshot, then marshal the actual widget resolution and
             // perform_action() onto the main thread via the event loop.
-            if (action_index >= 0 &&
-                static_cast<std::size_t>(action_index) < node->action_names.size()) {
-                const auto action_name = node->action_names[static_cast<std::size_t>(action_index)];
+            const auto target = snapshot.targets.find(object_path);
+            const auto action =
+                action_index >= 0 &&
+                        static_cast<std::size_t>(action_index) < node->action_names.size()
+                    ? detail::atspi_action_from_name(
+                          node->action_names[static_cast<std::size_t>(action_index)])
+                    : std::nullopt;
+            if (target != snapshot.targets.end() && action.has_value()) {
                 if (auto* app = Application::instance(); app != nullptr) {
-                    app->event_loop().post([impl, path = std::string(object_path), action_name]() {
-                        // Runs on the main thread: widget tree and surfaces map are safe here.
-                        auto* widget = find_live_atspi_widget(*impl, path);
-                        if (widget == nullptr || widget->accessible() == nullptr) {
-                            return;
+                    app->event_loop().post([impl, target = target->second, action = *action]() {
+                        // UI thread: resolve through the stable identity, which also rejects
+                        // destroyed, hidden, disabled, and modal-covered widgets.
+                        for (auto& [surface, state] : impl->accessibility_windows) {
+                            if (state.key != target.window) {
+                                continue;
+                            }
+                            (void)(action == AccessibleAction::Focus
+                                       ? state.tree->perform(target.node, action) ||
+                                             state.tree->focus(target.node)
+                                       : state.tree->perform(target.node, action));
+                            break;
                         }
-                        if (action_name == "activate") {
-                            (void)widget->accessible()->perform_action(AccessibleAction::Activate);
-                        } else if (action_name == "focus") {
-                            (void)widget->accessible()->perform_action(AccessibleAction::Focus);
-                        } else if (action_name == "toggle") {
-                            (void)widget->accessible()->perform_action(AccessibleAction::Toggle);
-                        }
+                        refresh_accessibility_snapshot(*impl);
                     });
                     success = true;
                 }
@@ -1474,16 +1489,13 @@ void atspi_method_call(GDBusConnection* connection,
             gint32 start = 0;
             gint32 end = -1;
             g_variant_get(parameters, "(ii)", &start, &end);
-            const auto length = static_cast<gint32>(node->value.size());
-            start = std::clamp(start, 0, length);
-            end = end < 0 ? length : std::clamp(end, start, length);
-            g_dbus_method_invocation_return_value(
-                invocation,
-                g_variant_new("(s)",
-                              node->value
-                                  .substr(static_cast<std::size_t>(start),
-                                          static_cast<std::size_t>(end - start))
-                                  .c_str()));
+            // AT-SPI offsets count characters; a byte slice could split one and hand GVariant
+            // invalid UTF-8.
+            auto text = detail::atspi_text_slice(node->value, start, end);
+            if (g_utf8_validate(text.c_str(), static_cast<gssize>(text.size()), nullptr) == 0) {
+                text.clear();
+            }
+            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", text.c_str()));
             return;
         }
     }
@@ -1500,6 +1512,7 @@ GVariant* atspi_get_property(GDBusConnection* /*connection*/,
                              GError** error,
                              gpointer user_data) {
     auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
+    request_accessibility_refresh(*impl);
     const auto snapshot = copy_cached_accessibility_snapshot(impl);
     const auto* node = find_atspi_node(snapshot, object_path);
     if (node == nullptr) {
@@ -1533,7 +1546,7 @@ GVariant* atspi_get_property(GDBusConnection* /*connection*/,
         }
     } else if (std::string_view(interface_name) == AtspiTextInterface) {
         if (std::string_view(property_name) == "CharacterCount") {
-            return g_variant_new_int32(static_cast<int32_t>(node->value.size()));
+            return g_variant_new_int32(detail::atspi_character_count(node->value));
         }
     }
 
@@ -2233,27 +2246,23 @@ int WaylandBackend::output_scale(wl_output* output) const {
 
 void WaylandBackend::register_surface(wl_surface* wl_surf, WaylandSurface* surface) {
     impl_->surfaces[wl_surf] = surface;
-    schedule_accessibility_sync();
+    impl_->accessibility_windows[surface] = AtspiWindowState{
+        .key = impl_->next_accessibility_window++,
+        .tree = std::make_unique<detail::AccessibilityTree>(surface->owner()),
+    };
+    refresh_accessibility_snapshot(*impl_);
 }
 
 void WaylandBackend::unregister_surface(wl_surface* wl_surf) {
-    impl_->surfaces.erase(wl_surf);
-    schedule_accessibility_sync();
+    if (const auto found = impl_->surfaces.find(wl_surf); found != impl_->surfaces.end()) {
+        impl_->accessibility_windows.erase(found->second);
+        impl_->surfaces.erase(found);
+    }
+    refresh_accessibility_snapshot(*impl_);
 }
 
-void WaylandBackend::schedule_accessibility_sync() {
-    // Build the snapshot here (main thread) because widgets aren't thread-safe. Then hand the
-    // immutable copy to the a11y worker via the cache, and ask it to re-register objects.
-    auto snapshot = build_atspi_snapshot_state(*impl_);
-    GMainContext* context = nullptr;
-    {
-        std::lock_guard lock(impl_->accessibility_mutex);
-        impl_->cached_accessibility_snapshot = std::move(snapshot);
-        context = impl_->accessibility_context;
-    }
-    if (context != nullptr) {
-        g_main_context_invoke(context, sync_accessibility_objects_trampoline, impl_.get());
-    }
+void WaylandBackend::request_accessibility_sync() {
+    request_accessibility_refresh(*impl_);
 }
 
 WaylandSurface* WaylandBackend::find_surface(wl_surface* wl_surf) const {
