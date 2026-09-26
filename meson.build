@@ -270,6 +270,7 @@ elif host_system == 'linux'
         command : [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
     nk_sources += files(
+        'src/platform/linux/atspi_dbus.cpp',
         'src/platform/linux/wayland_backend.cpp',
         'src/platform/linux/wayland_portal_helpers.cpp',
         'src/platform/linux/wayland_surface.cpp',

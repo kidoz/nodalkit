@@ -53,8 +53,10 @@ graduates from experimental status.
 ## Accessibility bridges
 
 The accessibility model under `nk/accessibility` is populated on every
-platform. Linux exposes it through AT-SPI and macOS through NSAccessibility
-elements, one per widget with a role, below the window's content view. While a
+platform. Linux exposes it through AT-SPI, registering each application with
+the desktop registry so screen readers such as Orca can find it, and macOS
+through NSAccessibility elements below the window's content view. Both expose
+one element per widget with a role. While a
 modal dialog is open, macOS exposes only that dialog, and disabled or covered
 controls reject accessibility actions. Windows has no UI Automation provider
 yet.

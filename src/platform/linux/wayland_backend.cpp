@@ -5,6 +5,7 @@
 
 #include "../../accessibility/accessibility_tree.h"
 #include "../../accessibility/atspi_tree_snapshot.h"
+#include "atspi_dbus.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "fractional-scale-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
@@ -18,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -58,29 +60,6 @@ constexpr const char* DbusInterface = "org.freedesktop.DBus";
 constexpr const char* AtspiBusName = "org.a11y.Bus";
 constexpr const char* AtspiBusObjectPath = "/org/a11y/bus";
 constexpr const char* AtspiBusInterface = "org.a11y.Bus";
-constexpr const char* AtspiObjectRootPath = "/org/a11y/atspi/accessible";
-// AT-SPI clients (Orca, GTK's at-spi2-atk, Qt's QAccessible2) look for the per-application root
-// accessible at the `/root` child of the subtree. Expose our Application node there so standard
-// tools can find us without a custom handshake.
-constexpr const char* AtspiApplicationRootPath = "/org/a11y/atspi/accessible/root";
-constexpr const char* AtspiApplicationRootName = "root";
-constexpr const char* AtspiAccessibleInterface = "org.a11y.atspi.Accessible";
-constexpr const char* AtspiApplicationInterface = "org.a11y.atspi.Application";
-constexpr const char* AtspiComponentInterface = "org.a11y.atspi.Component";
-constexpr const char* AtspiActionInterface = "org.a11y.atspi.Action";
-constexpr const char* AtspiTextInterface = "org.a11y.atspi.Text";
-
-struct AtspiActionTarget {
-    std::uint64_t window = 0;
-    detail::AccessibleId node = 0;
-};
-
-struct AtspiSnapshotState {
-    AtspiAccessibleNode application;
-    std::vector<AtspiAccessibleNode> nodes;
-    // Widget nodes by object path, so actions reach the widget through its stable identity.
-    std::unordered_map<std::string, AtspiActionTarget> targets;
-};
 
 // Per-window identities. Keys are assigned at registration and never reused, so
 // window object paths stay stable while other windows open and close.
@@ -105,88 +84,6 @@ void on_portal_request_response(GDBusConnection* connection,
                                 const gchar* signal_name,
                                 GVariant* parameters,
                                 gpointer user_data);
-
-GDBusNodeInfo* atspi_node_info() {
-    static GDBusNodeInfo* node_info = []() {
-        constexpr const char* xml = R"xml(
-<node>
-  <interface name="org.a11y.atspi.Accessible">
-    <method name="GetChildren">
-      <arg name="children" type="a(so)" direction="out"/>
-    </method>
-    <method name="GetRoleName">
-      <arg name="role_name" type="s" direction="out"/>
-    </method>
-    <method name="GetLocalizedRoleName">
-      <arg name="localized_role_name" type="s" direction="out"/>
-    </method>
-    <method name="GetState">
-      <arg name="state" type="u" direction="out"/>
-    </method>
-    <method name="GetInterfaces">
-      <arg name="interfaces" type="as" direction="out"/>
-    </method>
-    <property name="Name" type="s" access="read"/>
-    <property name="Description" type="s" access="read"/>
-    <property name="Parent" type="o" access="read"/>
-    <property name="ChildCount" type="i" access="read"/>
-  </interface>
-  <interface name="org.a11y.atspi.Application">
-    <method name="GetToolkitName">
-      <arg name="toolkit_name" type="s" direction="out"/>
-    </method>
-    <method name="GetVersion">
-      <arg name="version" type="s" direction="out"/>
-    </method>
-  </interface>
-  <interface name="org.a11y.atspi.Component">
-    <method name="GetExtents">
-      <arg name="x" type="i" direction="out"/>
-      <arg name="y" type="i" direction="out"/>
-      <arg name="width" type="i" direction="out"/>
-      <arg name="height" type="i" direction="out"/>
-    </method>
-  </interface>
-  <interface name="org.a11y.atspi.Action">
-    <method name="GetNActions">
-      <arg name="count" type="i" direction="out"/>
-    </method>
-    <method name="GetActions">
-      <arg name="actions" type="a(sss)" direction="out"/>
-    </method>
-    <method name="DoAction">
-      <arg name="index" type="i" direction="in"/>
-      <arg name="success" type="b" direction="out"/>
-    </method>
-  </interface>
-  <interface name="org.a11y.atspi.Text">
-    <method name="GetText">
-      <arg name="start" type="i" direction="in"/>
-      <arg name="end" type="i" direction="in"/>
-      <arg name="text" type="s" direction="out"/>
-    </method>
-    <property name="CharacterCount" type="i" access="read"/>
-  </interface>
-</node>
-)xml";
-        GError* error = nullptr;
-        GDBusNodeInfo* info = g_dbus_node_info_new_for_xml(xml, &error);
-        if (info == nullptr && error != nullptr) {
-            NK_LOG_ERROR("WaylandA11y", error->message);
-            g_error_free(error);
-        }
-        return info;
-    }();
-    return node_info;
-}
-
-GDBusInterfaceInfo* lookup_atspi_interface_info(const char* interface_name) {
-    GDBusNodeInfo* info = atspi_node_info();
-    if (info == nullptr) {
-        return nullptr;
-    }
-    return g_dbus_node_info_lookup_interface(info, interface_name);
-}
 
 std::string make_portal_handle_token() {
     return "nk_" + std::to_string(g_random_int());
@@ -640,21 +537,17 @@ struct WaylandBackend::Impl {
     GMainContext* accessibility_context = nullptr;
     GMainLoop* accessibility_loop = nullptr;
     GDBusConnection* accessibility_connection = nullptr;
-    guint accessibility_subtree_id = 0;
-    // Direct object registrations keep GDBus from filtering out /accessible and /accessible/root
-    // calls that the subtree dispatch path silently rejects on some GDBus versions. Keyed by
-    // object path so we can diff against a freshly-built snapshot on widget-tree change.
-    std::unordered_map<std::string, std::vector<guint>> accessibility_objects_by_path;
-    // Cached AT-SPI snapshot built on the main thread (widgets aren't thread-safe) and read by
-    // the a11y thread's method handlers. Protected by `accessibility_mutex`.
-    AtspiSnapshotState cached_accessibility_snapshot;
     bool accessibility_stop_requested = false;
+    // Serves the published tree on the accessibility bus thread.
+    std::unique_ptr<detail::AtspiDbusServer> atspi_server;
     // UI thread only.
     std::unordered_map<WaylandSurface*, AtspiWindowState> accessibility_windows;
     std::uint64_t next_accessibility_window = 0;
-    // Coalesces refresh requests from input handlers and the a11y thread into one
-    // rebuild per event-loop turn.
-    std::atomic<bool> accessibility_refresh_posted{false};
+    // Refresh policy (see refresh_accessibility_if_due): requests come from input handlers
+    // and client queries; `in_use` is set by the first client query.
+    std::atomic<bool> accessibility_refresh_requested{false};
+    std::atomic<bool> accessibility_in_use{false};
+    std::chrono::steady_clock::time_point last_accessibility_refresh{};
 };
 
 namespace {
@@ -1033,116 +926,11 @@ SystemPreferences observed_linux_preferences(const WaylandBackend::Impl& impl) {
     return query_linux_preferences();
 }
 
-// Forward declarations — defined later alongside the subtree dispatch vtable.
-void atspi_method_call(GDBusConnection*,
-                       const gchar*,
-                       const gchar*,
-                       const gchar*,
-                       const gchar*,
-                       GVariant*,
-                       GDBusMethodInvocation*,
-                       gpointer);
-GVariant* atspi_get_property(
-    GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*, GError**, gpointer);
-AtspiSnapshotState build_atspi_snapshot_state(WaylandBackend::Impl& impl);
 void request_accessibility_refresh(WaylandBackend::Impl& impl);
 
-// Returns a thread-safe copy of the cached accessibility snapshot. Built on the main thread via
-// refresh_accessibility_snapshot; the a11y worker reads it via this helper under the mutex. The
-// widget tree is not thread-safe, so the worker MUST NOT call build_atspi_snapshot_state itself.
-AtspiSnapshotState copy_cached_accessibility_snapshot(WaylandBackend::Impl* impl) {
-    std::lock_guard lock(impl->accessibility_mutex);
-    return impl->cached_accessibility_snapshot;
-}
-
-// Registers explicit GDBus object handlers at `object_path` for all three AT-SPI interfaces we
-// advertise on window/widget nodes. Returns the registration IDs so they can be unregistered on
-// teardown or snapshot diff. Must run on the thread that owns `connection`.
-std::vector<guint> register_atspi_object_at(GDBusConnection* connection,
-                                            const std::string& object_path,
-                                            WaylandBackend::Impl* impl) {
-    if (g_variant_is_object_path(object_path.c_str()) == 0) {
-        return {};
-    }
-    static const GDBusInterfaceVTable vtable = {
-        .method_call = atspi_method_call,
-        .get_property = atspi_get_property,
-        .set_property = nullptr,
-        .padding = {},
-    };
-    std::vector<guint> ids;
-    static constexpr const char* kInterfaces[] = {
-        AtspiAccessibleInterface,
-        AtspiApplicationInterface,
-        AtspiComponentInterface,
-        AtspiActionInterface,
-        AtspiTextInterface,
-    };
-    for (const char* iface : kInterfaces) {
-        GDBusInterfaceInfo* info = lookup_atspi_interface_info(iface);
-        if (info == nullptr) {
-            continue;
-        }
-        GError* error = nullptr;
-        const guint id = g_dbus_connection_register_object(
-            connection, object_path.c_str(), info, &vtable, impl, nullptr, &error);
-        if (id == 0U) {
-            if (error != nullptr) {
-                NK_LOG_ERROR("WaylandA11y", error->message);
-                g_error_free(error);
-            }
-            continue;
-        }
-        ids.push_back(id);
-    }
-    return ids;
-}
-
-// Ensures that every node currently present in the snapshot has an explicit GDBus object
-// registration. Called from the a11y thread (directly or via g_main_context_invoke) whenever
-// the widget tree may have changed. Paths that dropped out of the snapshot are unregistered.
-void sync_accessibility_objects(WaylandBackend::Impl* impl) {
-    if (impl->accessibility_connection == nullptr) {
-        return;
-    }
-    const auto snapshot = copy_cached_accessibility_snapshot(impl);
-
-    std::unordered_set<std::string> live_paths;
-    if (!snapshot.application.object_path.empty()) {
-        live_paths.insert(snapshot.application.object_path);
-    }
-    for (const auto& node : snapshot.nodes) {
-        if (!node.object_path.empty()) {
-            live_paths.insert(node.object_path);
-        }
-    }
-
-    // Unregister paths no longer present.
-    for (auto it = impl->accessibility_objects_by_path.begin();
-         it != impl->accessibility_objects_by_path.end();) {
-        if (!live_paths.contains(it->first)) {
-            for (const guint id : it->second) {
-                g_dbus_connection_unregister_object(impl->accessibility_connection, id);
-            }
-            it = impl->accessibility_objects_by_path.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    // Register new paths.
-    for (const auto& path : live_paths) {
-        if (impl->accessibility_objects_by_path.contains(path)) {
-            continue;
-        }
-        impl->accessibility_objects_by_path[path] =
-            register_atspi_object_at(impl->accessibility_connection, path, impl);
-    }
-}
-
-// Trampoline for g_main_context_invoke. Calls sync_accessibility_objects on the a11y thread.
-gboolean sync_accessibility_objects_trampoline(gpointer user_data) {
-    sync_accessibility_objects(static_cast<WaylandBackend::Impl*>(user_data));
+// Runs on the accessibility bus thread: registers new objects, then emits queued events.
+gboolean sync_accessibility_server_trampoline(gpointer user_data) {
+    static_cast<detail::AtspiDbusServer*>(user_data)->sync();
     return G_SOURCE_REMOVE;
 }
 
@@ -1198,16 +986,18 @@ gboolean quit_system_preferences_loop(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-AtspiSnapshotState build_atspi_snapshot_state(WaylandBackend::Impl& impl) {
-    AtspiSnapshotState snapshot;
-    snapshot.application.object_path = AtspiApplicationRootPath;
-    snapshot.application.object_name = AtspiApplicationRootName;
-    snapshot.application.parent_path = "/";
-    snapshot.application.role_name = "application";
-    snapshot.application.name = "NodalKit";
-    snapshot.application.state = AtspiStateBit::Enabled | AtspiStateBit::Sensitive |
-                                 AtspiStateBit::Visible | AtspiStateBit::Showing;
-    snapshot.application.interfaces = {AtspiAccessibleInterface, AtspiApplicationInterface};
+detail::AtspiPublishedTree build_atspi_published_tree(WaylandBackend::Impl& impl) {
+    detail::AtspiPublishedTree tree;
+    detail::AtspiTreeNode application;
+    application.role = detail::AtspiRoleValue::Application;
+    application.node.object_path = detail::AtspiApplicationPath;
+    application.node.object_name = "root";
+    application.node.role_name = "application";
+    application.node.interfaces = {"org.a11y.atspi.Accessible", "org.a11y.atspi.Application"};
+    if (auto* app = Application::instance(); app != nullptr && !app->app_name().empty()) {
+        application.node.name = std::string(app->app_name());
+    }
+    tree.nodes.push_back(std::move(application));
 
     std::vector<std::pair<WaylandSurface*, AtspiWindowState*>> windows;
     windows.reserve(impl.accessibility_windows.size());
@@ -1223,373 +1013,91 @@ AtspiSnapshotState build_atspi_snapshot_state(WaylandBackend::Impl& impl) {
             title = "Window";
         }
         auto nodes = detail::build_atspi_tree_nodes(*state->tree,
-                                                    AtspiApplicationRootPath,
+                                                    detail::AtspiApplicationPath,
                                                     "window" + std::to_string(state->key),
                                                     title,
-                                                    {0.0F, 0.0F, size.width, size.height});
-        snapshot.application.child_paths.push_back(nodes.front().node.object_path);
+                                                    {0.0F, 0.0F, size.width, size.height},
+                                                    surface->owner().is_focused());
+        tree.nodes.front().node.child_paths.push_back(nodes.front().node.object_path);
+        if (tree.nodes.front().node.name.empty()) {
+            tree.nodes.front().node.name = title;
+        }
         for (auto& entry : nodes) {
             if (entry.id != 0) {
-                snapshot.targets.emplace(entry.node.object_path,
-                                         AtspiActionTarget{.window = state->key, .node = entry.id});
+                tree.targets.emplace(
+                    entry.node.object_path,
+                    detail::AtspiActionTarget{.window = state->key, .node = entry.id});
             }
-            snapshot.nodes.push_back(std::move(entry.node));
+            tree.nodes.push_back(std::move(entry));
         }
     }
-
-    if (!snapshot.application.child_paths.empty() && !snapshot.nodes.empty() &&
-        !snapshot.nodes.front().name.empty()) {
-        snapshot.application.name = snapshot.nodes.front().name;
-    }
-
-    return snapshot;
+    return tree;
 }
 
-// Rebuilds the snapshot on the UI thread and hands the immutable copy to the a11y thread.
+// UI thread: publish a fresh tree, then let the bus thread register objects and emit events.
 void refresh_accessibility_snapshot(WaylandBackend::Impl& impl) {
-    auto snapshot = build_atspi_snapshot_state(impl);
+    if (!impl.atspi_server) {
+        return;
+    }
+    impl.atspi_server->publish(build_atspi_published_tree(impl));
     GMainContext* context = nullptr;
     {
         std::lock_guard lock(impl.accessibility_mutex);
-        impl.cached_accessibility_snapshot = std::move(snapshot);
         context = impl.accessibility_context;
     }
     if (context != nullptr) {
-        g_main_context_invoke(context, sync_accessibility_objects_trampoline, &impl);
+        g_main_context_invoke(
+            context, sync_accessibility_server_trampoline, impl.atspi_server.get());
     }
 }
 
-// Thread-safe. Posts at most one pending rebuild to the UI thread, and only while an
-// accessibility bus connection exists.
+// UI thread: perform an action requested over AT-SPI through the stable identity, which also
+// rejects destroyed, hidden, disabled, and modal-covered widgets.
+void perform_accessible_action(WaylandBackend::Impl& impl,
+                               detail::AtspiActionTarget target,
+                               AccessibleAction action) {
+    for (auto& [surface, state] : impl.accessibility_windows) {
+        if (state.key != target.window) {
+            continue;
+        }
+        (void)(action == AccessibleAction::Focus
+                   ? state.tree->perform(target.node, action) || state.tree->focus(target.node)
+                   : state.tree->perform(target.node, action));
+        break;
+    }
+    refresh_accessibility_snapshot(impl);
+}
+
+// Thread-safe: ask the UI thread to refresh after its current event-loop iteration.
 void request_accessibility_refresh(WaylandBackend::Impl& impl) {
+    impl.accessibility_refresh_requested = true;
+}
+
+// UI thread, after each event-loop iteration. The loop sees every task, timer, frame, and
+// input dispatch, so this is where state changes that no callback reports (layout, timers,
+// animations) reach clients. While a client uses the tree, any iteration that did work
+// refreshes it; before that, refreshes are rate-limited so an idle accessibility bus costs
+// almost nothing but the first reply is still recent.
+void refresh_accessibility_if_due(WaylandBackend::Impl& impl, bool did_work) {
+    if (!impl.atspi_server) {
+        return;
+    }
+    const bool requested = impl.accessibility_refresh_requested.exchange(false);
+    const auto now = std::chrono::steady_clock::now();
+    const auto interval =
+        impl.accessibility_in_use ? std::chrono::milliseconds(0) : std::chrono::milliseconds(500);
+    if (!requested && !(did_work && now - impl.last_accessibility_refresh >= interval)) {
+        return;
+    }
     {
         std::lock_guard lock(impl.accessibility_mutex);
         if (impl.accessibility_connection == nullptr) {
             return;
         }
     }
-    auto* app = Application::instance();
-    if (app == nullptr || impl.accessibility_refresh_posted.exchange(true)) {
-        return;
-    }
-    app->event_loop().post([impl = &impl]() {
-        impl->accessibility_refresh_posted = false;
-        refresh_accessibility_snapshot(*impl);
-    });
+    impl.last_accessibility_refresh = now;
+    refresh_accessibility_snapshot(impl);
 }
-
-const AtspiAccessibleNode* find_atspi_node(const AtspiSnapshotState& snapshot,
-                                           std::string_view object_path) {
-    if (object_path == snapshot.application.object_path) {
-        return &snapshot.application;
-    }
-    // NOTE: do NOT construct a temporary AtspiAccessibleSnapshot here — the previous version
-    // passed `{snapshot.nodes}` which created a brace-initialized temporary; the returned
-    // pointer dangled as soon as this function returned, and dereferencing it from a11y method
-    // handlers produced garbage (and crashes on `GetChildren` with non-empty child_paths).
-    for (const auto& node : snapshot.nodes) {
-        if (node.object_path == object_path) {
-            return &node;
-        }
-    }
-    return nullptr;
-}
-
-std::string subtree_lookup_path(const gchar* object_path, const gchar* node) {
-    if (node == nullptr || *node == '\0') {
-        return std::string(object_path);
-    }
-    return std::string(object_path) + "/" + node;
-}
-
-gchar** atspi_subtree_enumerate(GDBusConnection* /*connection*/,
-                                const gchar* /*sender*/,
-                                const gchar* object_path,
-                                gpointer user_data) {
-    auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
-    if (std::string_view(object_path) != AtspiObjectRootPath) {
-        return g_new0(gchar*, 1);
-    }
-
-    const auto snapshot = copy_cached_accessibility_snapshot(impl);
-    // GDBus expects the names of direct children of the subtree root. The application node is
-    // at "/root" under the subtree; the per-widget nodes live deeper, so they would not normally
-    // be enumerated as direct children. We return the flat list (including the application and
-    // all descendants) because the subtree is registered with G_DBUS_SUBTREE_FLAGS_NONE — any
-    // path that isn't enumerated + introspected is rejected, and AT-SPI clients walk from `root`
-    // deeper via object paths obtained from GetChildren responses. Enumerating everything flat
-    // is a pragmatic way to keep GDBus from filtering out legitimate traversals.
-    gchar** children = g_new0(gchar*, snapshot.nodes.size() + 2);
-    std::size_t out = 0;
-    if (!snapshot.application.object_name.empty()) {
-        children[out++] = g_strdup(snapshot.application.object_name.c_str());
-    }
-    for (std::size_t index = 0; index < snapshot.nodes.size(); ++index) {
-        children[out++] = g_strdup(snapshot.nodes[index].object_name.c_str());
-    }
-    return children;
-}
-
-GDBusInterfaceInfo** atspi_subtree_introspect(GDBusConnection* /*connection*/,
-                                              const gchar* /*sender*/,
-                                              const gchar* object_path,
-                                              const gchar* node,
-                                              gpointer user_data) {
-    auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
-    const auto snapshot = copy_cached_accessibility_snapshot(impl);
-    if (find_atspi_node(snapshot, subtree_lookup_path(object_path, node)) == nullptr) {
-        return nullptr;
-    }
-
-    const auto* accessible_node = find_atspi_node(snapshot, subtree_lookup_path(object_path, node));
-    if (accessible_node == nullptr) {
-        return nullptr;
-    }
-
-    auto** interfaces = g_new0(GDBusInterfaceInfo*, accessible_node->interfaces.size() + 1);
-    std::size_t interface_index = 0;
-    for (const auto& interface_name : accessible_node->interfaces) {
-        GDBusInterfaceInfo* info = lookup_atspi_interface_info(interface_name.c_str());
-        if (info == nullptr) {
-            continue;
-        }
-        interfaces[interface_index++] = g_dbus_interface_info_ref(info);
-    }
-    return interfaces;
-}
-
-void atspi_method_call(GDBusConnection* connection,
-                       const gchar* /*sender*/,
-                       const gchar* object_path,
-                       const gchar* interface_name,
-                       const gchar* method_name,
-                       GVariant* parameters,
-                       GDBusMethodInvocation* invocation,
-                       gpointer user_data) {
-    auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
-    request_accessibility_refresh(*impl);
-    const auto snapshot = copy_cached_accessibility_snapshot(impl);
-    const auto* node = find_atspi_node(snapshot, object_path);
-    if (node == nullptr) {
-        g_dbus_method_invocation_return_dbus_error(
-            invocation, "org.a11y.atspi.Error.NotFound", "Accessible node not found");
-        return;
-    }
-
-    if (std::string_view(interface_name) == AtspiAccessibleInterface) {
-        if (std::string_view(method_name) == "GetRoleName" ||
-            std::string_view(method_name) == "GetLocalizedRoleName") {
-            g_dbus_method_invocation_return_value(invocation,
-                                                  g_variant_new("(s)", node->role_name.c_str()));
-            return;
-        }
-        if (std::string_view(method_name) == "GetState") {
-            g_dbus_method_invocation_return_value(
-                invocation, g_variant_new("(u)", static_cast<uint32_t>(node->state)));
-            return;
-        }
-        if (std::string_view(method_name) == "GetInterfaces") {
-            GVariantBuilder builder;
-            g_variant_builder_init(&builder, G_VARIANT_TYPE("as"));
-            for (const auto& iface : node->interfaces) {
-                g_variant_builder_add(&builder, "s", iface.c_str());
-            }
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(as)", &builder));
-            return;
-        }
-        if (std::string_view(method_name) == "GetChildren") {
-            GVariantBuilder builder;
-            g_variant_builder_init(&builder, G_VARIANT_TYPE("a(so)"));
-            const char* bus_name = g_dbus_connection_get_unique_name(connection);
-            for (const auto& child_path : node->child_paths) {
-                // `g_variant_new("(so)", ...)` aborts the process on invalid object paths.
-                if (g_variant_is_object_path(child_path.c_str()) == 0) {
-                    continue;
-                }
-                g_variant_builder_add(&builder, "(so)", bus_name, child_path.c_str());
-            }
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(a(so))", &builder));
-            return;
-        }
-    } else if (std::string_view(interface_name) == AtspiApplicationInterface) {
-        if (std::string_view(method_name) == "GetToolkitName") {
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", "NodalKit"));
-            return;
-        }
-        if (std::string_view(method_name) == "GetVersion") {
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", NK_VERSION));
-            return;
-        }
-    } else if (std::string_view(interface_name) == AtspiComponentInterface) {
-        if (std::string_view(method_name) == "GetExtents") {
-            g_dbus_method_invocation_return_value(
-                invocation,
-                g_variant_new("(iiii)",
-                              static_cast<int>(node->bounds.x),
-                              static_cast<int>(node->bounds.y),
-                              static_cast<int>(node->bounds.width),
-                              static_cast<int>(node->bounds.height)));
-            return;
-        }
-    } else if (std::string_view(interface_name) == AtspiActionInterface) {
-        if (std::string_view(method_name) == "GetNActions") {
-            g_dbus_method_invocation_return_value(
-                invocation, g_variant_new("(i)", static_cast<int>(node->action_names.size())));
-            return;
-        }
-        if (std::string_view(method_name) == "GetActions") {
-            GVariantBuilder builder;
-            g_variant_builder_init(&builder, G_VARIANT_TYPE("a(sss)"));
-            for (const auto& action_name : node->action_names) {
-                g_variant_builder_add(&builder, "(sss)", action_name.c_str(), "", "");
-            }
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(a(sss))", &builder));
-            return;
-        }
-        if (std::string_view(method_name) == "DoAction") {
-            gint32 action_index = -1;
-            g_variant_get(parameters, "(i)", &action_index);
-            bool success = false;
-            // This handler runs on the accessibility worker thread, which must NOT touch the
-            // widget tree or impl->surfaces (both owned by the main/UI thread). Decide the reply
-            // from the thread-safe cached snapshot, then marshal the actual widget resolution and
-            // perform_action() onto the main thread via the event loop.
-            const auto target = snapshot.targets.find(object_path);
-            const auto action =
-                action_index >= 0 &&
-                        static_cast<std::size_t>(action_index) < node->action_names.size()
-                    ? detail::atspi_action_from_name(
-                          node->action_names[static_cast<std::size_t>(action_index)])
-                    : std::nullopt;
-            if (target != snapshot.targets.end() && action.has_value()) {
-                if (auto* app = Application::instance(); app != nullptr) {
-                    app->event_loop().post([impl, target = target->second, action = *action]() {
-                        // UI thread: resolve through the stable identity, which also rejects
-                        // destroyed, hidden, disabled, and modal-covered widgets.
-                        for (auto& [surface, state] : impl->accessibility_windows) {
-                            if (state.key != target.window) {
-                                continue;
-                            }
-                            (void)(action == AccessibleAction::Focus
-                                       ? state.tree->perform(target.node, action) ||
-                                             state.tree->focus(target.node)
-                                       : state.tree->perform(target.node, action));
-                            break;
-                        }
-                        refresh_accessibility_snapshot(*impl);
-                    });
-                    success = true;
-                }
-            }
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", success));
-            return;
-        }
-    } else if (std::string_view(interface_name) == AtspiTextInterface) {
-        if (std::string_view(method_name) == "GetText") {
-            gint32 start = 0;
-            gint32 end = -1;
-            g_variant_get(parameters, "(ii)", &start, &end);
-            // AT-SPI offsets count characters; a byte slice could split one and hand GVariant
-            // invalid UTF-8.
-            auto text = detail::atspi_text_slice(node->value, start, end);
-            if (g_utf8_validate(text.c_str(), static_cast<gssize>(text.size()), nullptr) == 0) {
-                text.clear();
-            }
-            g_dbus_method_invocation_return_value(invocation, g_variant_new("(s)", text.c_str()));
-            return;
-        }
-    }
-
-    g_dbus_method_invocation_return_dbus_error(
-        invocation, "org.a11y.atspi.Error.Unsupported", "Unsupported accessibility method");
-}
-
-GVariant* atspi_get_property(GDBusConnection* /*connection*/,
-                             const gchar* /*sender*/,
-                             const gchar* object_path,
-                             const gchar* interface_name,
-                             const gchar* property_name,
-                             GError** error,
-                             gpointer user_data) {
-    auto* impl = static_cast<WaylandBackend::Impl*>(user_data);
-    request_accessibility_refresh(*impl);
-    const auto snapshot = copy_cached_accessibility_snapshot(impl);
-    const auto* node = find_atspi_node(snapshot, object_path);
-    if (node == nullptr) {
-        g_set_error(error,
-                    G_DBUS_ERROR,
-                    G_DBUS_ERROR_UNKNOWN_OBJECT,
-                    "Unknown accessibility object '%s'",
-                    object_path);
-        return nullptr;
-    }
-
-    auto safe_utf8_variant = [](const std::string& value) -> GVariant* {
-        if (g_utf8_validate(value.c_str(), static_cast<gssize>(value.size()), nullptr) == 0) {
-            return g_variant_new_string("");
-        }
-        return g_variant_new_string(value.c_str());
-    };
-    if (std::string_view(interface_name) == AtspiAccessibleInterface) {
-        if (std::string_view(property_name) == "Name") {
-            return safe_utf8_variant(node->name);
-        }
-        if (std::string_view(property_name) == "Description") {
-            return safe_utf8_variant(node->description);
-        }
-        if (std::string_view(property_name) == "Parent") {
-            return g_variant_new_object_path(node->parent_path.empty() ? "/"
-                                                                       : node->parent_path.c_str());
-        }
-        if (std::string_view(property_name) == "ChildCount") {
-            return g_variant_new_int32(static_cast<int32_t>(node->child_paths.size()));
-        }
-    } else if (std::string_view(interface_name) == AtspiTextInterface) {
-        if (std::string_view(property_name) == "CharacterCount") {
-            return g_variant_new_int32(detail::atspi_character_count(node->value));
-        }
-    }
-
-    g_set_error(error,
-                G_DBUS_ERROR,
-                G_DBUS_ERROR_UNKNOWN_PROPERTY,
-                "Unknown accessibility property '%s'",
-                property_name);
-    return nullptr;
-}
-
-const GDBusInterfaceVTable* atspi_subtree_dispatch(GDBusConnection* /*connection*/,
-                                                   const gchar* /*sender*/,
-                                                   const gchar* /*object_path*/,
-                                                   const gchar* interface_name,
-                                                   const gchar* /*node*/,
-                                                   gpointer* out_user_data,
-                                                   gpointer user_data) {
-    static const GDBusInterfaceVTable vtable = {
-        .method_call = atspi_method_call,
-        .get_property = atspi_get_property,
-        .set_property = nullptr,
-        .padding = {},
-    };
-
-    if (std::string_view(interface_name) != AtspiAccessibleInterface &&
-        std::string_view(interface_name) != AtspiApplicationInterface &&
-        std::string_view(interface_name) != AtspiComponentInterface &&
-        std::string_view(interface_name) != AtspiActionInterface &&
-        std::string_view(interface_name) != AtspiTextInterface) {
-        return nullptr;
-    }
-
-    *out_user_data = user_data;
-    return &vtable;
-}
-
-const GDBusSubtreeVTable atspi_subtree_vtable = {
-    .enumerate = atspi_subtree_enumerate,
-    .introspect = atspi_subtree_introspect,
-    .dispatch = atspi_subtree_dispatch,
-    .padding = {},
-};
 
 } // namespace
 
@@ -1720,6 +1228,23 @@ void WaylandBackend::start_accessibility_thread() {
         std::lock_guard lock(impl_->accessibility_mutex);
         impl_->accessibility_stop_requested = false;
     }
+    if (!impl_->atspi_server) {
+        auto* impl = impl_.get();
+        impl_->atspi_server = std::make_unique<detail::AtspiDbusServer>(
+            NK_VERSION,
+            [impl](detail::AtspiActionTarget target, AccessibleAction action) {
+                if (auto* app = Application::instance(); app != nullptr) {
+                    app->event_loop().post([impl, target, action] {
+                        perform_accessible_action(*impl, target, action);
+                    });
+                }
+            },
+            [impl] {
+                impl->accessibility_in_use = true;
+                request_accessibility_refresh(*impl);
+            });
+        refresh_accessibility_snapshot(*impl_);
+    }
     impl_->accessibility_thread = std::thread([impl = impl_.get()] {
         // Own GMainContext + thread-default so the a11y GDBusConnection dispatches all incoming
         // method calls (Accessible.GetRoleName, etc.) on this thread's mainloop. Without the
@@ -1730,36 +1255,6 @@ void WaylandBackend::start_accessibility_thread() {
         GMainLoop* loop = g_main_loop_new(context, FALSE);
 
         GDBusConnection* connection = atspi_bus_connection();
-        guint subtree_id = 0;
-        if (connection != nullptr) {
-            GError* error = nullptr;
-            // Register the subtree at /org/a11y/atspi/accessible. Uses
-            // DISPATCH_TO_UNENUMERATED_NODES so deeper widget paths (e.g.
-            // /accessible/root/window0/0_0) reach the dispatch handler even though our enumerate
-            // function couldn't represent them as single-segment names. Registration is done on
-            // this thread so messages dispatch on its GMainContext — GDBus binds the subtree to
-            // whatever thread-default context is current at registration time.
-            subtree_id = g_dbus_connection_register_subtree(
-                connection,
-                AtspiObjectRootPath,
-                &atspi_subtree_vtable,
-                G_DBUS_SUBTREE_FLAGS_DISPATCH_TO_UNENUMERATED_NODES,
-                impl,
-                nullptr,
-                &error);
-            if (subtree_id == 0U) {
-                if (error != nullptr) {
-                    NK_LOG_ERROR("WaylandA11y", error->message);
-                    g_error_free(error);
-                }
-                g_object_unref(connection);
-                connection = nullptr;
-            } else {
-                NK_LOG_INFO(
-                    "WaylandA11y",
-                    "Registered AT-SPI accessibility subtree on the accessibility bus thread");
-            }
-        }
 
         bool stop_requested = false;
         {
@@ -1767,29 +1262,17 @@ void WaylandBackend::start_accessibility_thread() {
             impl->accessibility_context = context;
             impl->accessibility_loop = loop;
             impl->accessibility_connection = connection;
-            impl->accessibility_subtree_id = subtree_id;
             stop_requested = impl->accessibility_stop_requested;
         }
 
         if (!stop_requested && connection != nullptr) {
-            // Register the application root and any surfaces that already exist.
-            sync_accessibility_objects(impl);
+            // Registers every published object, then embeds the application with the registry.
+            impl->atspi_server->attach(connection);
             g_main_loop_run(loop);
+            impl->atspi_server->detach();
         }
 
-        // Teardown on this thread: unregister subtree and drop the connection so the final
-        // unref happens on the same context that owns the GDBusConnection worker.
-        if (connection != nullptr) {
-            for (auto& [path, ids] : impl->accessibility_objects_by_path) {
-                for (const guint id : ids) {
-                    g_dbus_connection_unregister_object(connection, id);
-                }
-            }
-        }
-        impl->accessibility_objects_by_path.clear();
-        if (connection != nullptr && subtree_id != 0U) {
-            g_dbus_connection_unregister_subtree(connection, subtree_id);
-        }
+        // Drop the connection on the context that owns its GDBus worker.
         if (connection != nullptr) {
             g_object_unref(connection);
         }
@@ -1799,7 +1282,6 @@ void WaylandBackend::start_accessibility_thread() {
         {
             std::lock_guard lock(impl->accessibility_mutex);
             impl->accessibility_connection = nullptr;
-            impl->accessibility_subtree_id = 0;
             impl->accessibility_loop = nullptr;
             impl->accessibility_context = nullptr;
         }
@@ -1952,7 +1434,8 @@ int WaylandBackend::run_event_loop(EventLoop& loop) {
         }
 
         // Drive the NK event loop (posted tasks, timers, idle callbacks).
-        loop.poll();
+        const bool did_work = loop.poll();
+        refresh_accessibility_if_due(*impl_, did_work);
     }
 
     impl_->current_loop = nullptr;
