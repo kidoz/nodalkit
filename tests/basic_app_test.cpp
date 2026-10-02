@@ -3009,6 +3009,25 @@ TEST_CASE("Window restores focused widgets across focus changes and modal overla
     REQUIRE(field->text() == "ab");
 }
 
+TEST_CASE("Window reports platform window state changes", "[app][window]") {
+    nk::Window window({.title = "Window state", .width = 240, .height = 120});
+    window.set_child(nk::Label::create("Root"));
+
+    int state_changes = 0;
+    [[maybe_unused]] auto connection =
+        window.on_window_state_changed().connect([&state_changes] { ++state_changes; });
+
+    // The platform backend dispatches NativeChromeChanged when the window
+    // manager confirms a fullscreen, maximized, or decoration-mode change;
+    // slots read the new state through the state accessors.
+    window.dispatch_window_event({.type = nk::WindowEvent::Type::NativeChromeChanged});
+    REQUIRE(state_changes == 1);
+
+    // Unrelated window events do not fire the state signal.
+    window.dispatch_window_event({.type = nk::WindowEvent::Type::Expose});
+    REQUIRE(state_changes == 1);
+}
+
 TEST_CASE("Window tracks current key state and cursor shape", "[app][input]") {
     nk::Window window({.title = "Input state", .width = 240, .height = 120});
     auto root = TestContainer::create();

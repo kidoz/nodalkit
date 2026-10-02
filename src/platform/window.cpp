@@ -109,6 +109,7 @@ struct Window::Impl {
     std::function<bool()> close_policy;
     Signal<int, int> resize_signal;
     Signal<float> scale_factor_signal;
+    Signal<> window_state_changed_signal;
     ScopedConnection system_preferences_subscription;
     SystemPreferences system_preferences;
 };
@@ -3998,6 +3999,7 @@ void Window::dispatch_window_event(const WindowEvent& event) {
         break;
     case WindowEvent::Type::NativeChromeChanged:
         impl_->needs_layout = true;
+        impl_->window_state_changed_signal.emit();
         request_frame(FrameRequestReason::Resize);
         break;
     case WindowEvent::Type::FocusIn:
@@ -4172,6 +4174,10 @@ Signal<int, int>& Window::on_resize() {
 
 Signal<float>& Window::on_scale_factor_changed() {
     return impl_->scale_factor_signal;
+}
+
+Signal<>& Window::on_window_state_changed() {
+    return impl_->window_state_changed_signal;
 }
 
 } // namespace nk

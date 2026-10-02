@@ -871,6 +871,7 @@ void force_symbol_references() {
     (void)static_cast<nk::Signal<>& (nk::Window::*)()>(&nk::Window::on_close_requested);
     (void)static_cast<nk::Signal<int, int>& (nk::Window::*)()>(&nk::Window::on_resize);
     (void)static_cast<nk::Signal<float>& (nk::Window::*)()>(&nk::Window::on_scale_factor_changed);
+    (void)static_cast<nk::Signal<>& (nk::Window::*)()>(&nk::Window::on_window_state_changed);
     (void)static_cast<const uint32_t* (nk::ImageNode::*)() const>(&nk::ImageNode::pixel_data);
     (void)static_cast<int (nk::ImageNode::*)() const>(&nk::ImageNode::src_width);
     (void)static_cast<int (nk::ImageNode::*)() const>(&nk::ImageNode::src_height);

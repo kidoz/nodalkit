@@ -232,6 +232,14 @@ public:
     /// Emitted when the window content scale changes.
     Signal<float>& on_scale_factor_changed();
 
+    /// Emitted when the platform window state changes — fullscreen,
+    /// maximization, or native decoration mode. Slots read the new state
+    /// through is_fullscreen(), is_maximized(), and
+    /// uses_client_side_decorations(). Fires when the window manager confirms
+    /// a state change, whether the application requested it (set_fullscreen,
+    /// toggle_maximize) or the platform initiated it.
+    Signal<>& on_window_state_changed();
+
 private:
     friend class Widget;
     friend class Dialog;
