@@ -27,6 +27,18 @@ std::string join_segments(const std::vector<std::string>& segments) {
     return summary;
 }
 
+std::string status_description(const std::vector<std::string>& segments,
+                               const std::string& trailing) {
+    std::string summary = join_segments(segments);
+    if (!trailing.empty()) {
+        if (!summary.empty()) {
+            summary += " | ";
+        }
+        summary += trailing;
+    }
+    return summary;
+}
+
 Rect union_rect(Rect lhs, Rect rhs) {
     if (lhs.width <= 0.0F || lhs.height <= 0.0F) {
         return rhs;
@@ -83,10 +95,25 @@ Rect status_tail_damage_rect(float bar_width,
     };
 }
 
+template <typename MeasureTextFn>
+Rect trailing_damage_rect(float bar_width,
+                          float bar_height,
+                          const std::string& trailing,
+                          MeasureTextFn&& measure_text_fn) {
+    if (bar_width <= 0.0F || bar_height <= 0.0F || trailing.empty()) {
+        return {0.0F, 0.0F, bar_width, bar_height};
+    }
+    const auto measured = measure_text_fn(trailing);
+    const float right_edge = std::max(0.0F, bar_width - 16.0F);
+    const float left = std::max(0.0F, right_edge - measured.width);
+    return {left, 0.0F, std::max(0.0F, right_edge - left), bar_height};
+}
+
 } // namespace
 
 struct StatusBar::Impl {
     std::vector<std::string> segments;
+    std::string trailing;
 };
 
 std::shared_ptr<StatusBar> StatusBar::create() {
@@ -105,7 +132,7 @@ StatusBar::~StatusBar() = default;
 void StatusBar::set_segments(std::vector<std::string> segments) {
     const auto previous_segments = impl_->segments;
     impl_->segments = std::move(segments);
-    ensure_accessible().set_description(join_segments(impl_->segments));
+    ensure_accessible().set_description(status_description(impl_->segments, impl_->trailing));
     const auto a = allocation();
     if (previous_segments.size() != impl_->segments.size() || a.width <= 0.0F || a.height <= 0.0F) {
         queue_layout();
@@ -140,7 +167,7 @@ void StatusBar::set_segment(std::size_t index, std::string text) {
     if (impl_->segments[index] != text) {
         const auto previous_segments = impl_->segments;
         impl_->segments[index] = std::move(text);
-        ensure_accessible().set_description(join_segments(impl_->segments));
+        ensure_accessible().set_description(status_description(impl_->segments, impl_->trailing));
         const auto a = allocation();
         if (a.width <= 0.0F || a.height <= 0.0F) {
             queue_redraw();
@@ -170,11 +197,37 @@ std::string_view StatusBar::segment(std::size_t index) const {
     return impl_->segments[index];
 }
 
+void StatusBar::set_trailing(std::string text) {
+    if (impl_->trailing == text) {
+        return;
+    }
+    const auto previous_trailing = impl_->trailing;
+    impl_->trailing = std::move(text);
+    ensure_accessible().set_description(status_description(impl_->segments, impl_->trailing));
+    const auto a = allocation();
+    if (a.width <= 0.0F || a.height <= 0.0F) {
+        queue_redraw();
+        return;
+    }
+    const auto font = status_font();
+    const auto measure_trailing = [&](std::string_view value) { return measure_text(value, font); };
+    queue_redraw(
+        union_rect(trailing_damage_rect(a.width, a.height, previous_trailing, measure_trailing),
+                   trailing_damage_rect(a.width, a.height, impl_->trailing, measure_trailing)));
+}
+
+std::string_view StatusBar::trailing() const {
+    return impl_->trailing;
+}
+
 SizeRequest StatusBar::measure(const Constraints& constraints) const {
     const auto font = status_font();
     float tallest_segment = 0.0F;
     for (const auto& seg : impl_->segments) {
         tallest_segment = std::max(tallest_segment, measure_text(seg, font).height);
+    }
+    if (!impl_->trailing.empty()) {
+        tallest_segment = std::max(tallest_segment, measure_text(impl_->trailing, font).height);
     }
     const float content_height = tallest_segment > 0.0F ? tallest_segment + 10.0F : 0.0F;
     const float h = std::max(theme_number("min-height", 28.0F), content_height);
@@ -203,6 +256,14 @@ void StatusBar::snapshot(SnapshotContext& ctx) const {
             ctx.add_color_rect({a.x + x_offset - (gap * 0.5F), a.y + 5.0F, 1.0F, a.height - 10.0F},
                                separator_color);
         }
+    }
+
+    if (!impl_->trailing.empty()) {
+        const auto trailing_color = theme_color("text-secondary", Color::from_rgb(96, 103, 114));
+        const auto measured = measure_text(impl_->trailing, font);
+        const float text_y = a.y + std::max(0.0F, (a.height - measured.height) * 0.5F);
+        const float text_x = std::max(a.x, a.x + a.width - 16.0F - measured.width);
+        ctx.add_text({text_x, text_y}, impl_->trailing, trailing_color, font);
     }
 }
 

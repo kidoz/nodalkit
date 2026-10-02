@@ -2581,6 +2581,25 @@ TEST_CASE("StatusBar advertises the accessible status role", "[app][status]") {
     REQUIRE(status->segment(1) == "Saved");
 }
 
+TEST_CASE("StatusBar carries a right-aligned trailing detail", "[app][status]") {
+    auto status = nk::StatusBar::create();
+    status->set_segments({"Ready"});
+    status->set_trailing("mapper: idle");
+    REQUIRE(status->trailing() == "mapper: idle");
+    CHECK(status->ensure_accessible().description() == "Ready | mapper: idle");
+    CHECK(status->measure({}).natural_height >= 28.0F);
+
+    // Clearing the detail drops it from the description again.
+    status->set_trailing("");
+    REQUIRE(status->trailing().empty());
+    CHECK(status->ensure_accessible().description() == "Ready");
+
+    // A bar without segments still reports the trailing text.
+    status->set_segments({});
+    status->set_trailing("12 ms");
+    CHECK(status->ensure_accessible().description() == "12 ms");
+}
+
 TEST_CASE("SegmentedControl selects segments through API, mouse, and keyboard", "[app][widgets]") {
     auto control = nk::SegmentedControl::create();
     control->set_segments({"Input", "Video", "Audio"});

@@ -29,6 +29,12 @@ public:
     /// Get segment text by index.
     [[nodiscard]] std::string_view segment(std::size_t index) const;
 
+    /// Set trailing text drawn right-aligned in the secondary text color.
+    void set_trailing(std::string text);
+
+    /// Get the trailing text.
+    [[nodiscard]] std::string_view trailing() const;
+
     // --- Widget overrides ---
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
 
