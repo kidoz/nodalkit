@@ -84,6 +84,8 @@ public:
                                uint32_t state);
     static void
     pointer_axis(void* data, wl_pointer* pointer, uint32_t time, uint32_t axis, wl_fixed_t value);
+    static void
+    pointer_axis_value120(void* data, wl_pointer* pointer, uint32_t axis, int32_t value120);
     // Wayland >= 1.26 (WL_POINTER_WARP_SINCE_VERSION).
     static void
     pointer_warp(void* data, wl_pointer* pointer, wl_fixed_t surface_x, wl_fixed_t surface_y);

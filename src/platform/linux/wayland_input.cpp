@@ -322,10 +322,31 @@ static void pointer_axis_discrete(void* /*data*/,
                                   uint32_t /*axis*/,
                                   int32_t /*discrete*/) {}
 
-static void pointer_axis_value120(void* /*data*/,
-                                  wl_pointer* /*pointer*/,
-                                  uint32_t /*axis*/,
-                                  int32_t /*value120*/) {}
+void WaylandInput::pointer_axis_value120(void* data,
+                                         wl_pointer* /*pointer*/,
+                                         uint32_t axis,
+                                         int32_t value120) {
+    // Wheel clicks arrive as value120 steps, often alongside a zero smooth
+    // axis value. Translate each 120 step into one discrete scroll click.
+    auto* self = static_cast<WaylandInput*>(data);
+    if (self == nullptr || self->pointer_focus_ == nullptr || value120 == 0) {
+        return;
+    }
+
+    MouseEvent me{};
+    me.type = MouseEvent::Type::Scroll;
+    me.x = self->pointer_x_;
+    me.y = self->pointer_y_;
+    const auto clicks = static_cast<float>(value120) / 120.0F;
+    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+        me.scroll_dy = -clicks; // Wayland positive = scroll down.
+    } else {
+        me.scroll_dx = clicks;
+    }
+    me.precise_scrolling = false;
+    self->pointer_focus_->owner().dispatch_mouse_event(me);
+    self->backend_.request_accessibility_sync();
+}
 
 static void pointer_axis_relative_direction(void* /*data*/,
                                             wl_pointer* /*pointer*/,
@@ -357,7 +378,7 @@ static constexpr struct wl_pointer_listener pointer_listener = {
     .axis_source = pointer_axis_source,
     .axis_stop = pointer_axis_stop,
     .axis_discrete = pointer_axis_discrete,
-    .axis_value120 = pointer_axis_value120,
+    .axis_value120 = WaylandInput::pointer_axis_value120,
     .axis_relative_direction = pointer_axis_relative_direction,
 #ifdef WL_POINTER_WARP_SINCE_VERSION
     .warp = WaylandInput::pointer_warp,
