@@ -765,6 +765,59 @@ TEST_CASE("Dialog Escape cancellation survives caller releasing setup reference"
     REQUIRE(weak_dialog.expired());
 }
 
+TEST_CASE("Modal dialogs own the keyboard and release it back on dismiss", "[app][dialog][input]") {
+    const auto tree_has_focused = [](auto&& self, const nk::Widget& widget) -> bool {
+        if (nk::has_flag(widget.state_flags(), nk::StateFlags::Focused)) {
+            return true;
+        }
+        for (const auto& child : widget.children()) {
+            if (child != nullptr && self(self, *child)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Modal keyboard", .width = 320, .height = 240});
+    auto root_button = nk::Button::create("Root");
+    window.set_child(root_button);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    // Put keyboard focus on the occluded surface first.
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Release, .key = nk::KeyCode::Tab});
+    REQUIRE(nk::has_flag(root_button->state_flags(), nk::StateFlags::Focused));
+
+    // A polled key latches while no modal is up and stays latched (the
+    // physical key is still held) when the sheet opens through the mouse.
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::W});
+    REQUIRE(window.is_key_pressed(nk::KeyCode::W));
+
+    auto dialog = nk::Dialog::create("Paused", "Modal keyboard regression");
+    dialog->add_button("Resume", nk::DialogResponse::Accept);
+    dialog->present(window);
+    REQUIRE(app.event_loop().poll());
+
+    // Focus moved off the occluded surface into the sheet...
+    CHECK_FALSE(nk::has_flag(root_button->state_flags(), nk::StateFlags::Focused));
+    REQUIRE(tree_has_focused(tree_has_focused, *dialog));
+
+    // ...opening the sheet released the latched polled key, and presses while
+    // it is up do not latch: the surface behind must not keep reacting.
+    CHECK_FALSE(window.is_key_pressed(nk::KeyCode::W));
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::W});
+    REQUIRE_FALSE(window.is_key_pressed(nk::KeyCode::W));
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    CHECK(nk::has_flag(root_button->state_flags(), nk::StateFlags::Focused));
+
+    // With the sheet gone, polled keys latch again.
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::W});
+    REQUIRE(window.is_key_pressed(nk::KeyCode::W));
+}
+
 TEST_CASE("Destroying a widget with a queued redraw before the next frame is safe",
           "[app][lifetime]") {
     nk::Application app(0, nullptr);

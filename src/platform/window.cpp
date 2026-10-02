@@ -3654,9 +3654,19 @@ void Window::dispatch_key_event(const KeyEvent& event) {
     if (event.type == KeyEvent::Type::Press) {
         impl_->last_input_keyboard = true;
     }
-    const auto key_index = static_cast<std::size_t>(event.key);
-    if (key_index < impl_->key_state.size()) {
-        impl_->key_state[key_index] = event.type == KeyEvent::Type::Press;
+    // A visible modal sheet owns input: game-style polled keys (key_state)
+    // must not latch while it is up, or the surface behind keeps reacting.
+    const bool modal_overlay_visible = std::any_of(
+        impl_->overlays.begin(), impl_->overlays.end(), [](const Impl::OverlayEntry& entry) {
+            return entry.modal && entry.widget != nullptr && entry.widget->is_visible();
+        });
+    if (modal_overlay_visible) {
+        impl_->key_state.fill(false);
+    } else {
+        const auto key_index = static_cast<std::size_t>(event.key);
+        if (key_index < impl_->key_state.size()) {
+            impl_->key_state[key_index] = event.type == KeyEvent::Type::Press;
+        }
     }
 
     std::vector<std::shared_ptr<Widget>> overlay_widgets;
@@ -4065,9 +4075,23 @@ void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {
             append_unique_widget(impl_->dirty_widgets, entry.widget.get());
             entry.widget = std::move(overlay);
             entry.modal = modal;
-            entry.previous_focus = modal && impl_->focused_widget != nullptr
-                                       ? impl_->focused_widget->shared_from_this()
-                                       : std::weak_ptr<Widget>{};
+            if (modal) {
+                // A re-shown modal sheet re-takes the keyboard. Focus already
+                // inside it must not overwrite the restore target with a
+                // widget from the sheet itself.
+                if (impl_->focused_widget == nullptr ||
+                    !is_descendant_of(impl_->focused_widget, entry.widget.get())) {
+                    if (impl_->focused_widget != nullptr) {
+                        entry.previous_focus = impl_->focused_widget->shared_from_this();
+                    }
+                    std::vector<Widget*> focusable;
+                    collect_focusable_widgets(entry.widget.get(), focusable);
+                    focus_widget(focusable.empty() ? entry.widget.get() : focusable.front());
+                }
+                impl_->key_state.fill(false);
+            } else {
+                entry.previous_focus = std::weak_ptr<Widget>{};
+            }
             entry.widget->set_host_window(this);
             append_unique_widget(impl_->dirty_widgets, entry.widget.get());
             impl_->needs_layout = true;
@@ -4078,11 +4102,22 @@ void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {
 
     overlay->set_host_window(this);
     append_unique_widget(impl_->dirty_widgets, overlay.get());
+    Widget* overlay_ptr = overlay.get();
     impl_->overlays.push_back({std::move(overlay),
                                modal,
                                modal && impl_->focused_widget != nullptr
                                    ? impl_->focused_widget->shared_from_this()
                                    : std::weak_ptr<Widget>{}});
+    if (modal) {
+        // Modal sheets own the keyboard: move focus inside so Tab, Return,
+        // and Escape operate on the sheet instead of the occluded surface,
+        // and drop latched polled keys so consumers behind the sheet see a
+        // clean state.
+        std::vector<Widget*> focusable;
+        collect_focusable_widgets(overlay_ptr, focusable);
+        focus_widget(focusable.empty() ? overlay_ptr : focusable.front());
+        impl_->key_state.fill(false);
+    }
     impl_->needs_layout = true;
     request_frame(FrameRequestReason::OverlayChanged);
 }
