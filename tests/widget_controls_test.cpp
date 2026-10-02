@@ -847,6 +847,38 @@ TEST_CASE("Boxed-list rows wrap their control and keep focus on it",
     }
 }
 
+TEST_CASE("PreferencesRow caps a wide suffix so the title keeps its text",
+          "[widgets][preferences]") {
+    auto row = nk::PreferencesRow::create("Deadzone response");
+    row->set_suffix(FixedWidget::create(450.0F));
+    row->allocate({0.0F, 0.0F, 499.0F, 50.0F});
+
+    // A 450 px control in a 499 px row is capped at 60 % of the row width
+    // instead of squeezing the title into an ellipsis, and stays glued to the
+    // row's trailing padding.
+    const auto* suffix = row->suffix();
+    REQUIRE(suffix != nullptr);
+    CHECK(suffix->allocation().width == Catch::Approx(499.0F * 0.6F).margin(0.5F));
+    CHECK(suffix->allocation().right() == Catch::Approx(499.0F - 16.0F).margin(0.5F));
+
+    // A suffix narrower than the cap keeps its natural width.
+    auto short_row = nk::PreferencesRow::create("Preferred device");
+    short_row->set_suffix(FixedWidget::create(120.0F));
+    short_row->allocate({0.0F, 0.0F, 499.0F, 50.0F});
+    CHECK(short_row->suffix()->allocation().width == Catch::Approx(120.0F).margin(0.5F));
+
+    SECTION("A capped suffix leaves the full title in the paint output") {
+        auto painted = SnapshotSwitchRow::create("Deadzone response", "Fallback curve");
+        painted->set_suffix(FixedWidget::create(450.0F));
+        painted->allocate({0.0F, 0.0F, 499.0F, 66.0F});
+        nk::SnapshotContext ctx;
+        painted->snapshot_for_test(ctx);
+        const auto root = ctx.take_root();
+        REQUIRE(root != nullptr);
+        CHECK(find_text_node(*root, "Deadzone response") != nullptr);
+    }
+}
+
 TEST_CASE("Headerbar stacks a subtitle under the title", "[widgets][headerbar][gnome]") {
     auto headerbar = SnapshotHeaderbar::create("Workspace");
     CHECK(headerbar->subtitle().empty());

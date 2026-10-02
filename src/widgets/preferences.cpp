@@ -17,6 +17,10 @@ FontDescriptor preference_font(float size, FontWeight weight = FontWeight::Regul
     return {.family = {}, .size = size, .weight = weight};
 }
 
+// Share of the row width a suffix control may claim before it starts
+// squeezing the title into an ellipsis.
+constexpr float kMaxSuffixWidthShare = 0.6F;
+
 } // namespace
 
 struct PreferencesRow::Impl {
@@ -139,7 +143,9 @@ void PreferencesRow::allocate(const Rect& allocation) {
     }
     const float padding = theme_number("padding-x", 16.0F);
     const auto request = impl_->suffix->measure({0.0F, 0.0F, allocation.width, allocation.height});
-    const float width = std::min(request.natural_width, std::max(0.0F, allocation.width - padding));
+    const float max_suffix_width = std::max(0.0F, allocation.width * kMaxSuffixWidthShare);
+    const float width = std::min(std::min(request.natural_width, max_suffix_width),
+                                 std::max(0.0F, allocation.width - padding));
     const float height = std::min(request.natural_height, allocation.height);
     impl_->suffix->allocate({allocation.right() - padding - width,
                              allocation.y + ((allocation.height - height) * 0.5F),
