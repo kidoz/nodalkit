@@ -79,6 +79,7 @@ int item_index_at(const PopupGeometry& geometry,
 struct ContextMenu::Impl {
     std::vector<MenuItemEntry> items;
     Signal<int> item_activated;
+    Signal<> dismissed;
     bool open = false;
     Point position;
     int hovered_index = -1;
@@ -91,6 +92,7 @@ std::shared_ptr<ContextMenu> ContextMenu::create() {
 
 ContextMenu::ContextMenu() : impl_(std::make_unique<Impl>()) {
     set_focusable(true);
+    set_visible(false);
     add_style_class("context-menu");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Menu);
@@ -123,18 +125,34 @@ void ContextMenu::show_at(Point position) {
     impl_->open = true;
     impl_->hovered_index = -1;
     impl_->armed_index = -1;
+    set_visible(true);
     queue_redraw();
 }
 
 void ContextMenu::dismiss() {
+    const bool was_open = impl_->open;
+    dismiss_without_activation();
+    if (was_open) {
+        impl_->dismissed.emit();
+    }
+}
+
+void ContextMenu::dismiss_without_activation() {
     if (!impl_->open) {
         return;
     }
+    // Unmap so hit tests and the focus chain skip the closed menu. Unmapping
+    // also releases focus if the menu held it.
     preserve_damage_regions_for_next_redraw();
     impl_->open = false;
     impl_->hovered_index = -1;
     impl_->armed_index = -1;
+    set_visible(false);
     queue_redraw();
+}
+
+Signal<>& ContextMenu::on_dismissed() {
+    return impl_->dismissed;
 }
 
 bool ContextMenu::is_open() const {
@@ -217,7 +235,7 @@ bool ContextMenu::handle_mouse_event(const MouseEvent& event) {
         const int activated_index = impl_->armed_index;
         impl_->armed_index = -1;
         if (activated) {
-            dismiss();
+            dismiss_without_activation();
             impl_->item_activated.emit(activated_index);
         }
         return true;
@@ -287,7 +305,7 @@ bool ContextMenu::handle_key_event(const KeyEvent& event) {
     case KeyCode::Space:
         if (impl_->hovered_index >= 0) {
             const int activated_index = impl_->hovered_index;
-            dismiss();
+            dismiss_without_activation();
             impl_->item_activated.emit(activated_index);
         }
         return true;

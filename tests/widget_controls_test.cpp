@@ -22,6 +22,7 @@
 #include <nk/widgets/calendar.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/color_well.h>
+#include <nk/widgets/context_menu.h>
 #include <nk/widgets/headerbar.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/radio_button.h>
@@ -915,4 +916,43 @@ TEST_CASE("AboutDialog omits empty fields and reports link activation", "[widget
     CHECK(activatable_rows == 1);
     CHECK(activated == "https://example.invalid/nodalkit");
     connection.disconnect();
+}
+
+TEST_CASE("ContextMenu maps only while open and separates dismissal from activation",
+          "[widgets][context_menu]") {
+    auto menu = nk::ContextMenu::create();
+    menu->add_item("Cut");
+    menu->add_item("Copy");
+    CHECK_FALSE(menu->is_open());
+    CHECK_FALSE(menu->is_visible());
+
+    int dismissals = 0;
+    int activated = -1;
+    [[maybe_unused]] auto dismissed_connection =
+        menu->on_dismissed().connect([&dismissals] { ++dismissals; });
+    [[maybe_unused]] auto activated_connection =
+        menu->on_item_activated().connect([&activated](int index) { activated = index; });
+
+    // Escape dismisses, unmaps, and fires on_dismissed without activating.
+    menu->show_at({40.0F, 40.0F});
+    REQUIRE(menu->is_open());
+    REQUIRE(menu->is_visible());
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    CHECK_FALSE(menu->is_open());
+    CHECK_FALSE(menu->is_visible());
+    CHECK(dismissals == 1);
+    CHECK(activated == -1);
+
+    // Activating an item unmaps the menu but fires only on_item_activated.
+    menu->show_at({40.0F, 40.0F});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    CHECK_FALSE(menu->is_open());
+    CHECK_FALSE(menu->is_visible());
+    CHECK(activated == 0);
+    CHECK(dismissals == 1);
+
+    // Dismissing an already closed menu is a no-op: no second signal.
+    menu->dismiss();
+    CHECK(dismissals == 1);
 }

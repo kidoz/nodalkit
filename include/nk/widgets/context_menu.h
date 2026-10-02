@@ -40,6 +40,10 @@ public:
     /// Emitted when an item is activated, with its index.
     Signal<int>& on_item_activated();
 
+    /// Emitted when the menu is dismissed without an item activation
+    /// (Escape or outside click). The menu is already hidden when this fires.
+    Signal<>& on_dismissed();
+
     // --- Widget overrides ---
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
     bool handle_mouse_event(const MouseEvent& event) override;
@@ -54,6 +58,9 @@ protected:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    /// Close the menu without emitting on_dismissed; used on activation.
+    void dismiss_without_activation();
 };
 
 } // namespace nk
