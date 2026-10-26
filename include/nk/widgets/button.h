@@ -4,6 +4,7 @@
 /// @brief Clickable button widget.
 
 #include <memory>
+#include <nk/actions/action.h>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
 #include <string>
@@ -23,7 +24,13 @@ public:
     [[nodiscard]] std::string_view label() const;
     void set_label(std::string label);
 
-    /// Signal emitted when the button is clicked.
+    /// Bind shared command state and activation. Null unbinds and restores
+    /// sensitivity and unchecked state. The label remains application-owned.
+    void set_action(std::shared_ptr<Action> action);
+    [[nodiscard]] Action* action() const;
+
+    /// Emitted on activation when no action is bound. Bound buttons activate
+    /// their Action instead; observe Action::on_activated() for shared commands.
     Signal<>& on_clicked();
 
     // --- Widget overrides ---
@@ -37,8 +44,13 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    bool activate();
+    void sync_action();
+
     std::string label_;
     Signal<> clicked_;
+    std::shared_ptr<Action> action_;
+    ScopedConnection action_changed_;
     bool armed_ = false;
 };
 

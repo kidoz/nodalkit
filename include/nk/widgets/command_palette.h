@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <nk/actions/action.h>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
 #include <optional>
@@ -22,6 +23,7 @@ struct CommandPaletteCommand {
     std::string subtitle;
     std::string category;
     bool enabled = true;
+    bool checked = false;
 };
 
 /// In-window searchable command palette with keyboard and pointer activation.
@@ -36,6 +38,11 @@ public:
     /// Returns all source commands in insertion order.
     [[nodiscard]] std::span<const CommandPaletteCommand> commands() const;
 
+    /// Bind command IDs to a registry. Effective enabled/checked state is
+    /// reflected in commands(); missing actions are disabled. Null unbinds.
+    void set_action_group(std::shared_ptr<ActionGroup> actions);
+    [[nodiscard]] ActionGroup* action_group() const;
+
     /// Sets the search query.
     void set_query(std::string query);
     /// Returns the current search query.
@@ -46,7 +53,8 @@ public:
     /// Returns the source command index for the current result.
     [[nodiscard]] std::optional<std::size_t> current_command() const;
 
-    /// Emitted with a command ID when an enabled command is activated.
+    /// Emitted for enabled commands when no action group is bound. Bound
+    /// palettes activate the shared action instead of emitting this signal.
     Signal<std::string_view>& on_command_activated();
 
     /// Emitted when Escape is pressed with an empty query.
@@ -66,6 +74,7 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    void sync_actions();
     void rebuild_filter();
     void sync_accessible_summary();
     void move_current(int delta);

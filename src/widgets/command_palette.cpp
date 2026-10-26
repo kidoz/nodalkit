@@ -104,6 +104,9 @@ std::string palette_accessible_description(std::span<const CommandPaletteCommand
         if (!command.enabled) {
             stream << ", disabled";
         }
+        if (command.checked) {
+            stream << ", checked";
+        }
     } else {
         stream << ", no current result";
     }
@@ -130,6 +133,9 @@ std::string palette_accessible_value(std::span<const CommandPaletteCommand> comm
     if (!command.enabled) {
         stream << ", disabled";
     }
+    if (command.checked) {
+        stream << ", checked";
+    }
     return stream.str();
 }
 
@@ -140,7 +146,10 @@ std::size_t invalid_row() {
 } // namespace
 
 struct CommandPalette::Impl {
+    std::vector<CommandPaletteCommand> source_commands;
     std::vector<CommandPaletteCommand> commands;
+    std::shared_ptr<ActionGroup> actions;
+    ScopedConnection actions_changed;
     std::vector<std::size_t> filtered;
     std::string query;
     std::optional<std::size_t> current_result;
@@ -169,9 +178,39 @@ CommandPalette::CommandPalette() : impl_(std::make_unique<Impl>()) {
 CommandPalette::~CommandPalette() = default;
 
 void CommandPalette::set_commands(std::vector<CommandPaletteCommand> commands) {
-    impl_->commands = std::move(commands);
-    rebuild_filter();
+    impl_->source_commands = std::move(commands);
+    sync_actions();
     queue_layout();
+}
+
+void CommandPalette::set_action_group(std::shared_ptr<ActionGroup> actions) {
+    impl_->actions_changed.disconnect();
+    impl_->actions = std::move(actions);
+    if (impl_->actions) {
+        impl_->actions_changed = ScopedConnection{
+            impl_->actions->on_changed().connect([weak = weak_from_this()](std::string_view) {
+                if (auto widget = weak.lock()) {
+                    static_cast<CommandPalette&>(*widget).sync_actions();
+                }
+            })};
+    }
+    sync_actions();
+}
+
+ActionGroup* CommandPalette::action_group() const {
+    return impl_->actions.get();
+}
+
+void CommandPalette::sync_actions() {
+    impl_->commands = impl_->source_commands;
+    if (impl_->actions) {
+        for (auto& command : impl_->commands) {
+            const auto action = impl_->actions->find(command.id);
+            command.enabled = command.enabled && action && action->is_enabled();
+            command.checked = action && action->is_checked();
+        }
+    }
+    rebuild_filter();
     queue_redraw();
 }
 
@@ -516,8 +555,12 @@ void CommandPalette::snapshot(SnapshotContext& ctx) const {
             row_rect.y + std::max(0.0F, (row_rect.height - text_block_height) * 0.5F);
         const float title_x = row_rect.x + row_padding_x;
         const float title_width = std::max(0.0F, row_rect.right() - row_padding_x - title_x);
-        add_text_elided(
-            ctx, {title_x, title_y}, command.title, title_width, command_text, title_font);
+        add_text_elided(ctx,
+                        {title_x, title_y},
+                        command.checked ? "\u2713 " + command.title : command.title,
+                        title_width,
+                        command_text,
+                        title_font);
         if (!detail.empty()) {
             const float detail_x = title_x + detail_indent;
             const float detail_width = std::max(0.0F, row_rect.right() - row_padding_x - detail_x);
@@ -655,11 +698,15 @@ bool CommandPalette::activate_current() {
     if (!current) {
         return false;
     }
-    const auto& command = impl_->commands[*current];
+    const auto command = impl_->commands[*current];
     if (!command.enabled) {
         return false;
     }
-    impl_->command_activated.emit(command.id);
+    if (auto actions = impl_->actions) {
+        actions->activate(command.id);
+    } else {
+        impl_->command_activated.emit(command.id);
+    }
     return true;
 }
 

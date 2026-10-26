@@ -30,10 +30,7 @@ Button::Button(std::string label) : label_(std::move(label)) {
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Button);
     accessible.set_name(label_);
-    accessible.add_action(AccessibleAction::Activate, [this]() {
-        clicked_.emit();
-        return true;
-    });
+    accessible.add_action(AccessibleAction::Activate, [this]() { return activate(); });
 }
 
 Button::~Button() = default;
@@ -55,8 +52,53 @@ Signal<>& Button::on_clicked() {
     return clicked_;
 }
 
+void Button::set_action(std::shared_ptr<Action> action) {
+    action_changed_.disconnect();
+    action_ = std::move(action);
+    if (action_) {
+        action_changed_ = ScopedConnection{action_->on_changed().connect([weak = weak_from_this()] {
+            if (auto widget = weak.lock()) {
+                static_cast<Button&>(*widget).sync_action();
+            }
+        })};
+    }
+    sync_action();
+}
+
+Action* Button::action() const {
+    return action_.get();
+}
+
+void Button::sync_action() {
+    const auto bound = action_;
+    ensure_accessible().set_role(bound && bound->is_checkable() ? AccessibleRole::ToggleButton
+                                                                : AccessibleRole::Button);
+    set_state_flag(StateFlags::Checked, bound && bound->is_checked());
+    if (bound && !bound->is_enabled()) {
+        armed_ = false;
+    }
+    queue_layout();
+    set_sensitive(!bound || bound->is_enabled());
+}
+
+bool Button::activate() {
+    if (!is_sensitive()) {
+        return false;
+    }
+    if (auto bound = action_) {
+        if (!bound->is_enabled()) {
+            return false;
+        }
+        bound->activate();
+    } else {
+        clicked_.emit();
+    }
+    return true;
+}
+
 SizeRequest Button::measure(const Constraints& /*constraints*/) const {
-    const auto measured = measure_text(label_, button_font());
+    const auto text = has_flag(state_flags(), StateFlags::Checked) ? "\u2713 " + label_ : label_;
+    const auto measured = measure_text(text, button_font());
     const float padding_x = theme_number("padding-x", 16.0F);
     const float min_width = theme_number("min-width", 82.0F);
     const float min_height = theme_number("min-height", 36.0F);
@@ -66,6 +108,10 @@ SizeRequest Button::measure(const Constraints& /*constraints*/) const {
 }
 
 bool Button::handle_mouse_event(const MouseEvent& event) {
+    if (!is_sensitive()) {
+        armed_ = false;
+        return false;
+    }
     if (event.button != 1) {
         return false;
     }
@@ -75,12 +121,9 @@ bool Button::handle_mouse_event(const MouseEvent& event) {
         armed_ = allocation().contains({event.x, event.y});
         return armed_;
     case MouseEvent::Type::Release: {
-        const bool activate = armed_ && allocation().contains({event.x, event.y});
+        const bool should_activate = armed_ && allocation().contains({event.x, event.y});
         armed_ = false;
-        if (activate) {
-            clicked_.emit();
-        }
-        return activate;
+        return should_activate && activate();
     }
     case MouseEvent::Type::Move:
     case MouseEvent::Type::Enter:
@@ -101,8 +144,7 @@ bool Button::handle_key_event(const KeyEvent& event) {
     }
 
     if (event.key == KeyCode::Space || event.key == KeyCode::Return) {
-        clicked_.emit();
-        return true;
+        return activate();
     }
 
     return false;
@@ -128,7 +170,8 @@ void Button::snapshot(SnapshotContext& ctx) const {
         body, theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}), 1.0F, corner_radius);
 
     const auto font = button_font();
-    const auto measured = measure_text(label_, font);
+    const auto text = has_flag(state_flags(), StateFlags::Checked) ? "\u2713 " + label_ : label_;
+    const auto measured = measure_text(text, font);
     // When layout under-allocates the button, elide the label instead of
     // painting past the body.
     const float label_inset = theme_number("padding-x", 16.0F) * 0.5F;
@@ -137,7 +180,7 @@ void Button::snapshot(SnapshotContext& ctx) const {
     const float text_x = body.x + std::max(label_inset, (body.width - label_width) * 0.5F);
     const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
     add_text_elided(
-        ctx, {text_x, text_y}, label_, measured, max_label_width, theme_color("text-color"), font);
+        ctx, {text_x, text_y}, text, measured, max_label_width, theme_color("text-color"), font);
 }
 
 } // namespace nk

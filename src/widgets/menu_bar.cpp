@@ -82,6 +82,8 @@ Rect popup_item_rect(const PopupGeometry& geometry, int index) {
 
 struct MenuBar::Impl {
     std::vector<Menu> menus;
+    std::shared_ptr<ActionGroup> actions;
+    ScopedConnection actions_changed;
     Signal<std::string_view> action_signal;
     int open_menu = -1;
     int armed_menu = -1;
@@ -116,6 +118,43 @@ void MenuBar::clear() {
 
 Signal<std::string_view>& MenuBar::on_action() {
     return impl_->action_signal;
+}
+
+void MenuBar::set_action_group(std::shared_ptr<ActionGroup> actions) {
+    impl_->actions_changed.disconnect();
+    impl_->actions = std::move(actions);
+    if (impl_->actions) {
+        impl_->actions_changed = ScopedConnection{
+            impl_->actions->on_changed().connect([weak = weak_from_this()](std::string_view) {
+                if (auto widget = weak.lock()) {
+                    widget->queue_redraw();
+                }
+            })};
+    }
+    queue_redraw();
+}
+
+ActionGroup* MenuBar::action_group() const {
+    return impl_->actions.get();
+}
+
+bool MenuBar::item_enabled(const MenuItem& item) const {
+    if (!item.enabled) {
+        return false;
+    }
+    if (!impl_->actions || item.action_name.empty() || !item.children.empty()) {
+        return true;
+    }
+    const auto action = impl_->actions->find(item.action_name);
+    return action && action->is_enabled();
+}
+
+void MenuBar::activate_action(std::string name) {
+    if (auto actions = impl_->actions) {
+        actions->activate(name);
+    } else if (!name.empty()) {
+        impl_->action_signal.emit(name);
+    }
 }
 
 namespace {
@@ -446,7 +485,7 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
             if (released_path && *released_path == impl_->armed_path) {
                 const auto& menu = impl_->menus[static_cast<std::size_t>(impl_->open_menu)];
                 if (auto* item = item_at_path(menu, *released_path)) {
-                    if (!item->enabled || item->separator) {
+                    if (!item_enabled(*item) || item->separator) {
                         return true;
                     }
                     if (!item->children.empty()) {
@@ -457,10 +496,9 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
                             *this, title_damage_rect(title_rects, allocation(), impl_->open_menu));
                         return true;
                     }
-                    if (!item->action_name.empty()) {
-                        impl_->action_signal.emit(item->action_name);
-                    }
+                    const std::string name = item->action_name;
                     close_popups();
+                    activate_action(name);
                     return true;
                 }
             }
@@ -603,7 +641,7 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
             next_index =
                 std::clamp(next_index + delta, 0, static_cast<int>(current_items->size()) - 1);
             const auto& item = (*current_items)[static_cast<std::size_t>(next_index)];
-            if (!item.separator && item.enabled) {
+            if (!item.separator && item_enabled(item)) {
                 auto next_path = current_path;
                 if (next_path.empty()) {
                     next_path.push_back(next_index);
@@ -695,10 +733,12 @@ bool MenuBar::handle_key_event(const KeyEvent& event) {
                     *this, title_damage_rect(title_rects, allocation(), impl_->open_menu));
                 return true;
             }
-            if (item->enabled && !item->separator && !item->action_name.empty()) {
-                impl_->action_signal.emit(item->action_name);
-            }
+            const std::string name =
+                item_enabled(*item) && !item->separator ? item->action_name : std::string{};
             close_popups();
+            if (!name.empty()) {
+                activate_action(name);
+            }
             return true;
         }
         return false;
@@ -859,9 +899,11 @@ void MenuBar::snapshot(SnapshotContext& ctx) const {
             const auto label_size = measure_text(item.label, font);
             const float text_y =
                 row_rect.y + std::max(0.0F, (row_rect.height - label_size.height) * 0.5F);
+            const auto action = impl_->actions ? impl_->actions->find(item.action_name) : nullptr;
+            const bool checked = action && action->is_checked();
             ctx.add_text({row_rect.x + 12.0F, text_y},
-                         item.label,
-                         item.enabled ? popup_text : disabled_text,
+                         checked ? "\u2713 " + item.label : item.label,
+                         item_enabled(item) ? popup_text : disabled_text,
                          font);
 
             if (!item.children.empty()) {

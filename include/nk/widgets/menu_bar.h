@@ -4,6 +4,7 @@
 /// @brief Horizontal menu bar widget with menu model.
 
 #include <memory>
+#include <nk/actions/action.h>
 #include <nk/foundation/signal.h>
 #include <nk/platform/native_menu.h>
 #include <nk/ui_core/widget.h>
@@ -29,14 +30,20 @@ public:
     ~MenuBar() override;
 
     /// Add a top-level menu. Items are described via NativeMenu / NativeMenuItem;
-    /// leaf items carry an action name which is emitted from on_action() when
-    /// the user activates the item.
+    /// leaf items carry an action name used for group activation when bound,
+    /// or emitted from on_action() otherwise.
     void add_menu(Menu menu);
 
     /// Remove all top-level menus. Any currently open popup is dismissed.
     void clear();
 
-    /// Emitted when a leaf menu item is activated by click or keyboard.
+    /// Bind menu action names to a shared registry. Missing/disabled actions
+    /// disable their items; checked actions display a check mark. Null unbinds.
+    void set_action_group(std::shared_ptr<ActionGroup> actions);
+    [[nodiscard]] ActionGroup* action_group() const;
+
+    /// Emitted when an unbound leaf menu item is activated by click or keyboard.
+    /// With an action group, activation goes exclusively through that group.
     /// The argument is the item's action name (e.g. "file.open"). Items
     /// without an action name do not fire this signal.
     Signal<std::string_view>& on_action();
@@ -55,6 +62,9 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    [[nodiscard]] bool item_enabled(const MenuItem& item) const;
+    void activate_action(std::string name);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
