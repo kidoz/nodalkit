@@ -444,15 +444,7 @@ bool TextArea::handle_mouse_event(const MouseEvent& event) {
         return true;
     }
     if (event.type == MouseEvent::Type::Press && event.button == 3 && impl_->editable) {
-        // Read before moving the caret changes primary-selection ownership.
-        const auto pasted = detail::read_text_clipboard(true);
-        if (pasted.empty()) {
-            return false;
-        }
-        const auto position = hit_test_cursor({event.x, event.y});
-        clear_preedit();
-        impl_->edit.move_cursor(position, false);
-        return replace_selection(pasted);
+        return request_paste(true, hit_test_cursor({event.x, event.y}));
     }
     if (event.type == MouseEvent::Type::Press && event.button == 1) {
         const auto position = hit_test_cursor({event.x, event.y});
@@ -531,10 +523,7 @@ bool TextArea::handle_key_event(const KeyEvent& event) {
             if (!impl_->editable) {
                 return false;
             }
-            if (const auto pasted = detail::read_text_clipboard(); !pasted.empty()) {
-                return replace_selection(pasted);
-            }
-            return false;
+            return request_paste(false);
         case KeyCode::Z:
         case KeyCode::Y:
             if (!impl_->editable) {
@@ -684,6 +673,42 @@ bool TextArea::handle_text_input_event(const TextInputEvent& event) {
         return true;
     }
     return false;
+}
+
+bool TextArea::request_paste(bool primary, std::optional<std::size_t> cursor_position) {
+    const auto expected_text = impl_->edit.text;
+    const auto expected_cursor = impl_->edit.cursor;
+    const auto expected_anchor = impl_->edit.selection_anchor;
+    auto* window = host_window();
+    auto result = std::make_shared<std::optional<bool>>();
+    detail::read_text_clipboard_async(
+        [weak = weak_from_this(),
+         expected_text,
+         expected_cursor,
+         expected_anchor,
+         window,
+         cursor_position,
+         result](std::string text) {
+            *result = false;
+            auto widget = weak.lock();
+            if (!widget || text.empty()) {
+                return;
+            }
+            auto& area = static_cast<TextArea&>(*widget);
+            if (!area.impl_->editable || !area.is_sensitive() || area.host_window() != window ||
+                area.impl_->edit.text != expected_text ||
+                area.impl_->edit.cursor != expected_cursor ||
+                area.impl_->edit.selection_anchor != expected_anchor) {
+                return;
+            }
+            area.clear_preedit();
+            if (cursor_position) {
+                area.impl_->edit.move_cursor(*cursor_position, false);
+            }
+            *result = area.replace_selection(text);
+        },
+        primary);
+    return result->value_or(true);
 }
 
 CursorShape TextArea::cursor_shape() const {

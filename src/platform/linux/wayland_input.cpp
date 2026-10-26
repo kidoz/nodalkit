@@ -14,11 +14,13 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <linux/input-event-codes.h>
 #include <nk/foundation/logging.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <poll.h>
 #include <string>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -793,6 +795,7 @@ void WaylandInput::set_clipboard_text(std::string text) {
 }
 
 void WaylandInput::destroy_clipboard_offer() {
+    ++clipboard_generation_;
     if (clipboard_offer_ != nullptr) {
         wl_data_offer_destroy(clipboard_offer_);
         clipboard_offer_ = nullptr;
@@ -818,46 +821,111 @@ std::string WaylandInput::preferred_clipboard_mime_type() const {
     return {};
 }
 
-std::string WaylandInput::receive_clipboard_offer_text() const {
-    if (clipboard_offer_ == nullptr) {
-        return {};
+int WaylandInput::receive_offer_fd(bool primary) const {
+    const auto mime_type =
+        primary ? preferred_primary_selection_mime_type() : preferred_clipboard_mime_type();
+    if (mime_type.empty() ||
+        (primary ? primary_selection_offer_ == nullptr : clipboard_offer_ == nullptr)) {
+        return -1;
     }
-
-    const auto mime_type = preferred_clipboard_mime_type();
-    if (mime_type.empty()) {
-        return {};
-    }
-
     std::array<int, 2> pipe_fds{-1, -1};
-    if (pipe(pipe_fds.data()) != 0) {
-        NK_LOG_ERROR("Wayland", "Failed to create clipboard pipe");
-        return {};
+    if (pipe2(pipe_fds.data(), O_CLOEXEC) != 0) {
+        return -1;
     }
-
-    wl_data_offer_receive(clipboard_offer_, mime_type.c_str(), pipe_fds[1]);
+    if (primary) {
+        zwp_primary_selection_offer_v1_receive(
+            primary_selection_offer_, mime_type.c_str(), pipe_fds[1]);
+    } else {
+        wl_data_offer_receive(clipboard_offer_, mime_type.c_str(), pipe_fds[1]);
+    }
     close(pipe_fds[1]);
-    wl_display_flush(backend_.display());
-
-    std::string text;
-    std::array<char, 4096> buffer{};
-    while (true) {
-        const auto bytes = read(pipe_fds[0], buffer.data(), buffer.size());
-        if (bytes > 0) {
-            text.append(buffer.data(), static_cast<std::size_t>(bytes));
-            continue;
-        }
-        if (bytes == 0) {
-            break;
-        }
-        if (errno == EINTR) {
-            continue;
-        }
-        NK_LOG_ERROR("Wayland", "Failed to read clipboard offer");
-        text.clear();
-        break;
+    if (wl_display_flush(backend_.display()) < 0 && errno != EAGAIN) {
+        close(pipe_fds[0]);
+        return -1;
     }
-    close(pipe_fds[0]);
-    return text;
+    return pipe_fds[0];
+}
+
+namespace {
+
+// Compatibility for the synchronous public getter. Editors use the async path.
+// Bound this API too, so an unresponsive source cannot hang application code.
+std::string read_clipboard_pipe(int fd) {
+    detail::ClipboardTransfer transfer(fd,
+                                       detail::ClipboardTransfer::Direction::Read,
+                                       {},
+                                       detail::ClipboardTransfer::MaxBytes,
+                                       std::chrono::milliseconds(100));
+    while (!transfer.poll()) {
+        pollfd descriptor{transfer.fd(), POLLIN, 0};
+        (void)::poll(&descriptor, 1, 5);
+    }
+    return transfer.take_text();
+}
+
+} // namespace
+
+std::string WaylandInput::receive_clipboard_offer_text() const {
+    return read_clipboard_pipe(receive_offer_fd(false));
+}
+
+void WaylandInput::read_clipboard_text_async(std::function<void(std::string)> callback,
+                                             bool primary) {
+    if (!callback) {
+        return;
+    }
+    if (primary ? owns_primary_selection_ : owns_clipboard_) {
+        callback(primary ? primary_selection_text_ : clipboard_text_);
+        return;
+    }
+    constexpr std::size_t MaxTransfers = 8;
+    if (clipboard_transfers_.size() >= MaxTransfers) {
+        callback({});
+        return;
+    }
+    auto pipe = std::make_unique<detail::ClipboardTransfer>(
+        receive_offer_fd(primary), detail::ClipboardTransfer::Direction::Read);
+    clipboard_transfers_.push_back(
+        {std::move(pipe),
+         std::move(callback),
+         primary,
+         primary ? primary_selection_generation_ : clipboard_generation_});
+}
+
+void WaylandInput::poll_clipboard_transfers() {
+    std::vector<std::pair<std::function<void(std::string)>, std::string>> completed;
+    for (auto it = clipboard_transfers_.begin(); it != clipboard_transfers_.end();) {
+        const auto generation = it->primary ? primary_selection_generation_ : clipboard_generation_;
+        const bool cancelled = it->callback && it->generation != generation;
+        if (cancelled || it->pipe->poll()) {
+            if (it->callback) {
+                completed.emplace_back(std::move(it->callback),
+                                       cancelled ? std::string{} : it->pipe->take_text());
+            }
+            it = clipboard_transfers_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    // User callbacks may replace offers, enqueue more transfers, or tear down
+    // their UI. Invoke them after iteration, without borrowing transfer state.
+    for (auto& [callback, text] : completed) {
+        callback(std::move(text));
+    }
+}
+
+void WaylandInput::send_clipboard_text(int fd, const std::string& text) {
+    constexpr std::size_t MaxTransfers = 8;
+    if (clipboard_transfers_.size() >= MaxTransfers ||
+        text.size() > detail::ClipboardTransfer::MaxBytes) {
+        close(fd);
+        return;
+    }
+    clipboard_transfers_.push_back({std::make_unique<detail::ClipboardTransfer>(
+                                        fd, detail::ClipboardTransfer::Direction::Write, text),
+                                    {},
+                                    false,
+                                    0});
 }
 
 std::string WaylandInput::primary_selection_text() const {
@@ -913,6 +981,7 @@ void WaylandInput::set_primary_selection_text(std::string text) {
 }
 
 void WaylandInput::destroy_primary_selection_offer() {
+    ++primary_selection_generation_;
     if (primary_selection_offer_ != nullptr) {
         zwp_primary_selection_offer_v1_destroy(primary_selection_offer_);
         primary_selection_offer_ = nullptr;
@@ -940,46 +1009,7 @@ std::string WaylandInput::preferred_primary_selection_mime_type() const {
 }
 
 std::string WaylandInput::receive_primary_selection_offer_text() const {
-    if (primary_selection_offer_ == nullptr) {
-        return {};
-    }
-
-    const auto mime_type = preferred_primary_selection_mime_type();
-    if (mime_type.empty()) {
-        return {};
-    }
-
-    std::array<int, 2> pipe_fds{-1, -1};
-    if (pipe(pipe_fds.data()) != 0) {
-        NK_LOG_ERROR("Wayland", "Failed to create primary-selection pipe");
-        return {};
-    }
-
-    zwp_primary_selection_offer_v1_receive(
-        primary_selection_offer_, mime_type.c_str(), pipe_fds[1]);
-    close(pipe_fds[1]);
-    wl_display_flush(backend_.display());
-
-    std::string text;
-    std::array<char, 4096> buffer{};
-    while (true) {
-        const auto bytes = read(pipe_fds[0], buffer.data(), buffer.size());
-        if (bytes > 0) {
-            text.append(buffer.data(), static_cast<std::size_t>(bytes));
-            continue;
-        }
-        if (bytes == 0) {
-            break;
-        }
-        if (errno == EINTR) {
-            continue;
-        }
-        NK_LOG_ERROR("Wayland", "Failed to read primary-selection offer");
-        text.clear();
-        break;
-    }
-    close(pipe_fds[0]);
-    return text;
+    return read_clipboard_pipe(receive_offer_fd(true));
 }
 
 void WaylandInput::disable_text_input() {
@@ -1488,22 +1518,7 @@ void WaylandInput::clipboard_source_send(void* data,
                                          const char* /*mime_type*/,
                                          int32_t fd) {
     auto* self = static_cast<WaylandInput*>(data);
-    const char* buffer = self->clipboard_text_.data();
-    std::size_t remaining = self->clipboard_text_.size();
-    while (remaining > 0) {
-        const auto written = write(fd, buffer, remaining);
-        if (written > 0) {
-            buffer += written;
-            remaining -= static_cast<std::size_t>(written);
-            continue;
-        }
-        if (written < 0 && errno == EINTR) {
-            continue;
-        }
-        NK_LOG_ERROR("Wayland", "Failed to write clipboard payload");
-        break;
-    }
-    close(fd);
+    self->send_clipboard_text(fd, self->clipboard_text_);
 }
 
 void WaylandInput::clipboard_source_cancelled(void* data, wl_data_source* source) {
@@ -1571,22 +1586,7 @@ void WaylandInput::primary_selection_source_send(void* data,
                                                  const char* /*mime_type*/,
                                                  int32_t fd) {
     auto* self = static_cast<WaylandInput*>(data);
-    const char* buffer = self->primary_selection_text_.data();
-    std::size_t remaining = self->primary_selection_text_.size();
-    while (remaining > 0) {
-        const auto written = write(fd, buffer, remaining);
-        if (written > 0) {
-            buffer += written;
-            remaining -= static_cast<std::size_t>(written);
-            continue;
-        }
-        if (written < 0 && errno == EINTR) {
-            continue;
-        }
-        NK_LOG_ERROR("Wayland", "Failed to write primary-selection payload");
-        break;
-    }
-    close(fd);
+    self->send_clipboard_text(fd, self->primary_selection_text_);
 }
 
 void WaylandInput::primary_selection_source_cancelled(void* data,

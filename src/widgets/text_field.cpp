@@ -1002,34 +1002,55 @@ bool TextField::delete_forward_word() {
 }
 
 bool TextField::paste_from_clipboard() {
-    const auto text = detail::read_text_clipboard();
-
-    if (text.empty()) {
-        return false;
-    }
-
-    reset_history_grouping();
-    replace_selection(text);
-    return true;
+    return request_paste(false);
 }
 
 bool TextField::paste_from_primary_selection(std::optional<std::size_t> cursor_position) {
-    const auto text = detail::read_text_clipboard(true);
+    return request_paste(true, cursor_position);
+}
 
-    if (text.empty()) {
-        return false;
-    }
-
-    reset_history_grouping();
-    if (cursor_position.has_value()) {
-        reset_mouse_selection_state();
-        const auto bounded = nearest_grapheme_boundary(
-            impl_->edit.text, std::min(*cursor_position, impl_->edit.text.size()));
-        impl_->edit.cursor = bounded;
-        impl_->edit.selection_anchor = bounded;
-    }
-    replace_selection(text);
-    return true;
+bool TextField::request_paste(bool primary, std::optional<std::size_t> cursor_position) {
+    const auto expected_text = impl_->edit.text;
+    const auto expected_cursor = impl_->edit.cursor;
+    const auto expected_anchor = impl_->edit.selection_anchor;
+    auto* window = host_window();
+    auto result = std::make_shared<std::optional<bool>>();
+    detail::read_text_clipboard_async(
+        [weak = weak_from_this(),
+         expected_text,
+         expected_cursor,
+         expected_anchor,
+         window,
+         cursor_position,
+         result](std::string text) {
+            *result = false;
+            auto widget = weak.lock();
+            if (!widget || text.empty()) {
+                return;
+            }
+            auto& field = static_cast<TextField&>(*widget);
+            if (!field.impl_->editable || !field.is_sensitive() || field.host_window() != window ||
+                field.impl_->edit.text != expected_text ||
+                field.impl_->edit.cursor != expected_cursor ||
+                field.impl_->edit.selection_anchor != expected_anchor) {
+                return;
+            }
+            field.reset_history_grouping();
+            if (cursor_position) {
+                field.reset_mouse_selection_state();
+                const auto bounded = nearest_grapheme_boundary(
+                    field.impl_->edit.text,
+                    std::min(*cursor_position, field.impl_->edit.text.size()));
+                field.impl_->edit.cursor = bounded;
+                field.impl_->edit.selection_anchor = bounded;
+            }
+            field.replace_selection(text);
+            *result = true;
+        },
+        primary);
+    // Synchronous backends retain the existing empty-paste return value;
+    // pending requests consume the input event and complete on the UI thread.
+    return result->value_or(true);
 }
 
 bool TextField::has_preedit() const {

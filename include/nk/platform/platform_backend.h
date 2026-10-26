@@ -209,6 +209,15 @@ public:
     /// Read UTF-8 text from the platform clipboard.
     [[nodiscard]] virtual std::string clipboard_text() const { return {}; }
 
+    /// Read text without blocking native event dispatch. Completion runs on the
+    /// UI thread and may be immediate. Empty text also represents failure.
+    virtual void read_clipboard_text_async(std::function<void(std::string)> callback,
+                                           bool primary = false) {
+        if (callback) {
+            callback(primary ? primary_selection_text() : clipboard_text());
+        }
+    }
+
     /// Write UTF-8 text to the platform clipboard.
     virtual void set_clipboard_text(std::string_view text) { (void)text; }
 

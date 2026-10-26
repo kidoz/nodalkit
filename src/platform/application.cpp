@@ -299,6 +299,19 @@ void Application::set_clipboard_text(std::string text) {
     }
 }
 
+void Application::read_clipboard_text_async(std::function<void(std::string)> callback,
+                                            bool primary) {
+    if (!callback) {
+        return;
+    }
+    if (impl_->backend &&
+        (primary ? supports_primary_selection_text() : supports_clipboard_text())) {
+        impl_->backend->read_clipboard_text_async(std::move(callback), primary);
+    } else {
+        callback(primary ? impl_->primary_selection_text : impl_->clipboard_text);
+    }
+}
+
 bool Application::supports_primary_selection_text() const {
     return impl_->backend != nullptr && impl_->backend->supports_primary_selection_text();
 }

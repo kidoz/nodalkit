@@ -19,6 +19,14 @@ std::string read_text_clipboard(bool primary) {
     return fallback(primary);
 }
 
+void read_text_clipboard_async(std::function<void(std::string)> callback, bool primary) {
+    if (auto* app = Application::instance()) {
+        app->read_clipboard_text_async(std::move(callback), primary);
+    } else if (callback) {
+        callback(fallback(primary));
+    }
+}
+
 void write_text_clipboard(std::string text, bool primary) {
     if (auto* app = Application::instance()) {
         if (primary) {

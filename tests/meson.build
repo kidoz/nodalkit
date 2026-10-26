@@ -163,6 +163,13 @@ test_public_api_audit = executable('test_public_api_audit',
 test('public_api_audit', test_public_api_audit)
 
 if host_machine.system() == 'linux'
+    test_clipboard_transfer = executable('test_clipboard_transfer',
+        'clipboard_transfer_test.cpp',
+        '../src/platform/linux/clipboard_transfer.cpp',
+        include_directories : include_directories('..'),
+        dependencies : [nk_dep, catch2_test_dep],
+    )
+    test('clipboard_transfer', test_clipboard_transfer)
     test_wayland_portal_contract = executable('test_wayland_portal_contract',
         'wayland_portal_contract_test.cpp',
         '../src/platform/linux/wayland_portal_helpers.cpp',

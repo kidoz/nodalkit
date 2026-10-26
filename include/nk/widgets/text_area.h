@@ -7,6 +7,7 @@
 #include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -61,6 +62,7 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    bool request_paste(bool primary, std::optional<std::size_t> cursor_position = std::nullopt);
     [[nodiscard]] Rect text_rect() const;
     [[nodiscard]] float line_height() const;
     [[nodiscard]] std::size_t cursor_line() const;

@@ -530,6 +530,8 @@ void force_symbol_references() {
         &nk::Application::save_file_dialog_async);
     (void)static_cast<bool (nk::Application::*)() const>(&nk::Application::supports_clipboard_text);
     (void)static_cast<std::string (nk::Application::*)() const>(&nk::Application::clipboard_text);
+    (void)static_cast<void (nk::Application::*)(std::function<void(std::string)>, bool)>(
+        &nk::Application::read_clipboard_text_async);
     (void)static_cast<void (nk::Application::*)(std::string)>(&nk::Application::set_clipboard_text);
     (void)static_cast<bool (nk::Application::*)() const>(
         &nk::Application::supports_primary_selection_text);

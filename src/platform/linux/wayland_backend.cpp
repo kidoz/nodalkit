@@ -1435,6 +1435,9 @@ int WaylandBackend::run_event_loop(EventLoop& loop) {
 
         // Drive the NK event loop (posted tasks, timers, idle callbacks).
         const bool did_work = loop.poll();
+        if (impl_->input) {
+            impl_->input->poll_clipboard_transfers();
+        }
         refresh_accessibility_if_due(*impl_, did_work);
     }
 
@@ -1491,6 +1494,15 @@ std::string WaylandBackend::clipboard_text() const {
         return impl_->input->clipboard_text();
     }
     return impl_->clipboard_text_cache;
+}
+
+void WaylandBackend::read_clipboard_text_async(std::function<void(std::string)> callback,
+                                               bool primary) {
+    if (impl_->input) {
+        impl_->input->read_clipboard_text_async(std::move(callback), primary);
+    } else if (callback) {
+        callback(primary ? impl_->primary_selection_text_cache : impl_->clipboard_text_cache);
+    }
 }
 
 void WaylandBackend::set_clipboard_text(std::string_view text) {

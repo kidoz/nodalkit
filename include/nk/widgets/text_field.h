@@ -89,6 +89,7 @@ protected:
     void clear_preedit();
 
 private:
+    bool request_paste(bool primary, std::optional<std::size_t> cursor_position = std::nullopt);
     [[nodiscard]] Rect local_text_damage_rect() const;
     [[nodiscard]] std::size_t hit_test_cursor(Point point) const;
     void queue_text_redraw();

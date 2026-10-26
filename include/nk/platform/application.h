@@ -4,6 +4,7 @@
 /// @brief Application lifecycle and global state.
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <nk/foundation/signal.h>
 #include <nk/platform/file_dialog.h>
@@ -145,7 +146,16 @@ public:
 
     /// Read clipboard text, falling back to a process-local buffer when no
     /// native clipboard is available.
+    /// Wayland external reads are bounded to 100 ms and 16 MiB; an incomplete
+    /// or failed transfer returns empty text. Prefer the async API for UI work.
     [[nodiscard]] std::string clipboard_text() const;
+
+    /// Read clipboard (or primary-selection) text asynchronously on the UI
+    /// thread. Completion may be immediate; empty text also represents failure.
+    /// Prefer this over synchronous reads when handling user input.
+    /// Wayland limits transfers to 16 MiB and two seconds, and cancels reads
+    /// when the selection changes or the backend shuts down.
+    void read_clipboard_text_async(std::function<void(std::string)> callback, bool primary = false);
 
     /// Write clipboard text, falling back to a process-local buffer when no
     /// native clipboard is available.
@@ -156,6 +166,7 @@ public:
 
     /// Read primary-selection text, falling back to a process-local buffer when
     /// no native primary selection is available.
+    /// Wayland applies the same bounds as clipboard_text().
     [[nodiscard]] std::string primary_selection_text() const;
 
     /// Write primary-selection text, falling back to a process-local buffer

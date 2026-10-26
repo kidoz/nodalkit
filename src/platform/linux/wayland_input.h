@@ -1,5 +1,7 @@
 #pragma once
 
+#include "clipboard_transfer.h"
+
 /// @file wayland_input.h
 /// @brief Wayland seat / pointer / keyboard input (private header).
 
@@ -50,6 +52,8 @@ public:
     void set_primary_selection_text(std::string text);
     [[nodiscard]] std::string clipboard_text() const;
     void set_clipboard_text(std::string text);
+    void read_clipboard_text_async(std::function<void(std::string)> callback, bool primary);
+    void poll_clipboard_transfers();
 
     void set_cursor_shape(CursorShape shape);
 
@@ -179,6 +183,8 @@ private:
     void destroy_primary_selection_source();
     [[nodiscard]] std::string receive_primary_selection_offer_text() const;
     [[nodiscard]] std::string preferred_primary_selection_mime_type() const;
+    [[nodiscard]] int receive_offer_fd(bool primary) const;
+    void send_clipboard_text(int fd, const std::string& text);
     void sync_text_input_state();
     void disable_text_input();
 
@@ -219,6 +225,17 @@ private:
     std::string primary_selection_text_;
     std::vector<std::string> primary_selection_offer_mime_types_;
     bool owns_primary_selection_ = false;
+
+    struct PendingTransfer {
+        std::unique_ptr<detail::ClipboardTransfer> pipe;
+        std::function<void(std::string)> callback;
+        bool primary = false;
+        uint64_t generation = 0;
+    };
+
+    std::vector<PendingTransfer> clipboard_transfers_;
+    uint64_t clipboard_generation_ = 0;
+    uint64_t primary_selection_generation_ = 0;
 };
 
 } // namespace nk

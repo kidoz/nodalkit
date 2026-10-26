@@ -53,6 +53,8 @@ public:
                                      SaveFileDialogCallback callback) override;
     [[nodiscard]] bool supports_clipboard_text() const override;
     [[nodiscard]] std::string clipboard_text() const override;
+    void read_clipboard_text_async(std::function<void(std::string)> callback,
+                                   bool primary = false) override;
     void set_clipboard_text(std::string_view text) override;
     [[nodiscard]] bool supports_primary_selection_text() const override;
     [[nodiscard]] std::string primary_selection_text() const override;
