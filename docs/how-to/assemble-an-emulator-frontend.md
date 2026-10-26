@@ -119,7 +119,7 @@ window.set_close_policy([this] {
 `close()` forces it once the user confirms. See `Window::set_close_policy`
 in [window.h](../../include/nk/platform/window.h).
 
-## 7. Keep a native handle for staged migration
+## 7. Keep a native handle during migration
 
 If you are porting an existing Win32 frontend incrementally, reach the
 `HWND` with [`nk::window_hwnd()`](../../include/nk/platform/windows_interop.h)

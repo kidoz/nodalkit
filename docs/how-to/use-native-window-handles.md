@@ -41,7 +41,7 @@ it project-wide).
 Typical uses:
 
 - Parent or position an emulator output window relative to the frontend.
-- Keep legacy Win32-only dialogs working during a staged migration.
+- Keep legacy Win32-only dialogs working during migration.
 - Attach platform diagnostics or a message filter.
 
 ## macOS and Linux: cast at the call site

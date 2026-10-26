@@ -67,7 +67,7 @@ through the installed headers and library:
 meson compile -C buildDir install-smoke
 ```
 
-That target configures a separate staged install, validates the generated
+That target configures a separate temporary install, validates the generated
 `nodalkit.pc`, then builds and runs `tests/install_smoke` against the
 installed headers and library instead of the source tree.
 

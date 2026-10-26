@@ -39,7 +39,7 @@ lightly tested · ❌ not implemented.
 | File / save dialogs | 🧪 | Common Item Dialog. |
 | Clipboard | 🧪 | Win32 clipboard. |
 | Drag & drop | 🧪 | OLE `IDropTarget` receive side. External drops (files via `CF_HDROP`, text via `CF_UNICODETEXT`) are translated to `DragPayload` and delivered through `Window::dispatch_drag_drop_event`. Drag *source* (`DoDragDrop`) is not yet wired; in-process drags keep using the toolkit's synthetic simulation. |
-| App / menu bar | 🧪 | Native menu bar built per window from the app-global `NativeMenu` model (`SetMenu` / `AppendMenuW`); `WM_COMMAND` dispatches `action_name` through the shared `NativeMenuActionHandler`. Shortcuts render as label text only (`HACCEL` accelerators are a follow-up). |
+| App / menu bar | 🧪 | Native menu bar built per window from the app-global `NativeMenu` model (`SetMenu` / `AppendMenuW`); `WM_COMMAND` dispatches `action_name` through the shared `NativeMenuActionHandler`. Shortcuts render as label text only; `HACCEL` accelerators are not installed. |
 | High-DPI | 🧪 | Per-monitor DPI awareness; scale tracked per window. |
 | Fullscreen | 🧪 | Borderless-on-monitor toggle. |
 | Text shaping | 🧪 | DirectWrite, with a GDI fallback shaper. |

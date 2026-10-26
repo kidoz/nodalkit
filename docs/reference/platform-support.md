@@ -28,9 +28,6 @@ package config module in 0.x.
 | macOS | `libNodalKit.dylib` | Shared | Nothing extra. The dylib links the Cocoa, CoreGraphics, CoreText, Metal, QuartzCore, and UniformTypeIdentifiers frameworks, and downstream applications pick them up automatically. |
 | Windows | Static library; the exact filename is toolchain-dependent and the current clang-based build emits `libNodalKit.a` | Static | Nothing extra when consuming through `pkg-config`. The generated `nodalkit.pc` includes `user32`, `gdi32`, `advapi32`, `dwmapi`, `ole32`, `shcore`, `dwrite`, `d3d11`, `d3dcompiler`, and `dxgi`. Optional Vulkan link flags are present only when Vulkan support was detected while building NodalKit. |
 
-The static/shared decision on Windows will be revisited before Windows
-graduates from experimental status.
-
 ## Build requirements
 
 | Requirement | Notes |
