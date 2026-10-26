@@ -1,6 +1,9 @@
 #include <cmath>
+#include <limits>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/image_view.h>
+#include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace nk {
@@ -80,12 +83,15 @@ Rect local_image_content_rect(Rect allocation,
 } // namespace
 
 struct ImageView::Impl {
-    std::vector<uint32_t> pixels;
+    std::shared_ptr<const std::vector<uint32_t>> pixels;
     int src_width = 0;
     int src_height = 0;
     ScaleMode scale_mode = ScaleMode::NearestNeighbor;
     bool preserve_aspect_ratio = true;
     mutable std::mutex mutex;
+    std::thread::id owner_thread = std::this_thread::get_id();
+    EventLoop::TaskPoster post;
+    bool redraw_pending = false;
 };
 
 std::shared_ptr<ImageView> ImageView::create() {
@@ -93,6 +99,9 @@ std::shared_ptr<ImageView> ImageView::create() {
 }
 
 ImageView::ImageView() : impl_(std::make_unique<Impl>()) {
+    if (auto* loop = EventLoop::current()) {
+        impl_->post = loop->task_poster("image-update");
+    }
     add_style_class("image-view");
     ensure_accessible().set_role(AccessibleRole::Image);
 }
@@ -100,24 +109,64 @@ ImageView::ImageView() : impl_(std::make_unique<Impl>()) {
 ImageView::~ImageView() = default;
 
 void ImageView::update_pixel_buffer(const uint32_t* data, int width, int height) {
-    const auto a = allocation();
-    Rect damage{};
+    if (width < 0 || height < 0 ||
+        (height > 0 && static_cast<std::size_t>(width) > std::numeric_limits<std::size_t>::max() /
+                                                             sizeof(uint32_t) /
+                                                             static_cast<std::size_t>(height))) {
+        throw std::invalid_argument("Invalid image dimensions");
+    }
+    const auto count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+    if (count > 0 && data == nullptr) {
+        throw std::invalid_argument("Image pixels must not be null");
+    }
+    auto pixels = std::make_shared<std::vector<uint32_t>>();
+    if (count > 0) {
+        pixels->assign(data, data + count);
+    }
+    int previous_width = 0;
+    int previous_height = 0;
+    const bool on_owner_thread = std::this_thread::get_id() == impl_->owner_thread;
+    bool post_redraw = false;
     {
         std::lock_guard lock(impl_->mutex);
-        const auto previous_damage = local_image_content_rect(
-            a, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
-        const auto count = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-        impl_->pixels.assign(data, data + count);
+        previous_width = impl_->src_width;
+        previous_height = impl_->src_height;
+        impl_->pixels = std::move(pixels);
         impl_->src_width = width;
         impl_->src_height = height;
-        damage =
-            union_rect(previous_damage,
-                       local_image_content_rect(
-                           a, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio));
+        if (!on_owner_thread && impl_->post && !impl_->redraw_pending) {
+            impl_->redraw_pending = true;
+            post_redraw = true;
+        }
     }
-    // queue_redraw can fan out to the Window / damage tracker on the main thread; keeping the
-    // mutex across that call risks lock-order inversions with anything those paths touch. The
-    // damage rect was captured under the lock so the release is safe here.
+    if (on_owner_thread) {
+        queue_image_redraw(previous_width, previous_height);
+    } else if (post_redraw) {
+        impl_->post([weak = weak_from_this(), previous_width, previous_height] {
+            if (auto widget = weak.lock()) {
+                auto& image = static_cast<ImageView&>(*widget);
+                {
+                    std::lock_guard lock(image.impl_->mutex);
+                    image.impl_->redraw_pending = false;
+                }
+                image.queue_image_redraw(previous_width, previous_height);
+            }
+        });
+    }
+}
+
+void ImageView::queue_image_redraw(int previous_width, int previous_height) {
+    const auto a = allocation();
+    int width = 0;
+    int height = 0;
+    {
+        std::lock_guard lock(impl_->mutex);
+        width = impl_->src_width;
+        height = impl_->src_height;
+    }
+    const auto damage = union_rect(
+        local_image_content_rect(a, previous_width, previous_height, impl_->preserve_aspect_ratio),
+        local_image_content_rect(a, width, height, impl_->preserve_aspect_ratio));
     if (rect_is_empty(damage)) {
         queue_redraw();
     } else {
@@ -211,7 +260,7 @@ void ImageView::snapshot(SnapshotContext& ctx) const {
     };
 
     std::lock_guard lock(impl_->mutex);
-    if (!impl_->pixels.empty() && impl_->src_width > 0 && impl_->src_height > 0) {
+    if (impl_->pixels && !impl_->pixels->empty() && impl_->src_width > 0 && impl_->src_height > 0) {
         note_image_snapshot_for_diagnostics();
         const bool use_integer = impl_->scale_mode == ScaleMode::IntegerNearest;
         const auto image_bounds =
@@ -221,11 +270,8 @@ void ImageView::snapshot(SnapshotContext& ctx) const {
                       inner, impl_->src_width, impl_->src_height, impl_->preserve_aspect_ratio);
         const auto effective_mode = use_integer ? ScaleMode::NearestNeighbor : impl_->scale_mode;
         ctx.push_rounded_clip(inner, content_radius);
-        ctx.add_image(image_bounds,
-                      impl_->pixels.data(),
-                      impl_->src_width,
-                      impl_->src_height,
-                      effective_mode);
+        ctx.add_image(
+            image_bounds, impl_->pixels, impl_->src_width, impl_->src_height, effective_mode);
         ctx.pop_container();
     }
 }

@@ -55,6 +55,13 @@ public:
                    int h,
                    ScaleMode scale = ScaleMode::NearestNeighbor);
 
+    /// Add an image whose immutable storage is retained by the snapshot.
+    void add_image(Rect dest,
+                   std::shared_ptr<const std::vector<uint32_t>> pixels,
+                   int w,
+                   int h,
+                   ScaleMode scale = ScaleMode::NearestNeighbor);
+
     /// Push a child container (for grouping/clipping).
     void push_container(Rect bounds);
 

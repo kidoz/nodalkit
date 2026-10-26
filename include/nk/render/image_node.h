@@ -4,7 +4,9 @@
 /// @brief Render node for blitting raw pixel buffers.
 
 #include <cstdint>
+#include <memory>
 #include <nk/render/render_node.h>
+#include <vector>
 
 namespace nk {
 
@@ -25,12 +27,20 @@ public:
               int src_height,
               ScaleMode scale = ScaleMode::NearestNeighbor);
 
+    /// Retain immutable pixels for the lifetime of this render node.
+    ImageNode(Rect dest,
+              std::shared_ptr<const std::vector<uint32_t>> pixels,
+              int src_width,
+              int src_height,
+              ScaleMode scale = ScaleMode::NearestNeighbor);
+
     [[nodiscard]] const uint32_t* pixel_data() const;
     [[nodiscard]] int src_width() const;
     [[nodiscard]] int src_height() const;
     [[nodiscard]] ScaleMode scale_mode() const;
 
 private:
+    std::shared_ptr<const std::vector<uint32_t>> pixels_;
     const uint32_t* pixel_data_;
     int src_width_;
     int src_height_;

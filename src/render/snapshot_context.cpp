@@ -89,6 +89,11 @@ void SnapshotContext::add_image(Rect dest, const uint32_t* data, int w, int h, S
     add_node(std::make_unique<ImageNode>(dest, data, w, h, scale));
 }
 
+void SnapshotContext::add_image(
+    Rect dest, std::shared_ptr<const std::vector<uint32_t>> pixels, int w, int h, ScaleMode scale) {
+    add_node(std::make_unique<ImageNode>(dest, std::move(pixels), w, h, scale));
+}
+
 void SnapshotContext::add_path(Path2D path, Color stroke_color, float thickness) {
     add_node(std::make_unique<PathNode>(std::move(path), stroke_color, thickness));
 }

@@ -52,6 +52,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -6077,4 +6078,57 @@ TEST_CASE("Secure text is never published to either selection channel", "[app][t
                                    .modifiers = nk::Modifiers::Ctrl}));
     CHECK(app.clipboard_text() == "public clipboard");
     CHECK(app.primary_selection_text().empty());
+}
+
+TEST_CASE("Image snapshots retain pixels across worker updates and widget destruction",
+          "[app][image][lifetime]") {
+    struct SnapshotImage : nk::ImageView {
+        SnapshotImage() = default;
+        using ImageView::snapshot;
+    };
+
+    nk::EventLoop loop;
+    auto image = std::make_shared<SnapshotImage>();
+    const uint32_t red = 0xFFFF0000;
+    image->update_pixel_buffer(&red, 1, 1);
+    image->allocate({0, 0, 32, 32});
+    nk::SnapshotContext snapshot;
+    image->snapshot(snapshot);
+    auto root = snapshot.take_root();
+    std::thread worker([&] {
+        std::vector<uint32_t> pixels(4096, 0xFF00FF00);
+        image->update_pixel_buffer(pixels.data(), 64, 64);
+    });
+    worker.join();
+    image.reset();
+    loop.poll(); // A queued redraw must also tolerate widget destruction.
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({32, 32}, 1);
+    renderer.render(*root);
+    renderer.end_frame();
+    const auto* center = renderer.pixel_data() + (16 * 32 + 16) * 4;
+    CHECK(center[0] == 255);
+    CHECK(center[1] == 0);
+    CHECK(center[2] == 0);
+}
+
+TEST_CASE("Worker image updates defer UI invalidation to the owning loop", "[app][image][thread]") {
+    nk::Application app(0, nullptr);
+    nk::Window window(
+        {.title = "Worker image update", .width = 32, .height = 32, .decorated = false});
+    auto image = nk::ImageView::create();
+    image->allocate({0, 0, 32, 32});
+    window.set_child(image);
+    window.present();
+    app.event_loop().poll();
+    REQUIRE_FALSE(image->debug_pending_redraw());
+    std::thread worker([&] {
+        const uint32_t red = 0xFFFF0000;
+        image->update_pixel_buffer(&red, 1, 1);
+    });
+    worker.join();
+    CHECK_FALSE(image->debug_pending_redraw());
+    CHECK(image->source_width() == 1);
+    app.event_loop().poll();
+    CHECK(image->debug_pending_redraw());
 }

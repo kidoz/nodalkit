@@ -13,6 +13,7 @@ namespace nk {
 
 /// Displays a raw ARGB8888 pixel buffer, scaled to fit the widget area.
 /// Thread-safe: update_pixel_buffer() can be called from any thread.
+/// Construct on the UI thread with an EventLoop to schedule worker redraws.
 class ImageView : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<ImageView> create();
@@ -20,6 +21,7 @@ public:
 
     /// Update the displayed image. Copies the data internally.
     /// Thread-safe — can be called from the emulation thread.
+    /// Existing render snapshots keep their previous immutable pixels.
     void update_pixel_buffer(const uint32_t* data, int width, int height);
 
     /// Set scaling mode (nearest-neighbor or bilinear).
@@ -42,6 +44,7 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    void queue_image_redraw(int previous_width, int previous_height);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
