@@ -24,6 +24,8 @@ struct CallbackHandle {
 /// callbacks, and posted tasks. One EventLoop per Application.
 class EventLoop {
 public:
+    using TaskPoster = std::function<void(std::function<void()>)>;
+
     /// Return the EventLoop bound to the current thread, if any.
     [[nodiscard]] static EventLoop* current();
 
@@ -41,6 +43,10 @@ public:
 
     /// Post a task to be executed on the next iteration of the loop.
     void post(std::function<void()> task, std::string_view source_label = {});
+
+    /// A thread-safe posting handle that becomes a no-op after loop destruction.
+    /// Unlike a captured EventLoop pointer, this handle may outlive the loop.
+    [[nodiscard]] TaskPoster task_poster(std::string_view source_label = {}) const;
 
     /// Schedule a one-shot timer.
     [[nodiscard]] CallbackHandle set_timeout(std::chrono::milliseconds delay,

@@ -139,3 +139,21 @@ TEST_CASE("Posted tasks run before timers within a poll", "[event_loop]") {
 
     REQUIRE(order == std::vector<int>{1, 2});
 }
+
+TEST_CASE("Task posters survive loop destruction and concurrent shutdown", "[event_loop][thread]") {
+    auto loop = std::make_unique<nk::EventLoop>();
+    const auto post = loop->task_poster("lifetime-test");
+    int calls = 0;
+    post([&] { ++calls; });
+    loop->poll();
+    REQUIRE(calls == 1);
+    std::thread worker([post] {
+        for (int i = 0; i < 1000; ++i) {
+            post([] {});
+        }
+    });
+    loop.reset();
+    worker.join();
+    post([&] { ++calls; });
+    REQUIRE(calls == 1);
+}

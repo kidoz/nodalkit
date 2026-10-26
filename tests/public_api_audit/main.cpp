@@ -946,6 +946,8 @@ void force_symbol_references() {
     (void)static_cast<std::unique_ptr<nk::RenderNode> (nk::SnapshotContext::*)()>(
         &nk::SnapshotContext::take_root);
     (void)static_cast<int (nk::EventLoop::*)()>(&nk::EventLoop::run);
+    (void)static_cast<nk::EventLoop::TaskPoster (nk::EventLoop::*)(std::string_view) const>(
+        &nk::EventLoop::task_poster);
     (void)static_cast<void (nk::EventLoop::*)(int)>(&nk::EventLoop::quit);
     (void)static_cast<void (nk::EventLoop::*)(std::function<void()>, std::string_view)>(
         &nk::EventLoop::post);

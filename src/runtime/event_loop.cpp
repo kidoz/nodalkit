@@ -20,8 +20,16 @@ struct EventLoop::Impl {
     uint64_t next_handle_id = 1;
 
     std::chrono::steady_clock::time_point diagnostics_origin = std::chrono::steady_clock::now();
-    std::deque<PostedTask> posted_tasks;
-    std::mutex task_mutex;
+
+    // Posting handles share only this queue. Timers and idles stay owned and
+    // destroyed by the EventLoop thread even when a worker is posting at exit.
+    struct TaskQueue {
+        std::deque<PostedTask> posted_tasks;
+        std::mutex mutex;
+        bool accepting_tasks = true;
+    };
+
+    std::shared_ptr<TaskQueue> task_queue = std::make_shared<TaskQueue>();
 
     struct TimerEntry {
         CallbackHandle handle;
@@ -92,6 +100,12 @@ EventLoop::EventLoop() : impl_(std::make_unique<Impl>()) {
 }
 
 EventLoop::~EventLoop() {
+    std::deque<Impl::PostedTask> discarded;
+    {
+        std::lock_guard lock(impl_->task_queue->mutex);
+        impl_->task_queue->accepting_tasks = false;
+        discarded.swap(impl_->task_queue->posted_tasks);
+    }
     if (current_event_loop == this) {
         current_event_loop = nullptr;
     }
@@ -125,14 +139,30 @@ void EventLoop::quit(int exit_code) {
 
 void EventLoop::post(std::function<void()> task, std::string_view source_label) {
     {
-        std::lock_guard lock(impl_->task_mutex);
-        impl_->posted_tasks.push_back({
+        std::lock_guard lock(impl_->task_queue->mutex);
+        if (!impl_->task_queue->accepting_tasks) {
+            return;
+        }
+        impl_->task_queue->posted_tasks.push_back({
             .queued_at = std::chrono::steady_clock::now(),
             .callback = std::move(task),
             .source_label = std::string(source_label),
         });
     }
     wake();
+}
+
+EventLoop::TaskPoster EventLoop::task_poster(std::string_view source_label) const {
+    return [weak = std::weak_ptr<Impl::TaskQueue>(impl_->task_queue),
+            label = std::string(source_label)](std::function<void()> task) {
+        if (auto impl = weak.lock()) {
+            std::lock_guard lock(impl->mutex);
+            if (impl->accepting_tasks) {
+                impl->posted_tasks.push_back(
+                    {std::chrono::steady_clock::now(), std::move(task), label});
+            }
+        }
+    };
 }
 
 void EventLoop::wake() {
@@ -211,8 +241,8 @@ bool EventLoop::poll() {
     // Drain posted tasks.
     std::deque<Impl::PostedTask> tasks;
     {
-        std::lock_guard lock(impl_->task_mutex);
-        tasks.swap(impl_->posted_tasks);
+        std::lock_guard lock(impl_->task_queue->mutex);
+        tasks.swap(impl_->task_queue->posted_tasks);
     }
     for (auto& task : tasks) {
         const auto started_at = std::chrono::steady_clock::now();
