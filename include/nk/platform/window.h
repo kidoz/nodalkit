@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <nk/actions/action.h>
+#include <nk/actions/shortcut.h>
 #include <nk/debug/diagnostics.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
@@ -109,6 +111,19 @@ public:
 
     /// Get the current root widget.
     [[nodiscard]] Widget* child() const;
+
+    /// Registry used by this window's installed shortcuts.
+    void set_action_group(std::shared_ptr<ActionGroup> actions);
+    [[nodiscard]] ActionGroup* action_group() const;
+
+    /// Install an exact key/modifier binding, before widget key handlers.
+    /// A scope restricts activation to focus within that visible, sensitive
+    /// subtree; the window retains it weakly. Window-wide bindings are blocked
+    /// by modal overlays. Closest focused scope wins; ties use the last binding.
+    /// A matching disabled/missing action or suppressed repeat consumes the key.
+    /// Uses translated KeyCode values; built-in inspector shortcuts take precedence.
+    void add_shortcut(ShortcutBinding binding, std::shared_ptr<Widget> scope = {});
+    void clear_shortcuts();
 
     /// Show the window on screen.
     void present();
@@ -265,6 +280,7 @@ private:
     [[nodiscard]] std::unique_ptr<RenderNode> build_window_debug_render_tree(Size viewport_size,
                                                                              Rect content_area);
     void focus_widget(Widget* widget);
+    [[nodiscard]] bool dispatch_shortcut(const KeyEvent& event);
     void handle_widget_state_change(Widget& widget);
     void handle_widget_detached(Widget& widget);
     void purge_dirty_widget(Widget& widget);

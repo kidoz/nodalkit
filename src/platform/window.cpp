@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <nk/controllers/event_controller.h>
 #include <nk/debug/diagnostics.h>
@@ -35,6 +36,12 @@
 namespace nk {
 
 struct Window::Impl {
+    struct InstalledShortcut {
+        ShortcutBinding binding;
+        std::weak_ptr<Widget> scope;
+        bool scoped = false;
+    };
+
     struct OverlayEntry {
         std::shared_ptr<Widget> widget;
         bool modal = false;
@@ -43,6 +50,8 @@ struct Window::Impl {
 
     WindowConfig config;
     std::shared_ptr<Widget> child;
+    std::shared_ptr<ActionGroup> actions;
+    std::vector<InstalledShortcut> shortcuts;
 
     // Set at the start of teardown so widget destructors skip dirty-list
     // bookkeeping once window state is going away.
@@ -1753,6 +1762,92 @@ void Window::set_child(std::shared_ptr<Widget> child) {
 
 Widget* Window::child() const {
     return impl_->child.get();
+}
+
+void Window::set_action_group(std::shared_ptr<ActionGroup> actions) {
+    impl_->actions = std::move(actions);
+}
+
+ActionGroup* Window::action_group() const {
+    return impl_->actions.get();
+}
+
+void Window::add_shortcut(ShortcutBinding binding, std::shared_ptr<Widget> scope) {
+    const bool scoped = scope != nullptr;
+    impl_->shortcuts.push_back({std::move(binding), scope, scoped});
+}
+
+void Window::clear_shortcuts() {
+    impl_->shortcuts.clear();
+}
+
+bool Window::dispatch_shortcut(const KeyEvent& event) {
+    if (event.type != KeyEvent::Type::Press || event.key == KeyCode::Unknown) {
+        return false;
+    }
+
+    Widget* modal = nullptr;
+    for (auto it = impl_->overlays.rbegin(); it != impl_->overlays.rend(); ++it) {
+        if (it->modal && it->widget && it->widget->is_visible()) {
+            modal = it->widget.get();
+            break;
+        }
+    }
+
+    const Impl::InstalledShortcut* selected = nullptr;
+    auto selected_distance = std::numeric_limits<std::size_t>::max();
+    for (auto it = impl_->shortcuts.rbegin(); it != impl_->shortcuts.rend(); ++it) {
+        const auto& binding = it->binding;
+        if (binding.shortcut.key_code != static_cast<int>(event.key) ||
+            binding.shortcut.modifiers != event.modifiers) {
+            continue;
+        }
+        auto distance = std::numeric_limits<std::size_t>::max();
+        if (it->scoped) {
+            const auto scope = it->scope.lock();
+            if (!scope || scope->host_window() != this ||
+                (modal && !is_descendant_of(scope.get(), modal))) {
+                continue;
+            }
+            bool available = true;
+            for (auto* current = scope.get(); current != nullptr; current = current->parent()) {
+                if (!current->is_visible() || !current->is_sensitive()) {
+                    available = false;
+                    break;
+                }
+            }
+            if (!available) {
+                continue;
+            }
+            distance = 0;
+            auto* focused = impl_->focused_widget;
+            while (focused && focused != scope.get()) {
+                ++distance;
+                focused = focused->parent();
+            }
+            if (!focused) {
+                continue;
+            }
+        } else if (modal) {
+            continue;
+        }
+        if (!selected || distance < selected_distance) {
+            selected = &*it;
+            selected_distance = distance;
+        }
+    }
+
+    if (!selected) {
+        return false;
+    }
+    // Resolve shared ownership before callbacks may replace the registry,
+    // clear shortcuts, detach the focus subtree, or destroy the window.
+    const bool repeat_allowed = selected->binding.allow_repeat;
+    auto action = impl_->actions ? impl_->actions->find(selected->binding.action_name) : nullptr;
+    if (action && (!event.is_repeat || repeat_allowed)) {
+        action->activate();
+    }
+    return true;
 }
 
 void Window::present() {
@@ -3885,6 +3980,10 @@ void Window::dispatch_key_event(const KeyEvent& event) {
                 return;
             }
         }
+    }
+
+    if (dispatch_shortcut(event)) {
+        return;
     }
 
     auto dispatch_key_bubble = [this, &event, alive = impl_->alive](Widget* target) {

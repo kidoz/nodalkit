@@ -25,7 +25,8 @@ constexpr Modifiers operator&(Modifiers a, Modifiers b) {
     return static_cast<Modifiers>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 }
 
-/// A keyboard shortcut descriptor (e.g. Ctrl+S).
+/// A keyboard shortcut descriptor (e.g. Ctrl+S). key_code is an nk::KeyCode
+/// value converted to int, not a character code or native scan code.
 struct Shortcut {
     int key_code = 0;
     Modifiers modifiers = Modifiers::None;
@@ -35,6 +36,7 @@ struct Shortcut {
 struct ShortcutBinding {
     Shortcut shortcut;
     std::string action_name;
+    bool allow_repeat = false;
 };
 
 } // namespace nk
