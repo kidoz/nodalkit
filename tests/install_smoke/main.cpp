@@ -26,6 +26,7 @@
 #include <nk/model/tree_model.h>
 #include <nk/platform/events.h>
 #include <nk/style/theme.h>
+#include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/canvas_widget.h>
 #include <nk/widgets/combo_box.h>
@@ -83,6 +84,17 @@ void check_foundation() {
 }
 
 void check_layout() {
+    auto box = nk::Box::create(nk::Orientation::Horizontal, 8.0F);
+    auto nested = nk::Box::create();
+    box->append(nested);
+    check(box->children().size() == 1 && nested->parent() == box.get(), "Box child ownership");
+    box->set_orientation(nk::Orientation::Vertical);
+    box->set_homogeneous(true);
+    check(box->orientation() == nk::Orientation::Vertical && box->homogeneous(),
+          "Box layout setters");
+    check(box->spacing() == 8.0F, "Box spacing roundtrip");
+    box->clear();
+    check(nested->parent() == nullptr, "Box detaches retained children");
     nk::BoxLayout vertical{nk::Orientation::Vertical};
     vertical.set_spacing(4.0F);
     vertical.set_homogeneous(true);

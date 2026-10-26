@@ -108,10 +108,9 @@ framework:
 ## Counter Example
 
 ```cpp
-#include <nk/layout/box_layout.h>
 #include <nk/platform/application.h>
 #include <nk/platform/window.h>
-#include <nk/ui_core/widget.h>
+#include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/label.h>
 
@@ -127,7 +126,7 @@ int main(int argc, char** argv) {
         label->set_text(std::to_string(++count));
     });
 
-    auto root = /* vertical box container */;
+    auto root = nk::Box::create(nk::Orientation::Vertical, 8.0F);
     root->append(label);
     root->append(button);
 

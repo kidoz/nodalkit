@@ -36,6 +36,9 @@ test_property = executable('test_property',
 )
 test('property', test_property)
 
+test_box = executable('test_box', 'box_test.cpp', dependencies : [nk_dep, catch2_test_dep])
+test('box', test_box)
+
 test_app = executable('test_basic_app',
     'basic_app_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

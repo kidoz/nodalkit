@@ -18,6 +18,9 @@ public:
     explicit BoxLayout(Orientation orientation = Orientation::Vertical);
     ~BoxLayout() override;
 
+    [[nodiscard]] Orientation orientation() const;
+    void set_orientation(Orientation orientation);
+
     /// Spacing between children in logical pixels.
     [[nodiscard]] float spacing() const;
     void set_spacing(float spacing);

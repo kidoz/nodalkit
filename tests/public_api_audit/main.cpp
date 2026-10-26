@@ -67,6 +67,7 @@
 #include <nk/ui_core/state_flags.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/banner.h>
+#include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/clamp.h>
 #include <nk/widgets/combo_box.h>
@@ -205,6 +206,21 @@ void force_symbol_references() {
     (void)static_cast<bool (*)()>(&nk::ServiceLocator::has<int>);
     (void)static_cast<void (*)()>(&nk::ServiceLocator::clear);
     (void)static_cast<float (nk::BoxLayout::*)() const>(&nk::BoxLayout::spacing);
+    (void)static_cast<nk::Orientation (nk::BoxLayout::*)() const>(&nk::BoxLayout::orientation);
+    (void)static_cast<void (nk::BoxLayout::*)(nk::Orientation)>(&nk::BoxLayout::set_orientation);
+    (void)static_cast<std::shared_ptr<nk::Box> (*)(nk::Orientation, float)>(&nk::Box::create);
+    (void)static_cast<nk::Orientation (nk::Box::*)() const>(&nk::Box::orientation);
+    (void)static_cast<void (nk::Box::*)(nk::Orientation)>(&nk::Box::set_orientation);
+    (void)static_cast<float (nk::Box::*)() const>(&nk::Box::spacing);
+    (void)static_cast<void (nk::Box::*)(float)>(&nk::Box::set_spacing);
+    (void)static_cast<bool (nk::Box::*)() const>(&nk::Box::homogeneous);
+    (void)static_cast<void (nk::Box::*)(bool)>(&nk::Box::set_homogeneous);
+    (void)static_cast<void (nk::Box::*)(std::shared_ptr<nk::Widget>)>(&nk::Box::append);
+    (void)static_cast<void (nk::Box::*)(std::shared_ptr<nk::Widget>)>(&nk::Box::prepend);
+    (void)static_cast<void (nk::Box::*)(std::size_t, std::shared_ptr<nk::Widget>)>(
+        &nk::Box::insert);
+    (void)static_cast<void (nk::Box::*)(nk::Widget&)>(&nk::Box::remove);
+    (void)static_cast<void (nk::Box::*)()>(&nk::Box::clear);
     (void)static_cast<void (nk::BoxLayout::*)(float)>(&nk::BoxLayout::set_spacing);
     (void)static_cast<bool (nk::BoxLayout::*)() const>(&nk::BoxLayout::homogeneous);
     (void)static_cast<void (nk::BoxLayout::*)(bool)>(&nk::BoxLayout::set_homogeneous);

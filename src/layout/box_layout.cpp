@@ -155,6 +155,14 @@ BoxLayout::BoxLayout(Orientation orientation) : orientation_(orientation) {}
 
 BoxLayout::~BoxLayout() = default;
 
+Orientation BoxLayout::orientation() const {
+    return orientation_;
+}
+
+void BoxLayout::set_orientation(Orientation orientation) {
+    orientation_ = orientation;
+}
+
 float BoxLayout::spacing() const {
     return spacing_;
 }

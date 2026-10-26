@@ -58,10 +58,9 @@ just installed.
 Create `main.cpp` with the following contents:
 
 ```cpp
-#include <nk/layout/box_layout.h>
 #include <nk/platform/application.h>
 #include <nk/platform/window.h>
-#include <nk/ui_core/widget.h>
+#include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/label.h>
 
@@ -78,30 +77,13 @@ private:
     int count_ = 0;
 };
 
-// nk::Widget's constructor is protected, so a container is a small subclass.
-class Column : public nk::Widget {
-public:
-    static std::shared_ptr<Column> create(float spacing = 12.0F) {
-        auto column = std::shared_ptr<Column>(new Column());
-        auto layout = std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical);
-        layout->set_spacing(spacing);
-        column->set_layout_manager(std::move(layout));
-        return column;
-    }
-
-    void append(std::shared_ptr<nk::Widget> child) { append_child(std::move(child)); }
-
-private:
-    Column() = default;
-};
-
 int main(int argc, char** argv) {
     nk::Application app(argc, argv);
     nk::Window window({.title = "Counter", .width = 420, .height = 220});
 
     CounterController controller;
 
-    auto root = Column::create();
+    auto root = nk::Box::create(nk::Orientation::Vertical, 12.0F);
     auto label = nk::Label::create("0");
     auto button = nk::Button::create("Increment");
 
@@ -123,7 +105,7 @@ int main(int argc, char** argv) {
 Read it top to bottom once. Three things are happening:
 
 - `CounterController` owns the state. It knows nothing about widgets.
-- `Column` is the root container. It wraps a `BoxLayout` so children stack
+- `nk::Box` is the root container. It uses a `BoxLayout` so children stack
   vertically. Widgets are created through `create()` factories and shared
   pointers because the tree owns them.
 - The click handler is the only place the UI and the controller meet. It
