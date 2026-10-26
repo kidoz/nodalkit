@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
 - **Property binding** with change notification
 - **GTK4-style layout** — measure/allocate with pluggable layout managers
 - **CSS-like theming** — selectors, style classes, pseudo-states, tokens
-- **Accessibility model** — WAI-ARIA roles and states (platform bridges planned)
+- **Accessibility** — shared roles and states, Linux AT-SPI and macOS NSAccessibility bridges
 - **Async dialogs** — non-blocking `present()`, response via signals
 - **Model/view** — `AbstractListModel` + `SelectionModel` + `ItemFactory`
 - **Built-in diagnostics** — widget tree inspector, frame timeline, trace export, render snapshots
