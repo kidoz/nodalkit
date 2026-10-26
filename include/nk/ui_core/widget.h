@@ -375,6 +375,8 @@ private:
     friend class Window;
     friend class WindowInspector;
 
+    void validate_child(const std::shared_ptr<Widget>& child) const;
+
     [[nodiscard]] std::vector<std::size_t> debug_tree_path() const;
     [[nodiscard]] std::string debug_snapshot_label() const;
     void reset_debug_hotspot_counters_recursive();

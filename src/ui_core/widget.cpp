@@ -10,6 +10,7 @@
 #include <nk/text/font.h>
 #include <nk/text/text_shaper.h>
 #include <nk/ui_core/widget.h>
+#include <stdexcept>
 
 namespace nk {
 
@@ -673,7 +674,19 @@ Signal<DragDropEvent&>& Widget::on_drop() {
 
 // --- Child management ---
 
+void Widget::validate_child(const std::shared_ptr<Widget>& child) const {
+    if (!child || child->impl_->parent != nullptr || child->impl_->host_window != nullptr) {
+        throw std::invalid_argument("Child must be non-null and detached from its tree and window");
+    }
+    for (const auto* ancestor = this; ancestor != nullptr; ancestor = ancestor->parent()) {
+        if (ancestor == child.get()) {
+            throw std::invalid_argument("Widget trees cannot contain cycles");
+        }
+    }
+}
+
 void Widget::append_child(std::shared_ptr<Widget> child) {
+    validate_child(child);
     child->impl_->parent = this;
     child->set_host_window(impl_->host_window);
     impl_->children.push_back(std::move(child));
@@ -681,6 +694,7 @@ void Widget::append_child(std::shared_ptr<Widget> child) {
 }
 
 void Widget::insert_child(std::size_t index, std::shared_ptr<Widget> child) {
+    validate_child(child);
     child->impl_->parent = this;
     child->set_host_window(impl_->host_window);
     auto pos = impl_->children.begin() +
