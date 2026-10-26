@@ -80,8 +80,9 @@ framework:
 - **Tutorials** teach by doing. Start with
   [Your first NodalKit application](docs/tutorials/your-first-application.md).
 - **How-to guides** solve one task each: consuming the installed SDK,
-  Meson integration, external processes, native window handles, support
-  bundles, accessibility validation, and an emulator frontend walkthrough.
+  Meson integration, shared actions and shortcuts, external processes, native
+  window handles, support bundles, accessibility validation, and an emulator
+  frontend walkthrough.
 - **Reference** records platform support, the Windows support matrix, the
   native handle contract, and the diagnostics facilities.
 - **Explanation** covers

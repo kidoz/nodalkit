@@ -34,6 +34,11 @@ secondary surfaces after the shell is coherent.
 
 ## Keep command handling shared
 
+`Action` and `ActionGroup` connect toolkit menus, toolbar buttons, command
+palettes, and window shortcuts to shared command state. See
+[Share actions between controls and shortcuts](../how-to/share-actions-and-shortcuts.md)
+for bindings and focus/modal shortcut behavior.
+
 If the same action can be triggered from a menu item, a button, a keyboard
 shortcut, or a native app menu, then all of them should route into the same
 handler:

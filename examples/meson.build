@@ -8,6 +8,8 @@ executable('counter',
     dependencies : nk_dep,
 )
 
+executable('shared_actions', 'shared_actions.cpp', dependencies : nk_dep)
+
 executable('search_input',
     'search_input.cpp',
     dependencies : nk_dep,

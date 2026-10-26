@@ -23,6 +23,7 @@ Task-oriented steps for developers who already know the basics.
 
 - [Consume the installed SDK](how-to/consume-the-installed-sdk.md)
 - [Integrate NodalKit into a Meson build](how-to/integrate-with-meson.md)
+- [Share actions between controls and shortcuts](how-to/share-actions-and-shortcuts.md)
 - [Launch and monitor external processes](how-to/launch-external-processes.md)
 - [Use native window handles](how-to/use-native-window-handles.md)
 - [Export a support bundle](how-to/export-a-support-bundle.md)
