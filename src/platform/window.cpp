@@ -1670,6 +1670,17 @@ Window::~Window() {
         // Window. Once the impl_ member's own destruction starts, unique_ptr
         // nulls it before ~Impl runs, and purge must tolerate that instead.
         impl_->window_destroying = true;
+        impl_->focused_widget = nullptr;
+        impl_->hovered_widget = nullptr;
+        impl_->pressed_widget = nullptr;
+        if (impl_->child) {
+            impl_->child->set_host_window(nullptr);
+        }
+        for (auto& overlay : impl_->overlays) {
+            if (overlay.widget) {
+                overlay.widget->set_host_window(nullptr);
+            }
+        }
         impl_->child.reset();
         impl_->overlays.clear();
     }
@@ -3453,9 +3464,19 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
             next_path[remaining - 1]->dispatch_pointer_controllers(enter_event);
         }
     };
-    auto dispatch_mouse_bubble = [&event](Widget* target) {
+    auto dispatch_mouse_bubble = [this, &event, alive = impl_->alive](Widget* target) {
+        std::vector<std::shared_ptr<Widget>> path;
         for (auto* current = target; current != nullptr; current = current->parent()) {
+            path.push_back(current->shared_from_this());
+        }
+        for (const auto& current : path) {
+            if (current->host_window() != this) {
+                return true;
+            }
             current->dispatch_pointer_controllers(event);
+            if (!*alive || current->host_window() != this) {
+                return true;
+            }
             if (current->handle_mouse_event(event)) {
                 return true;
             }
@@ -3866,9 +3887,19 @@ void Window::dispatch_key_event(const KeyEvent& event) {
         }
     }
 
-    auto dispatch_key_bubble = [&event](Widget* target) {
+    auto dispatch_key_bubble = [this, &event, alive = impl_->alive](Widget* target) {
+        std::vector<std::shared_ptr<Widget>> path;
         for (auto* current = target; current != nullptr; current = current->parent()) {
+            path.push_back(current->shared_from_this());
+        }
+        for (const auto& current : path) {
+            if (current->host_window() != this) {
+                return true;
+            }
             current->dispatch_keyboard_controllers(event);
+            if (!*alive || current->host_window() != this) {
+                return true;
+            }
             if (current->handle_key_event(event)) {
                 return true;
             }
@@ -3936,8 +3967,15 @@ void Window::dispatch_key_event(const KeyEvent& event) {
 }
 
 void Window::dispatch_text_input_event(const TextInputEvent& event) {
-    auto dispatch_text_input_bubble = [&event](Widget* target) {
+    auto dispatch_text_input_bubble = [this, &event, alive = impl_->alive](Widget* target) {
+        std::vector<std::shared_ptr<Widget>> path;
         for (auto* current = target; current != nullptr; current = current->parent()) {
+            path.push_back(current->shared_from_this());
+        }
+        for (const auto& current : path) {
+            if (!*alive || current->host_window() != this) {
+                return true;
+            }
             if (current->handle_text_input_event(event)) {
                 return true;
             }

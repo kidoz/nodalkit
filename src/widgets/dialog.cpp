@@ -36,7 +36,6 @@ struct Dialog::Impl {
     std::string title;
     std::string message;
     std::shared_ptr<Widget> content;
-    Window* parent_window = nullptr;
     bool presented = false;
     mutable bool backdrop_dirty = false;
     DialogPresentationStyle presentation_style = DialogPresentationStyle::Default;
@@ -83,8 +82,11 @@ Dialog::~Dialog() = default;
 void Dialog::add_button(std::string label, DialogResponse response) {
     auto button = Button::create(std::move(label));
     button->add_style_class("dialog-button");
-    // The button is a child of this dialog, so the connection cannot outlive it.
-    (void)button->on_clicked().connect([this, response] { close(response); });
+    (void)button->on_clicked().connect([weak = weak_from_this(), response] {
+        if (auto widget = weak.lock()) {
+            static_cast<Dialog&>(*widget).close(response);
+        }
+    });
     append_child(button);
     impl_->buttons.push_back({std::move(button), response});
     queue_layout();
@@ -124,15 +126,14 @@ void Dialog::set_minimum_panel_width(float width) {
 }
 
 void Dialog::present(Window& parent) {
-    if (impl_->presented && impl_->parent_window == &parent) {
+    if (impl_->presented && host_window() == &parent) {
         return;
     }
 
-    if (impl_->presented && impl_->parent_window != nullptr) {
-        impl_->parent_window->dismiss_overlay(*this);
+    if (impl_->presented && host_window() != nullptr) {
+        host_window()->dismiss_overlay(*this);
     }
 
-    impl_->parent_window = &parent;
     impl_->presented = true;
     impl_->backdrop_dirty = true;
     parent.show_overlay(shared_from_this(), true);
@@ -149,17 +150,16 @@ void Dialog::present(Window& parent) {
 }
 
 bool Dialog::is_presented() const {
-    return impl_->presented;
+    return impl_->presented && host_window() != nullptr;
 }
 
 void Dialog::close(DialogResponse response) {
     auto keep_alive = shared_from_this();
     (void)keep_alive;
-    if (impl_->presented && impl_->parent_window != nullptr) {
+    if (impl_->presented && host_window() != nullptr) {
         impl_->backdrop_dirty = true;
-        impl_->parent_window->dismiss_overlay(*this);
+        host_window()->dismiss_overlay(*this);
     }
-    impl_->parent_window = nullptr;
     impl_->presented = false;
     impl_->on_response.emit(response);
 }

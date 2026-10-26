@@ -59,8 +59,8 @@ struct WidgetTextInputState {
     bool composing = false;
 };
 
-/// Base class for all widgets. Widgets form a tree with unique-pointer
-/// ownership: a parent exclusively owns its children.
+/// Base class for all widgets. Parents retain shared ownership of their children;
+/// a child has one non-owning parent link, cleared when it is detached.
 ///
 /// ### Core Contracts
 ///

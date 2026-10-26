@@ -5981,3 +5981,79 @@ TEST_CASE("Box cross-axis minimum tracks child minimums, not naturals", "[app][l
     REQUIRE(row_request.natural_height == Catch::Approx(20.0F));
     REQUIRE(row_request.minimum_height == Catch::Approx(20.0F));
 }
+
+TEST_CASE("Retained children detach when their parent is destroyed", "[app][lifetime]") {
+    auto child = FixedWidget::create(20, 20);
+    auto controller = std::make_shared<nk::KeyboardController>();
+    child->add_controller(controller);
+    {
+        auto parent = TestContainer::create();
+        parent->append(child);
+        REQUIRE(child->parent() == parent.get());
+    }
+    REQUIRE(child->parent() == nullptr);
+    CHECK(child->test_theme_number("font-size", 12.0F) > 0);
+    child.reset();
+    CHECK(controller->widget() == nullptr);
+}
+
+TEST_CASE("Retained content and dialogs detach when their window is destroyed", "[app][lifetime]") {
+    auto child = nk::Label::create("retained");
+    auto dialog = nk::Dialog::create("retained dialog");
+    {
+        auto window = std::make_unique<nk::Window>();
+        window->set_child(child);
+        dialog->present(*window);
+        REQUIRE(dialog->is_presented());
+    }
+    child->set_text("safe after window destruction");
+    CHECK_FALSE(dialog->is_presented());
+    dialog->close(nk::DialogResponse::Cancel);
+    auto replacement = std::make_unique<nk::Window>();
+    replacement->set_child(child);
+    dialog->present(*replacement);
+    CHECK(dialog->is_presented());
+    dialog->close(nk::DialogResponse::Cancel);
+}
+
+TEST_CASE("Retained dialog buttons do not call a destroyed dialog", "[app][lifetime]") {
+    auto dialog = nk::Dialog::create("temporary");
+    dialog->add_button("Close", nk::DialogResponse::Cancel);
+    auto button = std::dynamic_pointer_cast<nk::Button>(dialog->children().front());
+    REQUIRE(button);
+    dialog.reset();
+    CHECK(button->parent() == nullptr);
+    CHECK(
+        button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+}
+
+TEST_CASE("Keyboard dispatch stops after a controller replaces its target",
+          "[app][input][lifetime]") {
+    nk::Window window;
+
+    struct Probe : nk::Widget {
+        int& handled;
+
+        explicit Probe(int& count) : handled(count) { set_focusable(true); }
+
+        bool handle_key_event(const nk::KeyEvent&) override {
+            ++handled;
+            return true;
+        }
+    };
+
+    int handled = 0;
+    auto target = std::make_shared<Probe>(handled);
+    std::weak_ptr<nk::Widget> weak = target;
+    auto controller = std::make_shared<nk::KeyboardController>();
+    auto connection =
+        controller->on_key_pressed().connect([&](int, int) { window.set_child(nullptr); });
+    target->add_controller(controller);
+    window.set_child(target);
+    target->grab_focus();
+    target.reset();
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::A});
+    CHECK(handled == 0);
+    CHECK(weak.expired());
+    CHECK(controller->widget() == nullptr);
+}

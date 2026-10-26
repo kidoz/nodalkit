@@ -114,6 +114,13 @@ Widget::~Widget() {
     if (impl_->host_window != nullptr) {
         impl_->host_window->purge_dirty_widget(*this);
     }
+    for (auto& child : impl_->children) {
+        child->impl_->parent = nullptr;
+        child->set_host_window(nullptr);
+    }
+    for (auto& controller : impl_->controllers) {
+        controller->set_widget(nullptr);
+    }
 }
 
 // --- Tree ---
@@ -535,7 +542,11 @@ void Widget::add_controller(std::shared_ptr<EventController> controller) {
 }
 
 void Widget::dispatch_pointer_controllers(const MouseEvent& event) {
-    for (const auto& controller : impl_->controllers) {
+    const auto controllers = impl_->controllers;
+    for (const auto& controller : controllers) {
+        if (controller->widget() != this) {
+            continue;
+        }
         auto* pointer = dynamic_cast<PointerController*>(controller.get());
         if (pointer == nullptr) {
             continue;
@@ -567,7 +578,11 @@ void Widget::dispatch_pointer_controllers(const MouseEvent& event) {
 }
 
 void Widget::dispatch_keyboard_controllers(const KeyEvent& event) {
-    for (const auto& controller : impl_->controllers) {
+    const auto controllers = impl_->controllers;
+    for (const auto& controller : controllers) {
+        if (controller->widget() != this) {
+            continue;
+        }
         auto* keyboard = dynamic_cast<KeyboardController*>(controller.get());
         if (keyboard == nullptr) {
             continue;
@@ -584,7 +599,11 @@ void Widget::dispatch_keyboard_controllers(const KeyEvent& event) {
 }
 
 void Widget::dispatch_focus_controllers(bool focused) {
-    for (const auto& controller : impl_->controllers) {
+    const auto controllers = impl_->controllers;
+    for (const auto& controller : controllers) {
+        if (controller->widget() != this) {
+            continue;
+        }
         auto* focus = dynamic_cast<FocusController*>(controller.get());
         if (focus == nullptr) {
             continue;
