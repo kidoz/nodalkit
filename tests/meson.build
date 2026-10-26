@@ -24,6 +24,9 @@ test_signal = executable('test_signal',
 )
 test('signal', test_signal)
 
+test_actions = executable('test_actions', 'actions_test.cpp', dependencies : [nk_dep, catch2_test_dep])
+test('actions', test_actions)
+
 test_event_loop = executable('test_event_loop',
     'event_loop_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

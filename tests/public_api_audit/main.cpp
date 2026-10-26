@@ -138,6 +138,24 @@ void force_symbol_references() {
     (void)static_cast<nk::Action* (nk::ActionGroup::*)(std::string_view) const>(
         &nk::ActionGroup::lookup);
     (void)static_cast<void (nk::ActionGroup::*)(std::string_view)>(&nk::ActionGroup::activate);
+    (void)&nk::Action::is_checkable;
+    (void)&nk::Action::set_checkable;
+    (void)&nk::Action::is_checked;
+    (void)&nk::Action::set_checked;
+    (void)&nk::Action::on_changed;
+    (void)&nk::ActionGroup::find;
+    (void)&nk::ActionGroup::remove;
+    (void)&nk::ActionGroup::on_changed;
+    (void)&nk::Button::set_action;
+    (void)&nk::Button::action;
+    (void)&nk::MenuBar::set_action_group;
+    (void)&nk::MenuBar::action_group;
+    (void)&nk::CommandPalette::set_action_group;
+    (void)&nk::CommandPalette::action_group;
+    (void)&nk::Window::set_action_group;
+    (void)&nk::Window::action_group;
+    (void)&nk::Window::add_shortcut;
+    (void)&nk::Window::clear_shortcuts;
     (void)static_cast<nk::Widget* (nk::EventController::*)() const>(&nk::EventController::widget);
     (void)static_cast<nk::Signal<float, float>& (nk::PointerController::*)()>(
         &nk::PointerController::on_enter);

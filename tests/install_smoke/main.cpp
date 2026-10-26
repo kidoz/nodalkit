@@ -177,6 +177,36 @@ void check_actions() {
     nk::ActionGroup group;
     group.add(action);
     check(group.lookup("app.quit") == action.get(), "ActionGroup lookup by name");
+    check(group.find("app.quit") == action, "ActionGroup shared lookup");
+    int changes = 0;
+    auto changed = group.on_changed().connect([&](std::string_view) { ++changes; });
+    action->set_enabled(true);
+    action->set_checkable(true);
+    auto button = nk::Button::create("Quit");
+    button->set_action(action);
+    group.activate("app.quit");
+    check(action->is_checkable() && action->is_checked() &&
+              nk::has_flag(button->state_flags(), nk::StateFlags::Checked),
+          "Shared checkable action updates a bound button");
+    check(changes == 3 && changed.connected(), "ActionGroup observes effective state changes");
+    action->set_checked(false);
+    check(!nk::has_flag(button->state_flags(), nk::StateFlags::Checked),
+          "Action checked setter synchronizes the button");
+    group.remove("app.quit");
+    check(!group.find("app.quit"), "ActionGroup removal");
+
+    auto shared_group = std::make_shared<nk::ActionGroup>();
+    shared_group->add(action);
+    auto palette = nk::CommandPalette::create();
+    palette->set_commands({{.id = "app.quit", .title = "Quit", .subtitle = {}, .category = {}}});
+    palette->set_action_group(shared_group);
+    auto menu = nk::MenuBar::create();
+    menu->set_action_group(shared_group);
+    action->set_enabled(false);
+    check(button->action() == action.get() && menu->action_group() == shared_group.get() &&
+              palette->action_group() == shared_group.get() &&
+              !palette->commands().front().enabled && !button->is_sensitive(),
+          "Installed control bindings share action state");
 
     nk::Shortcut shortcut{.key_code = 83, .modifiers = nk::Modifiers::Ctrl};
     check(shortcut.key_code == 83, "Shortcut aggregate init");
