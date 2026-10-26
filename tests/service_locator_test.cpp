@@ -56,3 +56,36 @@ TEST_CASE("ServiceLocator generic registration helper works", "[service_locator]
     REQUIRE(db != nullptr);
     REQUIRE(db->query() == "real");
 }
+
+TEST_CASE("Service destructors can use the registry during cleanup and replacement",
+          "[service_locator]") {
+    nk::ServiceLocator::clear();
+    bool destroyed = false;
+
+    struct ReentrantService {
+        bool& destroyed;
+
+        ~ReentrantService() {
+            (void)nk::ServiceLocator::has<IDatabase>();
+            nk::ServiceLocator::register_service<MockDatabase>();
+            destroyed = true;
+        }
+    };
+
+    nk::ServiceLocator::register_service<ReentrantService>(
+        std::make_shared<ReentrantService>(destroyed));
+    SECTION("Clearing the registry") {
+        nk::ServiceLocator::clear();
+    }
+    SECTION("Replacing the registration") {
+        bool replacement_destroyed = false;
+        nk::ServiceLocator::register_service<ReentrantService>(
+            std::make_shared<ReentrantService>(replacement_destroyed));
+        REQUIRE(destroyed);
+        nk::ServiceLocator::clear();
+        REQUIRE(replacement_destroyed);
+    }
+    REQUIRE(destroyed);
+    REQUIRE(nk::ServiceLocator::has<MockDatabase>());
+    nk::ServiceLocator::clear();
+}

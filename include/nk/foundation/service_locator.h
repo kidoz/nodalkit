@@ -21,9 +21,12 @@ public:
     /// Registers an implementation instance against an interface type.
     template <typename Interface, typename Implementation>
     static void register_service(std::shared_ptr<Implementation> instance) {
-        std::lock_guard<std::mutex> lock(mutex());
         std::shared_ptr<Interface> interface_ptr = instance;
-        services()[std::type_index(typeid(Interface))] = std::move(interface_ptr);
+        std::any displaced(std::move(interface_ptr));
+        {
+            std::lock_guard<std::mutex> lock(mutex());
+            services()[std::type_index(typeid(Interface))].swap(displaced);
+        }
     }
 
     /// Registers a newly constructed instance of the given type.
@@ -53,8 +56,11 @@ public:
 
     /// Clears all registered services. Useful between tests.
     static void clear() {
-        std::lock_guard<std::mutex> lock(mutex());
-        services().clear();
+        std::unordered_map<std::type_index, std::any> displaced;
+        {
+            std::lock_guard<std::mutex> lock(mutex());
+            displaced.swap(services());
+        }
     }
 
 private:
