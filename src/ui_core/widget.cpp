@@ -252,14 +252,30 @@ bool Widget::has_height_for_width() const {
 
 float Widget::height_for_width(float width) const {
     if (impl_->layout_manager) {
-        return impl_->layout_manager->height_for_width(*this, width);
+        const auto p = padding();
+        return impl_->layout_manager->height_for_width(*this,
+                                                       std::max(0.0F, width - p.left - p.right)) +
+               p.top + p.bottom;
     }
     return measure(Constraints::unbounded()).natural_height;
 }
 
 SizeRequest Widget::measure(const Constraints& constraints) const {
     if (impl_->layout_manager) {
-        return impl_->layout_manager->measure(*this, constraints);
+        const auto p = padding();
+        const auto horizontal = p.left + p.right;
+        const auto vertical = p.top + p.bottom;
+        auto inner = constraints;
+        inner.min_width = std::max(0.0F, inner.min_width - horizontal);
+        inner.max_width = std::max(0.0F, inner.max_width - horizontal);
+        inner.min_height = std::max(0.0F, inner.min_height - vertical);
+        inner.max_height = std::max(0.0F, inner.max_height - vertical);
+        auto request = impl_->layout_manager->measure(*this, inner);
+        request.minimum_width += horizontal;
+        request.natural_width += horizontal;
+        request.minimum_height += vertical;
+        request.natural_height += vertical;
+        return request;
     }
     return {};
 }
@@ -284,7 +300,7 @@ void Widget::allocate(const Rect& allocation) {
     impl_->has_allocation = true;
     impl_->debug_pending_layout = false;
     if (impl_->layout_manager) {
-        impl_->layout_manager->allocate(*const_cast<Widget*>(this), allocation);
+        impl_->layout_manager->allocate(*this, content_rect());
     }
 }
 
