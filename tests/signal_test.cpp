@@ -101,9 +101,14 @@ TEST_CASE("Signal disconnect_all removes every slot", "[signal]") {
     REQUIRE(sig.connection_count() == 0);
 }
 
+#include <array>
 #include <atomic>
 #include <nk/runtime/event_loop.h>
+#include <span>
+#include <stdexcept>
+#include <string_view>
 #include <thread>
+#include <vector>
 
 TEST_CASE("Signal posts cross-thread emissions to the target EventLoop", "[signal][thread]") {
     nk::EventLoop loop;
@@ -119,4 +124,81 @@ TEST_CASE("Signal posts cross-thread emissions to the target EventLoop", "[signa
 
     loop.poll();
     REQUIRE(received == 42);
+}
+
+TEST_CASE("Signal cancels queued deliveries when disconnected or destroyed", "[signal][thread]") {
+    nk::EventLoop loop;
+    auto signal = std::make_unique<nk::Signal<int>>();
+    auto receiver = std::make_unique<int>(0);
+    auto conn = signal->connect([value = receiver.get()](int v) { *value = v; });
+    std::thread worker([&] { signal->emit(42); });
+    worker.join();
+    SECTION("Explicit disconnection") {
+        conn.disconnect();
+    }
+    SECTION("Signal destruction") {
+        signal.reset();
+    }
+    SECTION("Move assignment discards the old connections") {
+        *signal = nk::Signal<int>{};
+    }
+    REQUIRE_FALSE(conn.connected());
+    receiver.reset();
+    loop.poll();
+}
+
+TEST_CASE("Queued signals own string and span views", "[signal][thread]") {
+    nk::EventLoop loop;
+    nk::Signal<std::string_view, std::span<const int>> signal;
+    std::string received;
+    std::vector<int> numbers;
+    auto conn = signal.connect([&](std::string_view text, std::span<const int> values) {
+        received = text;
+        numbers.assign(values.begin(), values.end());
+    });
+    std::thread worker([&] {
+        std::string text(1000, 'x');
+        std::array values{1, 2, 3};
+        signal.emit(text, values);
+        text.assign(1000, 'y');
+        values.fill(0);
+    });
+    worker.join();
+    loop.poll();
+    REQUIRE(received == std::string(1000, 'x'));
+    REQUIRE(numbers == std::vector<int>{1, 2, 3});
+}
+
+TEST_CASE("Signal delivery tolerates a destroyed target loop", "[signal][thread]") {
+    nk::Signal<int> signal;
+    int calls = 0;
+    nk::Connection conn;
+    {
+        nk::EventLoop loop;
+        conn = signal.connect([&](int) { ++calls; });
+    }
+    std::thread worker([&] { signal.emit(42); });
+    worker.join();
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("Cross-thread mutable references are rejected instead of invoked on the worker",
+          "[signal][thread]") {
+    nk::EventLoop loop;
+    nk::Signal<int&> signal;
+    int calls = 0;
+    auto conn = signal.connect([&](int&) { ++calls; });
+    bool rejected = false;
+    std::thread worker([&] {
+        int value = 1;
+        try {
+            signal.emit(value);
+        } catch (const std::logic_error&) {
+            rejected = true;
+        }
+    });
+    worker.join();
+    loop.poll();
+    REQUIRE(rejected);
+    REQUIRE(calls == 0);
 }

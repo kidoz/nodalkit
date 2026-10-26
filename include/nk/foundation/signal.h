@@ -1,4 +1,3 @@
-#include <type_traits>
 #pragma once
 
 /// @file signal.h
@@ -12,7 +11,13 @@
 #include <memory>
 #include <mutex>
 #include <nk/runtime/event_loop.h>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <thread>
+#include <tuple>
+#include <type_traits>
 #include <vector>
 
 namespace nk {
@@ -23,6 +28,42 @@ namespace detail {
 struct ConnectionState {
     std::atomic<bool> connected{true};
     uint64_t id{0};
+};
+
+// Queued views need backing storage: copying the view alone retains a borrowed
+// pointer into the emitter's memory. Other value types must themselves own any
+// data needed by a receiver after emit() returns.
+template <typename T> struct QueuedSignalArgument {
+    static constexpr bool supported = std::is_copy_constructible_v<T> && !std::is_pointer_v<T>;
+    T value;
+
+    explicit QueuedSignalArgument(const T& arg) : value(arg) {}
+
+    const T& get() const { return value; }
+};
+
+template <typename Char, typename Traits>
+struct QueuedSignalArgument<std::basic_string_view<Char, Traits>> {
+    static constexpr bool supported = true;
+    std::basic_string<Char, Traits> value;
+
+    explicit QueuedSignalArgument(std::basic_string_view<Char, Traits> arg) : value(arg) {}
+
+    std::basic_string_view<Char, Traits> get() const { return value; }
+};
+
+template <typename T> struct QueuedSignalArgument<std::reference_wrapper<T>> {
+    static constexpr bool supported = false;
+};
+
+template <typename T, std::size_t Extent> struct QueuedSignalArgument<std::span<T, Extent>> {
+    static constexpr bool supported =
+        std::is_const_v<T> && std::is_copy_constructible_v<std::remove_const_t<T>>;
+    std::vector<std::remove_const_t<T>> value;
+
+    explicit QueuedSignalArgument(std::span<T, Extent> arg) : value(arg.begin(), arg.end()) {}
+
+    std::span<T, Extent> get() const { return std::span<T, Extent>(value); }
 };
 
 } // namespace detail
@@ -71,6 +112,11 @@ private:
 ///
 /// Signals are non-copyable but movable. Emitting during emission is
 /// supported (reentrant-safe). Disconnecting a slot during emission is safe.
+/// Disconnection or signal destruction also cancels queued deliveries that have
+/// not started. Cross-thread delivery copies string_view text and const span
+/// elements; other values and span elements must own their referenced data.
+/// Mutable references, reference wrappers, raw pointers,
+/// and non-copyable payloads cannot be queued and cause std::logic_error.
 ///
 /// Usage:
 /// @code
@@ -84,21 +130,33 @@ public:
     using SlotType = std::function<void(const Args&...)>;
 
     Signal() = default;
-    ~Signal() = default;
+
+    ~Signal() { disconnect_all(); }
 
     Signal(const Signal&) = delete;
     Signal& operator=(const Signal&) = delete;
 
     Signal(Signal&&) noexcept = default;
-    Signal& operator=(Signal&&) noexcept = default;
+
+    Signal& operator=(Signal&& other) noexcept {
+        if (this != &other) {
+            disconnect_all();
+            shared_ = std::move(other.shared_);
+        }
+        return *this;
+    }
 
     /// Connect a slot. Returns a Connection handle.
     [[nodiscard]] Connection connect(SlotType slot) {
         auto state = std::make_shared<detail::ConnectionState>();
         std::lock_guard lock(shared_->mutex);
         state->id = shared_->next_id++;
+        auto* loop = EventLoop::current();
         shared_->slots.push_back(
-            {state, std::move(slot), EventLoop::current(), std::this_thread::get_id()});
+            {state,
+             std::move(slot),
+             loop ? loop->task_poster("signal-cross-thread") : EventLoop::TaskPoster{},
+             std::this_thread::get_id()});
         return Connection(std::move(state));
     }
 
@@ -114,18 +172,28 @@ public:
         const auto current_thread = std::this_thread::get_id();
         for (const auto& s : local_slots) {
             if (s.state->connected.load(std::memory_order_relaxed)) {
-                if (s.target_thread == current_thread || !s.target_loop) {
+                if (s.target_thread == current_thread || !s.target_poster) {
                     s.callback(args...);
                 } else {
-                    if constexpr (std::conjunction_v<
-                                      std::is_copy_constructible<std::decay_t<Args>>...>) {
-                        auto cb = s.callback;
-                        s.target_loop->post([cb, args...]() mutable { cb(args...); },
-                                            "signal-cross-thread");
+                    if constexpr (((detail::QueuedSignalArgument<
+                                        std::remove_cvref_t<Args>>::supported &&
+                                    (!std::is_lvalue_reference_v<Args> ||
+                                     std::is_const_v<std::remove_reference_t<Args>>)) &&
+                                   ...)) {
+                        s.target_poster(
+                            [state = s.state,
+                             cb = s.callback,
+                             values =
+                                 std::tuple{detail::QueuedSignalArgument<std::remove_cvref_t<Args>>(
+                                     args)...}] {
+                                if (state->connected.load(std::memory_order_relaxed)) {
+                                    std::apply(
+                                        [&cb](const auto&... stored) { cb(stored.get()...); },
+                                        values);
+                                }
+                            });
                     } else {
-                        // Fallback to direct invocation if arguments are not copyable,
-                        // even though it is not thread-safe.
-                        s.callback(args...);
+                        throw std::logic_error("Signal payload cannot be delivered across threads");
                     }
                 }
             }
@@ -149,18 +217,24 @@ public:
 
     /// Disconnect all slots.
     void disconnect_all() {
-        std::lock_guard lock(shared_->mutex);
-        for (auto& s : shared_->slots) {
-            s.state->connected.store(false, std::memory_order_relaxed);
+        if (!shared_) {
+            return;
         }
-        shared_->slots.clear();
+        std::vector<Slot> disconnected;
+        {
+            std::lock_guard lock(shared_->mutex);
+            for (auto& s : shared_->slots) {
+                s.state->connected.store(false, std::memory_order_relaxed);
+            }
+            disconnected.swap(shared_->slots);
+        }
     }
 
 private:
     struct Slot {
         std::shared_ptr<detail::ConnectionState> state;
         SlotType callback;
-        EventLoop* target_loop;
+        EventLoop::TaskPoster target_poster;
         std::thread::id target_thread;
     };
 
