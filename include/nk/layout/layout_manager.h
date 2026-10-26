@@ -12,7 +12,7 @@ class Widget;
 /// Abstract base for layout managers. A layout manager controls how
 /// a container widget measures and arranges its children.
 ///
-/// The layout pipeline has two phases:
+/// The layout manager provides two operations:
 /// 1. **Measure**: compute this widget's SizeRequest given constraints.
 /// 2. **Allocate**: assign each child a Rect within the allocated space.
 class LayoutManager {

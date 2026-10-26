@@ -21,8 +21,7 @@ using ListModelLess =
 
 /// Wraps a source list model and exposes only rows accepted by a predicate.
 ///
-/// Source model changes currently rebuild the filtered mapping and emit a model reset. This keeps
-/// the contract simple for the first adapter slice while still supporting existing ListView usage.
+/// Source model changes rebuild the filtered mapping and emit a model reset.
 class FilterListModel : public AbstractListModel {
 public:
     FilterListModel();

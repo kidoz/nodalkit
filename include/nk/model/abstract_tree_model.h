@@ -30,9 +30,8 @@ struct TreeIndex {
 /// AbstractListModel. Lets applications expose hierarchical data they own
 /// without copying it into the toolkit.
 ///
-/// This is the canonical view-facing tree contract going forward, but no
-/// in-tree widget consumes it yet: TreeView currently consumes the concrete
-/// in-memory TreeModel and will migrate to this contract during 0.x.
+/// No in-tree widget consumes this interface. TreeView consumes the concrete
+/// in-memory TreeModel.
 ///
 /// The model relies on TreeIndex to point to specific nodes. An invalid
 /// TreeIndex (is_valid() == false) represents the invisible root of the tree.

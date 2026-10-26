@@ -1,8 +1,7 @@
 #pragma once
 
 /// @file visual_effect_view.h
-/// @brief Backdrop material container for sidebars, popovers, and other
-/// surfaces that want the native macOS vibrancy look.
+/// @brief Themed backdrop container for sidebars, popovers, and other surfaces.
 
 #include <memory>
 #include <nk/foundation/types.h>
@@ -10,9 +9,8 @@
 
 namespace nk {
 
-/// Standard backdrop materials. On macOS these map to NSVisualEffectMaterial
-/// values; on other platforms (and until the macOS native wiring lands in a
-/// follow-up slice) they select a themed translucent fallback color.
+/// Standard backdrop materials that select a themed surface color on every
+/// platform. This widget does not use native NSVisualEffectView compositing.
 enum class VisualEffectMaterial {
     Sidebar,
     HeaderView,
@@ -22,15 +20,13 @@ enum class VisualEffectMaterial {
     Tooltip,
 };
 
-/// Single-child container that paints a translucent backdrop material behind
+/// Single-child container that paints a themed backdrop material behind
 /// its child.
 ///
 /// Each material resolves a semantic surface token through the theme's shared
 /// rules (sidebar, headerbar, popover, ...), so the backdrop follows the
 /// active color scheme; the literal tints are only defensive fallbacks for
-/// themeless use. Real NSVisualEffectView compositing on macOS remains a
-/// follow-up slice once the window surface grows a non-opaque presentation
-/// path.
+/// themeless use. The material's color determines the backdrop opacity.
 class VisualEffectView : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<VisualEffectView>
@@ -43,8 +39,7 @@ public:
     [[nodiscard]] VisualEffectMaterial material() const;
     void set_material(VisualEffectMaterial material);
 
-    /// Corner radius applied to the backdrop fallback. Native macOS vibrancy
-    /// will follow the containing window's corner shape and ignore this value.
+    /// Corner radius applied to the painted backdrop.
     [[nodiscard]] float corner_radius() const;
     void set_corner_radius(float radius);
 

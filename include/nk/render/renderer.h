@@ -47,9 +47,9 @@ struct FramePixels {
     std::vector<uint8_t> rgba;
 };
 
-/// Abstract renderer backend. The MVP ships a software renderer that
-/// rasterizes render nodes to a pixel buffer. Future backends will
-/// target D3D11, Vulkan, OpenGL, or Metal.
+/// Abstract renderer backend. Software rendering rasterizes render nodes to
+/// a pixel buffer. D3D11, Vulkan, and Metal availability depends on the
+/// platform and build configuration; query renderer_backend_available().
 class Renderer {
 public:
     virtual ~Renderer();

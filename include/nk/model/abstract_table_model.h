@@ -13,10 +13,8 @@ namespace nk {
 /// Abstract base for 2D table models — the table counterpart of
 /// AbstractListModel.
 ///
-/// This is the canonical contract for row-and-column data going forward, but
-/// no in-tree widget consumes it yet: DataTable currently consumes
-/// AbstractListModel plus per-column text providers and will migrate to this
-/// contract during 0.x.
+/// No in-tree widget consumes this interface. DataTable consumes
+/// AbstractListModel plus per-column text providers.
 ///
 /// The model notifies views of changes through signals so that the
 /// view can update incrementally instead of rebuilding entirely.

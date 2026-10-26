@@ -21,7 +21,7 @@ enum class PlatformFamily {
     MacOS,
 };
 
-/// Desktop environment hint for Linux and future shell adaptation.
+/// Desktop environment hint for Linux visual policy selection.
 enum class DesktopEnvironment {
     Unknown,
     Gnome,

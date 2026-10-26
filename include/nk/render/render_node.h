@@ -30,7 +30,7 @@ enum class RenderNodeKind {
 };
 
 /// A node in the retained render tree. Widgets produce render nodes
-/// during the snapshot phase; the renderer consumes them.
+/// during snapshot creation; the renderer consumes them.
 class RenderNode {
 public:
     explicit RenderNode(RenderNodeKind kind);
