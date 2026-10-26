@@ -6057,3 +6057,24 @@ TEST_CASE("Keyboard dispatch stops after a controller replaces its target",
     CHECK(weak.expired());
     CHECK(controller->widget() == nullptr);
 }
+
+TEST_CASE("Secure text is never published to either selection channel", "[app][text][security]") {
+    nk::Application app(0, nullptr);
+    app.set_clipboard_text("public clipboard");
+    auto field = nk::TextField::create("synthetic password");
+    field->select_all();
+    REQUIRE(app.primary_selection_text() == "synthetic password");
+    field->set_secure_text_entry(true);
+    REQUIRE(app.primary_selection_text().empty());
+    field->select_all();
+    CHECK(app.primary_selection_text().empty());
+    CHECK(field->handle_key_event({.type = nk::KeyEvent::Type::Press,
+                                   .key = nk::KeyCode::C,
+                                   .modifiers = nk::Modifiers::Ctrl}));
+    CHECK(app.clipboard_text() == "public clipboard");
+    CHECK(field->handle_key_event({.type = nk::KeyEvent::Type::Press,
+                                   .key = nk::KeyCode::X,
+                                   .modifiers = nk::Modifiers::Ctrl}));
+    CHECK(app.clipboard_text() == "public clipboard");
+    CHECK(app.primary_selection_text().empty());
+}

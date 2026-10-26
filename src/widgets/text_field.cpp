@@ -262,6 +262,7 @@ void TextField::set_secure_text_entry(bool secure) {
         return;
     }
     impl_->secure_text_entry = secure;
+    sync_primary_selection_ownership();
     ensure_accessible().set_value(impl_->accessible_value());
     queue_text_redraw();
 }
@@ -694,8 +695,8 @@ void TextField::snapshot_text(SnapshotContext& ctx) const {
 
         ctx.add_text({text_bounds.x - impl_->scroll_x, text_y}, display_text, text_color, font);
 
-        if (impl_->spell_check_enabled && impl_->edit.preedit_text.empty() &&
-            !impl_->edit.text.empty()) {
+        if (!impl_->secure_text_entry && impl_->spell_check_enabled &&
+            impl_->edit.preedit_text.empty() && !impl_->edit.text.empty()) {
             if (!impl_->spell_check_cache_valid ||
                 impl_->spell_check_cache_text != impl_->edit.text) {
                 impl_->spell_check_ranges.clear();
@@ -917,7 +918,7 @@ bool TextField::redo() {
 }
 
 void TextField::copy_selection_to_clipboard() const {
-    if (!has_selection()) {
+    if (impl_->secure_text_entry || !has_selection()) {
         return;
     }
 
@@ -928,7 +929,7 @@ void TextField::copy_selection_to_clipboard() const {
 
 void TextField::sync_primary_selection_ownership() const {
     std::string selected;
-    if (has_selection()) {
+    if (!impl_->secure_text_entry && has_selection()) {
         selected = impl_->edit.text.substr(selection_start(), selection_end() - selection_start());
     }
 
