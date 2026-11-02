@@ -247,6 +247,48 @@ TEST_CASE("NavigationSplitView switches between sidebar and content",
     CHECK(content->allocation().width == Catch::Approx(360.0F));
 }
 
+TEST_CASE("NavigationSplitView hides the sidebar in the expanded layout",
+          "[widgets][navigation_split_view]") {
+    auto split = nk::NavigationSplitView::create();
+    auto sidebar = nk::Label::create("Sidebar");
+    auto content = nk::Label::create("Content");
+    split->set_sidebar(sidebar);
+    split->set_content(content);
+    split->set_min_sidebar_width(200.0F);
+    split->set_max_sidebar_width(300.0F);
+    split->set_sidebar_width_fraction(0.4F);
+    CHECK(split->shows_sidebar());
+
+    int sidebar_changes = 0;
+    auto connection = split->on_show_sidebar_changed().connect(
+        [&](bool shown) { sidebar_changes += shown ? 1 : -1; });
+
+    split->set_show_sidebar(false);
+    split->allocate({0.0F, 0.0F, 800.0F, 500.0F});
+    CHECK_FALSE(split->shows_sidebar());
+    CHECK(sidebar_changes == -1);
+    CHECK_FALSE(sidebar->is_visible());
+    CHECK(content->is_visible());
+    CHECK(content->allocation().x == Catch::Approx(0.0F));
+    CHECK(content->allocation().width == Catch::Approx(800.0F));
+
+    split->set_show_sidebar(true);
+    split->allocate({0.0F, 0.0F, 800.0F, 500.0F});
+    CHECK(sidebar->is_visible());
+    CHECK(sidebar->allocation().width == Catch::Approx(300.0F));
+    CHECK(sidebar_changes == 0);
+
+    // Compact navigation still presents the sidebar, independent of the
+    // expanded-layout preference.
+    split->set_show_sidebar(false);
+    split->set_collapsed(true);
+    split->set_show_content(false);
+    split->allocate({0.0F, 0.0F, 360.0F, 500.0F});
+    CHECK(sidebar->is_visible());
+    CHECK_FALSE(content->is_visible());
+    connection.disconnect();
+}
+
 TEST_CASE("OverlaySplitView overlays and dismisses its sidebar", "[widgets][overlay_split_view]") {
     auto split = nk::OverlaySplitView::create();
     auto sidebar = nk::Label::create("Tools");

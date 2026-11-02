@@ -14,8 +14,10 @@ struct NavigationSplitView::Impl {
     float max_sidebar_width = 360.0F;
     bool collapsed = false;
     bool show_content = false;
+    bool show_sidebar = true;
     Signal<bool> collapsed_changed;
     Signal<bool> show_content_changed;
+    Signal<bool> show_sidebar_changed;
 };
 
 std::shared_ptr<NavigationSplitView> NavigationSplitView::create() {
@@ -93,6 +95,19 @@ void NavigationSplitView::set_show_content(bool show_content) {
     queue_layout();
 }
 
+bool NavigationSplitView::shows_sidebar() const {
+    return impl_->show_sidebar;
+}
+
+void NavigationSplitView::set_show_sidebar(bool show_sidebar) {
+    if (impl_->show_sidebar == show_sidebar) {
+        return;
+    }
+    impl_->show_sidebar = show_sidebar;
+    impl_->show_sidebar_changed.emit(show_sidebar);
+    queue_layout();
+}
+
 float NavigationSplitView::sidebar_width_fraction() const {
     return impl_->sidebar_width_fraction;
 }
@@ -130,6 +145,10 @@ Signal<bool>& NavigationSplitView::on_show_content_changed() {
     return impl_->show_content_changed;
 }
 
+Signal<bool>& NavigationSplitView::on_show_sidebar_changed() {
+    return impl_->show_sidebar_changed;
+}
+
 SizeRequest NavigationSplitView::measure(const Constraints& constraints) const {
     const auto sidebar_request = impl_->sidebar != nullptr
                                      ? impl_->sidebar->measure_for_diagnostics(constraints)
@@ -144,6 +163,9 @@ SizeRequest NavigationSplitView::measure(const Constraints& constraints) const {
             std::max(sidebar_request.natural_width, content_request.natural_width),
             std::max(sidebar_request.natural_height, content_request.natural_height),
         };
+    }
+    if (!impl_->show_sidebar) {
+        return content_request;
     }
     const float separator = theme_number("separator-width", 1.0F);
     return {
@@ -169,6 +191,18 @@ void NavigationSplitView::allocate(const Rect& allocation) {
             if (impl_->show_content) {
                 impl_->content->allocate(allocation);
             }
+        }
+        return;
+    }
+
+    if (!impl_->show_sidebar) {
+        impl_->sidebar_bounds = {};
+        if (impl_->sidebar != nullptr) {
+            impl_->sidebar->set_visible(false);
+        }
+        if (impl_->content != nullptr) {
+            impl_->content->set_visible(true);
+            impl_->content->allocate(allocation);
         }
         return;
     }

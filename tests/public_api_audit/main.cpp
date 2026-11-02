@@ -711,12 +711,15 @@ void force_symbol_references() {
     (void)&nk::NavigationSplitView::set_collapsed;
     (void)&nk::NavigationSplitView::shows_content;
     (void)&nk::NavigationSplitView::set_show_content;
+    (void)&nk::NavigationSplitView::shows_sidebar;
+    (void)&nk::NavigationSplitView::set_show_sidebar;
     (void)&nk::NavigationSplitView::sidebar_width_fraction;
     (void)&nk::NavigationSplitView::set_sidebar_width_fraction;
     (void)&nk::NavigationSplitView::set_min_sidebar_width;
     (void)&nk::NavigationSplitView::set_max_sidebar_width;
     (void)&nk::NavigationSplitView::on_collapsed_changed;
     (void)&nk::NavigationSplitView::on_show_content_changed;
+    (void)&nk::NavigationSplitView::on_show_sidebar_changed;
     (void)&nk::OverlaySplitView::create;
     (void)&nk::OverlaySplitView::set_sidebar;
     (void)&nk::OverlaySplitView::sidebar;
