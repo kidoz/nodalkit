@@ -50,15 +50,21 @@ format-check:
     find src include tests examples -type f \( -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.mm' \) \
         | xargs clang-format --dry-run --Werror
 
-# Run clang-tidy on all project sources
+# Run clang-tidy on the sources in this platform's compile database
 lint:
-    find src tests examples -type f \( -name '*.cpp' -o -name '*.mm' \) \
-        | xargs clang-tidy -p {{builddir}}
+    jq -r '.[] | if (.file | startswith("/")) then .file else .directory + "/" + .file end' \
+        {{builddir}}/compile_commands.json \
+        | xargs -n1 realpath | sort -u \
+        | grep -E "^$PWD/(src|tests|examples)/" \
+        | xargs -P "$(nproc)" -n1 clang-tidy -p {{builddir}}
 
-# Run clang-tidy with automatic fixes
+# Run clang-tidy with automatic fixes on this platform's compile database
 lint-fix:
-    find src tests examples -type f \( -name '*.cpp' -o -name '*.mm' \) \
-        | xargs clang-tidy -p {{builddir}} --fix
+    jq -r '.[] | if (.file | startswith("/")) then .file else .directory + "/" + .file end' \
+        {{builddir}}/compile_commands.json \
+        | xargs -n1 realpath | sort -u \
+        | grep -E "^$PWD/(src|tests|examples)/" \
+        | xargs -P "$(nproc)" -n1 clang-tidy -p {{builddir}} --fix
 
 # Install the library
 install:
