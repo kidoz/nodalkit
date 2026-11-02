@@ -58,7 +58,7 @@ public:
     bool load();
 
     /// Write the in-memory values to disk, creating parent directories as
-    /// needed. Returns false on I/O failure.
+    /// needed and atomically replacing the previous file. Returns false on I/O failure.
     [[nodiscard]] bool save() const;
 
     // Typed accessors. The get_*() overloads return @p fallback when the key is

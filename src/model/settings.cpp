@@ -11,6 +11,10 @@
 #include <string>
 #include <system_error>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace nk {
 
 namespace {
@@ -164,7 +168,10 @@ bool Settings::save() const {
             return false;
         }
     }
-    std::ofstream out(file_, std::ios::binary | std::ios::trunc);
+
+    auto temporary = file_;
+    temporary += ".tmp";
+    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
     if (!out) {
         return false;
     }
@@ -172,7 +179,33 @@ bool Settings::save() const {
         out << percent_encode(key, kFileReserved) << '=' << percent_encode(value, kFileReserved)
             << '\n';
     }
-    return out.good();
+    out.flush();
+    if (!out.good()) {
+        out.close();
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    out.close();
+    if (out.fail()) {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+
+#if defined(_WIN32)
+    if (MoveFileExW(temporary.c_str(),
+                    file_.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+#else
+    std::filesystem::rename(temporary, file_, ec);
+    if (ec) {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+#endif
+    return true;
 }
 
 void Settings::set_string(std::string_view key, std::string_view value) {

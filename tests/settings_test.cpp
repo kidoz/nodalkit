@@ -191,3 +191,19 @@ TEST_CASE("default_path is under a per-app directory", "[settings]") {
     CHECK(path.filename() == "settings.conf");
     CHECK(path.parent_path().filename() == "NodalKitTestApp");
 }
+
+TEST_CASE("Repeated saves replace content without leaving temporary files", "[settings]") {
+    TempSettingsFile temp("atomic_replace");
+    nk::Settings settings(temp.path);
+    settings.set_string("value", "first");
+    REQUIRE(settings.save());
+    settings.set_string("value", "second");
+    REQUIRE(settings.save());
+
+    nk::Settings reloaded(temp.path);
+    REQUIRE(reloaded.load());
+    CHECK(reloaded.get_string("value") == "second");
+    auto temporary = temp.path;
+    temporary += ".tmp";
+    CHECK_FALSE(std::filesystem::exists(temporary));
+}
