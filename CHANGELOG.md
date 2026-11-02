@@ -6,6 +6,28 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.0] - 2026-11-02
 
+The third normal release of the NodalKit framework. 0.3.0 keeps the widget
+tree, layout system, theming, diagnostics, and platform integration of 0.2.0
+and adds shared actions and shortcuts, a public Box container, UTF-8 message
+catalogs, asynchronous clipboard reads, safe cross-thread task posting, and
+window state notifications. It also ships discoverable macOS and Linux
+accessibility bridges, completes multiline editing, composition, selection,
+and undo/redo across the built-in editors, and reworks the Linux showcase
+around a full-height GNOME sidebar shell.
+
+### Support Matrix for 0.3.0
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
 ### Added
 *   **Navigation Split Sidebar Visibility:** `NavigationSplitView::set_show_sidebar()` hides the sidebar in the expanded layout. Collapsed navigation still selects its pane with `set_show_content()`.
 *   **Asynchronous Clipboard Reads:** `Application::read_clipboard_text_async()` reads clipboard or primary-selection text without blocking the UI thread. Wayland transfers are bounded to 16 MiB and two seconds, yield between chunks, and cancel when the selection changes or the backend shuts down. TextField and TextArea use the asynchronous path for paste.
