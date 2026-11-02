@@ -36,7 +36,8 @@ public:
     [[nodiscard]] int bitmap_width() const;
     [[nodiscard]] int bitmap_height() const;
 
-    /// Set the rasterized bitmap. Takes ownership of the data.
+    /// Set the rasterized bitmap. Takes ownership of the data. The buffer must
+    /// contain exactly width * height * 4 bytes; invalid input throws std::invalid_argument.
     void set_bitmap(std::vector<uint8_t> data, int width, int height);
 
 private:

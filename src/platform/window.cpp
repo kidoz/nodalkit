@@ -1508,7 +1508,9 @@ save_ppm_file(std::string_view path, const uint8_t* rgba_pixels, int width, int 
     out << "P6\n" << width << " " << height << "\n255\n";
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            const auto index = static_cast<std::size_t>((y * width + x) * 4);
+            const auto index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                static_cast<std::size_t>(x)) *
+                               4U;
             const char rgb[3] = {
                 static_cast<char>(rgba_pixels[index]),
                 static_cast<char>(rgba_pixels[index + 1]),
@@ -2448,6 +2450,19 @@ void Window::request_frame(FrameRequestReason reason) {
             const auto sz = size();
             const float scale_factor =
                 impl_->surface != nullptr ? impl_->surface->scale_factor() : 1.0F;
+            constexpr double kMaxFramebufferBytes = 512.0 * 1024.0 * 1024.0;
+            const double normalized_scale =
+                std::isfinite(scale_factor) && scale_factor > 0.0F ? scale_factor : 1.0;
+            const double framebuffer_width = sz.width * normalized_scale;
+            const double framebuffer_height = sz.height * normalized_scale;
+            if (!std::isfinite(framebuffer_width) || !std::isfinite(framebuffer_height) ||
+                framebuffer_width > std::numeric_limits<int>::max() ||
+                framebuffer_height > std::numeric_limits<int>::max() ||
+                (framebuffer_width > 0.0 && framebuffer_height > 0.0 &&
+                 framebuffer_width * framebuffer_height * 4.0 > kMaxFramebufferBytes)) {
+                impl_->pending_frame_reasons.clear();
+                return;
+            }
             const auto content_area = apply_surface_content_insets(
                 compute_debug_content_area(
                     sz, impl_->debug_overlay_flags, impl_->debug_inspector_presentation),

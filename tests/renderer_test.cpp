@@ -11,6 +11,7 @@
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/text_shaper.h>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -788,4 +789,30 @@ TEST_CASE("ClipStack flattens nested clips into bounded GPU slots", "[render][cl
         stack.pop();
         REQUIRE(stack.active().size() == 3);
     }
+}
+
+TEST_CASE("ShapedText rejects bitmap data that does not match its dimensions", "[renderer]") {
+    nk::ShapedText shaped;
+    REQUIRE_THROWS_AS(shaped.set_bitmap({0, 0, 0, 255}, 2, 2), std::invalid_argument);
+    REQUIRE_THROWS_AS(shaped.set_bitmap({}, -1, 1), std::invalid_argument);
+    REQUIRE(shaped.bitmap_data() == nullptr);
+    REQUIRE(shaped.bitmap_width() == 0);
+    REQUIRE(shaped.bitmap_height() == 0);
+    REQUIRE_NOTHROW(shaped.set_bitmap({}, 0, 0));
+}
+
+TEST_CASE("SoftwareRenderer rejects oversized and non-finite frame dimensions", "[renderer]") {
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({16384.0F, 16384.0F}, 1.0F);
+    REQUIRE(renderer.pixel_width() == 0);
+    REQUIRE(renderer.pixel_height() == 0);
+
+    renderer.begin_frame({std::nanf(""), 20.0F}, 1.0F);
+    REQUIRE(renderer.pixel_width() == 0);
+    renderer.begin_frame({HUGE_VALF, 20.0F}, 1.0F);
+    REQUIRE(renderer.pixel_width() == 0);
+
+    renderer.begin_frame({20.0F, 20.0F}, 1.0F);
+    REQUIRE(renderer.pixel_width() == 20);
+    REQUIRE(renderer.pixel_height() == 20);
 }

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <nk/platform/platform_backend.h>
 #include <nk/render/image_node.h>
@@ -126,11 +127,14 @@ Point scale_point(Point point, float scale_factor) {
 }
 
 int scaled_extent(float logical_extent, float scale_factor) {
-    if (logical_extent <= 0.0F) {
+    if (!std::isfinite(logical_extent) || logical_extent <= 0.0F) {
         return 0;
     }
-
-    return std::max(1, static_cast<int>(std::lround(logical_extent * scale_factor)));
+    const auto scaled = static_cast<double>(logical_extent) * static_cast<double>(scale_factor);
+    if (!std::isfinite(scaled) || scaled > static_cast<double>(std::numeric_limits<int>::max())) {
+        return 0;
+    }
+    return std::max(1, static_cast<int>(std::lround(scaled)));
 }
 
 std::size_t scaled_pixel_area(Rect rect, float scale_factor) {
@@ -406,13 +410,27 @@ bool SoftwareRenderer::attach_surface(NativeSurface& surface) {
 }
 
 void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
+    constexpr std::size_t kMaxFramebufferBytes = 512U * 1024U * 1024U;
+
     impl_->logical_viewport = viewport;
     impl_->scale_factor = normalize_scale_factor(scale_factor);
     if (impl_->text_shaper != nullptr) {
         impl_->text_shaper->set_scale_factor(impl_->scale_factor);
     }
-    const int next_width = scaled_extent(viewport.width, impl_->scale_factor);
-    const int next_height = scaled_extent(viewport.height, impl_->scale_factor);
+    int next_width = scaled_extent(viewport.width, impl_->scale_factor);
+    int next_height = scaled_extent(viewport.height, impl_->scale_factor);
+    std::size_t size = 0;
+    if (next_width > 0 && next_height > 0) {
+        const auto w = static_cast<std::size_t>(next_width);
+        const auto h = static_cast<std::size_t>(next_height);
+        if (w > kMaxFramebufferBytes / 4U || h > kMaxFramebufferBytes / (w * 4U)) {
+            next_width = 0;
+            next_height = 0;
+        } else {
+            size = w * h * 4U;
+        }
+    }
+
     const bool size_changed = next_width != impl_->width || next_height != impl_->height;
     impl_->width = next_width;
     impl_->height = next_height;
@@ -424,8 +442,6 @@ void SoftwareRenderer::begin_frame(Size viewport, float scale_factor) {
         static_cast<std::size_t>(std::max(0, impl_->width)) *
         static_cast<std::size_t>(std::max(0, impl_->height));
 
-    const auto size = static_cast<std::size_t>(std::max(0, impl_->width)) *
-                      static_cast<std::size_t>(std::max(0, impl_->height)) * 4U;
     if (size_changed || impl_->pixels.size() != size) {
         impl_->pixels.resize(size);
         if (!impl_->pixels.empty()) {

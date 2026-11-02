@@ -266,7 +266,16 @@ void WaylandSurface::destroy_buffer(ShmBuffer& buf) {
 }
 
 void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
-    const auto needed = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    constexpr std::size_t kMaxFramebufferBytes = 512U * 1024U * 1024U;
+    if (w <= 0 || h <= 0 || static_cast<std::size_t>(w) > kMaxFramebufferBytes / 4U) {
+        return;
+    }
+    const auto stride = static_cast<std::size_t>(w) * 4U;
+    if (static_cast<std::size_t>(h) > kMaxFramebufferBytes / stride) {
+        return;
+    }
+    const auto needed = stride * static_cast<std::size_t>(h);
+
     // Reuse only when the wl_buffer's actual geometry matches: a resize that preserves total
     // area (e.g. 800x600 -> 600x800) keeps `needed` constant, but the existing wl_buffer was
     // created with the old width/height/stride, so reusing it would corrupt the presented image.
@@ -294,8 +303,19 @@ void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
 
     struct wl_shm_pool* pool =
         wl_shm_create_pool(backend_.shm(), buf.fd, static_cast<int32_t>(needed));
-    buf.buffer = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4, WL_SHM_FORMAT_ARGB8888);
+    if (pool == nullptr) {
+        NK_LOG_ERROR("Wayland", "Failed to create shm pool");
+        destroy_buffer(buf);
+        return;
+    }
+    buf.buffer = wl_shm_pool_create_buffer(
+        pool, 0, w, h, static_cast<int32_t>(stride), WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool);
+    if (buf.buffer == nullptr) {
+        NK_LOG_ERROR("Wayland", "Failed to create shm buffer");
+        destroy_buffer(buf);
+        return;
+    }
 
     wl_buffer_add_listener(buf.buffer, &buffer_listener, &buf.busy);
     buf.pool_size = needed;
@@ -433,7 +453,13 @@ void WaylandSurface::present(const uint8_t* rgba,
                              int w,
                              int h,
                              std::span<const Rect> damage_regions) {
-    if (!configured_) {
+    constexpr std::size_t kMaxFramebufferBytes = 512U * 1024U * 1024U;
+    if (!configured_ || rgba == nullptr || w <= 0 || h <= 0 ||
+        static_cast<std::size_t>(w) > kMaxFramebufferBytes / 4U) {
+        return;
+    }
+    const auto stride = static_cast<std::size_t>(w) * 4U;
+    if (static_cast<std::size_t>(h) > kMaxFramebufferBytes / stride) {
         return;
     }
 
@@ -467,7 +493,9 @@ void WaylandSurface::present(const uint8_t* rgba,
 
         for (int y = y0; y < y1; ++y) {
             for (int x = x0; x < x1; ++x) {
-                const int off = (y * w + x) * 4;
+                const auto off = (static_cast<std::size_t>(y) * static_cast<std::size_t>(w) +
+                                  static_cast<std::size_t>(x)) *
+                                 4U;
                 buffers_[idx].data[off + 0] = rgba[off + 2]; // B
                 buffers_[idx].data[off + 1] = rgba[off + 1]; // G
                 buffers_[idx].data[off + 2] = rgba[off + 0]; // R
