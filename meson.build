@@ -35,6 +35,7 @@ nk_sources = files(
     'src/foundation/signal.cpp',
     'src/foundation/logging.cpp',
     'src/foundation/service_locator.cpp',
+    'src/l10n/message_catalog.cpp',
     'src/runtime/event_loop.cpp',
     'src/platform/application.cpp',
     'src/platform/drag_drop.cpp',

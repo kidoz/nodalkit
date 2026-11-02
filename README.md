@@ -94,6 +94,7 @@ framework:
 | Module | Responsibility |
 |--------|----------------|
 | **foundation** | Types, Result, Signal/Slot, Property, Logging |
+| **l10n** | UTF-8 message catalogs and named placeholders |
 | **runtime** | Event loop, timers, task posting |
 | **platform** | Application, Window, input events |
 | **render** | Render node tree, software renderer, D3D11 on Windows, Metal on macOS, experimental Vulkan on Linux and Windows |

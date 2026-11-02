@@ -26,6 +26,7 @@
 #include <nk/foundation/service_locator.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
+#include <nk/l10n/message_catalog.h>
 #include <nk/layout/box_layout.h>
 #include <nk/layout/breakpoint.h>
 #include <nk/layout/constraints.h>
@@ -223,6 +224,15 @@ void force_symbol_references() {
     (void)static_cast<std::shared_ptr<int> (*)()>(&nk::ServiceLocator::get<int>);
     (void)static_cast<bool (*)()>(&nk::ServiceLocator::has<int>);
     (void)static_cast<void (*)()>(&nk::ServiceLocator::clear);
+    (void)static_cast<nk::Result<void> (nk::MessageCatalog::*)(const std::filesystem::path&)>(
+        &nk::MessageCatalog::load);
+    (void)static_cast<void (nk::MessageCatalog::*)() noexcept>(&nk::MessageCatalog::clear);
+    (void)static_cast<bool (nk::MessageCatalog::*)(std::string_view) const>(
+        &nk::MessageCatalog::contains);
+    (void)static_cast<std::size_t (nk::MessageCatalog::*)() const noexcept>(
+        &nk::MessageCatalog::size);
+    (void)static_cast<std::string (nk::MessageCatalog::*)(
+        std::string_view, const nk::MessageArguments&) const>(&nk::MessageCatalog::translate);
     (void)static_cast<float (nk::BoxLayout::*)() const>(&nk::BoxLayout::spacing);
     (void)static_cast<nk::Orientation (nk::BoxLayout::*)() const>(&nk::BoxLayout::orientation);
     (void)static_cast<void (nk::BoxLayout::*)(nk::Orientation)>(&nk::BoxLayout::set_orientation);

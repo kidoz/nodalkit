@@ -17,6 +17,7 @@
 #include <nk/foundation/result.h>
 #include <nk/foundation/signal.h>
 #include <nk/foundation/types.h>
+#include <nk/l10n/message_catalog.h>
 #include <nk/layout/box_layout.h>
 #include <nk/layout/grid_layout.h>
 #include <nk/layout/stack_layout.h>
@@ -375,6 +376,13 @@ void check_widgets() {
     check(segmented->selected_index() == 0, "SegmentedControl auto-selects first");
 }
 
+void check_l10n() {
+    nk::MessageCatalog catalog;
+    check(catalog.size() == 0 && !catalog.contains("hello"), "Empty MessageCatalog");
+    check(catalog.translate("hello") == "hello", "MessageCatalog missing-message fallback");
+    catalog.clear();
+}
+
 } // namespace
 
 int main() {
@@ -384,6 +392,7 @@ int main() {
     check_actions();
     check_style();
     check_widgets();
+    check_l10n();
 
     if (failures != 0) {
         std::fprintf(stderr, "install_smoke: %d check(s) failed\n", failures);

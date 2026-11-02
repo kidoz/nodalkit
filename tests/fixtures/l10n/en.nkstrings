@@ -1,0 +1,6 @@
+# English source messages
+app.title=Localization example
+welcome.user=Welcome, {user}!
+files.selected={count} files selected from {folder}
+escaped=Line one\nLine two\t#1 = ready
+literal.braces=Use {{name}} for {name}; repeat {name}.

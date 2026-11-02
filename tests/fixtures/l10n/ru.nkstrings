@@ -1,0 +1,4 @@
+# Russian messages in UTF-8
+app.title=Пример локализации
+welcome.user=Добро пожаловать, {user}!
+files.selected=Из папки {folder} выбрано файлов: {count}

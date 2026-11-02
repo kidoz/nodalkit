@@ -101,6 +101,12 @@ test_settings = executable('test_settings',
 )
 test('settings', test_settings)
 
+test_message_catalog = executable('test_message_catalog',
+    'message_catalog_test.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('message_catalog', test_message_catalog)
+
 test_log_view = executable('test_log_view',
     'log_view_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],
