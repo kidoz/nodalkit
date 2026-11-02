@@ -157,3 +157,33 @@ TEST_CASE("Task posters survive loop destruction and concurrent shutdown", "[eve
     post([&] { ++calls; });
     REQUIRE(calls == 1);
 }
+
+TEST_CASE("Both posting APIs invoke the registered wake handler", "[event_loop]") {
+    nk::EventLoop loop;
+    int wake_count = 0;
+    loop.set_wake_handler([&] { ++wake_count; });
+
+    loop.post([] {});
+    REQUIRE(wake_count == 1);
+    const auto post = loop.task_poster("wake-test");
+    post([] {});
+    REQUIRE(wake_count == 2);
+
+    loop.set_wake_handler({});
+    post([] {});
+    REQUIRE(wake_count == 2);
+    loop.poll();
+}
+
+TEST_CASE("Fallback run wakes for a task-poster callback and exits", "[event_loop][thread]") {
+    nk::EventLoop loop;
+    const auto post = loop.task_poster("fallback-wake-test");
+    std::thread worker([post, &loop] {
+        std::this_thread::sleep_for(10ms);
+        post([&loop] { loop.quit(7); });
+    });
+
+    const int exit_code = loop.run();
+    worker.join();
+    REQUIRE(exit_code == 7);
+}

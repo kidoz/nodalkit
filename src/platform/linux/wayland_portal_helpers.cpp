@@ -81,4 +81,17 @@ OpenFileDialogResult portal_result_from_response(uint32_t response_code,
     return Unexpected(FileDialogError::Failed);
 }
 
+void post_portal_file_dialog_result(const EventLoop::TaskPoster& poster,
+                                    PortalFileDialogCallback callback,
+                                    FileDialogResult result) {
+    if (!poster) {
+        return;
+    }
+    poster([callback = std::move(callback), result = std::move(result)]() mutable {
+        if (callback) {
+            callback(std::move(result));
+        }
+    });
+}
+
 } // namespace nk::detail

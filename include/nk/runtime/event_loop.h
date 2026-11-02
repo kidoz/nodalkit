@@ -73,6 +73,11 @@ public:
     /// Used by EventLoop::post() and platform backends.
     void wake();
 
+    /// Install the platform backend's wake callback. The callback is invoked
+    /// after work is queued and is cleared when the native loop exits. It must
+    /// return without calling back into this EventLoop.
+    void set_wake_handler(std::function<void()> handler);
+
     /// Whether the loop is currently running.
     [[nodiscard]] bool is_running() const;
 

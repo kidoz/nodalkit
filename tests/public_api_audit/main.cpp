@@ -1011,6 +1011,8 @@ void force_symbol_references() {
         std::function<void()>, std::string_view)>(&nk::EventLoop::add_idle);
     (void)static_cast<bool (nk::EventLoop::*)()>(&nk::EventLoop::poll);
     (void)static_cast<void (nk::EventLoop::*)()>(&nk::EventLoop::wake);
+    (void)static_cast<void (nk::EventLoop::*)(std::function<void()>)>(
+        &nk::EventLoop::set_wake_handler);
     (void)static_cast<bool (nk::EventLoop::*)() const>(&nk::EventLoop::is_running);
     (void)static_cast<int (nk::EventLoop::*)() const>(&nk::EventLoop::exit_code);
     (void)static_cast<std::span<const nk::TraceEvent> (nk::EventLoop::*)() const>(
@@ -1022,11 +1024,9 @@ void force_symbol_references() {
     (void)static_cast<void (nk::Theme::*)(std::string, nk::StyleValue)>(&nk::Theme::set_token);
     (void)static_cast<const nk::StyleValue* (nk::Theme::*)(std::string_view) const>(
         &nk::Theme::token);
-    (void)static_cast<const nk::StyleValue* (nk::Theme::*)(std::string_view,
-                                                           const std::vector<std::string>&,
-                                                           nk::StateFlags,
-                                                           std::string_view,
-                                                           int) const>(&nk::Theme::resolve);
+    (void)static_cast<const nk::StyleValue* (nk::Theme::*)(
+        std::string_view, const std::vector<std::string>&, nk::StateFlags, std::string_view, int)
+                          const>(&nk::Theme::resolve);
     (void)&nk::Theme::set_active;
     (void)&nk::Theme::active;
     (void)&nk::Theme::make_light;

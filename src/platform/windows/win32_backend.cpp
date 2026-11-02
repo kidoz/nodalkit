@@ -421,20 +421,28 @@ FileDialogError file_dialog_error_from_hresult(HRESULT hr) {
                                                      : FileDialogError::Failed;
 }
 
-template <typename Callback, typename Result>
-void post_file_dialog_result(Callback callback, Result result) {
-    if (!callback) {
-        return;
-    }
-
+EventLoop::TaskPoster file_dialog_task_poster() {
     if (auto* app = Application::instance(); app != nullptr) {
-        app->event_loop().post([callback = std::move(callback), result = std::move(result)]() {
-            callback(std::move(result));
-        });
+        return app->event_loop().task_poster("win32-file-dialog");
+    }
+    if (auto* loop = EventLoop::current(); loop != nullptr) {
+        return loop->task_poster("win32-file-dialog");
+    }
+    return {};
+}
+
+template <typename Callback, typename Result>
+void post_file_dialog_result(const EventLoop::TaskPoster& poster,
+                             Callback callback,
+                             Result result) {
+    if (!poster) {
         return;
     }
-
-    callback(std::move(result));
+    poster([callback = std::move(callback), result = std::move(result)]() mutable {
+        if (callback) {
+            callback(std::move(result));
+        }
+    });
 }
 
 OpenFileDialogResult show_modern_open_file_dialog(std::string_view title,
@@ -1720,10 +1728,10 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
 
 struct Win32Backend::Impl {
     HINSTANCE instance = GetModuleHandleW(nullptr);
-    DWORD event_loop_thread_id = 0;
+    std::atomic<DWORD> event_loop_thread_id{0};
     EventLoop* current_loop = nullptr;
-    int exit_code = 0;
-    bool quit_requested = false;
+    std::atomic<int> exit_code{0};
+    std::atomic<bool> quit_requested{false};
     bool window_class_registered = false;
     bool ole_initialized = false;
     mutable std::string clipboard_text_cache;
@@ -1804,6 +1812,7 @@ std::unique_ptr<NativeSurface> Win32Backend::create_surface(const WindowConfig& 
 int Win32Backend::run_event_loop(EventLoop& loop) {
     impl_->current_loop = &loop;
     impl_->event_loop_thread_id = GetCurrentThreadId();
+    loop.set_wake_handler([this] { wake_event_loop(); });
     impl_->quit_requested = false;
     impl_->exit_code = 0;
 
@@ -1826,6 +1835,7 @@ int Win32Backend::run_event_loop(EventLoop& loop) {
         MsgWaitForMultipleObjectsEx(0, nullptr, 8, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
     }
 
+    loop.set_wake_handler({});
     impl_->current_loop = nullptr;
     impl_->event_loop_thread_id = 0;
     return impl_->exit_code;
@@ -1851,9 +1861,13 @@ void Win32Backend::show_open_file_dialog_async(std::string_view title,
                                                const std::vector<std::string>& filters,
                                                OpenFileDialogCallback callback) {
     std::string title_str = std::string(title);
-    std::thread([title_str, filters, callback = std::move(callback)]() mutable {
+    auto poster = file_dialog_task_poster();
+    std::thread([title_str,
+                 filters,
+                 poster = std::move(poster),
+                 callback = std::move(callback)]() mutable {
         auto result = show_modern_open_file_dialog(title_str, filters);
-        post_file_dialog_result(std::move(callback), std::move(result));
+        post_file_dialog_result(poster, std::move(callback), std::move(result));
     }).detach();
 }
 
@@ -1863,9 +1877,12 @@ bool Win32Backend::supports_save_file_dialog() const {
 
 void Win32Backend::show_save_file_dialog_async(SaveFileDialogOptions options,
                                                SaveFileDialogCallback callback) {
-    std::thread([options = std::move(options), callback = std::move(callback)]() mutable {
+    auto poster = file_dialog_task_poster();
+    std::thread([options = std::move(options),
+                 poster = std::move(poster),
+                 callback = std::move(callback)]() mutable {
         auto result = show_modern_save_file_dialog(options);
-        post_file_dialog_result(std::move(callback), std::move(result));
+        post_file_dialog_result(poster, std::move(callback), std::move(result));
     }).detach();
 }
 

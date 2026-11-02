@@ -4,7 +4,9 @@
 /// @brief Internal helpers for XDG Desktop Portal file-dialog behavior.
 
 #include <cstdint>
+#include <functional>
 #include <nk/platform/file_dialog.h>
+#include <nk/runtime/event_loop.h>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -36,5 +38,11 @@ portal_filter_entries(const std::vector<std::string>& filters);
 
 [[nodiscard]] OpenFileDialogResult
 portal_result_from_response(uint32_t response_code, std::optional<std::string> selected_path);
+
+using PortalFileDialogCallback = std::function<void(FileDialogResult)>;
+
+void post_portal_file_dialog_result(const EventLoop::TaskPoster& poster,
+                                    PortalFileDialogCallback callback,
+                                    FileDialogResult result);
 
 } // namespace nk::detail

@@ -4,6 +4,7 @@
 #include "src/platform/linux/wayland_portal_helpers.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <nk/platform/file_dialog.h>
 
 TEST_CASE("Wayland portal request paths sanitize the D-Bus unique name", "[wayland][portal]") {
@@ -60,4 +61,28 @@ TEST_CASE("Wayland portal response mapping preserves the public dialog contract"
     const auto failure = nk::detail::portal_result_from_response(2, std::nullopt);
     REQUIRE_FALSE(failure);
     REQUIRE(failure.error() == nk::FileDialogError::Failed);
+}
+
+TEST_CASE("Portal results use the captured loop and are safe after its destruction",
+          "[wayland][portal][lifetime]") {
+    auto loop = std::make_unique<nk::EventLoop>();
+    const auto poster = loop->task_poster("portal-test");
+    int callbacks = 0;
+
+    nk::detail::post_portal_file_dialog_result(
+        poster,
+        [&](nk::FileDialogResult result) {
+            ++callbacks;
+            REQUIRE(result);
+            REQUIRE(result.value() == "/tmp/selected.txt");
+        },
+        std::string("/tmp/selected.txt"));
+    REQUIRE(callbacks == 0);
+    loop->poll();
+    REQUIRE(callbacks == 1);
+
+    loop.reset();
+    nk::detail::post_portal_file_dialog_result(
+        poster, [&](nk::FileDialogResult) { ++callbacks; }, std::string("/tmp/late.txt"));
+    REQUIRE(callbacks == 1);
 }

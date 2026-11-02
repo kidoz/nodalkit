@@ -1,4 +1,6 @@
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <deque>
 #include <mutex>
 #include <nk/runtime/event_loop.h>
@@ -15,8 +17,8 @@ struct EventLoop::Impl {
         std::string source_label;
     };
 
-    bool running = false;
-    int exit_code = 0;
+    std::atomic<bool> running{false};
+    std::atomic<int> exit_code{0};
     uint64_t next_handle_id = 1;
 
     std::chrono::steady_clock::time_point diagnostics_origin = std::chrono::steady_clock::now();
@@ -26,7 +28,9 @@ struct EventLoop::Impl {
     struct TaskQueue {
         std::deque<PostedTask> posted_tasks;
         std::mutex mutex;
+        std::condition_variable work_available;
         bool accepting_tasks = true;
+        std::function<void()> wake_handler;
     };
 
     std::shared_ptr<TaskQueue> task_queue = std::make_shared<TaskQueue>();
@@ -104,8 +108,10 @@ EventLoop::~EventLoop() {
     {
         std::lock_guard lock(impl_->task_queue->mutex);
         impl_->task_queue->accepting_tasks = false;
+        impl_->task_queue->wake_handler = {};
         discarded.swap(impl_->task_queue->posted_tasks);
     }
+    impl_->task_queue->work_available.notify_all();
     if (current_event_loop == this) {
         current_event_loop = nullptr;
     }
@@ -121,11 +127,28 @@ int EventLoop::run() {
 
     while (impl_->running) {
         poll();
+        if (!impl_->running) {
+            break;
+        }
 
-        // Avoid busy-waiting in this stub. A real implementation would
-        // use epoll/kqueue/Wayland fd polling.
-        if (impl_->running) {
-            std::this_thread::yield();
+        std::unique_lock lock(impl_->task_queue->mutex);
+        if (!impl_->task_queue->posted_tasks.empty()) {
+            continue;
+        }
+
+        auto next_fire = std::chrono::steady_clock::time_point::max();
+        for (const auto& timer : impl_->timers) {
+            if (!timer.cancelled) {
+                next_fire = std::min(next_fire, timer.fire_at);
+            }
+        }
+        const auto has_work = [this] {
+            return !impl_->task_queue->posted_tasks.empty() || !impl_->task_queue->accepting_tasks;
+        };
+        if (next_fire == std::chrono::steady_clock::time_point::max()) {
+            impl_->task_queue->work_available.wait(lock, has_work);
+        } else {
+            (void)impl_->task_queue->work_available.wait_until(lock, next_fire, has_work);
         }
     }
 
@@ -135,6 +158,8 @@ int EventLoop::run() {
 void EventLoop::quit(int exit_code) {
     impl_->exit_code = exit_code;
     impl_->running = false;
+    impl_->task_queue->work_available.notify_all();
+    wake();
 }
 
 void EventLoop::post(std::function<void()> task, std::string_view source_label) {
@@ -149,6 +174,7 @@ void EventLoop::post(std::function<void()> task, std::string_view source_label) 
             .source_label = std::string(source_label),
         });
     }
+    impl_->task_queue->work_available.notify_all();
     wake();
 }
 
@@ -160,15 +186,25 @@ EventLoop::TaskPoster EventLoop::task_poster(std::string_view source_label) cons
             if (impl->accepting_tasks) {
                 impl->posted_tasks.push_back(
                     {std::chrono::steady_clock::now(), std::move(task), label});
+                impl->work_available.notify_all();
+                if (impl->wake_handler) {
+                    impl->wake_handler();
+                }
             }
         }
     };
 }
 
 void EventLoop::wake() {
-    // Stub: platform backends override the run loop to use a real
-    // wake mechanism (eventfd on Linux, CFRunLoopWakeUp on macOS).
-    // For the fallback busy-spin loop this is a no-op.
+    std::lock_guard lock(impl_->task_queue->mutex);
+    if (impl_->task_queue->wake_handler) {
+        impl_->task_queue->wake_handler();
+    }
+}
+
+void EventLoop::set_wake_handler(std::function<void()> handler) {
+    std::lock_guard lock(impl_->task_queue->mutex);
+    impl_->task_queue->wake_handler = std::move(handler);
 }
 
 bool EventLoop::is_running() const {

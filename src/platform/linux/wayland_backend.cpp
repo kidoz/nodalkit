@@ -75,7 +75,7 @@ struct PortalRequestState {
     bool completed = false;
 };
 
-using PortalFileDialogCallback = std::function<void(FileDialogResult)>;
+using detail::PortalFileDialogCallback;
 
 void on_portal_request_response(GDBusConnection* connection,
                                 const gchar* sender_name,
@@ -273,36 +273,35 @@ void add_portal_file_filters_option(GVariantBuilder& options_builder,
         &options_builder, "{sv}", "filters", g_variant_builder_end(&filters_builder));
 }
 
-void post_portal_file_dialog_result(PortalFileDialogCallback callback, FileDialogResult result) {
-    auto* app = Application::instance();
-    if (app == nullptr) {
-        return;
+EventLoop::TaskPoster portal_file_dialog_task_poster() {
+    if (auto* app = Application::instance(); app != nullptr) {
+        return app->event_loop().task_poster("wayland-file-dialog");
     }
-
-    app->event_loop().post([callback = std::move(callback), result = std::move(result)]() mutable {
-        if (callback) {
-            callback(std::move(result));
-        }
-    });
+    if (auto* loop = EventLoop::current(); loop != nullptr) {
+        return loop->task_poster("wayland-file-dialog");
+    }
+    return {};
 }
 
 void show_portal_file_dialog_async(std::string method,
                                    SaveFileDialogOptions options,
+                                   EventLoop::TaskPoster poster,
                                    PortalFileDialogCallback callback) {
     std::thread([method = std::move(method),
                  options = std::move(options),
+                 poster = std::move(poster),
                  callback = std::move(callback)]() mutable {
         GDBusConnection* connection = portal_session_bus_connection();
         if (connection == nullptr) {
-            post_portal_file_dialog_result(std::move(callback),
-                                           Unexpected(FileDialogError::Failed));
+            detail::post_portal_file_dialog_result(
+                poster, std::move(callback), Unexpected(FileDialogError::Failed));
             return;
         }
 
         if (!session_bus_name_has_owner(connection, PortalBusName)) {
             g_object_unref(connection);
-            post_portal_file_dialog_result(std::move(callback),
-                                           Unexpected(FileDialogError::Unsupported));
+            detail::post_portal_file_dialog_result(
+                poster, std::move(callback), Unexpected(FileDialogError::Unsupported));
             return;
         }
 
@@ -368,8 +367,8 @@ void show_portal_file_dialog_async(std::string method,
             g_object_unref(connection);
             g_main_context_pop_thread_default(context);
             g_main_context_unref(context);
-            post_portal_file_dialog_result(std::move(callback),
-                                           Unexpected(FileDialogError::Failed));
+            detail::post_portal_file_dialog_result(
+                poster, std::move(callback), Unexpected(FileDialogError::Failed));
             return;
         }
 
@@ -397,7 +396,7 @@ void show_portal_file_dialog_async(std::string method,
         g_main_context_pop_thread_default(context);
         g_main_context_unref(context);
 
-        post_portal_file_dialog_result(std::move(callback), std::move(result));
+        detail::post_portal_file_dialog_result(poster, std::move(callback), std::move(result));
     }).detach();
 }
 
@@ -1395,6 +1394,7 @@ std::unique_ptr<NativeSurface> WaylandBackend::create_surface(const WindowConfig
 
 int WaylandBackend::run_event_loop(EventLoop& loop) {
     impl_->current_loop = &loop;
+    loop.set_wake_handler([this] { wake_event_loop(); });
     impl_->quit_requested = false;
     impl_->exit_code = 0;
 
@@ -1441,6 +1441,7 @@ int WaylandBackend::run_event_loop(EventLoop& loop) {
         refresh_accessibility_if_due(*impl_, did_work);
     }
 
+    loop.set_wake_handler({});
     impl_->current_loop = nullptr;
     return impl_->exit_code;
 }
@@ -1473,6 +1474,7 @@ void WaylandBackend::show_open_file_dialog_async(std::string_view title,
                                       .suggested_filename = {},
                                       .filters = filters,
                                   },
+                                  portal_file_dialog_task_poster(),
                                   std::move(callback));
 }
 
@@ -1482,7 +1484,8 @@ bool WaylandBackend::supports_save_file_dialog() const {
 
 void WaylandBackend::show_save_file_dialog_async(SaveFileDialogOptions options,
                                                  SaveFileDialogCallback callback) {
-    show_portal_file_dialog_async("SaveFile", std::move(options), std::move(callback));
+    show_portal_file_dialog_async(
+        "SaveFile", std::move(options), portal_file_dialog_task_poster(), std::move(callback));
 }
 
 bool WaylandBackend::supports_clipboard_text() const {

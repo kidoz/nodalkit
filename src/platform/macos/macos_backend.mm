@@ -354,6 +354,7 @@ std::unique_ptr<NativeSurface> MacosBackend::create_surface(const WindowConfig& 
 
 int MacosBackend::run_event_loop(EventLoop& loop) {
     impl_->current_loop = &loop;
+    loop.set_wake_handler([this] { wake_event_loop(); });
     impl_->quit_requested = false;
     impl_->exit_code = 0;
 
@@ -402,6 +403,7 @@ int MacosBackend::run_event_loop(EventLoop& loop) {
         impl_->poll_timer = nullptr;
     }
 
+    loop.set_wake_handler({});
     impl_->current_loop = nullptr;
     return impl_->exit_code;
 }
