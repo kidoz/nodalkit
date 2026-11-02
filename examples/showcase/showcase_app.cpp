@@ -957,15 +957,30 @@ int run_showcase(int argc, char** argv) {
         auto sidebar_row =
             nk::SwitchRow::create("Show Sidebar", "Keep the navigation sidebar expanded");
         sidebar_row->set_active(true);
-        (void)sidebar_row->on_toggled().connect(
-            [&](bool active) { show_linux_toast(active ? "Sidebar shown" : "Sidebar hidden"); });
         appearance_group->add(sidebar_row);
 
         auto density_row = nk::ComboRow::create("Density", "Spacing applied across the window");
         density_row->set_items({"Comfortable", "Standard", "Compact"});
         density_row->set_selected_index(0);
-        (void)density_row->on_selection_changed().connect(
-            [&](int index) { status_bar->set_segment(0, "Density " + std::to_string(index)); });
+        (void)density_row->on_selection_changed().connect([&](int index) {
+            const std::array<nk::ThemeDensity, 3> densities = {
+                nk::ThemeDensity::Comfortable,
+                nk::ThemeDensity::Standard,
+                nk::ThemeDensity::Compact,
+            };
+            const std::array<std::string_view, 3> labels = {
+                "Comfortable",
+                "Standard",
+                "Compact",
+            };
+            if (index < 0 || static_cast<std::size_t>(index) >= densities.size()) {
+                return;
+            }
+            const auto choice = static_cast<std::size_t>(index);
+            theme_selection.density = densities.at(choice);
+            app.set_theme_selection(theme_selection);
+            status_bar->set_segment(0, std::string(labels.at(choice)) + " density");
+        });
         appearance_group->add(density_row);
         settings_page->add(appearance_group);
 
@@ -1005,8 +1020,9 @@ int run_showcase(int argc, char** argv) {
         page_stack->add_page(make_scrolling_page(settings_content, 720.0F));
         page_stack->add_page(status_page);
 
+        auto sidebar_heading = FieldLabel::create("Showcase");
         auto sidebar_content = Box::vertical(4.0F);
-        sidebar_content->append(FieldLabel::create("Showcase"));
+        sidebar_content->append(sidebar_heading);
         std::vector<std::shared_ptr<NavigationRow>> category_buttons;
         category_buttons.reserve(category_titles.size());
         for (const auto& title : category_titles) {
@@ -1019,17 +1035,90 @@ int run_showcase(int argc, char** argv) {
 
         auto sidebar_page = SurfacePanel::page(sidebar_content);
         sidebar_page->set_padding(18.0F, 12.0F, 18.0F, 12.0F);
+        sidebar_page->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        sidebar_page->set_vertical_size_policy(nk::SizePolicy::Expanding);
+        sidebar_page->set_vertical_stretch(1);
 
-        auto adaptive_split = nk::NavigationSplitView::create();
-        adaptive_split->set_sidebar(sidebar_page);
-        adaptive_split->set_content(page_stack);
-        adaptive_split->set_sidebar_width_fraction(0.24F);
-        adaptive_split->set_min_sidebar_width(220.0F);
-        adaptive_split->set_max_sidebar_width(280.0F);
+        auto make_primary_menu = [&] {
+            auto menu = PrimaryMenuButton::create();
+            menu->add_item("Export Diagnostics Bundle");
+            menu->add_separator();
+            menu->add_item("System Integration");
+            menu->add_item("About NodalKit");
+            menu->add_separator();
+            menu->add_item("Quit");
+            (void)menu->on_item_activated().connect([&](int index) {
+                switch (index) {
+                case 0:
+                    export_debug_bundle();
+                    break;
+                case 2:
+                    present_preferences_sheet();
+                    break;
+                case 3:
+                    present_about_dialog();
+                    break;
+                case 5:
+                    app.quit(0);
+                    break;
+                default:
+                    break;
+                }
+            });
+            return menu;
+        };
+
+        // Wide layout: the header sits over the content and the sidebar runs
+        // the full height beside it. The compact sidebar page gets its own
+        // header so window controls stay reachable when that page is showing.
+        auto sidebar_header = nk::Headerbar::create(profile.window_title);
+        sidebar_header->set_centering_policy(nk::HeaderbarCenteringPolicy::Strict);
+        sidebar_header->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        sidebar_header->set_vertical_stretch(0);
+        sidebar_header->set_visible(false);
+        sidebar_header->add_trailing(make_primary_menu());
+
+        auto sidebar_column = Box::vertical(0.0F);
+        sidebar_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        sidebar_column->set_vertical_size_policy(nk::SizePolicy::Expanding);
+        sidebar_column->append(sidebar_header);
+        sidebar_column->append(sidebar_page);
 
         auto headerbar = nk::Headerbar::create(profile.window_title);
         headerbar->set_centering_policy(nk::HeaderbarCenteringPolicy::Strict);
         headerbar->set_show_back_button(false);
+        headerbar->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        headerbar->set_vertical_stretch(0);
+        headerbar->add_trailing(make_primary_menu());
+
+        page_stack->set_vertical_stretch(1);
+        auto content_column = Box::vertical(0.0F);
+        content_column->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        content_column->set_vertical_size_policy(nk::SizePolicy::Expanding);
+        content_column->append(headerbar);
+        content_column->append(page_stack);
+
+        auto adaptive_split = nk::NavigationSplitView::create();
+        adaptive_split->set_sidebar(sidebar_column);
+        adaptive_split->set_content(content_column);
+        adaptive_split->set_sidebar_width_fraction(0.24F);
+        adaptive_split->set_min_sidebar_width(220.0F);
+        adaptive_split->set_max_sidebar_width(280.0F);
+        (void)sidebar_row->on_toggled().connect([adaptive_split, &show_linux_toast](bool active) {
+            adaptive_split->set_show_sidebar(active);
+            show_linux_toast(active ? "Sidebar shown" : "Sidebar hidden");
+        });
+
+        auto sync_sidebar_chrome = [adaptive_split, sidebar_header, sidebar_heading] {
+            const bool sidebar_root =
+                adaptive_split->is_collapsed() && !adaptive_split->shows_content();
+            sidebar_header->set_visible(sidebar_root);
+            sidebar_heading->set_visible(!sidebar_root);
+        };
+        (void)adaptive_split->on_collapsed_changed().connect(
+            [sync_sidebar_chrome](bool) { sync_sidebar_chrome(); });
+        (void)adaptive_split->on_show_content_changed().connect(
+            [sync_sidebar_chrome](bool) { sync_sidebar_chrome(); });
 
         auto navigation_controller = ShowcaseNavigationController::create(
             page_stack, adaptive_split, headerbar, category_titles, category_buttons);
@@ -1069,38 +1158,9 @@ int run_showcase(int argc, char** argv) {
         linux_toasts = nk::ToastOverlay::create();
         linux_toasts->set_child(adaptive_bin);
 
-        auto primary_menu = PrimaryMenuButton::create();
-        primary_menu->add_item("Export Diagnostics Bundle");
-        primary_menu->add_separator();
-        primary_menu->add_item("System Integration");
-        primary_menu->add_item("About NodalKit");
-        primary_menu->add_separator();
-        primary_menu->add_item("Quit");
-        (void)primary_menu->on_item_activated().connect([&](int index) {
-            switch (index) {
-            case 0:
-                export_debug_bundle();
-                break;
-            case 2:
-                present_preferences_sheet();
-                break;
-            case 3:
-                present_about_dialog();
-                break;
-            case 5:
-                app.quit(0);
-                break;
-            default:
-                break;
-            }
-        });
-        headerbar->add_trailing(primary_menu);
-
         auto toolbar_view = nk::ToolbarView::create();
         toolbar_view->set_content(linux_toasts);
-        toolbar_view->add_top_bar(headerbar);
         toolbar_view->add_bottom_bar(status_bar);
-        toolbar_view->set_top_bar_style(nk::ToolbarStyle::Flat);
         window.set_child(toolbar_view);
     } else {
         auto left_column = Box::vertical(profile.controls_spacing);

@@ -11,7 +11,15 @@ NodalKit is an MIT-licensed alternative for C++ developers who might otherwise
 reach for Qt, offering a GTK4-inspired architecture with a productive,
 modern C++23 API. No meta-object compiler, no code generation, no build magic.
 
-![NodalKit showcase](docs/screenshots/showcase.png)
+<details>
+<summary>macOS</summary>
+<img src="docs/screenshots/showcase.png" alt="NodalKit showcase on macOS" width="480">
+</details>
+
+<details>
+<summary>Linux</summary>
+<img src="docs/screenshots/showcase-linux.png" alt="NodalKit showcase on Linux" width="480">
+</details>
 
 ## Status
 
@@ -70,7 +78,9 @@ Run the examples:
 
 The `showcase` example is the current best overview of the toolkit surface:
 menus, layout, text entry, list/model behavior, image presentation, dialogs,
-and status surfaces in one window.
+and status surfaces in one window. On Linux Wayland it uses the GNOME sidebar
+shell in the Linux screenshot. macOS, Windows, and the X11 profile use the
+shared card shell.
 
 ## Documentation
 

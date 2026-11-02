@@ -13,6 +13,7 @@
 #include <nk/layout/stack_layout.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
 #include <nk/ui_core/widget.h>
@@ -237,6 +238,9 @@ public:
 
     [[nodiscard]] std::vector<nk::Rect> damage_regions() const override {
         auto regions = Widget::damage_regions();
+        if (shows_tooltip()) {
+            regions.push_back(tooltip_bounds());
+        }
         const auto menu_regions = menu_->damage_regions();
         regions.insert(regions.end(), menu_regions.begin(), menu_regions.end());
         return regions;
@@ -273,6 +277,24 @@ protected:
                                  kStrokeHeight * 0.5F);
         }
         Widget::snapshot(ctx);
+        if (!shows_tooltip()) {
+            return;
+        }
+        const auto tooltip = tooltip_bounds();
+        ctx.push_overlay_container(tooltip);
+        ctx.add_rounded_rect(
+            tooltip,
+            theme_color("tooltip-background", nk::Color{0.15F, 0.15F, 0.17F, 0.95F}),
+            theme_number("tooltip-radius", 6.0F));
+        const auto font = tooltip_font();
+        const auto name = std::string(accessible()->name());
+        const auto measured = measure_text(name, font);
+        ctx.add_text({tooltip.x + ((tooltip.width - measured.width) * 0.5F),
+                      tooltip.y + ((tooltip.height - measured.height) * 0.5F)},
+                     name,
+                     theme_color("tooltip-text", nk::Color::from_rgb(255, 255, 255)),
+                     font);
+        ctx.pop_container();
     }
 
 private:
@@ -282,10 +304,37 @@ private:
         auto& accessible = ensure_accessible();
         accessible.set_role(nk::AccessibleRole::Button);
         accessible.set_name("Main Menu");
+        accessible.set_description("Main Menu");
         accessible.add_action(nk::AccessibleAction::Activate, [this] {
             toggle_menu();
             return true;
         });
+    }
+
+    [[nodiscard]] bool shows_tooltip() const {
+        return nk::has_flag(state_flags(), nk::StateFlags::Hovered) && !armed_ &&
+               (menu_ == nullptr || !menu_->is_open());
+    }
+
+    [[nodiscard]] nk::FontDescriptor tooltip_font() const {
+        return {
+            .family = {},
+            .size = theme_number("tooltip-font-size", 12.0F),
+            .weight = nk::FontWeight::Regular,
+        };
+    }
+
+    [[nodiscard]] nk::Rect tooltip_bounds() const {
+        const auto font = tooltip_font();
+        const auto measured =
+            measure_text(accessible() != nullptr ? accessible()->name() : "", font);
+        const float width = measured.width + 16.0F;
+        const float height = measured.height + 8.0F;
+        float x = allocation().x + ((allocation().width - width) * 0.5F);
+        if (const auto* window = host_window(); window != nullptr) {
+            x = std::clamp(x, 4.0F, std::max(4.0F, window->size().width - width - 4.0F));
+        }
+        return {x, allocation().bottom() + 6.0F, width, height};
     }
 
     void toggle_menu() {
