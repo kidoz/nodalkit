@@ -1930,6 +1930,20 @@ MacosSurface::MacosSurface(const WindowConfig& config, Window& owner) : owner_(o
 
 MacosSurface::~MacosSurface() {
     @autoreleasepool {
+        // Removing the toolbar can synchronously resize the window. Detach
+        // every callback before AppKit can re-enter a retiring Window.
+        if (window_) {
+            [window_ setDelegate:nil];
+        }
+        if (window_delegate_) {
+            window_delegate_.surface = nullptr;
+        }
+        if (view_) {
+            static_cast<NKView*>(view_).surface = nullptr;
+        }
+        if (toolbar_delegate_) {
+            toolbar_delegate_.config = nullptr;
+        }
         if (toolbar_) {
             [toolbar_ setDelegate:nil];
             if (window_) {
@@ -1941,16 +1955,13 @@ MacosSurface::~MacosSurface() {
             toolbar_delegate_ = nil;
         }
         if (window_) {
-            [window_ setDelegate:nil];
             [window_ close];
             window_ = nil;
         }
         if (view_) {
-            static_cast<NKView*>(view_).surface = nullptr;
             view_ = nil;
         }
         if (window_delegate_) {
-            window_delegate_.surface = nullptr;
             window_delegate_ = nil;
         }
     }
