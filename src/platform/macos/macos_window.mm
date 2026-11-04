@@ -1793,6 +1793,7 @@ static std::optional<double> accessibility_number(const std::string& text) {
                 [[NSSearchToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
             [search setLabel:label];
             [search setToolTip:tooltip];
+            [search setAutovalidates:NO];
             [[search searchField] setDelegate:self];
             [[search searchField] setTarget:self];
             [[search searchField] setAction:@selector(searchFieldSubmit:)];
@@ -1812,6 +1813,7 @@ static std::optional<double> accessibility_number(const std::string& text) {
         NSToolbarItem* item = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
         [item setLabel:label];
         [item setPaletteLabel:label];
+        [item setAutovalidates:NO];
         [item setToolTip:tooltip];
         [item setTarget:self];
         [item setAction:@selector(toolbarAction:)];
@@ -2187,6 +2189,24 @@ void MacosSurface::set_native_toolbar(const NativeToolbarConfig* config) {
         toolbar_ = new_toolbar;
         if (window_) {
             [window_ setToolbar:toolbar_];
+        }
+        set_native_toolbar_blocked(native_toolbar_blocked_);
+    }
+}
+
+void MacosSurface::set_native_toolbar_blocked(bool blocked) {
+    native_toolbar_blocked_ = blocked;
+    @autoreleasepool {
+        if (blocked && window_ && view_) {
+            [window_ makeFirstResponder:view_];
+        }
+        for (NSToolbarItem* item in [toolbar_ items]) {
+            [item setEnabled:!blocked];
+            if ([item isKindOfClass:[NSSearchToolbarItem class]]) {
+                [[static_cast<NSSearchToolbarItem*>(item) searchField] setEnabled:!blocked];
+            } else if ([[item view] isKindOfClass:[NSControl class]]) {
+                [static_cast<NSControl*>([item view]) setEnabled:!blocked];
+            }
         }
     }
 }

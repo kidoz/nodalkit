@@ -1870,6 +1870,7 @@ void Window::present() {
     }
     if (surface_was_null && impl_->surface && impl_->native_toolbar.has_value()) {
         impl_->surface->set_native_toolbar(&*impl_->native_toolbar);
+        sync_native_toolbar_state();
     }
 
     const auto preferred_backend = select_renderer_backend(impl_->surface.get());
@@ -1998,9 +1999,43 @@ TitlebarStyle Window::titlebar_style() const {
 }
 
 void Window::set_native_toolbar(NativeToolbarConfig config) {
+    const auto can_activate = [this, alive = impl_->alive] {
+        return *alive &&
+               std::none_of(impl_->overlays.begin(), impl_->overlays.end(), [](const auto& entry) {
+                   return entry.modal && entry.widget != nullptr && entry.widget->is_visible();
+               });
+    };
+    for (auto& item : config.items) {
+        if (item.on_activate) {
+            item.on_activate = [can_activate, activate = std::move(item.on_activate)] {
+                if (can_activate()) {
+                    activate();
+                }
+            };
+        }
+        if (item.on_search_submit) {
+            item.on_search_submit =
+                [can_activate, submit = std::move(item.on_search_submit)](std::string_view query) {
+                    if (can_activate()) {
+                        submit(query);
+                    }
+                };
+        }
+    }
     impl_->native_toolbar = std::move(config);
     if (impl_->surface) {
         impl_->surface->set_native_toolbar(&*impl_->native_toolbar);
+        sync_native_toolbar_state();
+    }
+}
+
+void Window::sync_native_toolbar_state() {
+    if (impl_->surface) {
+        const bool blocked =
+            std::any_of(impl_->overlays.begin(), impl_->overlays.end(), [](const auto& entry) {
+                return entry.modal && entry.widget != nullptr && entry.widget->is_visible();
+            });
+        impl_->surface->set_native_toolbar_blocked(blocked);
     }
 }
 
@@ -4264,6 +4299,7 @@ void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {
             append_unique_widget(impl_->dirty_widgets, entry.widget.get());
             impl_->needs_layout = true;
             request_frame(FrameRequestReason::OverlayChanged);
+            sync_native_toolbar_state();
             return;
         }
     }
@@ -4288,6 +4324,7 @@ void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {
     }
     impl_->needs_layout = true;
     request_frame(FrameRequestReason::OverlayChanged);
+    sync_native_toolbar_state();
 }
 
 void Window::dismiss_overlay(Widget& overlay) {
@@ -4328,6 +4365,7 @@ void Window::dismiss_overlay(Widget& overlay) {
     if (auto widget = restore_focus.lock()) {
         focus_widget(widget.get());
     }
+    sync_native_toolbar_state();
 }
 
 Signal<>& Window::on_close_requested() {

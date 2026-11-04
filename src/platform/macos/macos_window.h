@@ -50,6 +50,7 @@ public:
     void set_cursor_shape(CursorShape shape) override;
     void set_titlebar_style(TitlebarStyle style) override;
     void set_native_toolbar(const NativeToolbarConfig* config) override;
+    void set_native_toolbar_blocked(bool blocked) override;
 
     /// Access the owning Window for event delivery from Objective-C code.
     Window& owner() { return owner_; }
@@ -79,6 +80,7 @@ private:
     int pixel_width_ = 0;
     int pixel_height_ = 0;
     bool fullscreen_ = false;
+    bool native_toolbar_blocked_ = false;
 };
 
 } // namespace nk

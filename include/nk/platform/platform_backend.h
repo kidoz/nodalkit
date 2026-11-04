@@ -151,6 +151,10 @@ public:
     /// Install or replace the window-attached native toolbar. Pass nullptr
     /// to remove any existing toolbar. Default no-op; macOS uses NSToolbar.
     virtual void set_native_toolbar(const NativeToolbarConfig* config) { (void)config; }
+
+    /// Block native toolbar input while a toolkit modal overlay owns focus.
+    /// Implementations should return keyboard focus to the toolkit content.
+    virtual void set_native_toolbar_blocked(bool blocked) { (void)blocked; }
 };
 
 /// Abstract platform backend. One per Application.

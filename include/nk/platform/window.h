@@ -181,6 +181,7 @@ public:
     /// with autosaved user customization (reorder, show/hide). Platforms
     /// without a native toolbar ignore the call. The config is retained by
     /// the window until cleared or replaced.
+    /// Activation and search callbacks are blocked while a modal overlay is visible.
     void set_native_toolbar(NativeToolbarConfig config);
 
     /// Remove any installed native toolbar.
@@ -289,6 +290,7 @@ private:
     [[nodiscard]] Widget* drag_target_at(Point point) const;
     void show_overlay(std::shared_ptr<Widget> overlay, bool modal);
     void dismiss_overlay(Widget& overlay);
+    void sync_native_toolbar_state();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

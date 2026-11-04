@@ -314,6 +314,80 @@ TEST_CASE("macOS native Edit roles edit the active toolkit or native responder",
     }
 }
 
+TEST_CASE("macOS toolbar callbacks respect modal sheets and resume after dismissal",
+          "[macos][toolbar][modal]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        nk::Window window({.title = "Toolbar modality", .width = 500, .height = 280});
+        window.set_child(nk::Button::create("Content"));
+        int clicks = 0;
+        int submissions = 0;
+        nk::NativeToolbarConfig config;
+        config.identifier = "org.nodalkit.test.modal-toolbar";
+        config.allows_user_customization = false;
+        config.items = {
+            {.kind = nk::NativeToolbarItem::Kind::Button,
+             .identifier = "add",
+             .label = "Add",
+             .tooltip = {},
+             .symbol_name = {},
+             .on_activate = [&] { ++clicks; },
+             .on_search_submit = {}},
+            {.kind = nk::NativeToolbarItem::Kind::SearchField,
+             .identifier = "search",
+             .label = "Search",
+             .tooltip = {},
+             .symbol_name = {},
+             .on_activate = {},
+             .on_search_submit = [&](std::string_view) { ++submissions; }},
+        };
+        window.set_native_toolbar(std::move(config));
+        window.present();
+        settle(app);
+        auto* native = (__bridge NSWindow*)window.native_surface()->native_handle();
+        NSToolbarItem* button = nil;
+        NSSearchField* search = nil;
+        for (NSToolbarItem* item in native.toolbar.items) {
+            if ([[item itemIdentifier] isEqualToString:@"add"]) {
+                button = item;
+            }
+            if ([item isKindOfClass:[NSSearchToolbarItem class]]) {
+                search = [static_cast<NSSearchToolbarItem*>(item) searchField];
+            }
+        }
+        REQUIRE(button != nil);
+        REQUIRE(search != nil);
+        const auto activate = [&] {
+            CHECK([NSApp sendAction:button.action to:button.target from:button]);
+            CHECK([NSApp sendAction:search.action to:search.target from:search]);
+        };
+        activate();
+        CHECK(clicks == 1);
+        CHECK(submissions == 1);
+        REQUIRE([native makeFirstResponder:search]);
+        auto dialog = nk::Dialog::create("Preferences");
+        dialog->set_presentation_style(nk::DialogPresentationStyle::Sheet);
+        dialog->add_button("Later", nk::DialogResponse::Cancel);
+        dialog->present(window);
+        settle(app);
+        CHECK_FALSE(button.isEnabled);
+        CHECK_FALSE(search.isEnabled);
+        CHECK([native firstResponder] == root_element(window));
+        activate();
+        CHECK(clicks == 1);
+        CHECK(submissions == 1);
+        id panel = [[root_element(window) accessibilityChildren] firstObject];
+        id later = find_element([panel accessibilityChildren], NSAccessibilityButtonRole, @"Later");
+        REQUIRE(later != nil);
+        CHECK([later accessibilityPerformPress]);
+        CHECK(button.isEnabled);
+        CHECK(search.isEnabled);
+        activate();
+        CHECK(clicks == 2);
+        CHECK(submissions == 2);
+    }
+}
+
 TEST_CASE("macOS native Window roles use AppKit window operations", "[macos][menu][window]") {
     @autoreleasepool {
         nk::Application app(0, nullptr);

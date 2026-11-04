@@ -594,6 +594,7 @@ void force_symbol_references() {
     (void)static_cast<nk::Signal<std::string_view>& (nk::Application::*)()>(
         &nk::Application::on_native_app_menu_action);
     (void)&nk::NativeMenuItem::native_role;
+    (void)&nk::NativeSurface::set_native_toolbar_blocked;
     (void)static_cast<nk::DragPayload (*)(std::string, std::string)>(&nk::DragPayload::from_text);
     (void)static_cast<nk::DragPayload (*)(std::vector<std::filesystem::path>)>(
         &nk::DragPayload::from_files);
