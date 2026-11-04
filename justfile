@@ -56,7 +56,7 @@ lint:
         {{builddir}}/compile_commands.json \
         | xargs -n1 realpath | sort -u \
         | grep -E "^$PWD/(src|tests|examples)/" \
-        | xargs -P "$(nproc)" -n1 clang-tidy -p {{builddir}}
+        | xargs -P "$(nproc)" -n1 clang-tidy -p {{builddir}} --extra-arg=-Wno-error=c2y-extensions --extra-arg=-Wno-unknown-warning-option
 
 # Run clang-tidy with automatic fixes on this platform's compile database
 lint-fix:
@@ -64,7 +64,7 @@ lint-fix:
         {{builddir}}/compile_commands.json \
         | xargs -n1 realpath | sort -u \
         | grep -E "^$PWD/(src|tests|examples)/" \
-        | xargs -P "$(nproc)" -n1 clang-tidy -p {{builddir}} --fix
+        | xargs -P "$(nproc)" -n1 clang-tidy -p {{builddir}} --extra-arg=-Wno-error=c2y-extensions --extra-arg=-Wno-unknown-warning-option --fix
 
 # Install the library
 install:
