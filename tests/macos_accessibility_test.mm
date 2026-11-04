@@ -457,3 +457,42 @@ TEST_CASE("macOS native Window roles use AppKit window operations", "[macos][men
     }
 }
 
+TEST_CASE("The real showcase palette Quit command exits the application",
+          "[macos][showcase][commands]") {
+    @autoreleasepool {
+        __block bool activated = false;
+        __block int attempts = 0;
+        NSTimer* timer = [NSTimer
+            scheduledTimerWithTimeInterval:0.01
+                                   repeats:YES
+                                     block:^(NSTimer* timer) {
+                                       ++attempts;
+                                       for (NSWindow* native in [NSApp windows]) {
+                                           if (![[native title]
+                                                   isEqualToString:@"NodalKit Showcase"] ||
+                                               !native.isVisible) {
+                                               continue;
+                                           }
+                                           id palette = find_element(
+                                               [[native contentView] accessibilityChildren],
+                                               NSAccessibilityGroupRole,
+                                               @"Command palette");
+                                           if (palette != nil) {
+                                               activated = [palette accessibilityPerformPress];
+                                               [timer invalidate];
+                                               return;
+                                           }
+                                       }
+                                       if (attempts >= 200) {
+                                           if (auto* app = nk::Application::instance()) {
+                                               app->quit(74);
+                                           }
+                                           [timer invalidate];
+                                       }
+                                     }];
+        const int result = run_showcase(0, nullptr);
+        [timer invalidate];
+        CHECK(activated);
+        CHECK(result == 0);
+    }
+}

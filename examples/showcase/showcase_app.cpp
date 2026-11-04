@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <nk/actions/action.h>
 #include <nk/foundation/property.h>
 #include <nk/foundation/types.h>
 #include <nk/layout/breakpoint.h>
@@ -793,7 +794,84 @@ int run_showcase(int argc, char** argv) {
         dialog->present(window);
     };
 
-    (void)dialog_btn->on_clicked().connect(present_preferences_sheet);
+    auto dispatch_command = [&](std::string_view action) {
+        if (action == "file.quit") {
+            app.quit(0);
+            return;
+        }
+
+        if (action == "debug.export_bundle") {
+            export_debug_bundle();
+            return;
+        }
+
+        if (action == "help.about") {
+            present_about_dialog();
+            return;
+        }
+
+        if (action == "app.preferences") {
+            present_preferences_sheet();
+            return;
+        }
+
+        if (action == "window.minimize") {
+            window.minimize();
+            return;
+        }
+        if (action == "window.bring_all_to_front") {
+            window.present();
+            return;
+        }
+        const std::array edit_keys{
+            std::pair{"edit.undo", nk::KeyCode::Z},
+            std::pair{"edit.redo", nk::KeyCode::Z},
+            std::pair{"edit.cut", nk::KeyCode::X},
+            std::pair{"edit.copy", nk::KeyCode::C},
+            std::pair{"edit.paste", nk::KeyCode::V},
+        };
+        for (const auto& [name, key] : edit_keys) {
+            if (action == name) {
+                auto modifiers = is_macos ? nk::Modifiers::Super : nk::Modifiers::Ctrl;
+                if (action == "edit.redo") {
+                    modifiers = modifiers | nk::Modifiers::Shift;
+                }
+                window.dispatch_key_event(
+                    {.type = nk::KeyEvent::Type::Press, .key = key, .modifiers = modifiers});
+                window.dispatch_key_event(
+                    {.type = nk::KeyEvent::Type::Release, .key = key, .modifiers = modifiers});
+                return;
+            }
+        }
+        status_bar->set_segment(0, "Action: " + std::string(action));
+        runtime_status->set_text("Menu action: " + std::string(action));
+        runtime_status_detail->set_text("The last runtime event came from the application menu.");
+    };
+
+    auto command_actions = std::make_shared<nk::ActionGroup>();
+    auto register_command = [&](std::string name) {
+        if (command_actions->find(name)) {
+            return;
+        }
+        auto action = std::make_shared<nk::Action>(name);
+        (void)action->on_activated().connect([&, name] { dispatch_command(name); });
+        command_actions->add(std::move(action));
+    };
+    for (const auto& menu : menus) {
+        for (const auto& item : menu.items) {
+            if (!item.action_name.empty()) {
+                register_command(item.action_name);
+            }
+        }
+    }
+    register_command("app.preferences");
+    auto disabled_command = std::make_shared<nk::Action>("edit.disabled");
+    disabled_command->set_enabled(false);
+    command_actions->add(std::move(disabled_command));
+    menu_bar->set_action_group(command_actions);
+    (void)app.on_native_app_menu_action().connect(
+        [command_actions](std::string_view name) { command_actions->activate(name); });
+    dialog_btn->set_action(command_actions->find("app.preferences"));
 
     auto property_group = Box::vertical(
         profile.actions_layout_mode == ShowcaseActionsLayoutMode::Compact ? 6.0F : 8.0F);
@@ -876,12 +954,7 @@ int run_showcase(int argc, char** argv) {
             .enabled = false,
         },
     });
-    (void)command_palette->on_command_activated().connect([&](std::string_view command_id) {
-        status_bar->set_segment(0, "Command: " + std::string(command_id));
-        runtime_status->set_text("Command palette: " + std::string(command_id));
-        runtime_status_detail->set_text("The command was activated from the searchable palette.");
-        show_linux_toast("Command: " + std::string(command_id));
-    });
+    command_palette->set_action_group(command_actions);
     auto palette_stage =
         InsetStage::create(command_palette,
                            186.0F,
@@ -1220,35 +1293,6 @@ int run_showcase(int argc, char** argv) {
     }
 
     list_view->grab_focus();
-
-    auto handle_menu_action = [&](std::string_view action) {
-        if (action == "file.quit") {
-            app.quit(0);
-            return;
-        }
-
-        if (action == "debug.export_bundle") {
-            export_debug_bundle();
-            return;
-        }
-
-        if (action == "help.about") {
-            present_about_dialog();
-            return;
-        }
-
-        if (action == "app.preferences") {
-            present_preferences_sheet();
-            return;
-        }
-
-        status_bar->set_segment(0, "Action: " + std::string(action));
-        runtime_status->set_text("Menu action: " + std::string(action));
-        runtime_status_detail->set_text("The last runtime event came from the application menu.");
-    };
-
-    (void)menu_bar->on_action().connect(handle_menu_action);
-    (void)app.on_native_app_menu_action().connect(handle_menu_action);
 
     // Reporting the desktop's reduced-motion preference in the preferences sheet
     // is not the same as honoring it: render one static frame instead of running

@@ -200,6 +200,9 @@ test('accessibility_tree', test_accessibility_tree)
 if host_system == 'darwin'
     test_macos_accessibility = executable('test_macos_accessibility',
         'macos_accessibility_test.mm',
+        '../examples/showcase/showcase_app.cpp',
+        '../examples/showcase/showcase_pattern.cpp',
+        '../examples/showcase/showcase_profile.cpp',
         dependencies : [nk_dep, catch2_test_dep, cocoa_dep],
     )
     test('macos_accessibility', test_macos_accessibility)
