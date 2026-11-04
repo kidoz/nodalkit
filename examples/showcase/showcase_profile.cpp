@@ -3,8 +3,37 @@
 
 #include "showcase_profile.h"
 
+#include <array>
 #include <cstdlib>
 #include <string_view>
+#include <utility>
+
+namespace {
+
+std::vector<nk::NativeMenu> with_native_roles(std::vector<nk::NativeMenu> menus) {
+    const std::array roles{
+        std::pair{"edit.undo", nk::NativeMenuRole::Undo},
+        std::pair{"edit.redo", nk::NativeMenuRole::Redo},
+        std::pair{"edit.cut", nk::NativeMenuRole::Cut},
+        std::pair{"edit.copy", nk::NativeMenuRole::Copy},
+        std::pair{"edit.paste", nk::NativeMenuRole::Paste},
+        std::pair{"edit.select_all", nk::NativeMenuRole::SelectAll},
+        std::pair{"window.minimize", nk::NativeMenuRole::Minimize},
+        std::pair{"window.bring_all_to_front", nk::NativeMenuRole::BringAllToFront},
+    };
+    for (auto& menu : menus) {
+        for (auto& item : menu.items) {
+            for (const auto& [name, role] : roles) {
+                if (item.action_name == name) {
+                    item.native_role = role;
+                }
+            }
+        }
+    }
+    return menus;
+}
+
+} // namespace
 
 ShowcasePlatformFlavor
 detect_showcase_platform_flavor(const nk::SystemPreferences& system_preferences) {
@@ -213,7 +242,7 @@ std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
 
     switch (profile.flavor) {
     case ShowcasePlatformFlavor::MacOS:
-        return {
+        return with_native_roles({
             {"NodalKit Showcase",
              {
                  nk::MenuItem::action("About NodalKit Showcase", "help.about"),
@@ -283,6 +312,11 @@ std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
                                           .key = KeyCode::V,
                                           .modifiers = NativeMenuModifier::Super,
                                       }),
+                 nk::MenuItem::make_separator(),
+                 nk::MenuItem::action(
+                     "Select All",
+                     "edit.select_all",
+                     NativeMenuShortcut{.key = KeyCode::A, .modifiers = NativeMenuModifier::Super}),
              }},
             {"Window",
              {
@@ -293,7 +327,7 @@ std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
              {
                  nk::MenuItem::action("About NodalKit Showcase", "help.about"),
              }},
-        };
+        });
     case ShowcasePlatformFlavor::Windows:
         return {
             {"File",

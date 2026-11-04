@@ -35,6 +35,20 @@ struct NativeMenuShortcut {
     NativeMenuModifier modifiers = NativeMenuModifier::None;
 };
 
+/// Standard native commands routed through the platform's active responder.
+/// Platforms without native menus continue to use the item's action_name.
+enum class NativeMenuRole {
+    Custom,
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+    Minimize,
+    BringAllToFront,
+};
+
 /// A single menu item. May either activate an action or own submenu children.
 struct NativeMenuItem {
     std::string label;
@@ -43,6 +57,8 @@ struct NativeMenuItem {
     bool separator = false;
     std::optional<NativeMenuShortcut> shortcut;
     std::vector<NativeMenuItem> children;
+    /// A standard native role takes precedence over the application callback.
+    NativeMenuRole native_role = NativeMenuRole::Custom;
 
     /// Create an action item with a label, action name, and optional shortcut.
     static NativeMenuItem action(std::string label,

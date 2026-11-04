@@ -977,6 +977,61 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     [self synchronizeNativeState:NO];
 }
 
+// Standard menu roles use the same responder as native toolbar text fields.
+- (void)dispatchEditingKey:(nk::KeyCode)key modifiers:(nk::Modifiers)modifiers {
+    if (!_surface || !_surface->owner().current_text_input_state().has_value()) {
+        return;
+    }
+    _surface->owner().dispatch_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = key, .modifiers = modifiers});
+    if (!_surface) {
+        return;
+    }
+    _surface->owner().dispatch_key_event(
+        {.type = nk::KeyEvent::Type::Release, .key = key, .modifiers = modifiers});
+    [self synchronizeNativeState:NO];
+}
+
+- (void)cut:(id)sender {
+    (void)sender;
+    [self dispatchEditingKey:nk::KeyCode::X modifiers:nk::Modifiers::Super];
+}
+
+- (void)copy:(id)sender {
+    (void)sender;
+    [self dispatchEditingKey:nk::KeyCode::C modifiers:nk::Modifiers::Super];
+}
+
+- (void)paste:(id)sender {
+    (void)sender;
+    [self dispatchEditingKey:nk::KeyCode::V modifiers:nk::Modifiers::Super];
+}
+
+- (void)undo:(id)sender {
+    (void)sender;
+    [self dispatchEditingKey:nk::KeyCode::Z modifiers:nk::Modifiers::Super];
+}
+
+- (void)redo:(id)sender {
+    (void)sender;
+    [self dispatchEditingKey:nk::KeyCode::Z modifiers:nk::Modifiers::Super | nk::Modifiers::Shift];
+}
+
+- (void)selectAll:(id)sender {
+    (void)sender;
+    [self dispatchEditingKey:nk::KeyCode::A modifiers:nk::Modifiers::Super];
+}
+
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
+    const SEL action = [item action];
+    if (action == @selector(cut:) || action == @selector(copy:) || action == @selector(paste:) ||
+        action == @selector(undo:) || action == @selector(redo:) ||
+        action == @selector(selectAll:)) {
+        return _surface && _surface->owner().current_text_input_state().has_value();
+    }
+    return YES;
+}
+
 // -- Text input client --
 
 // Cocoa addresses the committed text with the marked text in place of the

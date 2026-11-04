@@ -46,6 +46,30 @@
 
 namespace {
 
+SEL native_menu_selector(nk::NativeMenuRole role) {
+    switch (role) {
+    case nk::NativeMenuRole::Undo:
+        return @selector(undo:);
+    case nk::NativeMenuRole::Redo:
+        return @selector(redo:);
+    case nk::NativeMenuRole::Cut:
+        return @selector(cut:);
+    case nk::NativeMenuRole::Copy:
+        return @selector(copy:);
+    case nk::NativeMenuRole::Paste:
+        return @selector(paste:);
+    case nk::NativeMenuRole::SelectAll:
+        return @selector(selectAll:);
+    case nk::NativeMenuRole::Minimize:
+        return @selector(performMiniaturize:);
+    case nk::NativeMenuRole::BringAllToFront:
+        return @selector(arrangeInFront:);
+    case nk::NativeMenuRole::Custom:
+        return nil;
+    }
+    return nil;
+}
+
 struct NativeMenuActionTargetState {
     std::function<void(std::string_view)>* handler = nullptr;
     std::string action_name;
@@ -278,10 +302,19 @@ void populate_native_submenu(
         NSMenuItem* menu_item = [[NSMenuItem alloc] initWithTitle:title
                                                            action:nil
                                                     keyEquivalent:key_equivalent];
-        [menu_item setEnabled:item.enabled && !item.action_name.empty()];
+        const auto native_selector = native_menu_selector(item.native_role);
+        [menu_item
+            setEnabled:item.enabled && (native_selector != nil || !item.action_name.empty())];
         [menu_item setKeyEquivalentModifierMask:modifier_flags];
+        if (!item.enabled) {
+            [menu addItem:menu_item];
+            continue;
+        }
 
-        if (!item.action_name.empty()) {
+        if (native_selector != nil) {
+            [menu_item setTarget:nil];
+            [menu_item setAction:native_selector];
+        } else if (!item.action_name.empty()) {
             auto state = std::make_unique<NativeMenuActionTargetState>();
             state->handler = &action_handler;
             state->action_name = item.action_name;

@@ -3,16 +3,24 @@
 // permission is needed. Covers structure, attributes, actions, modality, and
 // the lifetime cases that crashed the per-query bridge.
 
+#include "../examples/showcase/showcase_app.h"
+
 #import <Cocoa/Cocoa.h>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <memory>
+#include <nk/model/abstract_list_model.h>
+#include <nk/model/selection_model.h>
 #include <nk/platform/application.h>
+#include <nk/platform/native_menu.h>
+#include <nk/platform/native_toolbar.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/list_view.h>
 #include <nk/widgets/text_field.h>
 
 namespace {
@@ -231,3 +239,118 @@ TEST_CASE("macOS bridge proxies survive widget and window teardown", "[accessibi
     }
     [retained release];
 }
+
+TEST_CASE("macOS native Edit roles edit the active toolkit or native responder",
+          "[macos][menu][editing]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        nk::Window window({.title = "Native commands", .width = 500, .height = 280});
+        auto field = nk::TextField::create("clipboard-test");
+        window.set_child(field);
+        window.present();
+        settle(app);
+        auto* native = (__bridge NSWindow*)window.native_surface()->native_handle();
+        [native makeKeyAndOrderFront:nil];
+        [native makeFirstResponder:root_element(window)];
+        field->grab_focus();
+        std::vector<nk::NativeMenuItem> items;
+        for (const auto& [title, role] : std::vector<std::pair<std::string, nk::NativeMenuRole>>{
+                 {"Cut", nk::NativeMenuRole::Cut},
+                 {"Copy", nk::NativeMenuRole::Copy},
+                 {"Paste", nk::NativeMenuRole::Paste},
+                 {"Undo", nk::NativeMenuRole::Undo},
+                 {"Redo", nk::NativeMenuRole::Redo},
+                 {"Select All", nk::NativeMenuRole::SelectAll}}) {
+            auto item = nk::NativeMenuItem::action(title, "application.custom-name");
+            item.native_role = role;
+            items.push_back(std::move(item));
+        }
+        auto disabled = nk::NativeMenuItem::action("Disabled Cut", "unused");
+        disabled.native_role = nk::NativeMenuRole::Cut;
+        disabled.enabled = false;
+        items.push_back(std::move(disabled));
+        app.set_native_app_menu({{"Edit", std::move(items)}});
+        int callbacks = 0;
+        auto connection =
+            app.on_native_app_menu_action().connect([&](std::string_view) { ++callbacks; });
+        NSMenu* menu = [[[NSApp mainMenu] itemAtIndex:0] submenu];
+        [menu update];
+        CHECK_FALSE([[menu itemWithTitle:@"Disabled Cut"] isEnabled]);
+        CHECK([[menu itemWithTitle:@"Disabled Cut"] action] == nil);
+        const auto activate = [&](NSString* title) {
+            NSMenuItem* item = [menu itemWithTitle:title];
+            REQUIRE(item != nil);
+            CHECK([item target] == nil);
+            // Test processes need not be the OS key application. Start at this
+            // window's real responder rather than NSApp's global key window.
+            CHECK([[native firstResponder] tryToPerform:[item action] with:item]);
+        };
+        activate(@"Select All");
+        activate(@"Copy");
+        activate(@"Cut");
+        CHECK(field->text().empty());
+        activate(@"Undo");
+        CHECK(field->text() == "clipboard-test");
+        activate(@"Redo");
+        CHECK(field->text().empty());
+        activate(@"Paste");
+        CHECK(field->text() == "clipboard-test");
+        CHECK(callbacks == 0);
+
+        NSSearchField* search = [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 0, 180, 28)];
+        [[native contentView] addSubview:search];
+        [search setStringValue:@"native-search"];
+        REQUIRE([native makeFirstResponder:search]);
+        auto* editor = [search currentEditor];
+        REQUIRE(editor != nil);
+        activate(@"Select All");
+        activate(@"Cut");
+        CHECK([[editor string] length] == 0);
+        CHECK(field->text() == "clipboard-test");
+        activate(@"Paste");
+        CHECK([[editor string] isEqualToString:@"native-search"]);
+        [search removeFromSuperview];
+        [search release];
+    }
+}
+
+TEST_CASE("macOS native Window roles use AppKit window operations", "[macos][menu][window]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        nk::Window window({.title = "Native window commands", .width = 320, .height = 240});
+        window.set_child(nk::Button::create("Content"));
+        window.present();
+        settle(app);
+        auto* native = (__bridge NSWindow*)window.native_surface()->native_handle();
+        auto minimize = nk::NativeMenuItem::action("Minimize", "unused.minimize");
+        minimize.native_role = nk::NativeMenuRole::Minimize;
+        auto front = nk::NativeMenuItem::action("Bring All to Front", "unused.front");
+        front.native_role = nk::NativeMenuRole::BringAllToFront;
+        app.set_native_app_menu({{"Window", {minimize, front}}});
+        NSMenu* menu = [[[NSApp mainMenu] itemAtIndex:0] submenu];
+        NSMenuItem* minimize_item = [menu itemWithTitle:@"Minimize"];
+        REQUIRE(minimize_item != nil);
+        CHECK([minimize_item target] == nil);
+        CHECK([native tryToPerform:[minimize_item action] with:minimize_item]);
+        const auto minimized_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!native.isMiniaturized && std::chrono::steady_clock::now() < minimized_deadline) {
+            (void)app.event_loop().poll();
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        }
+        CHECK(native.isMiniaturized);
+        [native deminiaturize:nil];
+        const auto restored_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (native.isMiniaturized && std::chrono::steady_clock::now() < restored_deadline) {
+            (void)app.event_loop().poll();
+            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        }
+        CHECK_FALSE(native.isMiniaturized);
+        NSMenuItem* front_item = [menu itemWithTitle:@"Bring All to Front"];
+        REQUIRE(front_item != nil);
+        CHECK([front_item target] == nil);
+        CHECK([NSApp tryToPerform:[front_item action] with:front_item]);
+    }
+}
+
