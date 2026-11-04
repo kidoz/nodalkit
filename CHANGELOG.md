@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-04
+
+The first patch release of the NodalKit framework. 0.3.1 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.3.0 and adds native menu roles for the standard editing and
+window commands, list accessibility semantics, focus reveal inside nested
+scroll areas, and line rendering in the Metal renderer. It also closes native
+toolbar input while a modal overlay is up and makes macOS accessibility and
+surface teardown safe when AppKit re-enters the toolkit.
+
+### Support Matrix for 0.3.1
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
+### Added
+*   **Native Menu Roles:** `NativeMenuRole` and `NativeMenuItem::native_role` route Undo, Redo, Cut, Copy, Paste, Select All, Minimize, and Bring All to Front through the platform's active responder instead of the item's callback; a native role takes precedence, and platforms without native menus keep dispatching `action_name`. On macOS the editing roles reach toolkit editors and native toolbar search fields through the same key events as the application shortcuts, and they are disabled when no text input is active.
+*   **Focus Reveal in Scroll Areas:** `ScrollArea::reveal_child()` scrolls a descendant into view with a four-pixel gutter, keeps an oversized descendant that already spans the viewport in place, and otherwise aligns it to the nearest edge. It re-allocates immediately so an enclosing viewport can reveal the descendant too. Keyboard focus reveals the focused widget through every enclosing scroll area; pointer focus does not scroll, so press and release stay over the clicked control.
+*   **List Accessibility:** `ListView` exposes a list role whose value is the current row text with its position (for example "Alpha, item 1 of 2") and whose description carries the item and selection counts, with an Activate action that emits `on_row_activated()` for the current row. The value follows model resets, appends, clears, and selection changes.
+
+### Fixed
+*   **Native Toolbar During Modals:** macOS toolbar buttons and the search field are disabled while a toolkit modal overlay is visible, keyboard focus returns to the toolkit content, and toolbar activation and search-submit callbacks are filtered while a modal is up. Toolbar items also opt out of AppKit autovalidation so their enabled state follows the toolkit instead of the responder chain.
+*   **Toast Overlay Accessibility:** The toast overlay marked its whole content subtree hidden from assistive technology whenever a toast appeared. The overlay is now a named group and the toast surface is a Status element exposed only while a toast is visible, so the content stays reachable.
+*   **macOS Accessibility Teardown:** Accessibility elements are detached from the window tree before `NSAccessibilityUIElementDestroyedNotification` is posted, so AppKit cannot query an element that is already retiring, and `Window::accessibility_roots()` now returns nothing while a window is being destroyed.
+*   **macOS Surface Teardown:** `MacosSurface` detaches its window delegate, view, and toolbar callbacks before removing the toolbar, because removal can synchronously resize the window and re-enter the retiring surface.
+*   **Metal Line Rendering:** The Metal renderer draws `LineNode` segments, including zero-length points, with their thickness, antialiasing, and active clip regions; previously every segment a widget painted through `SnapshotContext::add_line()` was dropped on Metal.
+
+### Changed
+*   **Showcase Commands:** The showcase menu bar, native app menu, command palette, and Preferences button share one `ActionGroup`; each menu item is registered as an action and dispatches through a single command handler that also drives the standard editing keys and window commands. A disabled action demonstrates group-wide state.
+*   **Showcase Layout:** Inset stages, padded stages, and split columns measure their content against the width they are allocated, minus padding and border, so long text wraps instead of overflowing as the window narrows.
+*   **Build:** The lint recipes pass `-Wno-error=c2y-extensions` and `-Wno-unknown-warning-option` to clang-tidy, so newer clang releases do not fail the lint gate on C2y extension warnings from the C++23 headers.
+*   **C++ ABI:** `NativeMenuItem` gained a `native_role` member, `PlatformBackend` gained the `set_native_toolbar_blocked()` virtual method, and `ScrollArea` gained `reveal_child()`. Rebuild the library and all C++ consumers together: the aggregate layout and the backend virtual interface changed.
+
 ## [0.3.0] - 2026-11-02
 
 The third normal release of the NodalKit framework. 0.3.0 keeps the widget
