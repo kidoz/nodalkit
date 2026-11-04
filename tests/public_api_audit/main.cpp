@@ -1029,9 +1029,10 @@ void force_symbol_references() {
     (void)static_cast<void (nk::Theme::*)(std::string, nk::StyleValue)>(&nk::Theme::set_token);
     (void)static_cast<const nk::StyleValue* (nk::Theme::*)(std::string_view) const>(
         &nk::Theme::token);
-    (void)static_cast<const nk::StyleValue* (nk::Theme::*)(
+    using ThemeResolveSignature = const nk::StyleValue*(
         std::string_view, const std::vector<std::string>&, nk::StateFlags, std::string_view, int)
-                          const>(&nk::Theme::resolve);
+        const;
+    (void)static_cast<ThemeResolveSignature nk::Theme::*>(&nk::Theme::resolve);
     (void)&nk::Theme::set_active;
     (void)&nk::Theme::active;
     (void)&nk::Theme::make_light;
