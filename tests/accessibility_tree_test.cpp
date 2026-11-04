@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
+#include <nk/model/abstract_list_model.h>
+#include <nk/model/selection_model.h>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
 #include <nk/runtime/event_loop.h>
@@ -11,6 +13,7 @@
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/list_view.h>
 #include <nk/widgets/text_field.h>
 #include <nk/widgets/toast_overlay.h>
 #include <vector>
@@ -559,4 +562,40 @@ TEST_CASE("Toast notifications never hide the content accessibility subtree",
     overlay->add_toast({.title = "Saved again", .action_label = ""});
     overlay->dismiss_all();
     check_content();
+}
+
+TEST_CASE("List accessibility follows current items, model changes and activation",
+          "[accessibility][list]") {
+    nk::Window window({.title = "List semantics"});
+    auto list = nk::ListView::create();
+    auto model = std::make_shared<nk::StringListModel>(std::vector<std::string>{"Alpha", "Bravo"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    selection->select(0);
+    list->set_model(model);
+    list->set_selection_model(selection);
+    window.set_child(list);
+    nk::detail::AccessibilityTree tree(window);
+    const auto roots = tree.root_children();
+    REQUIRE(roots.size() == 1);
+    const auto id = roots.front();
+    REQUIRE(tree.info(id).has_value());
+    CHECK(tree.info(id)->role == nk::AccessibleRole::List);
+    CHECK(tree.info(id)->value == "Alpha, item 1 of 2");
+    CHECK(tree.focus(id));
+    CHECK(tree.focused() == id);
+    std::size_t activated = 99;
+    auto connection = list->on_row_activated().connect([&](std::size_t row) { activated = row; });
+    selection->set_current_row(1);
+    selection->select(1);
+    CHECK(tree.info(id)->value == "Bravo, item 2 of 2");
+    CHECK(tree.perform(id, nk::AccessibleAction::Activate));
+    CHECK(activated == 1);
+    model->append("Charlie");
+    CHECK(tree.info(id)->value == "Bravo, item 2 of 3");
+    model->clear();
+    CHECK(tree.info(id)->value.empty());
+    CHECK_FALSE(tree.perform(id, nk::AccessibleAction::Activate));
+    list->set_model(nullptr);
+    list->set_selection_model(nullptr);
+    CHECK(tree.info(id)->description == "0 items, 0 selected");
 }

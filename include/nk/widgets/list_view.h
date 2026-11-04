@@ -18,7 +18,8 @@ using ItemFactory = std::function<std::shared_ptr<Widget>(std::size_t row)>;
 
 /// A scrollable list view that creates item widgets on demand from
 /// a model. Uses an ItemFactory (delegate) to create widgets for
-/// visible rows.
+/// visible rows. Accessibility exposes the item count, current row label and
+/// selection summary, with activation of the current row.
 class ListView : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<ListView> create();
@@ -54,6 +55,7 @@ protected:
 private:
     [[nodiscard]] std::size_t clear_visible_items();
     void sync_visible_items();
+    void sync_accessible_summary();
     [[nodiscard]] Rect local_row_damage_rect(std::size_t row) const;
     void queue_row_redraw(std::size_t row);
     void queue_selection_redraw();

@@ -388,6 +388,35 @@ TEST_CASE("macOS toolbar callbacks respect modal sheets and resume after dismiss
     }
 }
 
+TEST_CASE("macOS exposes the list's current item and activation", "[macos][accessibility][list]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        nk::Window window({.title = "Accessible list", .width = 320, .height = 240});
+        auto list = nk::ListView::create();
+        auto model =
+            std::make_shared<nk::StringListModel>(std::vector<std::string>{"Alpha", "Bravo"});
+        auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+        selection->select(0);
+        list->set_model(model);
+        list->set_selection_model(selection);
+        window.set_child(list);
+        window.present();
+        settle(app);
+        id element = find_element(
+            [root_element(window) accessibilityChildren], NSAccessibilityListRole, @"List view");
+        REQUIRE(element != nil);
+        CHECK([[element accessibilityValue] isEqualToString:@"Alpha, item 1 of 2"]);
+        selection->set_current_row(1);
+        selection->select(1);
+        CHECK([[element accessibilityValue] isEqualToString:@"Bravo, item 2 of 2"]);
+        std::size_t activated = 99;
+        auto connection =
+            list->on_row_activated().connect([&](std::size_t row) { activated = row; });
+        CHECK([element accessibilityPerformPress]);
+        CHECK(activated == 1);
+    }
+}
+
 TEST_CASE("macOS native Window roles use AppKit window operations", "[macos][menu][window]") {
     @autoreleasepool {
         nk::Application app(0, nullptr);

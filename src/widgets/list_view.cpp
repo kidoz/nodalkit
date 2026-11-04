@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <nk/accessibility/accessible.h>
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/selection_model.h>
 #include <nk/platform/events.h>
@@ -8,6 +9,7 @@
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/list_view.h>
 #include <set>
+#include <sstream>
 
 namespace nk {
 
@@ -154,6 +156,18 @@ std::shared_ptr<ListView> ListView::create() {
 ListView::ListView() : impl_(std::make_unique<Impl>()) {
     set_focusable(true);
     add_style_class("list-view");
+    auto& accessible = ensure_accessible();
+    accessible.set_role(AccessibleRole::List);
+    accessible.set_name("List view");
+    accessible.add_action(AccessibleAction::Activate, [this] {
+        const auto row = current_row_index(impl_->selection.get());
+        if (!impl_->model || row >= impl_->model->row_count()) {
+            return false;
+        }
+        impl_->row_activated.emit(row);
+        return true;
+    });
+    sync_accessible_summary();
 }
 
 ListView::~ListView() = default;
@@ -168,6 +182,7 @@ void ListView::set_model(std::shared_ptr<AbstractListModel> model) {
     if (impl_->model) {
         auto refresh = [this] {
             (void)clear_visible_items();
+            sync_accessible_summary();
             queue_layout();
             queue_redraw();
         };
@@ -185,6 +200,7 @@ void ListView::set_model(std::shared_ptr<AbstractListModel> model) {
     impl_->last_selected_rows =
         impl_->selection ? impl_->selection->selected_rows() : std::set<std::size_t>{};
     impl_->last_current_row = current_row_index(impl_->selection.get());
+    sync_accessible_summary();
     queue_layout();
     queue_redraw();
 }
@@ -206,6 +222,7 @@ void ListView::set_selection_model(std::shared_ptr<SelectionModel> model) {
     impl_->last_selected_rows =
         impl_->selection ? impl_->selection->selected_rows() : std::set<std::size_t>{};
     impl_->last_current_row = current_row_index(impl_->selection.get());
+    sync_accessible_summary();
     queue_redraw();
 }
 
@@ -612,7 +629,26 @@ void ListView::queue_row_redraw(std::size_t row) {
     }
 }
 
+void ListView::sync_accessible_summary() {
+    auto& accessible = ensure_accessible();
+    const auto count = impl_->model ? impl_->model->row_count() : 0;
+    const auto row = current_row_index(impl_->selection.get());
+    std::ostringstream description;
+    description << count << " items, "
+                << (impl_->selection ? impl_->selection->selected_rows().size() : 0) << " selected";
+    if (impl_->model && row < count) {
+        const auto text = impl_->model->display_text(row);
+        description << ", current item " << (row + 1) << " of " << count << ", " << text;
+        accessible.set_value(std::string(text) + ", item " + std::to_string(row + 1) + " of " +
+                             std::to_string(count));
+    } else {
+        accessible.set_value({});
+    }
+    accessible.set_description(description.str());
+}
+
 void ListView::queue_selection_redraw() {
+    sync_accessible_summary();
     std::set<std::size_t> affected_rows = impl_->last_selected_rows;
     if (impl_->selection) {
         const auto& selected_rows = impl_->selection->selected_rows();
