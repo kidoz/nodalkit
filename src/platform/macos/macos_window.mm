@@ -571,8 +571,10 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
 }
 
 - (void)retireAccessibilityElement:(NKAccessibilityElement*)element {
-    NSAccessibilityPostNotification(element, NSAccessibilityUIElementDestroyedNotification);
+    // AppKit can query the element synchronously while handling this notification.
+    // Detach it from its window tree before announcing its retirement.
     [element invalidate];
+    NSAccessibilityPostNotification(element, NSAccessibilityUIElementDestroyedNotification);
     // AppKit may still be delivering the notification; drop our ownership later.
     [element autorelease];
 }
