@@ -1294,6 +1294,8 @@ void force_symbol_references() {
     (void)static_cast<float (nk::ScrollArea::*)() const>(&nk::ScrollArea::h_offset);
     (void)static_cast<float (nk::ScrollArea::*)() const>(&nk::ScrollArea::v_offset);
     (void)static_cast<void (nk::ScrollArea::*)(float, float)>(&nk::ScrollArea::scroll_to);
+    (void)static_cast<void (nk::ScrollArea::*)(const nk::Widget&, float)>(
+        &nk::ScrollArea::reveal_child);
     (void)static_cast<nk::Signal<float, float>& (nk::ScrollArea::*)()>(
         &nk::ScrollArea::on_scroll_changed);
     (void)static_cast<nk::SizeRequest (nk::ScrollArea::*)(const nk::Constraints&) const>(

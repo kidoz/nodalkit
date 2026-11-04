@@ -31,6 +31,7 @@
 #include <nk/style/style_class.h>
 #include <nk/style/theme.h>
 #include <nk/text/font.h>
+#include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/canvas_widget.h>
 #include <nk/widgets/combo_box.h>
@@ -6168,4 +6169,105 @@ TEST_CASE("Metal submits chevrons and clipped line segments instead of dropping 
 #else
     SUCCEED("Metal lines are verified on macOS");
 #endif
+}
+
+TEST_CASE("Pointer focus preserves clicks at the scroll viewport edge", "[app][scroll][reveal]") {
+    nk::Window window({.title = "Pointer focus", .width = 120, .height = 80});
+    auto scroll = nk::ScrollArea::create();
+    scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+    auto content = nk::Box::create();
+    auto button = nk::Button::create("Click");
+    const float height = button->measure(nk::Constraints::unbounded()).natural_height;
+    content->append(FixedWidget::create(120.0F, 80.0F - height));
+    content->append(button);
+    content->append(FixedWidget::create(120.0F, 200.0F));
+    scroll->set_content(content);
+    window.set_child(scroll);
+    scroll->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+    REQUIRE(button->allocation().bottom() == Catch::Approx(80.0F));
+
+    int clicked = 0;
+    auto connection = button->on_clicked().connect([&] { ++clicked; });
+    dispatch_click(window, {20.0F, 78.0F});
+
+    CHECK(clicked == 1);
+    CHECK(nk::has_flag(button->state_flags(), nk::StateFlags::Focused));
+    CHECK(scroll->v_offset() == Catch::Approx(0.0F));
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Keyboard and programmatic focus reveal offscreen controls", "[app][scroll][reveal]") {
+    nk::Window window({.title = "Reveal focus", .width = 120, .height = 80});
+    auto scroll = nk::ScrollArea::create();
+    scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+    auto content = nk::Box::create();
+    auto target = FocusProbeWidget::create(120.0F, 20.0F);
+    content->append(FixedWidget::create(120.0F, 160.0F));
+    content->append(target);
+    content->append(FixedWidget::create(120.0F, 200.0F));
+    scroll->set_content(content);
+    window.set_child(scroll);
+    scroll->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+
+    SECTION("keyboard traversal") {
+        window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    }
+    SECTION("programmatic focus after pointer input") {
+        dispatch_click(window, {20.0F, 20.0F});
+        target->grab_focus();
+    }
+
+    CHECK(nk::has_flag(target->state_flags(), nk::StateFlags::Focused));
+    CHECK(scroll->v_offset() == Catch::Approx(104.0F));
+    CHECK(target->allocation().bottom() == Catch::Approx(76.0F));
+}
+
+TEST_CASE("Revealing oversized controls keeps a stable nearest edge", "[app][scroll][reveal]") {
+    for (const auto orientation : {nk::Orientation::Horizontal, nk::Orientation::Vertical}) {
+        const bool vertical = orientation == nk::Orientation::Vertical;
+        DYNAMIC_SECTION("vertical = " << vertical) {
+            auto scroll = nk::ScrollArea::create();
+            scroll->set_h_scroll_policy(vertical ? nk::ScrollPolicy::Never
+                                                 : nk::ScrollPolicy::Automatic);
+            scroll->set_v_scroll_policy(vertical ? nk::ScrollPolicy::Automatic
+                                                 : nk::ScrollPolicy::Never);
+            auto content = nk::Box::create(orientation);
+            auto target = FixedWidget::create(200.0F, 200.0F);
+            content->append(FixedWidget::create(60.0F, 60.0F));
+            content->append(target);
+            content->append(FixedWidget::create(200.0F, 200.0F));
+            scroll->set_content(content);
+            const nk::Rect viewport{24.0F, 36.0F, 80.0F, 80.0F};
+            scroll->allocate(viewport);
+            float initial_offset = 0.0F;
+            float expected_offset = 56.0F;
+            SECTION("target starts below or right of the viewport") {}
+            SECTION("target already spans the viewport") {
+                initial_offset = 100.0F;
+                expected_offset = 100.0F;
+            }
+            SECTION("target ends above or left of the viewport") {
+                initial_offset = 280.0F;
+                expected_offset = 184.0F;
+            }
+            scroll->scroll_to(vertical ? 0.0F : initial_offset, vertical ? initial_offset : 0.0F);
+            scroll->allocate(viewport);
+            int notifications = 0;
+            auto connection =
+                scroll->on_scroll_changed().connect([&](float, float) { ++notifications; });
+
+            scroll->reveal_child(*target);
+            CHECK((vertical ? scroll->v_offset() : scroll->h_offset()) ==
+                  Catch::Approx(expected_offset));
+            CHECK(notifications == (initial_offset == expected_offset ? 0 : 1));
+            notifications = 0;
+            const auto target_allocation = target->allocation();
+            scroll->reveal_child(*target);
+            CHECK((vertical ? scroll->v_offset() : scroll->h_offset()) ==
+                  Catch::Approx(expected_offset));
+            CHECK(target->allocation() == target_allocation);
+            CHECK(notifications == 0);
+            CHECK(connection.connected());
+        }
+    }
 }

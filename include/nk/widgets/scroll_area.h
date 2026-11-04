@@ -55,6 +55,11 @@ public:
     /// differs from the current value.
     void scroll_to(float h, float v);
 
+    /// Reveal a descendant's current allocation, preserving a small focus gutter.
+    /// Oversized targets use the nearest edge and stay put while spanning the viewport.
+    /// Updates child allocations immediately so enclosing viewports can reveal it too.
+    void reveal_child(const Widget& child, float margin = 4.0F);
+
     /// Emitted after a successful scroll with the new (h, v) offsets.
     /// Not emitted for no-op scrolls (same clamped value as before).
     Signal<float, float>& on_scroll_changed();

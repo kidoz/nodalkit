@@ -279,7 +279,7 @@ private:
     void perform_window_layout(Rect content_area);
     [[nodiscard]] std::unique_ptr<RenderNode> build_window_debug_render_tree(Size viewport_size,
                                                                              Rect content_area);
-    void focus_widget(Widget* widget);
+    void focus_widget(Widget* widget, bool reveal = true);
     [[nodiscard]] bool dispatch_shortcut(const KeyEvent& event);
     void handle_widget_state_change(Widget& widget);
     void handle_widget_detached(Widget& widget);

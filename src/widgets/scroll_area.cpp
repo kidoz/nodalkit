@@ -264,6 +264,45 @@ SizeRequest ScrollArea::measure(const Constraints& constraints) const {
     return {};
 }
 
+void ScrollArea::reveal_child(const Widget& child, float margin) {
+    bool descendant = false;
+    for (auto* parent = child.parent(); parent != nullptr; parent = parent->parent()) {
+        if (parent == this) {
+            descendant = true;
+            break;
+        }
+    }
+    if (!descendant) {
+        return;
+    }
+    const auto viewport = allocation();
+    const auto target = child.allocation();
+    margin = std::max(0.0F, margin);
+    const auto offset = [margin](float current, float start, float end, float lo, float hi) {
+        const float leading_delta = start - margin - lo;
+        const float trailing_delta = end + margin - hi;
+        // An oversized target already covering the viewport needs no adjustment.
+        if (leading_delta < 0.0F && trailing_delta > 0.0F) {
+            return current;
+        }
+        if (leading_delta < 0.0F) {
+            return current + std::max(leading_delta, trailing_delta);
+        }
+        if (trailing_delta > 0.0F) {
+            return current + std::min(leading_delta, trailing_delta);
+        }
+        return current;
+    };
+    scroll_to(
+        impl_->h_policy == ScrollPolicy::Never
+            ? impl_->h_offset
+            : offset(impl_->h_offset, target.x, target.right(), viewport.x, viewport.right()),
+        impl_->v_policy == ScrollPolicy::Never
+            ? impl_->v_offset
+            : offset(impl_->v_offset, target.y, target.bottom(), viewport.y, viewport.bottom()));
+    allocate(viewport);
+}
+
 void ScrollArea::allocate(const Rect& allocation) {
     Widget::allocate(allocation);
     impl_->h_offset = std::clamp(

@@ -28,6 +28,7 @@
 #include <nk/style/theme.h>
 #include <nk/text/text_shaper.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/scroll_area.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -2672,7 +2673,7 @@ void WindowInspector::sync_debug_selected_widget_from_render_selection() {
     }
 }
 
-void Window::focus_widget(Widget* widget) {
+void Window::focus_widget(Widget* widget, bool reveal) {
     auto is_attached_to_window = [this](const Widget* candidate) {
         if (candidate == nullptr) {
             return false;
@@ -2711,6 +2712,15 @@ void Window::focus_widget(Widget* widget) {
         impl_->focused_widget->dispatch_focus_controllers(true);
         impl_->focused_widget->on_focus_changed(true);
         impl_->pending_focus_restore = impl_->focused_widget->shared_from_this();
+        // Reveal from the inside out: scrolling an inner viewport changes the
+        // target allocation used by the next enclosing viewport.
+        if (reveal) {
+            for (auto* parent = widget->parent(); parent != nullptr; parent = parent->parent()) {
+                if (auto* scroll = dynamic_cast<ScrollArea*>(parent)) {
+                    scroll->reveal_child(*widget);
+                }
+            }
+        }
     }
 }
 
@@ -3737,7 +3747,8 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
         if (impl_->pressed_widget != nullptr) {
             impl_->pressed_widget->set_state_flag(StateFlags::Pressed, true);
         }
-        focus_widget(target);
+        // Keep pointer coordinates over the pressed control for the whole click.
+        focus_widget(target, false);
         if (target != nullptr) {
             (void)dispatch_mouse_bubble(target);
         }
