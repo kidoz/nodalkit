@@ -52,6 +52,7 @@ struct PrimitiveUniforms {
     float thickness = 0.0F;
     uint32_t kind = 0;
     uint32_t clip_count = 0;
+    float line_points[4]{};
     float clip_rects[16]{};
     float clip_radii[4]{};
     float viewport_size[2];
@@ -68,6 +69,8 @@ struct PrimitiveCommand {
     float radius = 0.0F;
     float thickness = 0.0F;
     uint32_t kind = 0;
+    Point line_start{};
+    Point line_end{};
     std::array<ClipRegion, 4> clips{};
     uint32_t clip_count = 0;
 };
@@ -344,6 +347,7 @@ id<MTLLibrary> build_shader_library(id<MTLDevice> device) {
             float thickness;
             uint kind;
             uint clip_count;
+            float4 line_points;
             float4 clip_rects[4];
             float clip_radii[4];
             float2 viewport_size;
@@ -393,7 +397,17 @@ id<MTLLibrary> build_shader_library(id<MTLDevice> device) {
 
         fragment float4 nk_metal_primitive_fragment(PrimitiveVertexOut in [[stage_in]],
                                                     constant PrimitiveUniforms& uniforms [[buffer(1)]]) {
-            float coverage = saturate(0.5 - rounded_rect_sd(in.pixel_position, in.rect, in.radius));
+            float distance = rounded_rect_sd(in.pixel_position, in.rect, in.radius);
+            if (in.kind == 2) {
+                float2 start = uniforms.line_points.xy;
+                float2 segment = uniforms.line_points.zw - start;
+                float length_squared = dot(segment, segment);
+                float t = length_squared > 0.0
+                    ? clamp(dot(in.pixel_position - start, segment) / length_squared, 0.0, 1.0)
+                    : 0.0;
+                distance = length(in.pixel_position - start - t * segment) - in.thickness * 0.5;
+            }
+            float coverage = saturate(0.5 - distance);
             for (uint clip_index = 0; clip_index < uniforms.clip_count; ++clip_index) {
                 float clip_coverage = saturate(
                     0.5 - rounded_rect_sd(in.pixel_position,
@@ -1000,6 +1014,10 @@ private:
             uniforms.radius = command.radius * scale_factor_;
             uniforms.thickness = command.thickness * scale_factor_;
             uniforms.kind = command.kind;
+            uniforms.line_points[0] = command.line_start.x * scale_factor_;
+            uniforms.line_points[1] = command.line_start.y * scale_factor_;
+            uniforms.line_points[2] = command.line_end.x * scale_factor_;
+            uniforms.line_points[3] = command.line_end.y * scale_factor_;
             populate_clip_uniforms(uniforms, command.clips, command.clip_count, scale_factor_);
             uniforms.viewport_size[0] = static_cast<float>(width);
             uniforms.viewport_size[1] = static_cast<float>(height);
@@ -1238,7 +1256,32 @@ private:
 
     bool collect_draw_commands(const RenderNode& node) {
         switch (node.kind()) {
-        case RenderNodeKind::Line:
+        case RenderNodeKind::Line: {
+            const auto& line = static_cast<const LineNode&>(node);
+            if (line.thickness() <= 0.0F) {
+                return true;
+            }
+            const auto start = line.start();
+            const auto end = line.end();
+            const float padding = line.thickness() * 0.5F + 1.0F / scale_factor_;
+            PrimitiveCommand command{
+                .rect = {std::min(start.x, end.x) - padding,
+                         std::min(start.y, end.y) - padding,
+                         std::abs(end.x - start.x) + padding * 2,
+                         std::abs(end.y - start.y) + padding * 2},
+                .color = line.color(),
+                .thickness = line.thickness(),
+                .kind = 2,
+                .line_start = start,
+                .line_end = end,
+            };
+            command.clip_count = static_cast<uint32_t>(active_clips_.size());
+            std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+            primitive_commands_.push_back(command);
+            draw_commands_.push_back({.kind = DrawCommandKind::Primitive,
+                                      .command_index = primitive_commands_.size() - 1});
+            return true;
+        }
         case RenderNodeKind::Path:
         case RenderNodeKind::Transform:
             return true;

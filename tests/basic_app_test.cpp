@@ -6132,3 +6132,40 @@ TEST_CASE("Worker image updates defer UI invalidation to the owning loop", "[app
     app.event_loop().poll();
     CHECK(image->debug_pending_redraw());
 }
+
+TEST_CASE("Metal submits chevrons and clipped line segments instead of dropping them",
+          "[app][render][metal]") {
+#if defined(__APPLE__)
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("metal") == 0);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Metal lines", .width = 200, .height = 120});
+    auto canvas = nk::CanvasWidget::create();
+    bool draw_lines = false;
+    auto connection = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect) {
+        if (draw_lines) {
+            const auto color = nk::Color::from_rgb(255, 255, 255);
+            ctx.push_rounded_clip({10, 10, 50, 50}, 0);
+            ctx.add_line({20, 20}, {25, 25}, color, 2);
+            ctx.add_line({25, 25}, {30, 20}, color, 2);
+            ctx.add_line({50, 40}, {20, 40}, color, 2);
+            ctx.add_line({40, 50}, {40, 50}, color, 2);
+            ctx.add_line({0, 30}, {70, 30}, color, 2);
+            ctx.pop_container();
+        }
+    });
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Metal);
+    const auto before = window.inspector().last_frame_diagnostics().render_hotspot_counters;
+    draw_lines = true;
+    canvas->queue_canvas_redraw();
+    REQUIRE(app.event_loop().poll());
+    const auto after = window.inspector().last_frame_diagnostics().render_hotspot_counters;
+    CHECK(after.gpu_draw_call_count >= before.gpu_draw_call_count + 5);
+    CHECK(connection.connected());
+#else
+    SUCCEED("Metal lines are verified on macOS");
+#endif
+}
