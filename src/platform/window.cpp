@@ -2879,6 +2879,9 @@ std::span<const FrameDiagnostics> WindowInspector::debug_frame_history() const {
 }
 
 std::vector<Widget*> Window::accessibility_roots() const {
+    if (!impl_ || impl_->window_destroying) {
+        return {};
+    }
     for (auto it = impl_->overlays.rbegin(); it != impl_->overlays.rend(); ++it) {
         if (it->modal && it->widget != nullptr && it->widget->is_visible()) {
             return {it->widget.get()};
