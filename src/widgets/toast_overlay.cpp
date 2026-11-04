@@ -92,7 +92,7 @@ protected:
 private:
     ToastSurface() {
         add_style_class("toast-surface");
-        ensure_accessible().set_hidden(true);
+        ensure_accessible().set_role(AccessibleRole::Status);
     }
 
     Toast toast_;
@@ -136,8 +136,8 @@ ToastOverlay::ToastOverlay() : impl_(std::make_unique<Impl>()) {
         ScopedConnection(impl_->surface->on_dismissed().connect([this] { dismiss_current(); }));
     add_style_class("toast-overlay");
     auto& accessible = ensure_accessible();
-    accessible.set_role(AccessibleRole::Status);
-    accessible.set_hidden(true);
+    accessible.set_role(AccessibleRole::Group);
+    accessible.set_name("Content and notifications");
 }
 
 ToastOverlay::~ToastOverlay() {
@@ -177,7 +177,7 @@ void ToastOverlay::add_toast(Toast toast) {
     }
     impl_->surface->set_toast(impl_->toasts.front());
     impl_->surface->set_visible(true);
-    auto& accessible = ensure_accessible();
+    auto& accessible = impl_->surface->ensure_accessible();
     accessible.set_hidden(false);
     accessible.set_name(impl_->toasts.front().title);
     if (impl_->toasts.front().action_label.empty()) {
@@ -208,7 +208,7 @@ void ToastOverlay::dismiss_current() {
     if (!impl_->toasts.empty()) {
         impl_->surface->set_toast(impl_->toasts.front());
     }
-    auto& accessible = ensure_accessible();
+    auto& accessible = impl_->surface->ensure_accessible();
     accessible.set_hidden(impl_->toasts.empty());
     accessible.set_name(impl_->toasts.empty() ? "" : impl_->toasts.front().title);
     if (impl_->toasts.empty() || impl_->toasts.front().action_label.empty()) {
@@ -239,7 +239,7 @@ void ToastOverlay::dismiss_all() {
     impl_->toasts.clear();
     ++impl_->current_generation;
     impl_->surface->set_visible(false);
-    auto& accessible = ensure_accessible();
+    auto& accessible = impl_->surface->ensure_accessible();
     accessible.set_hidden(true);
     accessible.set_name("");
     accessible.remove_action(AccessibleAction::Activate);

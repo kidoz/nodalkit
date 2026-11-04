@@ -442,7 +442,8 @@ TEST_CASE("Banner, status page, and toast overlay expose GNOME feedback patterns
         overlay->dismiss_current();
     });
     REQUIRE(overlay->accessible() != nullptr);
-    REQUIRE(overlay->accessible()->perform_action(nk::AccessibleAction::Activate));
+    REQUIRE(
+        overlay->children().back()->accessible()->perform_action(nk::AccessibleAction::Activate));
     CHECK(action_requested);
     REQUIRE(overlay->current_toast() != nullptr);
     CHECK(overlay->current_toast()->title == "Saved");

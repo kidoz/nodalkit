@@ -6,11 +6,13 @@
 #include <memory>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
+#include <nk/runtime/event_loop.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/text_field.h>
+#include <nk/widgets/toast_overlay.h>
 #include <vector>
 
 namespace {
@@ -522,4 +524,39 @@ TEST_CASE("Dialog focus starts on the default button, stays inside, and is resto
     CHECK_FALSE(dialog->is_presented());
     CHECK(tree.info(tree.root_children().at(0))->focused);
     CHECK(connection.connected());
+}
+
+TEST_CASE("Toast notifications never hide the content accessibility subtree",
+          "[accessibility][toast]") {
+    nk::EventLoop event_loop;
+    nk::Window window({.title = "Welcome"});
+    auto overlay = nk::ToastOverlay::create();
+    auto open = nk::Button::create("Open ROM");
+    overlay->set_child(open);
+    window.set_child(overlay);
+    nk::detail::AccessibilityTree tree(window);
+    const auto group = tree.root_children().at(0);
+    const auto button = tree.children(group).at(0);
+    const auto check_content = [&] {
+        CHECK(tree.info(group)->role == nk::AccessibleRole::Group);
+        CHECK(tree.is_exposed(button));
+        CHECK(tree.info(button)->name == "Open ROM");
+    };
+    check_content();
+    overlay->add_toast(
+        {.title = "Opened", .action_label = "", .timeout = std::chrono::milliseconds::zero()});
+    check_content();
+    REQUIRE(tree.children(group).size() == 2);
+    const auto status = tree.children(group).back();
+    CHECK(tree.info(status)->role == nk::AccessibleRole::Status);
+    CHECK(tree.info(status)->name == "Opened");
+    REQUIRE(event_loop.poll());
+    check_content();
+    CHECK_FALSE(tree.is_exposed(status));
+    overlay->add_toast({.title = "Saved", .action_label = ""});
+    overlay->dismiss_current();
+    check_content();
+    overlay->add_toast({.title = "Saved again", .action_label = ""});
+    overlay->dismiss_all();
+    check_content();
 }
