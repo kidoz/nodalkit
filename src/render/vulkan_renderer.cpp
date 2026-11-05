@@ -3594,6 +3594,10 @@ private:
     bool collect_draw_commands(const RenderNode& node) {
         switch (node.kind()) {
         case RenderNodeKind::Line:
+            // Strokes are rasterized by SoftwareRenderer and uploaded through
+            // the Vulkan presentation path until the GPU pipeline supports them.
+            // Reporting success here silently discarded dropdown chevrons.
+            return false;
         case RenderNodeKind::Path:
         case RenderNodeKind::Transform:
             return true;

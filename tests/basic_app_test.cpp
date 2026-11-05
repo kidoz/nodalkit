@@ -6271,3 +6271,37 @@ TEST_CASE("Revealing oversized controls keeps a stable nearest edge", "[app][scr
         }
     }
 }
+
+TEST_CASE("Vulkan preserves chevron strokes instead of silently omitting them",
+          "[app][render][vulkan][chevron]") {
+#if defined(__linux__)
+    if (!nk::renderer_backend_available(nk::RendererBackend::Vulkan) ||
+        std::getenv("WAYLAND_DISPLAY") == nullptr) {
+        SKIP("Requires Linux Wayland and Vulkan");
+    }
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("vulkan") == 0);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan chevron", .width = 200, .height = 160});
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect([](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        ctx.add_line({a.x + 30, a.y + 30}, {a.x + 50, a.y + 50}, nk::Color::from_rgb(0, 0, 0), 4);
+        ctx.add_line({a.x + 50, a.y + 50}, {a.x + 70, a.y + 30}, nk::Color::from_rgb(0, 0, 0), 4);
+    });
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
+    const auto captured = window.inspector().capture_debug_screenshot();
+    REQUIRE(captured);
+    REQUIRE(captured->source_backend == nk::RendererBackend::Vulkan);
+    const auto a = canvas->allocation();
+    const int x = static_cast<int>((a.x + 40) * window.scale_factor());
+    const int y = static_cast<int>((a.y + 40) * window.scale_factor());
+    CHECK(pixel_matches(screenshot_pixel(*captured, x, y), 0, 0, 0, 2));
+    CHECK(connection.connected());
+#else
+    SKIP("Requires Linux Wayland and Vulkan");
+#endif
+}
