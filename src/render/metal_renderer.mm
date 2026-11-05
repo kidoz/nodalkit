@@ -85,6 +85,7 @@ struct PrimitiveCommand {
 struct ImageCommand {
     Rect rect{};
     const uint32_t* pixel_data = nullptr;
+    const uint32_t* cache_identity = nullptr;
     int src_width = 0;
     int src_height = 0;
     ScaleMode scale_mode = ScaleMode::NearestNeighbor;
@@ -283,6 +284,9 @@ bool upload_texture_region(id<MTLDevice> device,
                            MTLRegion region,
                            const void* bytes,
                            NSUInteger bytes_per_row) {
+    if (texture == nil || bytes == nullptr || region.size.width == 0 || region.size.height == 0) {
+        return false;
+    }
     if (texture.storageMode == MTLStorageModeShared) {
         [texture replaceRegion:region mipmapLevel:0 withBytes:bytes bytesPerRow:bytes_per_row];
         return true;
@@ -360,6 +364,84 @@ std::size_t hash_bytes(const uint8_t* data, std::size_t size) {
         hash *= 1099511628211ULL;
     }
     return hash;
+}
+
+std::unique_ptr<RenderNode> copy_gpu_tree_for_recovery(const RenderNode& node,
+                                                       std::vector<ImageCommand>& images,
+                                                       std::size_t& image_index) {
+    const auto bounds = node.bounds();
+    switch (node.kind()) {
+    case RenderNodeKind::ColorRect:
+        return std::make_unique<ColorRectNode>(bounds,
+                                               static_cast<const ColorRectNode&>(node).color());
+    case RenderNodeKind::RoundedRect: {
+        const auto& rect = static_cast<const RoundedRectNode&>(node);
+        return std::make_unique<RoundedRectNode>(bounds, rect.color(), rect.corner_radius());
+    }
+    case RenderNodeKind::Border: {
+        const auto& border = static_cast<const BorderNode&>(node);
+        return std::make_unique<BorderNode>(
+            bounds, border.color(), border.thickness(), border.corner_radius());
+    }
+    case RenderNodeKind::Line: {
+        const auto& line = static_cast<const LineNode&>(node);
+        auto copy =
+            std::make_unique<LineNode>(line.start(), line.end(), line.color(), line.thickness());
+        copy->set_bounds(bounds);
+        return copy;
+    }
+    case RenderNodeKind::Text: {
+        const auto& text = static_cast<const TextNode&>(node);
+        return std::make_unique<TextNode>(Point{bounds.x, bounds.y},
+                                          Size{bounds.width, bounds.height},
+                                          text.text(),
+                                          text.text_color(),
+                                          text.font(),
+                                          text.max_width());
+    }
+    case RenderNodeKind::Image: {
+        const auto& image = static_cast<const ImageNode&>(node);
+        if (image.pixel_data() == nullptr || image.src_width() <= 0 || image.src_height() <= 0) {
+            return std::make_unique<ImageNode>(bounds, nullptr, 0, 0, image.scale_mode());
+        }
+        const auto count = static_cast<std::size_t>(image.src_width()) *
+                           static_cast<std::size_t>(image.src_height());
+        auto pixels = std::make_shared<const std::vector<uint32_t>>(image.pixel_data(),
+                                                                    image.pixel_data() + count);
+        images[image_index++].pixel_data = pixels->data();
+        return std::make_unique<ImageNode>(
+            bounds, std::move(pixels), image.src_width(), image.src_height(), image.scale_mode());
+    }
+    case RenderNodeKind::Container:
+    case RenderNodeKind::RoundedClip: {
+        std::unique_ptr<RenderNode> copy;
+        if (node.kind() == RenderNodeKind::RoundedClip) {
+            copy = std::make_unique<RoundedClipNode>(
+                bounds, static_cast<const RoundedClipNode&>(node).corner_radius());
+        } else {
+            copy = std::make_unique<RenderNode>(RenderNodeKind::Container);
+            copy->set_bounds(bounds);
+        }
+        for (const auto& child : node.children()) {
+            if (child == nullptr) {
+                continue;
+            }
+            auto child_copy = copy_gpu_tree_for_recovery(*child, images, image_index);
+            if (child_copy == nullptr) {
+                return nullptr;
+            }
+            copy->append_child(std::move(child_copy));
+        }
+        return copy;
+    }
+    case RenderNodeKind::Opacity:
+    case RenderNodeKind::LinearGradient:
+    case RenderNodeKind::Shadow:
+    case RenderNodeKind::Path:
+    case RenderNodeKind::Transform:
+        return nullptr;
+    }
+    return nullptr;
 }
 
 template <typename Uniforms, typename ClipArray>
@@ -765,8 +847,7 @@ public:
 
     void set_damage_regions(std::span<const Rect> regions) override {
         damage_regions_.clear();
-        if (logical_viewport_.width <= 0.0F || logical_viewport_.height <= 0.0F ||
-            regions.empty()) {
+        if (!has_valid_framebuffer() || regions.empty()) {
             last_hotspot_counters_.damage_region_count = 0;
             full_redraw_ = true;
             return;
@@ -776,10 +857,8 @@ public:
         const Rect viewport = {
             0.0F,
             0.0F,
-            static_cast<float>(std::max(
-                1, static_cast<int>(std::lround(logical_viewport_.width * scale_factor_)))),
-            static_cast<float>(std::max(
-                1, static_cast<int>(std::lround(logical_viewport_.height * scale_factor_)))),
+            static_cast<float>(software_->pixel_width()),
+            static_cast<float>(software_->pixel_height()),
         };
         for (const auto& region : regions) {
             Rect scaled = scale_rect(region, scale_factor_);
@@ -835,7 +914,7 @@ public:
         active_clips_.clear();
         trim_texture_cache(image_texture_cache_, kImageTextureCacheMaxEntries);
         trim_texture_cache(text_texture_cache_, kTextTextureCacheMaxEntries);
-        last_root_ = nullptr;
+        recovery_root_.reset();
         needs_software_fallback_ = false;
         software_frame_rendered_ = false;
         software_frame_finalized_ = false;
@@ -848,14 +927,27 @@ public:
         const auto preserved_damage_region_count = last_hotspot_counters_.damage_region_count;
         last_hotspot_counters_ = {};
         last_hotspot_counters_.damage_region_count = preserved_damage_region_count;
-        last_root_ = &root;
         draw_commands_.clear();
         primitive_commands_.clear();
         image_commands_.clear();
         text_commands_.clear();
         active_clips_.clear();
+        recovery_root_.reset();
+        software_frame_rendered_ = false;
+        software_frame_finalized_ = false;
+        if (!has_valid_framebuffer()) {
+            return;
+        }
         needs_software_fallback_ = !collect_draw_commands(root);
+        if (!needs_software_fallback_) {
+            std::size_t image_index = 0;
+            // Keep recovery and deferred image uploads independent of the caller's tree.
+            recovery_root_ = copy_gpu_tree_for_recovery(root, image_commands_, image_index);
+            needs_software_fallback_ = recovery_root_ == nullptr;
+        }
         if (needs_software_fallback_) {
+            software_->render(root);
+            software_frame_rendered_ = true;
             (void)ensure_software_frame();
         }
     }
@@ -868,18 +960,17 @@ public:
     }
 
     void present(NativeSurface& surface) override {
+        if (!has_valid_framebuffer()) {
+            scene_initialized_ = false;
+            return;
+        }
         if (!attach_surface(surface) || layer_ == nil) {
             present_software_direct(surface);
             return;
         }
 
-        const int width =
-            std::max(1, static_cast<int>(std::lround(logical_viewport_.width * scale_factor_)));
-        const int height =
-            std::max(1, static_cast<int>(std::lround(logical_viewport_.height * scale_factor_)));
-        if (width <= 0 || height <= 0) {
-            return;
-        }
+        const int width = software_->pixel_width();
+        const int height = software_->pixel_height();
 
         id<CAMetalDrawable> drawable = [layer_ nextDrawable];
         if (drawable == nil) {
@@ -995,8 +1086,12 @@ public:
                     if (!draw_command_intersects_damage(draw_command, damage_region)) {
                         continue;
                     }
-                    encode_draw_command(
-                        scene_encoder, active_pipeline, draw_command, width, height);
+                    if (!encode_draw_command(
+                            scene_encoder, active_pipeline, draw_command, width, height)) {
+                        [scene_encoder endEncoding];
+                        present_software_direct(surface);
+                        return;
+                    }
                 }
             }
             last_hotspot_counters_.gpu_present_region_count = damage_regions_.size();
@@ -1007,7 +1102,12 @@ public:
                 damage_pixel_count;
         } else {
             for (const auto& draw_command : draw_commands_) {
-                encode_draw_command(scene_encoder, active_pipeline, draw_command, width, height);
+                if (!encode_draw_command(
+                        scene_encoder, active_pipeline, draw_command, width, height)) {
+                    [scene_encoder endEncoding];
+                    present_software_direct(surface);
+                    return;
+                }
             }
             last_hotspot_counters_.gpu_present_region_count = 0;
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::FullRedrawCopyBack;
@@ -1051,12 +1151,20 @@ public:
     }
 
 private:
+    [[nodiscard]] bool has_valid_framebuffer() const {
+        return software_->pixel_width() > 0 && software_->pixel_height() > 0 &&
+               software_->pixel_data() != nullptr;
+    }
+
     [[nodiscard]] bool ensure_software_frame() {
+        if (!has_valid_framebuffer()) {
+            return false;
+        }
         if (!software_frame_rendered_) {
-            if (last_root_ == nullptr) {
+            if (recovery_root_ == nullptr) {
                 return false;
             }
-            software_->render(*last_root_);
+            software_->render(*recovery_root_);
             software_frame_rendered_ = true;
         }
         if (!software_frame_finalized_) {
@@ -1073,6 +1181,7 @@ private:
             return;
         }
         software_->present(surface);
+        last_hotspot_counters_ = software_->last_hotspot_counters();
     }
 
     [[nodiscard]] bool ensure_scene_texture(int width, int height) {
@@ -1168,11 +1277,11 @@ private:
         ++last_hotspot_counters_.gpu_draw_call_count;
     }
 
-    void encode_draw_command(id<MTLRenderCommandEncoder> encoder,
-                             id<MTLRenderPipelineState>& active_pipeline,
-                             const DrawCommand& draw_command,
-                             int width,
-                             int height) {
+    [[nodiscard]] bool encode_draw_command(id<MTLRenderCommandEncoder> encoder,
+                                           id<MTLRenderPipelineState>& active_pipeline,
+                                           const DrawCommand& draw_command,
+                                           int width,
+                                           int height) {
         switch (draw_command.kind) {
         case DrawCommandKind::Primitive: {
             const auto& command = primitive_commands_[draw_command.command_index];
@@ -1212,7 +1321,7 @@ private:
             const auto& command = image_commands_[draw_command.command_index];
             id<MTLTexture> image_texture = upload_image_texture(command);
             if (image_texture == nil) {
-                break;
+                return false;
             }
 
             if (active_pipeline != image_pipeline_) {
@@ -1245,7 +1354,7 @@ private:
             const auto& command = text_commands_[draw_command.command_index];
             id<MTLTexture> text_texture = upload_text_texture(command);
             if (text_texture == nil) {
-                break;
+                return false;
             }
 
             if (active_pipeline != image_pipeline_) {
@@ -1272,6 +1381,7 @@ private:
             break;
         }
         }
+        return true;
     }
 
     template <typename Map> void trim_texture_cache(Map& cache, std::size_t max_entries) {
@@ -1303,7 +1413,8 @@ private:
         const std::size_t byte_count = static_cast<std::size_t>(command.src_width) *
                                        static_cast<std::size_t>(command.src_height) * 4;
         const ImageTextureCacheKey cache_key{
-            .pixel_data = command.pixel_data,
+            .pixel_data =
+                command.cache_identity != nullptr ? command.cache_identity : command.pixel_data,
             .width = command.src_width,
             .height = command.src_height,
             .content_hash =
@@ -1575,6 +1686,7 @@ private:
             ImageCommand command{
                 .rect = image_node.bounds(),
                 .pixel_data = image_node.pixel_data(),
+                .cache_identity = image_node.pixel_data(),
                 .src_width = image_node.src_width(),
                 .src_height = image_node.src_height(),
                 .scale_mode = image_node.scale_mode(),
@@ -1635,7 +1747,7 @@ private:
     CAMetalLayer* layer_ = nil;
     std::unique_ptr<SoftwareRenderer> software_;
     TextShaper* text_shaper_ = nullptr;
-    const RenderNode* last_root_ = nullptr;
+    std::unique_ptr<RenderNode> recovery_root_;
     std::unordered_map<TextKey, std::shared_ptr<ShapedText>, TextKeyHash> shaped_text_cache_;
     std::unordered_map<ImageTextureCacheKey, TextureCacheEntry, ImageTextureCacheKeyHash>
         image_texture_cache_;
