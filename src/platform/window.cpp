@@ -453,7 +453,11 @@ std::vector<Widget*> widget_path_to_root(Widget* widget) {
 }
 
 DragOperation dispatch_drag_drop_bubble(Widget* target, DragDropEvent& event) {
+    std::vector<std::shared_ptr<Widget>> path;
     for (auto* current = target; current != nullptr; current = current->parent()) {
+        path.push_back(current->shared_from_this());
+    }
+    for (const auto& current : path) {
         if (current->handle_drag_drop_event(event)) {
             return event.accepted_operation;
         }
@@ -2799,6 +2803,10 @@ void Window::handle_widget_state_change(Widget& widget) {
 
 void Window::handle_widget_detached(Widget& widget) {
     purge_dirty_widget(widget);
+    if (impl_->drag_hovered_widget != nullptr &&
+        is_descendant_of(impl_->drag_hovered_widget, &widget)) {
+        impl_->drag_hovered_widget = nullptr;
+    }
     if (impl_->hovered_widget != nullptr && is_descendant_of(impl_->hovered_widget, &widget)) {
         impl_->hovered_widget->set_state_flag(StateFlags::Hovered, false);
         impl_->hovered_widget = nullptr;
@@ -3399,7 +3407,7 @@ Widget* Window::drag_target_at(Point point) const {
         if (auto* hit = hit_test_widget(it->widget.get(), point)) {
             return hit;
         }
-        if (it->modal && it->widget->hit_test(point)) {
+        if (it->modal) {
             return it->widget.get();
         }
     }
@@ -3444,6 +3452,8 @@ DragOperation Window::dispatch_drag_drop_event(DragDropEvent event) {
 
     auto* target = event.type == DragDropEventType::Leave ? impl_->drag_hovered_widget
                                                           : drag_target_at(event.position);
+    const auto target_keep_alive = target != nullptr ? target->shared_from_this() : nullptr;
+    DragOperation enter_accepted = DragOperation::None;
     if (event.type == DragDropEventType::Enter || event.type == DragDropEventType::Motion ||
         event.type == DragDropEventType::Drop) {
         if (impl_->drag_hovered_widget != target) {
@@ -3468,16 +3478,20 @@ DragOperation Window::dispatch_drag_drop_event(DragDropEvent event) {
                     .modifiers = event.modifiers,
                     .external = event.external,
                 };
-                (void)dispatch_drag_drop_bubble(impl_->drag_hovered_widget, enter_event);
+                enter_accepted = dispatch_drag_drop_bubble(impl_->drag_hovered_widget, enter_event);
             }
         }
     }
 
     DragOperation accepted = DragOperation::None;
+    if (event.type != DragDropEventType::Leave && target != drag_target_at(event.position)) {
+        impl_->drag_hovered_widget = nullptr;
+        return DragOperation::None;
+    }
     if (target != nullptr && event.type != DragDropEventType::Enter) {
         accepted = dispatch_drag_drop_bubble(target, event);
     } else if (target != nullptr) {
-        accepted = event.accepted_operation;
+        accepted = enter_accepted;
     }
 
     if (event.type == DragDropEventType::Leave || event.type == DragDropEventType::Drop) {

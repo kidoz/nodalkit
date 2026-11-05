@@ -26,9 +26,11 @@ struct wp_cursor_shape_device_v1;
 
 #include <chrono>
 #include <cstdint>
+#include <nk/platform/drag_drop.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/ui_core/cursor_shape.h>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // wl_fixed_t is int32_t in wayland-util.h; forward-declare the typedef so
@@ -187,6 +189,9 @@ private:
     void send_clipboard_text(int fd, const std::string& text);
     void sync_text_input_state();
     void disable_text_input();
+    void reset_drag_offer(bool notify_leave);
+    void poll_drag_transfer();
+    void dispatch_drag_event(DragDropEventType type);
 
     WaylandBackend& backend_;
     wl_seat* seat_;
@@ -196,6 +201,14 @@ private:
     wl_data_device* clipboard_device_ = nullptr;
     wl_data_source* clipboard_source_ = nullptr;
     wl_data_offer* clipboard_offer_ = nullptr;
+    std::unordered_map<wl_data_offer*, std::vector<std::string>> offer_mime_types_;
+    wl_data_offer* drag_offer_ = nullptr;
+    WaylandSurface* drag_surface_ = nullptr;
+    Point drag_position_{};
+    std::string drag_mime_type_;
+    uint32_t drag_action_ = 0;
+    bool drag_dropped_ = false;
+    std::unique_ptr<detail::ClipboardTransfer> drag_transfer_;
     zwp_primary_selection_device_v1* primary_selection_device_ = nullptr;
     zwp_primary_selection_source_v1* primary_selection_source_ = nullptr;
     zwp_primary_selection_offer_v1* primary_selection_offer_ = nullptr;

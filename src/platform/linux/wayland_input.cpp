@@ -7,6 +7,7 @@
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
 #include "wayland_backend.h"
+#include "wayland_drop.h"
 #include "wayland_surface.h"
 
 #include <algorithm>
@@ -16,14 +17,19 @@
 #include <cstring>
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
+#include <memory>
 #include <nk/foundation/logging.h>
 #include <nk/platform/application.h>
+#include <nk/platform/drag_drop.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <optional>
 #include <poll.h>
 #include <string>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <utility>
+#include <wayland-client-protocol.h>
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon-compose.h>
 #include <xkbcommon/xkbcommon.h>
@@ -521,7 +527,13 @@ WaylandInput::WaylandInput(WaylandBackend& backend, wl_seat* seat)
 
 WaylandInput::~WaylandInput() {
     stop_key_repeat();
+    reset_drag_offer(false);
     destroy_clipboard_offer();
+    for (const auto& [offer, types] : offer_mime_types_) {
+        (void)types;
+        wl_data_offer_destroy(offer);
+    }
+    offer_mime_types_.clear();
     destroy_clipboard_source();
     if (clipboard_device_ != nullptr) {
         wl_data_device_destroy(clipboard_device_);
@@ -797,6 +809,7 @@ void WaylandInput::set_clipboard_text(std::string text) {
 void WaylandInput::destroy_clipboard_offer() {
     ++clipboard_generation_;
     if (clipboard_offer_ != nullptr) {
+        offer_mime_types_.erase(clipboard_offer_);
         wl_data_offer_destroy(clipboard_offer_);
         clipboard_offer_ = nullptr;
     }
@@ -893,6 +906,7 @@ void WaylandInput::read_clipboard_text_async(std::function<void(std::string)> ca
 }
 
 void WaylandInput::poll_clipboard_transfers() {
+    poll_drag_transfer();
     std::vector<std::pair<std::function<void(std::string)>, std::string>> completed;
     for (auto it = clipboard_transfers_.begin(); it != clipboard_transfers_.end();) {
         const auto generation = it->primary ? primary_selection_generation_ : clipboard_generation_;
@@ -1278,6 +1292,9 @@ void WaylandInput::forget_surface(WaylandSurface* surface) {
     if (surface == nullptr) {
         return;
     }
+    if (drag_surface_ == surface) {
+        reset_drag_offer(false);
+    }
     if (pointer_focus_ == surface) {
         pointer_focus_ = nullptr;
     }
@@ -1448,31 +1465,159 @@ void WaylandInput::clipboard_data_offer(void* data,
     if (offer == nullptr) {
         return;
     }
-    // A new offer object is being introduced; its mime types arrive via subsequent `offer`
-    // events before the `selection` event commits it. Reset the pending list here so each
-    // offer accumulates its own mime types (the committed offer's list must survive the
-    // destroy_clipboard_offer() that the selection handler runs on the previous offer).
-    self->clipboard_offer_mime_types_.clear();
+    // Clipboard and drag offers can coexist. Accumulate MIME types on the
+    // offer itself until selection/enter identifies its purpose.
+    self->offer_mime_types_.try_emplace(offer);
     wl_data_offer_add_listener(offer, &clipboard_offer_listener, self);
 }
 
-void WaylandInput::clipboard_enter(void* /*data*/,
-                                   wl_data_device* /*device*/,
-                                   uint32_t /*serial*/,
-                                   wl_surface* /*surface*/,
-                                   wl_fixed_t /*x*/,
-                                   wl_fixed_t /*y*/,
-                                   wl_data_offer* /*offer*/) {}
+void WaylandInput::dispatch_drag_event(DragDropEventType type) {
+    if (drag_surface_ == nullptr || drag_mime_type_.empty()) {
+        return;
+    }
+    auto payload = std::make_shared<DragPayload>();
+    payload->mime_type = drag_mime_type_;
+    (void)drag_surface_->owner().dispatch_drag_drop_event(
+        {.type = type,
+         .position = drag_position_,
+         .payload = std::move(payload),
+         .requested_operation = DragOperation::Copy,
+         .external = true});
+}
 
-void WaylandInput::clipboard_leave(void* /*data*/, wl_data_device* /*device*/) {}
+void WaylandInput::reset_drag_offer(bool notify_leave) {
+    if (notify_leave) {
+        dispatch_drag_event(DragDropEventType::Leave);
+    }
+    drag_transfer_.reset();
+    if (drag_offer_ != nullptr) {
+        offer_mime_types_.erase(drag_offer_);
+        wl_data_offer_destroy(drag_offer_);
+    }
+    drag_offer_ = nullptr;
+    drag_surface_ = nullptr;
+    drag_mime_type_.clear();
+    drag_dropped_ = false;
+    drag_action_ = 0;
+}
 
-void WaylandInput::clipboard_motion(void* /*data*/,
-                                    wl_data_device* /*device*/,
-                                    uint32_t /*time*/,
-                                    wl_fixed_t /*x*/,
-                                    wl_fixed_t /*y*/) {}
+void WaylandInput::poll_drag_transfer() {
+    if (!drag_transfer_ || !drag_transfer_->poll()) {
+        return;
+    }
+    const bool success = drag_transfer_->succeeded();
+    auto data = drag_transfer_->take_text();
+    auto payload =
+        success ? detail::decode_wayland_drop(drag_mime_type_, std::move(data)) : std::nullopt;
+    // Detach native offer ownership before calling application code, which may
+    // close the target window or open a native file chooser.
+    auto* offer = drag_offer_;
+    auto* surface = drag_surface_;
+    const auto position = drag_position_;
+    const auto action = drag_action_;
+    const auto mime = drag_mime_type_;
+    offer_mime_types_.erase(offer);
+    drag_offer_ = nullptr;
+    drag_transfer_.reset();
+    drag_surface_ = nullptr;
+    drag_mime_type_.clear();
+    drag_dropped_ = false;
+    DragOperation accepted = DragOperation::None;
+    if (surface != nullptr) {
+        auto content = std::make_shared<DragPayload>(payload ? std::move(*payload) : DragPayload{});
+        content->mime_type = mime;
+        accepted = surface->owner().dispatch_drag_drop_event(
+            {.type = payload ? DragDropEventType::Drop : DragDropEventType::Leave,
+             .position = position,
+             .payload = std::move(content),
+             .requested_operation = DragOperation::Copy,
+             .external = true});
+    }
+    if (offer != nullptr) {
+        if (accepted == DragOperation::Copy && action == WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY &&
+            wl_data_offer_get_version(offer) >= WL_DATA_OFFER_FINISH_SINCE_VERSION) {
+            wl_data_offer_finish(offer);
+        }
+        wl_data_offer_destroy(offer);
+    }
+}
 
-void WaylandInput::clipboard_drop(void* /*data*/, wl_data_device* /*device*/) {}
+void WaylandInput::clipboard_enter(void* data,
+                                   wl_data_device*,
+                                   uint32_t serial,
+                                   wl_surface* surface,
+                                   wl_fixed_t x,
+                                   wl_fixed_t y,
+                                   wl_data_offer* offer) {
+    auto* self = static_cast<WaylandInput*>(data);
+    self->reset_drag_offer(true);
+    self->drag_offer_ = offer;
+    self->drag_surface_ = self->backend_.find_surface(surface);
+    self->drag_position_ = {static_cast<float>(wl_fixed_to_double(x)),
+                            static_cast<float>(wl_fixed_to_double(y))};
+    if (offer == nullptr) {
+        return;
+    }
+    if (self->drag_surface_ != nullptr) {
+        const auto& types = self->offer_mime_types_[offer];
+        for (const char* preferred : {"text/uri-list",
+                                      ClipboardMimeTextUtf8,
+                                      ClipboardMimeUtf8String,
+                                      ClipboardMimeTextPlain}) {
+            if (std::ranges::find(types, preferred) != types.end()) {
+                self->drag_mime_type_ = preferred;
+                break;
+            }
+        }
+    }
+    wl_data_offer_accept(
+        offer, serial, self->drag_mime_type_.empty() ? nullptr : self->drag_mime_type_.c_str());
+    if (wl_data_offer_get_version(offer) >= WL_DATA_OFFER_SET_ACTIONS_SINCE_VERSION) {
+        wl_data_offer_set_actions(
+            offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+    } else {
+        self->drag_action_ = WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+    }
+    self->dispatch_drag_event(DragDropEventType::Enter);
+}
+
+void WaylandInput::clipboard_leave(void* data, wl_data_device*) {
+    auto* self = static_cast<WaylandInput*>(data);
+    // A successful drop is followed by leave while its asynchronous read is
+    // still in progress. Only an undropped drag is cancelled by leave.
+    if (!self->drag_dropped_) {
+        self->reset_drag_offer(true);
+    }
+}
+
+void WaylandInput::clipboard_motion(
+    void* data, wl_data_device*, uint32_t, wl_fixed_t x, wl_fixed_t y) {
+    auto* self = static_cast<WaylandInput*>(data);
+    self->drag_position_ = {static_cast<float>(wl_fixed_to_double(x)),
+                            static_cast<float>(wl_fixed_to_double(y))};
+    self->dispatch_drag_event(DragDropEventType::Motion);
+}
+
+void WaylandInput::clipboard_drop(void* data, wl_data_device*) {
+    auto* self = static_cast<WaylandInput*>(data);
+    if (self->drag_offer_ == nullptr || self->drag_surface_ == nullptr ||
+        self->drag_mime_type_.empty() ||
+        self->drag_action_ != WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY) {
+        self->reset_drag_offer(true);
+        return;
+    }
+    std::array<int, 2> fds{-1, -1};
+    if (pipe2(fds.data(), O_CLOEXEC) != 0) {
+        self->reset_drag_offer(true);
+        return;
+    }
+    wl_data_offer_receive(self->drag_offer_, self->drag_mime_type_.c_str(), fds[1]);
+    close(fds[1]);
+    self->drag_dropped_ = true;
+    self->drag_transfer_ = std::make_unique<detail::ClipboardTransfer>(
+        fds[0], detail::ClipboardTransfer::Direction::Read);
+    (void)wl_display_flush(self->backend_.display());
+}
 
 void WaylandInput::clipboard_selection(void* data,
                                        wl_data_device* /*device*/,
@@ -1480,6 +1625,8 @@ void WaylandInput::clipboard_selection(void* data,
     auto* self = static_cast<WaylandInput*>(data);
     self->destroy_clipboard_offer();
     self->clipboard_offer_ = offer;
+    self->clipboard_offer_mime_types_ =
+        offer != nullptr ? self->offer_mime_types_[offer] : std::vector<std::string>{};
     if (offer == nullptr) {
         if (!self->owns_clipboard_) {
             self->clipboard_text_.clear();
@@ -1491,23 +1638,27 @@ void WaylandInput::clipboard_selection(void* data,
     }
 }
 
-void WaylandInput::clipboard_offer_offer(void* data,
-                                         wl_data_offer* /*offer*/,
-                                         const char* mime_type) {
+void WaylandInput::clipboard_offer_offer(void* data, wl_data_offer* offer, const char* mime_type) {
     auto* self = static_cast<WaylandInput*>(data);
     if (mime_type == nullptr) {
         return;
     }
-    self->clipboard_offer_mime_types_.emplace_back(mime_type);
+    auto& types = self->offer_mime_types_[offer];
+    if (types.size() < 128 && std::strlen(mime_type) < 1024) {
+        types.emplace_back(mime_type);
+    }
 }
 
 void WaylandInput::clipboard_offer_source_actions(void* /*data*/,
                                                   wl_data_offer* /*offer*/,
                                                   uint32_t /*source_actions*/) {}
 
-void WaylandInput::clipboard_offer_action(void* /*data*/,
-                                          wl_data_offer* /*offer*/,
-                                          uint32_t /*dnd_action*/) {}
+void WaylandInput::clipboard_offer_action(void* data, wl_data_offer* offer, uint32_t dnd_action) {
+    auto* self = static_cast<WaylandInput*>(data);
+    if (self->drag_offer_ == offer) {
+        self->drag_action_ = dnd_action;
+    }
+}
 
 void WaylandInput::clipboard_source_target(void* /*data*/,
                                            wl_data_source* /*source*/,

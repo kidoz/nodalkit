@@ -29,6 +29,7 @@ Task-oriented steps for developers who already know the basics.
 - [Use native window handles](how-to/use-native-window-handles.md)
 - [Export a support bundle](how-to/export-a-support-bundle.md)
 - [Validate accessibility and keyboard behavior](how-to/validate-accessibility.md)
+- [Receive external files and text](how-to/receive-file-drops.md)
 - [Assemble an emulator frontend](how-to/assemble-an-emulator-frontend.md)
 
 ## Reference

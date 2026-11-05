@@ -182,6 +182,13 @@ if host_machine.system() == 'linux'
         dependencies : [nk_dep, catch2_test_dep],
     )
     test('clipboard_transfer', test_clipboard_transfer)
+    test_wayland_drop = executable('test_wayland_drop',
+        'wayland_drop_test.cpp',
+        '../src/platform/linux/wayland_drop.cpp',
+        dependencies : [nk_dep, catch2_test_dep],
+    )
+    test('wayland_drop', test_wayland_drop)
+
     test_wayland_portal_contract = executable('test_wayland_portal_contract',
         'wayland_portal_contract_test.cpp',
         '../src/platform/linux/wayland_portal_helpers.cpp',

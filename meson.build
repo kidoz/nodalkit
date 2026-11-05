@@ -274,6 +274,7 @@ elif host_system == 'linux'
     nk_sources += files(
         'src/platform/linux/atspi_dbus.cpp',
         'src/platform/linux/clipboard_transfer.cpp',
+        'src/platform/linux/wayland_drop.cpp',
         'src/platform/linux/wayland_backend.cpp',
         'src/platform/linux/wayland_portal_helpers.cpp',
         'src/platform/linux/wayland_surface.cpp',

@@ -10,6 +10,8 @@
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/box.h>
+#include <nk/widgets/dialog.h>
 
 namespace {
 
@@ -164,4 +166,49 @@ TEST_CASE("Window dispatches external file-drop payloads to widget drop targets"
     REQUIRE(accepted == nk::DragOperation::Copy);
     REQUIRE(enters == 1);
     REQUIRE(drops == 1);
+}
+
+TEST_CASE("External drops never reach content behind a modal even outside its bounds",
+          "[drag-drop]") {
+    nk::Window window({.title = "Modal drop", .width = 300, .height = 200});
+    auto target = DropProbeWidget::create();
+    window.set_child(target);
+    target->allocate({0, 0, 300, 200});
+    int drops = 0;
+    auto connection = target->on_drop().connect([&](nk::DragDropEvent&) { ++drops; });
+    auto modal = nk::Dialog::create("Modal");
+    modal->present(window);
+    modal->allocate({50, 50, 100, 100});
+    auto payload = std::make_shared<nk::DragPayload>(nk::DragPayload::from_files({"game.nes"}));
+    (void)window.dispatch_drag_drop_event({.type = nk::DragDropEventType::Drop,
+                                           .position = {10, 10},
+                                           .payload = payload,
+                                           .external = true});
+    CHECK(drops == 0);
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Drop dispatch tolerates a target removing itself during drag enter", "[drag-drop]") {
+    nk::Window window({.title = "Detached drop target", .width = 200, .height = 100});
+    auto root = nk::Box::create();
+    auto target = DropProbeWidget::create();
+    root->append(target);
+    window.set_child(root);
+    root->allocate({0, 0, 200, 100});
+    target->allocate({0, 0, 200, 100});
+    int drops = 0;
+    auto enter = target->on_drag_enter().connect([&](nk::DragDropEvent&) {
+        root->remove(*target);
+        target.reset();
+    });
+    auto drop = target->on_drop().connect([&](nk::DragDropEvent&) { ++drops; });
+    const auto payload =
+        std::make_shared<nk::DragPayload>(nk::DragPayload::from_files({"game.nes"}));
+    CHECK(window.dispatch_drag_drop_event({.type = nk::DragDropEventType::Drop,
+                                           .position = {50, 50},
+                                           .payload = payload,
+                                           .external = true}) == nk::DragOperation::None);
+    CHECK(drops == 0);
+    (void)enter;
+    (void)drop;
 }
