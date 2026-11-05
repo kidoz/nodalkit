@@ -1,11 +1,17 @@
+#include "accessible_item.h"
+
 #include <algorithm>
+#include <cstddef>
 #include <functional>
+#include <memory>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
+#include <nk/ui_core/state_flags.h>
 #include <nk/widgets/menu_bar.h>
 #include <optional>
+#include <utility>
 
 namespace nk {
 
@@ -82,6 +88,14 @@ Rect popup_item_rect(const PopupGeometry& geometry, int index) {
 
 struct MenuBar::Impl {
     std::vector<Menu> menus;
+
+    struct SemanticEntry {
+        int menu;
+        MenuPath path;
+        std::shared_ptr<detail::AccessibleItem> widget;
+    };
+
+    std::vector<SemanticEntry> accessible_items;
     std::shared_ptr<ActionGroup> actions;
     ScopedConnection actions_changed;
     Signal<std::string_view> action_signal;
@@ -106,11 +120,21 @@ MenuBar::~MenuBar() = default;
 
 void MenuBar::add_menu(Menu menu) {
     impl_->menus.push_back(std::move(menu));
+    rebuild_accessible_items();
     queue_layout();
     queue_redraw();
 }
 
 void MenuBar::clear() {
+    for (const auto& entry : impl_->accessible_items) {
+        if (entry.path.empty()) {
+            remove_child(*entry.widget);
+        }
+    }
+    impl_->accessible_items.clear();
+    impl_->open_menu = -1;
+    impl_->open_path.clear();
+    impl_->highlighted_path.clear();
     impl_->menus.clear();
     queue_layout();
     queue_redraw();
@@ -127,10 +151,12 @@ void MenuBar::set_action_group(std::shared_ptr<ActionGroup> actions) {
         impl_->actions_changed = ScopedConnection{
             impl_->actions->on_changed().connect([weak = weak_from_this()](std::string_view) {
                 if (auto widget = weak.lock()) {
+                    static_cast<MenuBar&>(*widget).sync_accessible_items();
                     widget->queue_redraw();
                 }
             })};
     }
+    sync_accessible_items();
     queue_redraw();
 }
 
@@ -204,7 +230,7 @@ PopupGeometry popup_geometry(Rect anchor,
                              bool submenu,
                              MeasureTextFn&& measure_text_fn) {
     PopupGeometry geometry;
-    geometry.item_height = 28.0F;
+    geometry.item_height = std::max(28.0F, measure_text_fn("Ag").height + 10.0F);
     geometry.bounds = submenu
                           ? Rect{anchor.right() + 4.0F,
                                  anchor.y - 4.0F,
@@ -404,12 +430,133 @@ std::vector<Rect> popup_damage_regions(Rect /*bar_rect*/,
 } // namespace
 
 SizeRequest MenuBar::measure(const Constraints& constraints) const {
-    const float h = theme_number("min-height", 32.0F);
+    const float h =
+        std::max(theme_number("min-height", 32.0F), measure_text("Ag", menu_font()).height + 12.0F);
     const float w = constraints.max_width;
     return {0, h, w, h};
 }
 
+void MenuBar::allocate(const Rect& allocation) {
+    Widget::allocate(allocation);
+    sync_accessible_items();
+}
+
+void MenuBar::rebuild_accessible_items() {
+    // Existing command identities survive adding a sibling top-level menu.
+    const int menu_index = static_cast<int>(impl_->menus.size()) - 1;
+    const auto make_item = [this, menu_index](std::string label, MenuPath path) {
+        return detail::AccessibleItem::create(
+            std::move(label),
+            AccessibleRole::MenuItem,
+            [weak = weak_from_this(), menu_index, path] {
+                auto self = std::static_pointer_cast<MenuBar>(weak.lock());
+                if (!self || !self->is_sensitive() ||
+                    menu_index >= static_cast<int>(self->impl_->menus.size())) {
+                    return false;
+                }
+                if (path.empty()) {
+                    self->grab_focus();
+                    self->preserve_damage_regions_for_next_redraw();
+                    self->impl_->open_menu = menu_index;
+                    self->impl_->open_path.clear();
+                    self->impl_->highlighted_path.clear();
+                } else {
+                    const auto* item = item_at_path(self->impl_->menus[menu_index], path);
+                    if (!item || !self->item_enabled(*item) ||
+                        self->impl_->open_menu != menu_index) {
+                        return false;
+                    }
+                    if (!item->children.empty()) {
+                        self->preserve_damage_regions_for_next_redraw();
+                        self->impl_->open_path = path;
+                        self->impl_->highlighted_path = path;
+                    } else {
+                        const auto action = item->action_name;
+                        self->preserve_damage_regions_for_next_redraw();
+                        self->impl_->open_menu = -1;
+                        self->impl_->open_path.clear();
+                        self->impl_->highlighted_path.clear();
+                        self->sync_accessible_items();
+                        self->queue_redraw();
+                        self->activate_action(action);
+                        return true;
+                    }
+                }
+                self->sync_accessible_items();
+                self->queue_redraw();
+                return true;
+            });
+    };
+    const auto& menu = impl_->menus.back();
+    auto top = make_item(menu.title, {});
+    append_child(top);
+    impl_->accessible_items.push_back({menu_index, {}, top});
+    std::function<void(const std::vector<MenuItem>&, MenuPath, detail::AccessibleItem&)> add;
+    add = [&](const std::vector<MenuItem>& items, MenuPath prefix, detail::AccessibleItem& parent) {
+        for (std::size_t index = 0; index < items.size(); ++index) {
+            if (items[index].separator) {
+                continue;
+            }
+            auto path = prefix;
+            path.push_back(static_cast<int>(index));
+            auto child = make_item(items[index].label, path);
+            child->ensure_accessible().set_hidden(true);
+            parent.append(child);
+            impl_->accessible_items.push_back({menu_index, path, child});
+            add(items[index].children, path, *child);
+        }
+    };
+    add(menu.items, {}, *top);
+    sync_accessible_items();
+}
+
+void MenuBar::sync_accessible_items() {
+    const auto measure_menu_text = [&](std::string_view text) {
+        return measure_text(text, menu_font());
+    };
+    const auto titles = menu_title_rects(allocation(), impl_->menus, measure_menu_text);
+    for (const auto& entry : impl_->accessible_items) {
+        Rect bounds = titles[entry.menu];
+        bool visible = true;
+        bool enabled = true;
+        const auto* items = &impl_->menus[entry.menu].items;
+        for (std::size_t depth = 0; depth < entry.path.size(); ++depth) {
+            visible =
+                visible && impl_->open_menu == entry.menu &&
+                (depth == 0 || (impl_->open_path.size() >= depth &&
+                                std::equal(entry.path.begin(),
+                                           entry.path.begin() + static_cast<std::ptrdiff_t>(depth),
+                                           impl_->open_path.begin())));
+            const auto geometry = popup_geometry(bounds, *items, depth != 0, measure_menu_text);
+            const auto& item = (*items)[entry.path[depth]];
+            bounds = popup_item_rect(geometry, entry.path[depth]);
+            enabled = enabled && item_enabled(item);
+            items = &item.children;
+        }
+        entry.widget->set_sensitive(enabled);
+        entry.widget->allocate(bounds);
+        entry.widget->set_state_flag(
+            StateFlags::Selected,
+            impl_->open_menu == entry.menu &&
+                (entry.path.empty() || impl_->highlighted_path == entry.path));
+        if (!entry.path.empty()) {
+            const auto* item = item_at_path(impl_->menus[entry.menu], entry.path);
+            const auto action = impl_->actions ? impl_->actions->find(item->action_name) : nullptr;
+            entry.widget->set_state_flag(StateFlags::Checked, action && action->is_checked());
+        }
+        entry.widget->ensure_accessible().set_hidden(!visible);
+    }
+}
+
 bool MenuBar::handle_mouse_event(const MouseEvent& event) {
+    const auto keep_alive = weak_from_this().lock();
+
+    struct SyncOnExit {
+        MenuBar& owner;
+
+        ~SyncOnExit() { owner.sync_accessible_items(); }
+    } sync{*this};
+
     const auto point = Point{event.x, event.y};
     const auto font = menu_font();
     const auto measure_menu_text = [&](std::string_view text) { return measure_text(text, font); };
@@ -563,6 +710,14 @@ bool MenuBar::handle_mouse_event(const MouseEvent& event) {
 }
 
 bool MenuBar::handle_key_event(const KeyEvent& event) {
+    const auto keep_alive = weak_from_this().lock();
+
+    struct SyncOnExit {
+        MenuBar& owner;
+
+        ~SyncOnExit() { owner.sync_accessible_items(); }
+    } sync{*this};
+
     if (event.type != KeyEvent::Type::Press || impl_->menus.empty()) {
         return false;
     }
@@ -791,6 +946,14 @@ CursorShape MenuBar::cursor_shape() const {
 }
 
 void MenuBar::on_focus_changed(bool focused) {
+    const auto keep_alive = weak_from_this().lock();
+
+    struct SyncOnExit {
+        MenuBar& owner;
+
+        ~SyncOnExit() { owner.sync_accessible_items(); }
+    } sync{*this};
+
     if (focused || impl_->open_menu < 0) {
         return;
     }

@@ -73,6 +73,7 @@
 #include <nk/widgets/clamp.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/command_palette.h>
+#include <nk/widgets/context_menu.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
@@ -1219,6 +1220,9 @@ void force_symbol_references() {
         &nk::ComboBox::damage_regions);
     (void)static_cast<nk::CursorShape (nk::ComboBox::*)() const>(&nk::ComboBox::cursor_shape);
     (void)static_cast<void (nk::ComboBox::*)(bool)>(&nk::ComboBox::on_focus_changed);
+    (void)static_cast<void (nk::ComboBox::*)(const nk::Rect&)>(&nk::ComboBox::allocate);
+    (void)static_cast<void (nk::ContextMenu::*)(const nk::Rect&)>(&nk::ContextMenu::allocate);
+    (void)static_cast<void (nk::MenuBar::*)(const nk::Rect&)>(&nk::MenuBar::allocate);
     (void)&nk::Dialog::create;
     (void)static_cast<void (nk::Dialog::*)(std::string, nk::DialogResponse)>(
         &nk::Dialog::add_button);
@@ -1226,6 +1230,7 @@ void force_symbol_references() {
     (void)static_cast<void (nk::Dialog::*)(nk::DialogPresentationStyle)>(
         &nk::Dialog::set_presentation_style);
     (void)static_cast<void (nk::Dialog::*)(float)>(&nk::Dialog::set_minimum_panel_width);
+    (void)static_cast<void (nk::Dialog::*)(nk::DialogResponse)>(&nk::Dialog::set_default_response);
     (void)static_cast<void (nk::Dialog::*)(nk::Window&)>(&nk::Dialog::present);
     (void)static_cast<bool (nk::Dialog::*)() const>(&nk::Dialog::is_presented);
     (void)static_cast<void (nk::Dialog::*)(nk::DialogResponse)>(&nk::Dialog::close);

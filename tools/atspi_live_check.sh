@@ -16,7 +16,7 @@ app_name=$2
 tools_dir=$(cd "$(dirname "$0")" && pwd)
 
 launcher=""
-for candidate in /usr/libexec/at-spi-bus-launcher /usr/lib/at-spi2-core/at-spi-bus-launcher; do
+for candidate in /usr/libexec/at-spi-bus-launcher /usr/lib/at-spi2-core/at-spi-bus-launcher /usr/lib/at-spi-bus-launcher; do
     if [[ -x "$candidate" ]]; then
         launcher=$candidate
         break

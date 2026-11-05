@@ -46,6 +46,7 @@ public:
 
     // --- Widget overrides ---
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
     bool handle_key_event(const KeyEvent& event) override;
     [[nodiscard]] bool hit_test(Point point) const override;
@@ -61,6 +62,7 @@ private:
 
     /// Close the menu without emitting on_dismissed; used on activation.
     void dismiss_without_activation();
+    void sync_accessible_items();
 };
 
 } // namespace nk

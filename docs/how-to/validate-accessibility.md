@@ -71,3 +71,37 @@ for a worked example of labels, relations, and focus order.
 Platform coverage of the accessibility bridges is recorded in
 [Platform support](../reference/platform-support.md) and the
 [Windows support matrix](../reference/windows-support-matrix.md).
+
+## Custom text and accessibility text scaling
+
+`Widget::measure_text()` and `measure_text_wrapped()` use the same accessibility
+text scale as `SnapshotContext::add_text()` and `add_wrapped_text()`. Pass nominal
+logical font sizes to both paths; do not multiply font sizes by the system text
+scale yourself. Device scaling remains separate. A raw `TextShaper` or manually
+constructed `TextNode` works with the font size supplied to it.
+
+When a custom widget caches text measurements, invalidate that cache on
+`Application::on_system_preferences_changed()` and any application theme/font
+changes, then queue layout and redraw. Include font and scale in cache keys.
+Text drawing alone does not create accessible text: publish a suitable role and
+name/value, or use `Label`. Update the semantics whenever the visible text changes.
+
+`ContextMenu` and `MenuBar` expose commands as menu-item children. `ComboBox`
+exposes its choices while open, with an Activate action on the field and each
+option. Disabled, dismissed, detached, and modal-covered commands reject actions.
+The live probe includes menu and dropdown activation checks.
+
+For a destructive confirmation, explicitly select its safe default before
+presentation:
+
+```cpp
+auto dialog = nk::Dialog::create("Replace saved state?",
+                                  "The previous state will be replaced.");
+dialog->add_button("Cancel", nk::DialogResponse::Cancel);
+dialog->add_button("Replace", nk::DialogResponse::Accept);
+dialog->set_default_response(nk::DialogResponse::Cancel);
+dialog->present(window);
+```
+
+This controls initial focus and unhandled Return/Space. Applications still decide
+when confirmation or recovery is required.

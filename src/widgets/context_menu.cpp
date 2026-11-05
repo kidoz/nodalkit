@@ -1,9 +1,15 @@
+#include "accessible_item.h"
+
 #include <algorithm>
+#include <memory>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
+#include <nk/ui_core/state_flags.h>
+#include <nk/ui_core/widget.h>
 #include <nk/widgets/context_menu.h>
+#include <utility>
 
 namespace nk {
 
@@ -20,6 +26,7 @@ FontDescriptor context_menu_font() {
 struct MenuItemEntry {
     std::string label;
     bool is_separator = false;
+    std::shared_ptr<detail::AccessibleItem> accessible;
 };
 
 struct PopupGeometry {
@@ -43,11 +50,16 @@ PopupGeometry compute_popup_geometry(Point position,
             height += geometry.separator_height;
         } else {
             const auto measured = measure_text_fn(item.label);
+            geometry.item_height = std::max(geometry.item_height, measured.height + 10.0F);
             width = std::max(width, measured.width + 28.0F);
             height += geometry.item_height;
         }
     }
 
+    height = 2.0F;
+    for (const auto& item : items) {
+        height += item.is_separator ? geometry.separator_height : geometry.item_height;
+    }
     geometry.bounds = {position.x, position.y, width, height};
     return geometry;
 }
@@ -102,14 +114,32 @@ ContextMenu::ContextMenu() : impl_(std::make_unique<Impl>()) {
 ContextMenu::~ContextMenu() = default;
 
 void ContextMenu::add_item(std::string label) {
-    impl_->items.push_back({std::move(label), false});
+    const auto index = static_cast<int>(impl_->items.size());
+    auto item = detail::AccessibleItem::create(
+        label, AccessibleRole::MenuItem, [weak = weak_from_this(), index] {
+            auto self = std::static_pointer_cast<ContextMenu>(weak.lock());
+            if (!self || !self->is_open() || !self->is_sensitive()) {
+                return false;
+            }
+            self->dismiss_without_activation();
+            self->impl_->item_activated.emit(index);
+            return true;
+        });
+    append_child(item);
+    impl_->items.push_back({std::move(label), false, std::move(item)});
+    sync_accessible_items();
 }
 
 void ContextMenu::add_separator() {
-    impl_->items.push_back({"", true});
+    impl_->items.push_back({"", true, {}});
 }
 
 void ContextMenu::clear() {
+    for (const auto& item : impl_->items) {
+        if (item.accessible) {
+            remove_child(*item.accessible);
+        }
+    }
     impl_->items.clear();
     impl_->hovered_index = -1;
     impl_->armed_index = -1;
@@ -126,6 +156,7 @@ void ContextMenu::show_at(Point position) {
     impl_->hovered_index = -1;
     impl_->armed_index = -1;
     set_visible(true);
+    sync_accessible_items();
     queue_redraw();
 }
 
@@ -148,6 +179,7 @@ void ContextMenu::dismiss_without_activation() {
     impl_->hovered_index = -1;
     impl_->armed_index = -1;
     set_visible(false);
+    sync_accessible_items();
     queue_redraw();
 }
 
@@ -165,6 +197,30 @@ Signal<int>& ContextMenu::on_item_activated() {
 
 SizeRequest ContextMenu::measure(const Constraints& /*constraints*/) const {
     return {0.0F, 0.0F, 0.0F, 0.0F};
+}
+
+void ContextMenu::allocate(const Rect& allocation) {
+    Widget::allocate(allocation);
+    sync_accessible_items();
+}
+
+void ContextMenu::sync_accessible_items() {
+    const auto geometry =
+        compute_popup_geometry(impl_->position, impl_->items, [&](std::string_view text) {
+            return measure_text(text, context_menu_font());
+        });
+    float y = geometry.bounds.y + 1;
+    for (std::size_t index = 0; index < impl_->items.size(); ++index) {
+        const auto& item = impl_->items[index];
+        const float height = item.is_separator ? geometry.separator_height : geometry.item_height;
+        if (item.accessible) {
+            item.accessible->allocate(
+                {geometry.bounds.x + 1, y, geometry.bounds.width - 2, height});
+            item.accessible->set_state_flag(StateFlags::Selected,
+                                            static_cast<int>(index) == impl_->hovered_index);
+        }
+        y += height;
+    }
 }
 
 bool ContextMenu::hit_test(Point point) const {
@@ -200,6 +256,7 @@ std::vector<Rect> ContextMenu::damage_regions() const {
 }
 
 bool ContextMenu::handle_mouse_event(const MouseEvent& event) {
+    const auto keep_alive = weak_from_this().lock();
     if (!impl_->open || impl_->items.empty()) {
         return false;
     }
@@ -243,12 +300,14 @@ bool ContextMenu::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Move:
         if (impl_->hovered_index != index) {
             impl_->hovered_index = index;
+            sync_accessible_items();
             queue_redraw();
         }
         return inside_popup;
     case MouseEvent::Type::Leave:
         if (impl_->hovered_index != -1) {
             impl_->hovered_index = -1;
+            sync_accessible_items();
             queue_redraw();
         }
         return false;
@@ -265,6 +324,7 @@ bool ContextMenu::handle_mouse_event(const MouseEvent& event) {
 }
 
 bool ContextMenu::handle_key_event(const KeyEvent& event) {
+    const auto keep_alive = weak_from_this().lock();
     if (!impl_->open || event.type != KeyEvent::Type::Press || impl_->items.empty()) {
         return false;
     }
@@ -294,11 +354,13 @@ bool ContextMenu::handle_key_event(const KeyEvent& event) {
             next_selectable(impl_->hovered_index >= 0 ? impl_->hovered_index
                                                       : static_cast<int>(impl_->items.size()),
                             -1);
+        sync_accessible_items();
         queue_redraw();
         return true;
     case KeyCode::Down:
         impl_->hovered_index =
             next_selectable(impl_->hovered_index >= 0 ? impl_->hovered_index : -1, 1);
+        sync_accessible_items();
         queue_redraw();
         return true;
     case KeyCode::Return:

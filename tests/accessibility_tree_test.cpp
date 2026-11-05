@@ -11,9 +11,12 @@
 #include <nk/runtime/event_loop.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
+#include <nk/widgets/combo_box.h>
+#include <nk/widgets/context_menu.h>
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
+#include <nk/widgets/menu_bar.h>
 #include <nk/widgets/text_field.h>
 #include <nk/widgets/toast_overlay.h>
 #include <vector>
@@ -598,4 +601,180 @@ TEST_CASE("List accessibility follows current items, model changes and activatio
     list->set_model(nullptr);
     list->set_selection_model(nullptr);
     CHECK(tree.info(id)->description == "0 items, 0 selected");
+}
+
+TEST_CASE("Programmatic focus cannot leave the top modal and dismissal restores its parent",
+          "[accessibility][dialog][focus]") {
+    nk::Window window({.title = "Nested modal focus"});
+    auto behind = nk::Button::create("Behind");
+    window.set_child(behind);
+    behind->grab_focus();
+    auto outer = nk::Dialog::create("Settings");
+    auto field = nk::TextField::create("Binding");
+    outer->set_content(field);
+    outer->present(window);
+    field->grab_focus();
+    behind->grab_focus();
+    CHECK(nk::has_flag(field->state_flags(), nk::StateFlags::Focused));
+    CHECK_FALSE(nk::has_flag(behind->state_flags(), nk::StateFlags::Focused));
+
+    auto inner = nk::Dialog::create("Replace binding?");
+    inner->add_button("Cancel", nk::DialogResponse::Cancel);
+    inner->present(window);
+    field->grab_focus();
+    nk::detail::AccessibilityTree tree(window);
+    REQUIRE(tree.focused().has_value());
+    CHECK(tree.info(*tree.focused())->name == "Cancel");
+    inner->close(nk::DialogResponse::Cancel);
+    CHECK(nk::has_flag(field->state_flags(), nk::StateFlags::Focused));
+    outer->close();
+    CHECK(nk::has_flag(behind->state_flags(), nk::StateFlags::Focused));
+}
+
+TEST_CASE("Context menu exposes stable actionable commands and hides dismissed entries",
+          "[accessibility][menu]") {
+    nk::Window window({.title = "Commands"});
+    auto menu = nk::ContextMenu::create();
+    menu->add_item("Save State");
+    menu->add_separator();
+    menu->add_item("Settings");
+    window.set_child(menu);
+    menu->show_at({20, 30});
+    int activated = -1;
+    auto connection = menu->on_item_activated().connect([&](int index) { activated = index; });
+    nk::detail::AccessibilityTree tree(window);
+    const auto menu_id = tree.root_children().at(0);
+    const auto commands = tree.children(menu_id);
+    REQUIRE(commands.size() == 2);
+    CHECK(tree.info(commands[0])->role == nk::AccessibleRole::MenuItem);
+    CHECK(tree.info(commands[1])->name == "Settings");
+    CHECK(tree.info(commands[1])->bounds.width > 0);
+    menu->set_sensitive(false);
+    CHECK_FALSE(tree.perform(commands[1], nk::AccessibleAction::Activate));
+    menu->set_sensitive(true);
+    CHECK(tree.perform(commands[1], nk::AccessibleAction::Activate));
+    CHECK(activated == 2);
+    CHECK_FALSE(tree.is_exposed(commands[1]));
+    CHECK_FALSE(tree.perform(commands[1], nk::AccessibleAction::Activate));
+    menu->show_at({40, 50});
+    CHECK(tree.children(menu_id) == commands);
+    menu->clear();
+    CHECK(tree.children(menu_id).empty());
+    CHECK_FALSE(tree.perform(commands[0], nk::AccessibleAction::Activate));
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Combo options expose selection and activate through the shared accessibility tree",
+          "[accessibility][combo]") {
+    nk::Window window({.title = "Options"});
+    auto combo = nk::ComboBox::create();
+    combo->set_items({"NTSC", "PAL", "Dendy"});
+    combo->set_selected_index(0);
+    combo->allocate({10, 10, 240, 36});
+    window.set_child(combo);
+    nk::detail::AccessibilityTree tree(window);
+    const auto id = tree.root_children().at(0);
+    CHECK(tree.children(id).empty());
+    REQUIRE(combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    const auto options = tree.children(id);
+    REQUIRE(options.size() == 3);
+    CHECK(tree.info(options[1])->name == "PAL");
+    CHECK(nk::has_flag(tree.info(options[0])->state, nk::StateFlags::Selected));
+    CHECK(tree.perform(options[1], nk::AccessibleAction::Activate));
+    CHECK(combo->selected_index() == 1);
+    CHECK(tree.children(id).empty());
+    CHECK_FALSE(tree.perform(options[1], nk::AccessibleAction::Activate));
+    REQUIRE(combo->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(tree.children(id) == options);
+    CHECK(nk::has_flag(tree.info(options[1])->state, nk::StateFlags::Selected));
+    combo->set_items({"Other"});
+    CHECK_FALSE(tree.perform(options[0], nk::AccessibleAction::Activate));
+}
+
+TEST_CASE("Menu bar exposes nested commands with live enabled and checked states",
+          "[accessibility][menu]") {
+    nk::Window window({.title = "Menu bar"});
+    auto bar = nk::MenuBar::create();
+    auto actions = std::make_shared<nk::ActionGroup>();
+    auto save = std::make_shared<nk::Action>("save");
+    save->set_checkable(true);
+    save->set_checked(true);
+    int activations = 0;
+    auto connection = save->on_activated().connect([&] { ++activations; });
+    actions->add(save);
+    bar->set_action_group(actions);
+    bar->add_menu(
+        {"File", {nk::MenuItem::submenu("States", {nk::MenuItem::action("Save", "save")})}});
+    window.set_child(bar);
+    bar->allocate({0, 0, 500, 32});
+    nk::detail::AccessibilityTree tree(window);
+    const auto bar_id = tree.root_children().at(0);
+    const auto top = tree.children(bar_id).at(0);
+    CHECK(tree.info(top)->name == "File");
+    CHECK(tree.children(top).empty());
+    REQUIRE(tree.perform(top, nk::AccessibleAction::Activate));
+    const auto submenu = tree.children(top).at(0);
+    REQUIRE(tree.perform(submenu, nk::AccessibleAction::Activate));
+    const auto command = tree.children(submenu).at(0);
+    CHECK(tree.info(command)->name == "Save");
+    CHECK(nk::has_flag(tree.info(command)->state, nk::StateFlags::Checked));
+    save->set_enabled(false);
+    CHECK_FALSE(tree.perform(command, nk::AccessibleAction::Activate));
+    save->set_enabled(true);
+    REQUIRE(tree.perform(command, nk::AccessibleAction::Activate));
+    CHECK(activations == 1);
+    CHECK_FALSE(tree.is_exposed(command));
+    CHECK(tree.children(bar_id).at(0) == top);
+    bar->clear();
+    CHECK_FALSE(tree.perform(top, nk::AccessibleAction::Activate));
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Dialogs support a safe default and keep response buttons inside narrow allocations",
+          "[accessibility][dialog][layout]") {
+    nk::Window window({.title = "Narrow confirmation", .width = 240, .height = 480});
+    auto dialog = nk::Dialog::create("Replace state?", "Current progress will be replaced.");
+    dialog->add_button("Cancel", nk::DialogResponse::Cancel);
+    dialog->add_button("Replace saved state", nk::DialogResponse::Accept);
+    dialog->set_default_response(nk::DialogResponse::Cancel);
+    dialog->present(window);
+    dialog->allocate({0, 0, 240, 480});
+    nk::detail::AccessibilityTree tree(window);
+    REQUIRE(tree.focused().has_value());
+    CHECK(tree.info(*tree.focused())->name == "Cancel");
+    for (const auto button : tree.children(tree.root_children().at(0))) {
+        const auto bounds = tree.info(button)->bounds;
+        CHECK(bounds.x >= 0);
+        CHECK(bounds.right() <= 240);
+        CHECK(bounds.y >= 0);
+        CHECK(bounds.bottom() <= 480);
+    }
+    auto response = nk::DialogResponse::None;
+    auto connection =
+        dialog->on_response().connect([&](nk::DialogResponse value) { response = value; });
+    REQUIRE(
+        dialog->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(response == nk::DialogResponse::Cancel);
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Focus restoration falls back when the initiating control has been detached",
+          "[accessibility][dialog][focus]") {
+    nk::Window window({.title = "Restore attached focus"});
+    auto root = Container::create();
+    auto first = nk::Button::create("First");
+    auto opener = nk::Button::create("Open Settings");
+    root->append(first);
+    root->append(opener);
+    window.set_child(root);
+    window.dispatch_window_event({.type = nk::WindowEvent::Type::FocusIn});
+    CHECK(nk::has_flag(first->state_flags(), nk::StateFlags::Focused));
+    opener->grab_focus();
+    auto dialog = nk::Dialog::create("Settings");
+    dialog->add_button("Close", nk::DialogResponse::Close);
+    dialog->present(window);
+    root->remove(*opener);
+    dialog->close();
+    CHECK(nk::has_flag(first->state_flags(), nk::StateFlags::Focused));
+    CHECK_FALSE(nk::has_flag(opener->state_flags(), nk::StateFlags::Focused));
 }

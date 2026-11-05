@@ -1,9 +1,14 @@
+#include "accessible_item.h"
+
 #include <algorithm>
+#include <memory>
+#include <nk/accessibility/accessible.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/combo_box.h>
 #include <stdexcept>
+#include <utility>
 
 namespace nk {
 
@@ -100,6 +105,7 @@ Rect field_damage_rect(const ComboBox& combo_box) {
 
 struct ComboBox::Impl {
     std::vector<std::string> items;
+    std::vector<std::shared_ptr<detail::AccessibleItem>> accessible_items;
     int selected_index = -1;
     Signal<int> selection_changed;
     bool armed = false;
@@ -120,12 +126,42 @@ ComboBox::ComboBox() : impl_(std::make_unique<Impl>()) {
     add_style_class("combo-box");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::List);
+    accessible.add_action(AccessibleAction::Activate, [this] {
+        if (!is_sensitive() || impl_->items.empty()) {
+            return false;
+        }
+        grab_focus();
+        return handle_key_event({.type = KeyEvent::Type::Press, .key = KeyCode::Return});
+    });
 }
 
 ComboBox::~ComboBox() = default;
 
 void ComboBox::set_items(std::vector<std::string> items) {
+    for (const auto& item : impl_->accessible_items) {
+        remove_child(*item);
+    }
+    impl_->accessible_items.clear();
     impl_->items = std::move(items);
+    for (std::size_t index = 0; index < impl_->items.size(); ++index) {
+        auto option = detail::AccessibleItem::create(
+            impl_->items[index], AccessibleRole::ListItem, [weak = weak_from_this(), index] {
+                auto self = std::static_pointer_cast<ComboBox>(weak.lock());
+                if (!self || !self->impl_->popup_open || !self->is_sensitive()) {
+                    return false;
+                }
+                self->preserve_damage_regions_for_next_redraw();
+                self->impl_->popup_open = false;
+                self->impl_->highlighted_index = -1;
+                self->sync_accessible_items();
+                self->set_selected_index(static_cast<int>(index));
+                self->queue_redraw();
+                return true;
+            });
+        option->ensure_accessible().set_hidden(true);
+        append_child(option);
+        impl_->accessible_items.push_back(std::move(option));
+    }
     impl_->selected_index = -1;
     // Any open popup state refers to the previous item list; reset it so the next open rebuilds
     // from a known baseline and the current highlight can't index past the new end.
@@ -135,6 +171,7 @@ void ComboBox::set_items(std::vector<std::string> items) {
     impl_->highlighted_index = -1;
     impl_->popup_scroll_offset = 0;
     ensure_accessible().set_name({});
+    ensure_accessible().set_value({});
     queue_layout();
     queue_redraw();
 }
@@ -161,12 +198,14 @@ void ComboBox::set_selected_index(int index) {
     if (impl_->selected_index != index) {
         impl_->selected_index = index;
         ensure_accessible().set_name(std::string(selected_text()));
+        ensure_accessible().set_value(std::string(selected_text()));
         const auto damage = field_damage_rect(*this);
         if (damage.width <= 0.0F || damage.height <= 0.0F) {
             queue_redraw();
         } else {
             queue_redraw(damage);
         }
+        sync_accessible_items();
         impl_->selection_changed.emit(index);
     }
 }
@@ -185,17 +224,48 @@ Signal<int>& ComboBox::on_selection_changed() {
 
 SizeRequest ComboBox::measure(const Constraints& /*constraints*/) const {
     const float w = theme_number("min-width", 240.0F);
-    const float h = theme_number("min-height", 36.0F);
+    const float h = std::max(theme_number("min-height", 36.0F),
+                             measure_text("Ag", combo_box_font()).height + 12.0F);
     return {120.0F, h, w, h};
 }
 
+void ComboBox::allocate(const Rect& allocation) {
+    Widget::allocate(allocation);
+    sync_accessible_items();
+}
+
+void ComboBox::sync_accessible_items() {
+    const auto popup =
+        popup_geometry(allocation(),
+                       impl_->items.size(),
+                       std::max(theme_number("popup-item-height", 28.0F),
+                                measure_text("Ag", combo_box_font()).height + 10.0F));
+    for (std::size_t index = 0; index < impl_->accessible_items.size(); ++index) {
+        auto& item = impl_->accessible_items[index];
+        const int row = static_cast<int>(index) - impl_->popup_scroll_offset;
+        item->allocate(row >= 0 && row < popup.visible_count
+                           ? Rect{popup.bounds.x + 1,
+                                  popup.bounds.y + 1 + static_cast<float>(row) * popup.item_height,
+                                  popup.bounds.width - 2,
+                                  popup.item_height}
+                           : Rect{});
+        item->set_state_flag(StateFlags::Selected,
+                             static_cast<int>(index) == impl_->selected_index);
+        item->ensure_accessible().set_hidden(!impl_->popup_open);
+    }
+}
+
 bool ComboBox::handle_mouse_event(const MouseEvent& event) {
+    const auto keep_alive = weak_from_this().lock();
     if (event.button != 1 || impl_->items.empty()) {
         return false;
     }
 
     const auto popup =
-        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
+        popup_geometry(allocation(),
+                       impl_->items.size(),
+                       std::max(theme_number("popup-item-height", 28.0F),
+                                measure_text("Ag", combo_box_font()).height + 10.0F));
     const auto point = Point{event.x, event.y};
     const int item_count = static_cast<int>(impl_->items.size());
 
@@ -221,6 +291,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
             impl_->armed_index = -1;
             impl_->armed = false;
             impl_->popup_scroll_offset = 0;
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return consumed;
         }
@@ -237,6 +308,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
         impl_->highlighted_index = impl_->popup_open ? std::max(0, impl_->selected_index) : -1;
         impl_->popup_scroll_offset = clamp_scroll_offset(
             impl_->popup_scroll_offset, impl_->highlighted_index, item_count, popup.visible_count);
+        sync_accessible_items();
         invalidate_popup_frame(*this);
         return true;
     }
@@ -245,6 +317,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
             const int next_highlight = popup_index_at(popup, point, impl_->popup_scroll_offset);
             if (impl_->highlighted_index != next_highlight) {
                 impl_->highlighted_index = next_highlight;
+                sync_accessible_items();
                 invalidate_popup_frame(*this);
             }
         }
@@ -254,6 +327,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::Leave:
         if (impl_->popup_open && impl_->highlighted_index != -1) {
             impl_->highlighted_index = -1;
+            sync_accessible_items();
             invalidate_popup_frame(*this);
         }
         return false;
@@ -270,6 +344,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
                                                              impl_->highlighted_index,
                                                              item_count,
                                                              popup.visible_count);
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         }
@@ -279,6 +354,7 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
                                                              impl_->highlighted_index,
                                                              item_count,
                                                              popup.visible_count);
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         }
@@ -289,13 +365,17 @@ bool ComboBox::handle_mouse_event(const MouseEvent& event) {
 }
 
 bool ComboBox::handle_key_event(const KeyEvent& event) {
+    const auto keep_alive = weak_from_this().lock();
     if (event.type != KeyEvent::Type::Press || impl_->items.empty()) {
         return false;
     }
 
     const auto last_index = static_cast<int>(impl_->items.size()) - 1;
     const auto popup_visible_count =
-        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F))
+        popup_geometry(allocation(),
+                       impl_->items.size(),
+                       std::max(theme_number("popup-item-height", 28.0F),
+                                measure_text("Ag", combo_box_font()).height + 10.0F))
             .visible_count;
     auto item_count = static_cast<int>(impl_->items.size());
     auto update_scroll = [&] {
@@ -307,6 +387,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
         impl_->popup_open = true;
         impl_->highlighted_index = std::clamp(highlight, 0, last_index);
         update_scroll();
+        sync_accessible_items();
         invalidate_popup_frame(*this);
     };
 
@@ -317,6 +398,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
             impl_->popup_scroll_offset = 0;
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         case KeyCode::Up: {
@@ -326,6 +408,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
                 --impl_->highlighted_index;
             }
             update_scroll();
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         }
@@ -336,17 +419,20 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
                 ++impl_->highlighted_index;
             }
             update_scroll();
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         }
         case KeyCode::Home:
             impl_->highlighted_index = 0;
             update_scroll();
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         case KeyCode::End:
             impl_->highlighted_index = last_index;
             update_scroll();
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         case KeyCode::Return:
@@ -358,6 +444,7 @@ bool ComboBox::handle_key_event(const KeyEvent& event) {
             impl_->popup_open = false;
             impl_->highlighted_index = -1;
             impl_->popup_scroll_offset = 0;
+            sync_accessible_items();
             invalidate_popup_frame(*this);
             return true;
         }
@@ -405,7 +492,10 @@ bool ComboBox::hit_test(Point point) const {
     }
 
     const auto popup =
-        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
+        popup_geometry(allocation(),
+                       impl_->items.size(),
+                       std::max(theme_number("popup-item-height", 28.0F),
+                                measure_text("Ag", combo_box_font()).height + 10.0F));
     return popup.bounds.contains(point);
 }
 
@@ -416,7 +506,10 @@ std::vector<Rect> ComboBox::damage_regions() const {
 
     auto regions = std::vector<Rect>{allocation()};
     const auto popup =
-        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
+        popup_geometry(allocation(),
+                       impl_->items.size(),
+                       std::max(theme_number("popup-item-height", 28.0F),
+                                measure_text("Ag", combo_box_font()).height + 10.0F));
     if (popup.visible_count > 0) {
         regions.push_back(popup.bounds);
     }
@@ -435,6 +528,7 @@ void ComboBox::on_focus_changed(bool focused) {
         impl_->armed_index = -1;
         impl_->highlighted_index = -1;
         impl_->popup_scroll_offset = 0;
+        sync_accessible_items();
         invalidate_popup_frame(*this);
     }
 }
@@ -475,7 +569,12 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
     if (!text.empty()) {
         const auto measured = measure_text(text, font);
         const float text_y = inner.y + std::max(0.0F, (inner.height - measured.height) * 0.5F);
-        ctx.add_text({inner.x + 12.0F, text_y}, std::string(text), theme_color("text-color"), font);
+        add_text_elided(ctx,
+                        {inner.x + 12.0F, text_y},
+                        text,
+                        std::max(0.0F, inner.width - arrow_width - 24.0F),
+                        theme_color("text-color"),
+                        font);
     }
 
     // Chevron as a stroked polyline: an ASCII "v"/"^" glyph reads as a typed
@@ -520,7 +619,10 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
     }
 
     const auto popup =
-        popup_geometry(allocation(), impl_->items.size(), theme_number("popup-item-height", 28.0F));
+        popup_geometry(allocation(),
+                       impl_->items.size(),
+                       std::max(theme_number("popup-item-height", 28.0F),
+                                measure_text("Ag", combo_box_font()).height + 10.0F));
     if (popup.visible_count <= 0) {
         return;
     }
@@ -578,7 +680,12 @@ void ComboBox::snapshot(SnapshotContext& ctx) const {
         const auto item_text = impl_->items[static_cast<std::size_t>(index)];
         const auto item_size = measure_text(item_text, font);
         const float text_y = row_y + std::max(0.0F, (popup.item_height - item_size.height) * 0.5F);
-        ctx.add_text({popup_inner.x + 12.0F, text_y}, item_text, text_color, font);
+        add_text_elided(ctx,
+                        {popup_inner.x + 12.0F, text_y},
+                        item_text,
+                        std::max(0.0F, popup_inner.width - 24.0F),
+                        text_color,
+                        font);
         row_y += popup.item_height;
     }
     ctx.pop_container();

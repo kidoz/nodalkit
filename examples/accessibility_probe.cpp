@@ -9,6 +9,7 @@
 #include <nk/style/theme_selection.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/context_menu.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/text_field.h>
 #include <string>
@@ -108,6 +109,13 @@ int main(int argc, char** argv) {
 
     auto open_actions = Box::horizontal(10.0F);
     open_actions->append(open_button);
+    auto commands_button = nk::Button::create("Show Commands");
+    auto commands_menu = nk::ContextMenu::create();
+    commands_menu->ensure_accessible().set_name("Probe commands");
+    commands_menu->add_item("Update Status");
+    commands_menu->add_item("Other Command");
+    open_actions->append(commands_button);
+    open_actions->append(commands_menu);
     open_actions->append(Spacer::create());
 
     auto search_group = Box::vertical(10.0F);
@@ -200,11 +208,13 @@ int main(int argc, char** argv) {
     auto keyboard_label = FieldLabel::create("Keyboard flow");
     set_static_accessible_text(keyboard_label, "Keyboard flow");
     auto keyboard_copy = SecondaryText::create(
-        "Tab should move through Search, Open Search, and Region in that order. Shift+Tab should "
+        "Tab should move through Search, Open Search, Show Commands, and Region in that order. "
+        "Shift+Tab should "
         "reverse it, and Enter should trigger the focused action without ambiguity.");
-    set_static_accessible_text(keyboard_copy,
-                               "Keyboard flow detail",
-                               "Tab moves through search field, button, and region combo box.");
+    set_static_accessible_text(
+        keyboard_copy,
+        "Keyboard flow detail",
+        "Tab moves through the search field, buttons, and region combo box.");
 
     auto semantics_group = Box::vertical(8.0F);
     semantics_group->append(semantics_label);
@@ -253,6 +263,17 @@ int main(int argc, char** argv) {
         hero_status_pill->set_text(event);
         sync_live_values();
     };
+
+    auto commands_open_conn = commands_button->on_clicked().connect([&] {
+        const auto bounds = commands_button->allocation();
+        commands_menu->show_at({bounds.x, bounds.bottom() + 4});
+        commands_menu->grab_focus();
+    });
+    auto commands_activate_conn = commands_menu->on_item_activated().connect([&](int index) {
+        update_status(index == 0 ? "Command activated" : "Other command activated",
+                      "A menu command was invoked through its semantic item.");
+        commands_button->grab_focus();
+    });
 
     sync_live_values();
     update_status("Ready", "Waiting for field activation, button press, or region change.");

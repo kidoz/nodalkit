@@ -50,6 +50,7 @@ public:
 
     // --- Widget overrides ---
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
     bool handle_key_event(const KeyEvent& event) override;
     [[nodiscard]] bool hit_test(Point point) const override;
@@ -62,6 +63,8 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    void sync_accessible_items();
+    void rebuild_accessible_items();
     [[nodiscard]] bool item_enabled(const MenuItem& item) const;
     void activate_action(std::string name);
 

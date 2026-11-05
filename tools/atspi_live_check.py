@@ -133,6 +133,9 @@ def main():
         listener.register(event_type)
     pump(0.5)
 
+    Atspi.Component.grab_focus(button)
+    pump(0.3)
+    events.clear()
     Atspi.Component.grab_focus(entry)
     pump(1.5)
     check(any(e.type == "object:state-changed:focused" and e.detail1 == 1 and
@@ -146,6 +149,42 @@ def main():
     check(any(e.type == "object:property-change:accessible-name" and
               e.source.get_name() == "Open Search" and e.source != button for e in events),
           "activating the button announces the status label's new name")
+
+    def activate(node):
+        for index in range(Atspi.Action.get_n_actions(node)):
+            if Atspi.Action.get_action_name(node, index) == "activate":
+                return Atspi.Action.do_action(node, index)
+        return False
+
+    commands_button = first(walk(app), Atspi.Role.PUSH_BUTTON, "Show Commands")
+    if check(commands_button is not None, "the menu opener is exposed"):
+        check(activate(commands_button), "the menu opens through AT-SPI")
+        pump(0.5)
+        menu = first(walk(app), Atspi.Role.MENU, "Probe commands")
+        if check(menu is not None, "the open command menu is exposed"):
+            check(menu.get_child_count() == 2, "the menu exposes its command children")
+            command = first(walk(menu), Atspi.Role.MENU_ITEM, "Update Status")
+            if check(command is not None, "the command has its own name and menu-item role"):
+                check(activate(command), "the command activates through AT-SPI")
+                pump(0.5)
+                check(first(walk(app), Atspi.Role.MENU, "Probe commands") is None,
+                      "the dismissed menu is removed from the exposed tree")
+                check(any(node.get_name() == "Command activated" for node in walk(app)),
+                      "menu activation updates visible accessible status")
+
+    combo = first(walk(app), Atspi.Role.COMBO_BOX, "NTSC")
+    if check(combo is not None, "the region dropdown is exposed"):
+        check(activate(combo), "the dropdown opens through AT-SPI")
+        pump(0.5)
+        options = [combo.get_child_at_index(index) for index in range(combo.get_child_count())]
+        check([option.get_name() for option in options] == ["NTSC", "PAL", "Dendy"],
+              "all dropdown choices are exposed in order")
+        pal = next((option for option in options if option.get_name() == "PAL"), None)
+        if check(pal is not None, "the PAL option is discoverable"):
+            check(activate(pal), "a dropdown option activates through AT-SPI")
+            pump(0.5)
+            check(combo.get_name() == "PAL", "the dropdown reflects its new selection")
+            check(combo.get_child_count() == 0, "closed dropdown choices are no longer exposed")
 
     print(f"{len(failures)} failure(s)")
     return 1 if failures else 0
