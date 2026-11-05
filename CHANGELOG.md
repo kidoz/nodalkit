@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Wayland external file and text drop receiving, with asynchronous bounded
+  transfers, local file URI decoding, cancellation and surface cleanup.
+- Accessible command children for context menus and menu bars, and actionable
+  dropdown options with selection state and stable identity across reopening.
+- `Dialog::set_default_response()` allows a confirmation to start on Cancel.
+
+### Fixed
+
+- Programmatic focus and external drops stay inside the active modal. Focus
+  restoration falls back to an attached control when the original target is gone.
+- Widget text measurement and snapshot text now share accessibility text scaling.
+  Text fields and command palettes no longer apply their own duplicate font scale.
+- Vulkan preserves line strokes, including dropdown chevrons, through its
+  software-upload fallback instead of silently omitting them.
+- Dialog response buttons wrap inside narrow allocations and follow scaled
+  control heights; dialog titles and messages wrap within the panel.
+
 ## [0.3.1] - 2026-11-04
 
 The first patch release of the NodalKit framework. 0.3.1 keeps the widget
