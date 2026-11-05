@@ -23,9 +23,12 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wkeyword-macro"
 #define private public
+// Keep the inspected implementation distinct from the class linked in nk_dep.
+#define MetalRenderer MetalRendererUnderTest
 #define create_metal_renderer create_metal_renderer_under_test
 #include "../src/render/metal_renderer.mm"
 #undef create_metal_renderer
+#undef MetalRenderer
 #undef private
 #pragma clang diagnostic pop
 
@@ -34,6 +37,11 @@
 @end
 
 @implementation NKMetalTestCaptureLayer
+
+- (void)dealloc {
+    [_captured release];
+    [super dealloc];
+}
 
 - (id<CAMetalDrawable>)nextDrawable {
     id<CAMetalDrawable> drawable = [super nextDrawable];
@@ -125,7 +133,7 @@ struct MetalFixture {
     MetalFixture() : layer(attach_capture_layer(surface)) {}
 
     TestSurface surface;
-    nk::MetalRenderer renderer;
+    nk::MetalRendererUnderTest renderer;
     NKMetalTestCaptureLayer* layer = nil;
 };
 
@@ -147,7 +155,7 @@ std::unique_ptr<nk::RenderNode> fallback_root(nk::Color color) {
     return snapshot.take_root();
 }
 
-void frame(nk::MetalRenderer& renderer,
+void frame(nk::MetalRendererUnderTest& renderer,
            TestSurface& surface,
            const nk::RenderNode& root,
            std::span<const nk::Rect> damage = {}) {
@@ -158,15 +166,19 @@ void frame(nk::MetalRenderer& renderer,
     renderer.present(surface);
 }
 
-std::array<int, 4> read_pixel(nk::MetalRenderer& renderer, id<MTLTexture> texture, int x, int y) {
+std::array<int, 4>
+read_pixel(nk::MetalRendererUnderTest& renderer, id<MTLTexture> texture, int x, int y) {
     if (texture == nil) {
         return {-1, -1, -1, -1};
     }
     const NSUInteger stride = ((texture.width * 4 + 255) / 256) * 256;
     id<MTLBuffer> buffer = [renderer.device_ newBufferWithLength:stride * texture.height
                                                          options:MTLResourceStorageModeShared];
+    REQUIRE(buffer != nil);
     id<MTLCommandBuffer> command_buffer = [renderer.command_queue_ commandBuffer];
+    REQUIRE(command_buffer != nil);
     id<MTLBlitCommandEncoder> encoder = [command_buffer blitCommandEncoder];
+    REQUIRE(encoder != nil);
     [encoder copyFromTexture:texture
                      sourceSlice:0
                      sourceLevel:0
@@ -179,16 +191,19 @@ std::array<int, 4> read_pixel(nk::MetalRenderer& renderer, id<MTLTexture> textur
     [encoder endEncoding];
     [command_buffer commit];
     [command_buffer waitUntilCompleted];
+    REQUIRE(command_buffer.status == MTLCommandBufferStatusCompleted);
     const NSUInteger texture_x = static_cast<NSUInteger>(x) * texture.width / 64;
     const NSUInteger texture_y = static_cast<NSUInteger>(y) * texture.height / 64;
     const auto* pixels =
         static_cast<const uint8_t*>(buffer.contents) + texture_y * stride + texture_x * 4;
-    const std::array<int, 4> result{pixels[2], pixels[1], pixels[0], pixels[3]};
+    const bool bgra = texture.pixelFormat == MTLPixelFormatBGRA8Unorm;
+    const std::array<int, 4> result{
+        pixels[bgra ? 2 : 0], pixels[1], pixels[bgra ? 0 : 2], pixels[3]};
     [buffer release];
     return result;
 }
 
-void check_pixel(nk::MetalRenderer& renderer,
+void check_pixel(nk::MetalRendererUnderTest& renderer,
                  id<MTLTexture> texture,
                  int x,
                  int y,
@@ -272,7 +287,7 @@ TEST_CASE("Metal software fallback preserves unsupported node semantics", "[meta
 }
 
 TEST_CASE("Metal wraps text and keys shaped text by width", "[metal][text]") {
-    nk::MetalRenderer renderer;
+    nk::MetalRendererUnderTest renderer;
     auto shaper = nk::TextShaper::create();
     REQUIRE(shaper != nullptr);
     renderer.set_text_shaper(shaper.get());
@@ -350,7 +365,7 @@ TEST_CASE("Metal drawable failure presents the current software frame", "[metal]
     TestSurface surface;
     surface.window.contentView.wantsLayer = YES;
     surface.window.contentView.layer = [NKMetalTestNilLayer layer];
-    nk::MetalRenderer renderer;
+    nk::MetalRendererUnderTest renderer;
     auto green = solid({0, 1, 0, 1});
     frame(renderer, surface, *green);
 
@@ -364,8 +379,50 @@ TEST_CASE("Metal drawable failure presents the current software frame", "[metal]
     CHECK(surface.cpu_pixels[3] == 255);
 }
 
+TEST_CASE("Metal uploads padded rows into private textures", "[metal][upload]") {
+    nk::MetalRendererUnderTest renderer;
+    // Exercise the Intel/AMD upload path even when the test host supports shared textures.
+    auto* descriptor =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                           width:3
+                                                          height:2
+                                                       mipmapped:NO];
+    descriptor.usage = MTLTextureUsageShaderRead;
+    descriptor.storageMode = MTLStorageModePrivate;
+    id<MTLTexture> texture = [renderer.device_ newTextureWithDescriptor:descriptor];
+    REQUIRE(texture != nil);
+    const std::array<uint8_t, 24> pixels{
+        11,  22,  33,  255, 44,  55,  66,  255, 77,  88, 99, 255,
+        101, 102, 103, 255, 104, 105, 106, 255, 199, 66, 88, 255,
+    };
+    REQUIRE(nk::upload_texture_region(renderer.device_,
+                                      renderer.command_queue_,
+                                      texture,
+                                      MTLRegionMake2D(0, 0, 3, 2),
+                                      pixels.data(),
+                                      12));
+    check_pixel(renderer, texture, 0, 0, {11, 22, 33, 255});
+    check_pixel(renderer, texture, 63, 63, {199, 66, 88, 255});
+    [texture release];
+}
+
+TEST_CASE("Metal renderer destruction releases scene allocations", "[metal][memory]") {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    REQUIRE(device != nil);
+    const auto before = device.currentAllocatedSize;
+    for (int iteration = 0; iteration < 3; ++iteration) {
+        @autoreleasepool {
+            nk::MetalRendererUnderTest renderer;
+            REQUIRE(renderer.ensure_scene_texture(1024, 1024));
+            CHECK(device.currentAllocatedSize >= before + 4U * 1024U * 1024U);
+        }
+    }
+    CHECK(device.currentAllocatedSize < before + 1024U * 1024U);
+    [device release];
+}
+
 TEST_CASE("Metal texture cache and scene resizing release device allocations", "[metal][memory]") {
-    nk::MetalRenderer renderer;
+    nk::MetalRendererUnderTest renderer;
     const auto before = renderer.device_.currentAllocatedSize;
     std::vector<uint32_t> image(256U * 256U, 0xFFFFFFFFU);
     nk::ImageCommand command;
