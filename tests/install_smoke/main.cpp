@@ -26,6 +26,8 @@
 #include <nk/model/selection_model.h>
 #include <nk/model/tree_model.h>
 #include <nk/platform/events.h>
+#include <nk/render/image_node.h>
+#include <nk/render/snapshot_context.h>
 #include <nk/style/theme.h>
 #include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
@@ -85,6 +87,14 @@ void check_foundation() {
 }
 
 void check_layout() {
+    const uint32_t pixel = 0xFF000000;
+    nk::ImageNode image({0, 0, 1, 1}, &pixel, 1, 1);
+    image.set_content_revision(7);
+    check(image.content_revision() == 7, "Image content revision");
+    nk::SnapshotContext snapshot;
+    snapshot.add_image({0, 0, 1, 1}, &pixel, 1, 1, nk::ScaleMode::NearestNeighbor, 7);
+    check(snapshot.take_root() != nullptr, "Streaming image snapshot");
+
     auto box = nk::Box::create(nk::Orientation::Horizontal, 8.0F);
     auto nested = nk::Box::create();
     box->append(nested);

@@ -94,6 +94,13 @@ void SnapshotContext::add_image(Rect dest, const uint32_t* data, int w, int h, S
 }
 
 void SnapshotContext::add_image(
+    Rect dest, const uint32_t* data, int w, int h, ScaleMode scale, uint64_t revision) {
+    auto node = std::make_unique<ImageNode>(dest, data, w, h, scale);
+    node->set_content_revision(revision);
+    add_node(std::move(node));
+}
+
+void SnapshotContext::add_image(
     Rect dest, std::shared_ptr<const std::vector<uint32_t>> pixels, int w, int h, ScaleMode scale) {
     add_node(std::make_unique<ImageNode>(dest, std::move(pixels), w, h, scale));
 }

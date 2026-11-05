@@ -928,6 +928,13 @@ void force_symbol_references() {
     (void)static_cast<int (nk::ImageNode::*)() const>(&nk::ImageNode::src_width);
     (void)static_cast<int (nk::ImageNode::*)() const>(&nk::ImageNode::src_height);
     (void)static_cast<nk::ScaleMode (nk::ImageNode::*)() const>(&nk::ImageNode::scale_mode);
+    (void)static_cast<void (nk::ImageNode::*)(std::optional<uint64_t>)>(
+        &nk::ImageNode::set_content_revision);
+    (void)static_cast<std::optional<uint64_t> (nk::ImageNode::*)() const>(
+        &nk::ImageNode::content_revision);
+    (void)static_cast<void (nk::SnapshotContext::*)(
+        nk::Rect, const uint32_t*, int, int, nk::ScaleMode, uint64_t)>(
+        &nk::SnapshotContext::add_image);
     (void)static_cast<nk::RenderNodeKind (nk::RenderNode::*)() const>(&nk::RenderNode::kind);
     (void)static_cast<const nk::Rect& (nk::RenderNode::*)() const>(&nk::RenderNode::bounds);
     (void)static_cast<void (nk::RenderNode::*)(nk::Rect)>(&nk::RenderNode::set_bounds);

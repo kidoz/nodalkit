@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <nk/render/render_node.h>
+#include <optional>
 #include <vector>
 
 namespace nk {
@@ -39,12 +40,20 @@ public:
     [[nodiscard]] int src_height() const;
     [[nodiscard]] ScaleMode scale_mode() const;
 
+    /// Optional application revision for mutable pixel buffers. Increment it
+    /// whenever pixels change while keeping the storage address stable. Do
+    /// not reuse a revision for different contents at the same address,
+    /// including recycled storage. GPU backends may skip content hashing.
+    void set_content_revision(std::optional<uint64_t> revision);
+    [[nodiscard]] std::optional<uint64_t> content_revision() const;
+
 private:
     std::shared_ptr<const std::vector<uint32_t>> pixels_;
     const uint32_t* pixel_data_;
     int src_width_;
     int src_height_;
     ScaleMode scale_mode_;
+    std::optional<uint64_t> content_revision_;
 };
 
 } // namespace nk

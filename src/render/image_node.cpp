@@ -43,4 +43,12 @@ ScaleMode ImageNode::scale_mode() const {
     return scale_mode_;
 }
 
+void ImageNode::set_content_revision(std::optional<uint64_t> revision) {
+    content_revision_ = revision;
+}
+
+std::optional<uint64_t> ImageNode::content_revision() const {
+    return content_revision_;
+}
+
 } // namespace nk

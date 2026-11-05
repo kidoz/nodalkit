@@ -56,6 +56,14 @@ public:
                    int h,
                    ScaleMode scale = ScaleMode::NearestNeighbor);
 
+    /// Add a streaming image with an application-managed content revision.
+    /// Increment revision whenever the pixels at data change, including when
+    /// reusing storage. Revisions must not repeat for different contents at
+    /// the same address. The data must
+    /// remain valid until the frame has been rendered, as with add_image().
+    void
+    add_image(Rect dest, const uint32_t* data, int w, int h, ScaleMode scale, uint64_t revision);
+
     /// Add an image whose immutable storage is retained by the snapshot.
     void add_image(Rect dest,
                    std::shared_ptr<const std::vector<uint32_t>> pixels,
