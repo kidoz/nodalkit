@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-06
+
+The fourth patch release of the NodalKit framework. 0.3.4 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.3.3 and hardens the macOS Metal renderer. Metal resources are
+owned and released deterministically, textures upload through shared memory on
+Apple GPUs and through padded private staging buffers elsewhere, wrapped text
+is shaped at its device-scaled width, and software recovery replays a scene the
+renderer owns instead of borrowing the caller's tree. Fractional damage,
+invalid framebuffers, and allocation or upload failures now recover without
+stale or dropped frames, with a new Metal regression suite covering fallback,
+uploads, damage, and teardown.
+
+### Support Matrix for 0.3.4
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
+### Fixed
+*   **Metal Software Fallback:** Paths, affine transforms, opacity, gradients, and shadows previously disappeared on Metal; they now route to the software path. The renderer owns a recovery copy of the GPU-renderable tree, including borrowed image pixels, so fallback presentation still works after the caller releases the tree. Unsupported node kinds and failed deep copies fall back for the whole frame instead of drawing partially.
+*   **Metal Frame Validation:** Zero, negative, NaN, and overflowing logical or scaled framebuffer dimensions are rejected before allocation, damage collection, or surface presentation. Damage regions are rounded outward to whole device pixels, so fractional damage no longer leaves stale edges.
+*   **Metal Texture Failures:** Allocation or upload failures while encoding image and text commands now abandon GPU encoding and present the whole frame from software instead of silently dropping content. Failed drawables, command buffers, encoders, and fallback textures present the current software frame.
+*   **Metal Resource Lifetime:** Texture cache entries retain and release their textures, and shader functions, pipeline descriptors, samplers, buffers, pipelines, the library, the command queue, the device, and scene textures are released, including when a scene texture is resized or a renderer is destroyed. Per-frame staging textures are released after GPU completion, so fallback presentation no longer leaks device allocations.
+
+### Changed
+*   **Metal Texture Uploads:** Textures use shared storage on Apple GPUs and a 256-byte-aligned private staging buffer with blit copies on other GPUs such as Intel and AMD Macs. Shader uniform structs are 16-byte aligned and size-checked at compile time, and shaped-text cache keys include the wrapping width.
+*   **Metal Text Wrapping:** `TextNode::max_width()` is honored at the device scale with `TextShaper::shape_wrapped()`, matching the software renderer's wrapped layout.
+*   **Metal Test Coverage:** `tests/metal_renderer_test.mm` runs on macOS with the Metal debug layer and isolates the inspected renderer from the class linked in `nk_dep`. It covers unsupported-node fallback, wrapping by width, fractional damage clearing, scene invalidation, deferred upload ownership, drawable failure, padded private uploads, texture-failure recovery, and cache and scene release.
+
 ## [0.3.3] - 2026-11-05
 
 The third patch release of the NodalKit framework. 0.3.3 keeps the widget
