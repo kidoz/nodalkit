@@ -71,6 +71,40 @@ test_renderer = executable('test_renderer',
 )
 test('renderer', test_renderer)
 
+vulkan_test_deps = [nk_dep, catch2_test_dep]
+if host_system == 'linux'
+    vulkan_test_deps += cpp_compiler.find_library('dl')
+endif
+test_vulkan_renderer = executable('test_vulkan_renderer',
+    'vulkan_renderer_test.cpp',
+    dependencies : vulkan_test_deps,
+)
+test('vulkan_renderer', test_vulkan_renderer, timeout : 120)
+
+if host_system == 'linux' and vulkan_dep.found() and glslang_validator.found()
+    vulkan_faults = shared_library('vulkan_test_faults',
+        'vulkan_fault_injection.cpp',
+        dependencies : [vulkan_dep, cpp_compiler.find_library('dl')],
+        install : false,
+    )
+    foreach fault : ['submit', 'reset-fence', 'record']
+        fault_env = {
+            'LD_PRELOAD' : vulkan_faults.full_path(),
+            'NK_TEST_VULKAN_FAULT' : fault,
+        }
+        if get_option('b_sanitize').contains('address')
+            # The intentional LD_PRELOAD interposer precedes the ASan runtime.
+            # Keep memory/leak checks and fatal errors; relax only this loader check.
+            fault_env += {'ASAN_OPTIONS' : 'verify_asan_link_order=0:halt_on_error=1:abort_on_error=1:print_summary=1'}
+        endif
+        test('vulkan_failure_' + fault, test_vulkan_renderer,
+            args : ['Vulkan recovers after a failed frame'],
+            env : fault_env,
+            timeout : 30,
+        )
+    endforeach
+endif
+
 test_theme = executable('test_theme',
     'theme_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

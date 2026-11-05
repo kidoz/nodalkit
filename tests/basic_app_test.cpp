@@ -1243,7 +1243,15 @@ TEST_CASE("Win32 D3D11 dialog geometry presents on the GPU with a full swapchain
 #endif
 
 TEST_CASE("Native Vulkan-capable surfaces expose interop handles", "[app][render]") {
-#if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
+#if defined(__linux__) || defined(_WIN32)
+    if (!nk::renderer_backend_available(nk::RendererBackend::Vulkan)) {
+        SKIP("Vulkan was not built");
+    }
+#if defined(__linux__)
+    if (std::getenv("WAYLAND_DISPLAY") == nullptr) {
+        SKIP("Requires a Wayland session");
+    }
+#endif
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Vulkan interop", .width = 320, .height = 240});
     window.set_child(nk::Label::create("Vulkan interop"));
@@ -1255,13 +1263,11 @@ TEST_CASE("Native Vulkan-capable surfaces expose interop handles", "[app][render
     REQUIRE(surface != nullptr);
     const auto support = surface->renderer_backend_support();
     REQUIRE(support.software);
-#if defined(NK_HAVE_VULKAN)
     REQUIRE(support.vulkan);
-#endif
     REQUIRE(surface->native_handle() != nullptr);
     REQUIRE(surface->native_display_handle() != nullptr);
 #else
-    SUCCEED("Native Vulkan interop handles are only exposed on Vulkan-capable desktop backends");
+    SKIP("Native Vulkan interop handles are only exposed on Vulkan-capable desktop backends");
 #endif
 }
 
@@ -1342,7 +1348,15 @@ TEST_CASE("Win32 DPI changes update scale factor and framebuffer metrics",
 
 TEST_CASE("Desktop backends can opt into the Vulkan renderer backend experimentally",
           "[app][render]") {
-#if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
+#if defined(__linux__) || defined(_WIN32)
+    if (!nk::renderer_backend_available(nk::RendererBackend::Vulkan)) {
+        SKIP("Vulkan was not built");
+    }
+#if defined(__linux__)
+    if (std::getenv("WAYLAND_DISPLAY") == nullptr) {
+        SKIP("Requires a Wayland session");
+    }
+#endif
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("vulkan") == 0);
 
@@ -1355,7 +1369,7 @@ TEST_CASE("Desktop backends can opt into the Vulkan renderer backend experimenta
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
 
 #else
-    SUCCEED("Experimental Vulkan override is only available on Vulkan-capable desktop backends");
+    SKIP("Experimental Vulkan override is only available on Vulkan-capable desktop backends");
 #endif
 }
 
@@ -1484,7 +1498,15 @@ TEST_CASE("GNOME Wayland surfaces activate client-side headerbar chrome",
 #endif
 
 TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][render]") {
-#if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
+#if defined(__linux__) || defined(_WIN32)
+    if (!nk::renderer_backend_available(nk::RendererBackend::Vulkan)) {
+        SKIP("Vulkan was not built");
+    }
+#if defined(__linux__)
+    if (std::getenv("WAYLAND_DISPLAY") == nullptr) {
+        SKIP("Requires a Wayland session");
+    }
+#endif
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("vulkan") == 0);
 
@@ -1514,7 +1536,7 @@ TEST_CASE("Vulkan mixed-content frames upload image and text textures", "[app][r
     REQUIRE(second_frame.render_hotspot_counters.image_texture_upload_count == 0);
 
 #else
-    SUCCEED("Vulkan mixed-content path is only available on Vulkan-capable desktop backends");
+    SKIP("Vulkan mixed-content path is only available on Vulkan-capable desktop backends");
 #endif
 }
 
@@ -1629,7 +1651,11 @@ TEST_CASE("Debug screenshot capture reads the software renderer frame", "[app][r
 }
 
 TEST_CASE("Debug screenshot capture reads back the live Vulkan frame", "[app][render][debug]") {
-#if defined(NK_HAVE_VULKAN) && defined(__linux__)
+#if defined(__linux__)
+    if (!nk::renderer_backend_available(nk::RendererBackend::Vulkan) ||
+        std::getenv("WAYLAND_DISPLAY") == nullptr) {
+        SKIP("Requires Linux Wayland and Vulkan");
+    }
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("vulkan") == 0);
 
@@ -1705,7 +1731,7 @@ TEST_CASE("Debug screenshot capture reads back the live Vulkan frame", "[app][re
                           reference_pixel.b,
                           2));
 #else
-    SUCCEED("Vulkan screenshot readback is only available on the Linux Vulkan backend");
+    SKIP("Vulkan screenshot readback is only available on the Linux Vulkan backend");
 #endif
 }
 

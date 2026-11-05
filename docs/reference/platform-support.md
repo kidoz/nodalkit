@@ -47,6 +47,46 @@ package config module in 0.x.
 | Metal | macOS. |
 | Vulkan | Linux and Windows, experimental and optional. |
 
+### Vulkan rendering
+
+Vulkan uses a Vulkan 1.0 API baseline and negotiates a renderable BGRA8 or
+RGBA8 UNORM surface with nonlinear sRGB presentation. Other surface formats
+use software presentation. Its GPU draw path handles solid and
+rounded rectangles, borders, text, images, round-capped lines, linear gradients,
+distance-based box shadows, and per-draw opacity. Rounded clips support four
+levels; lines and gradients support three. Deeper clipping, paths, and affine
+transforms render the frame in software and upload it for Vulkan presentation.
+Affine fallback uses nearest sampling of bounded transparent layers; singular
+transforms draw no pixels.
+
+GPU image and text allocations share a 96 MiB cache budget. Cold allocations
+are evicted before making room for new ones. Frames whose working set exceeds
+the budget use software rasterization. Texture uploads are batched into the
+frame submission, and changes to an image at the same storage address reuse
+its allocation. The unversioned image API detects changes by hashing pixels.
+`SnapshotContext::add_image(dest, data, width, height, scale, revision)` allows
+applications to supply a revision instead; increment it whenever those pixels
+change, including when recycling storage. A revision must not repeat for
+different contents at the same address. Pixel storage must remain valid
+through rendering.
+
+`window.renderer_backend()` identifies the selected backend. The frame's
+`render_hotspot_counters.gpu_present_path` distinguishes GPU drawing from
+software upload or direct software presentation. A Vulkan screenshot source
+can therefore contain a software-rasterized frame.
+
+On Linux, native GPU and recovery checks can run with validation installed:
+
+```sh
+python3 tools/run_vulkan_validation.py meson test -C buildDir -v \
+  vulkan_renderer vulkan_failure_submit vulkan_failure_reset-fence vulkan_failure_record
+```
+
+This command requires a Wayland session, a Vulkan device, and
+`VK_LAYER_KHRONOS_validation`. It fails if Vulkan is unavailable or validation
+reports errors or warnings. CI supplies headless Weston and Mesa's software
+Vulkan implementation.
+
 ## Accessibility bridges
 
 The accessibility model under `nk/accessibility` is populated on every

@@ -164,11 +164,9 @@ struct ImageTextureCacheKey {
     const uint32_t* pixel_data = nullptr;
     int width = 0;
     int height = 0;
-    std::size_t content_hash = 0;
 
     bool operator==(const ImageTextureCacheKey& other) const {
-        return pixel_data == other.pixel_data && width == other.width && height == other.height &&
-               content_hash == other.content_hash;
+        return pixel_data == other.pixel_data && width == other.width && height == other.height;
     }
 };
 
@@ -191,6 +189,22 @@ struct TextureCacheEntry {
     VkDescriptorSet nearest_descriptor_set = VK_NULL_HANDLE;
     VkDescriptorSet linear_descriptor_set = VK_NULL_HANDLE;
     uint64_t last_used_frame = 0;
+    uint64_t upload_frame = 0;
+    std::size_t content_hash = 0;
+    std::optional<uint64_t> revision;
+    VkDeviceSize allocated_bytes = 0;
+    bool initialized = false;
+    bool content_valid = false;
+    // Retain the object used as the text-cache key; allocator address reuse
+    // must never make a new shaped run alias an old GPU texture.
+    std::shared_ptr<ShapedText> shaped_text;
+};
+
+struct TextureUpload {
+    TextureCacheEntry* entry = nullptr;
+    VkDeviceSize offset = 0;
+    uint32_t width = 0;
+    uint32_t height = 0;
 };
 
 struct ImageTextureCacheKeyHash {
@@ -198,7 +212,6 @@ struct ImageTextureCacheKeyHash {
         std::size_t hash = std::hash<const uint32_t*>{}(key.pixel_data);
         hash ^= std::hash<int>{}(key.width) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<int>{}(key.height) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        hash ^= std::hash<std::size_t>{}(key.content_hash) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         return hash;
     }
 };
@@ -217,6 +230,7 @@ struct TextTextureCacheKeyHash {
 constexpr uint64_t kTextureCacheMaxAgeFrames = 120;
 constexpr std::size_t kImageTextureCacheMaxEntries = 128;
 constexpr std::size_t kTextTextureCacheMaxEntries = 256;
+constexpr VkDeviceSize kTextureCacheMaxBytes = 96ULL * 1024 * 1024;
 
 float normalize_scale_factor(float scale_factor) {
     return std::isfinite(scale_factor) && scale_factor > 0.0F ? scale_factor : 1.0F;
@@ -680,6 +694,13 @@ public:
         scale_factor_ = normalize_scale_factor(scale_factor);
         ++frame_serial_;
         software_->begin_frame(viewport, scale_factor_);
+        // Cache eviction, streaming updates and command-pool reuse must wait
+        // for the previous submission before touching any GPU resources.
+        if (ready_ && !wait_for_frame()) {
+            destroy_context();
+        }
+        pending_uploads_.clear();
+        texture_upload_bytes_.clear();
         trim_texture_cache(image_texture_cache_, kImageTextureCacheMaxEntries);
         trim_texture_cache(text_texture_cache_, kTextTextureCacheMaxEntries);
         draw_commands_.clear();
@@ -734,6 +755,10 @@ public:
                 counters.gpu_estimated_draw_pixel_count = preserved.gpu_estimated_draw_pixel_count;
                 counters.gpu_present_path = preserved.gpu_present_path;
                 counters.gpu_present_tradeoff = preserved.gpu_present_tradeoff;
+                counters.texture_allocation_count = preserved.texture_allocation_count;
+                counters.texture_upload_byte_count = preserved.texture_upload_byte_count;
+                counters.texture_upload_batch_count = preserved.texture_upload_batch_count;
+                counters.texture_cache_byte_count = static_cast<std::size_t>(texture_cache_bytes_);
                 last_hotspot_counters_ = counters;
             } else {
                 last_hotspot_counters_.gpu_draw_call_count = estimate_gpu_draw_call_count();
@@ -757,15 +782,39 @@ public:
     }
 
     void present(NativeSurface& surface) override {
-        if (!attach_surface(surface) || !ensure_swapchain()) {
+        const auto* pending_root = last_root_;
+        const bool software_rendered = software_frame_rendered_;
+        const bool software_finalized = software_frame_finalized_;
+        if (!attach_surface(surface)) {
+            last_root_ = pending_root;
+            software_frame_rendered_ = software_rendered;
+            software_frame_finalized_ = software_finalized;
+            present_software_direct(surface);
+            return;
+        }
+        // Recovery can recreate the device after this frame was collected.
+        // Rebuild commands/textures against the new context, retaining the
+        // caller-owned render tree until presentation finishes.
+        if (pending_root != nullptr && last_root_ != pending_root) {
+            last_hotspot_counters_ = {};
+            render(*pending_root);
+        }
+        if (!ensure_swapchain()) {
             present_software_direct(surface);
             return;
         }
 
-        if (!vk_ok(vkWaitForFences(device_, 1, &in_flight_fence_, VK_TRUE, UINT64_MAX),
-                   "vkWaitForFences")) {
+        if (!wait_for_frame()) {
             present_software_direct(surface);
             return;
+        }
+
+        if (use_gpu_path_ && draw_textures_.size() != draw_commands_.size() &&
+            !ensure_draw_textures_ready()) {
+            use_gpu_path_ = false;
+        }
+        if (use_gpu_path_ && !prepare_texture_uploads()) {
+            use_gpu_path_ = false;
         }
 
         uint32_t image_index = 0;
@@ -794,28 +843,28 @@ public:
             return;
         }
 
-        if (!vk_ok(vkResetFences(device_, 1, &in_flight_fence_), "vkResetFences")) {
-            present_software_direct(surface);
-            return;
-        }
-
-        VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        // Both GPU strategies first access the acquired image with a transfer.
+        // Waiting only at COLOR_ATTACHMENT_OUTPUT would leave the copy/clear racing WSI.
+        const VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
         bool recorded = false;
         const bool full_redraw = full_redraw_ || !scene_initialized_ || damage_regions_.empty();
-        const bool textures_ready = !use_gpu_path_ ||
-                                    draw_textures_.size() == draw_commands_.size() ||
-                                    ensure_draw_textures_ready();
+        const bool textures_ready =
+            !use_gpu_path_ || draw_textures_.size() == draw_commands_.size();
+        const auto previous_scene_layout = scene_layout_;
         if (use_gpu_path_ && scene_framebuffer_ != VK_NULL_HANDLE &&
             primitive_pipeline_ != VK_NULL_HANDLE && image_pipeline_ != VK_NULL_HANDLE &&
             descriptor_pool_ != VK_NULL_HANDLE && descriptor_set_layout_ != VK_NULL_HANDLE &&
             textures_ready &&
             vk_ok(vkResetCommandPool(device_, command_pool_, 0), "vkResetCommandPool(gpu)")) {
             recorded = record_gpu_draw_commands(image_index);
-            wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         }
 
         if (!recorded) {
+            // A discarded recording never performed its layout transitions.
+            scene_layout_ = previous_scene_layout;
+            scene_initialized_ = false;
             if (!ensure_software_frame()) {
+                abandon_frame(surface);
                 return;
             }
 
@@ -823,13 +872,14 @@ public:
             const int pixel_width = software_->pixel_width();
             const int pixel_height = software_->pixel_height();
             if (pixel_data == nullptr || pixel_width <= 0 || pixel_height <= 0) {
+                abandon_frame(surface);
                 return;
             }
 
             if (!ensure_staging_buffer(static_cast<uint32_t>(pixel_width),
                                        static_cast<uint32_t>(pixel_height),
                                        swapchain_format_)) {
-                present_software_direct(surface);
+                abandon_frame(surface);
                 return;
             }
 
@@ -842,10 +892,9 @@ public:
                 !record_software_upload_commands(image_index,
                                                  static_cast<uint32_t>(pixel_width),
                                                  static_cast<uint32_t>(pixel_height))) {
-                present_software_direct(surface);
+                abandon_frame(surface);
                 return;
             }
-            wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::SoftwareUpload;
             last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::None;
         }
@@ -868,6 +917,7 @@ public:
         };
         const void* present_pnext = present_regions_.empty() ? nullptr : &present_regions_info;
 
+        const VkSemaphore render_finished = present_semaphores_[image_index];
         const VkSubmitInfo submit_info = {
             .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
             .pNext = nullptr,
@@ -877,20 +927,36 @@ public:
             .commandBufferCount = 1,
             .pCommandBuffers = &command_buffer_,
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &render_finished_semaphore_,
+            .pSignalSemaphores = &render_finished,
         };
 
-        if (!vk_ok(vkQueueSubmit(graphics_queue_, 1, &submit_info, in_flight_fence_),
-                   "vkQueueSubmit")) {
-            present_software_direct(surface);
+        // No fallible preparation remains between resetting the fence and submit.
+        if (!vk_ok(vkResetFences(device_, 1, &in_flight_fence_), "vkResetFences")) {
+            abandon_frame(surface);
             return;
         }
+        if (!vk_ok(vkQueueSubmit(graphics_queue_, 1, &submit_info, in_flight_fence_),
+                   "vkQueueSubmit")) {
+            abandon_frame(surface);
+            return;
+        }
+        frame_pending_ = true;
+        if (recorded) {
+            for (auto& upload : pending_uploads_) {
+                upload.entry->initialized = true;
+                upload.entry->content_valid = true;
+                upload.entry->upload_frame = 0;
+            }
+            last_hotspot_counters_.texture_upload_batch_count = pending_uploads_.empty() ? 0 : 1;
+        }
+        last_hotspot_counters_.texture_cache_byte_count =
+            static_cast<std::size_t>(texture_cache_bytes_);
 
         const VkPresentInfoKHR present_info = {
             .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             .pNext = present_pnext,
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &render_finished_semaphore_,
+            .pWaitSemaphores = &render_finished,
             .swapchainCount = 1,
             .pSwapchains = &swapchain_,
             .pImageIndices = &image_index,
@@ -1125,6 +1191,53 @@ private:
             destroy_texture_entry(oldest->second);
             cache.erase(oldest);
         }
+    }
+
+    template <typename Map> bool make_texture_slot(Map& cache, std::size_t limit) {
+        if (cache.size() < limit) {
+            return true;
+        }
+        auto oldest = cache.end();
+        for (auto it = cache.begin(); it != cache.end(); ++it) {
+            if (it->second.last_used_frame != frame_serial_ &&
+                (oldest == cache.end() ||
+                 it->second.last_used_frame < oldest->second.last_used_frame)) {
+                oldest = it;
+            }
+        }
+        if (oldest == cache.end()) {
+            return false;
+        }
+        destroy_texture_entry(oldest->second);
+        cache.erase(oldest);
+        return true;
+    }
+
+    [[nodiscard]] bool reserve_texture_bytes(VkDeviceSize bytes) {
+        if (bytes > kTextureCacheMaxBytes) {
+            return false;
+        }
+        while (texture_cache_bytes_ > kTextureCacheMaxBytes - bytes) {
+            TextureCacheEntry* oldest = nullptr;
+            auto find_oldest = [&](auto& cache) {
+                for (auto& [key, entry] : cache) {
+                    (void)key;
+                    if (entry.allocated_bytes > 0 && entry.last_used_frame != frame_serial_ &&
+                        (oldest == nullptr || entry.last_used_frame < oldest->last_used_frame)) {
+                        oldest = &entry;
+                    }
+                }
+            };
+            find_oldest(image_texture_cache_);
+            find_oldest(text_texture_cache_);
+            if (oldest == nullptr) {
+                return false;
+            }
+            // Keep the stable key but release its allocation. A later use
+            // repopulates it, after making room under the same budget.
+            destroy_texture_entry(*oldest);
+        }
+        return true;
     }
 
     [[nodiscard]] Rect draw_command_bounds(const DrawCommand& draw_command) const {
@@ -1530,6 +1643,39 @@ private:
                      "vkAllocateCommandBuffers");
     }
 
+    [[nodiscard]] bool wait_for_frame() {
+        if (!frame_pending_) {
+            return true;
+        }
+        if (!vk_ok(vkWaitForFences(device_, 1, &in_flight_fence_, VK_TRUE, UINT64_MAX),
+                   "vkWaitForFences")) {
+            return false;
+        }
+        frame_pending_ = false;
+        return true;
+    }
+
+    void abandon_frame(NativeSurface& surface) {
+        // Consume the acquisition even if recording/allocation/submit failed.
+        // This is an exceptional recovery path, never a normal frame stall.
+        const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        const VkSubmitInfo drain{
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = nullptr,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &image_available_semaphore_,
+            .pWaitDstStageMask = &stage,
+            .commandBufferCount = 0,
+            .pCommandBuffers = nullptr,
+            .signalSemaphoreCount = 0,
+            .pSignalSemaphores = nullptr,
+        };
+        if (vkQueueSubmit(graphics_queue_, 1, &drain, VK_NULL_HANDLE) == VK_SUCCESS) {
+            (void)vkQueueWaitIdle(graphics_queue_);
+        }
+        present_software_direct(surface);
+    }
+
     [[nodiscard]] bool create_sync_resources() {
         const VkSemaphoreCreateInfo semaphore_info = {
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
@@ -1538,10 +1684,7 @@ private:
         };
         if (!vk_ok(
                 vkCreateSemaphore(device_, &semaphore_info, nullptr, &image_available_semaphore_),
-                "vkCreateSemaphore(image_available)") ||
-            !vk_ok(
-                vkCreateSemaphore(device_, &semaphore_info, nullptr, &render_finished_semaphore_),
-                "vkCreateSemaphore(render_finished)")) {
+                "vkCreateSemaphore(image_available)")) {
             return false;
         }
 
@@ -1672,10 +1815,11 @@ private:
             entry.image = VK_NULL_HANDLE;
         }
         if (entry.memory != VK_NULL_HANDLE) {
+            texture_cache_bytes_ -= entry.allocated_bytes;
             vkFreeMemory(device_, entry.memory, nullptr);
             entry.memory = VK_NULL_HANDLE;
         }
-        entry.last_used_frame = 0;
+        entry = {};
     }
 
     void destroy_texture_caches() {
@@ -1691,6 +1835,8 @@ private:
         }
         text_texture_cache_.clear();
         shaped_text_cache_.clear();
+        pending_uploads_.clear();
+        texture_upload_bytes_.clear();
         draw_textures_.clear();
         draw_descriptor_sets_.clear();
         image_upload_buffer_.clear();
@@ -1758,6 +1904,12 @@ private:
         }
 
         destroy_render_targets();
+        for (auto semaphore : present_semaphores_) {
+            if (semaphore != VK_NULL_HANDLE) {
+                vkDestroySemaphore(device_, semaphore, nullptr);
+            }
+        }
+        present_semaphores_.clear();
 
         if (swapchain_ != VK_NULL_HANDLE) {
             vkDestroySwapchainKHR(device_, swapchain_, nullptr);
@@ -2003,7 +2155,8 @@ private:
             .srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             .dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             .srcAccessMask = 0,
-            .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .dstAccessMask =
+                (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
             .dependencyFlags = 0,
         };
 
@@ -2352,6 +2505,20 @@ private:
             return false;
         }
 
+        present_semaphores_.resize(swapchain_images_.size(), VK_NULL_HANDLE);
+        const VkSemaphoreCreateInfo semaphore_info{
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+        };
+        for (auto& semaphore : present_semaphores_) {
+            if (!vk_ok(vkCreateSemaphore(device_, &semaphore_info, nullptr, &semaphore),
+                       "vkCreateSemaphore(present_image)")) {
+                destroy_swapchain();
+                return false;
+            }
+        }
+
         swapchain_format_ = chosen_format.format;
         swapchain_extent_ = chosen_extent;
         recreate_swapchain_ = false;
@@ -2470,76 +2637,87 @@ private:
         std::memcpy(staging_mapped_, rgba, pixel_bytes);
     }
 
-    [[nodiscard]] bool create_upload_buffer(VkDeviceSize size,
-                                            const uint8_t* data,
-                                            VkBuffer& buffer,
-                                            VkDeviceMemory& buffer_memory) {
-        const VkBufferCreateInfo buffer_info = {
-            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .size = size,
-            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-            .queueFamilyIndexCount = 0,
-            .pQueueFamilyIndices = nullptr,
-        };
-        if (!vk_ok(vkCreateBuffer(device_, &buffer_info, nullptr, &buffer),
-                   "vkCreateBuffer(texture_upload)")) {
-            return false;
+    void destroy_texture_upload_buffer() {
+        if (texture_upload_mapped_ != nullptr) {
+            vkUnmapMemory(device_, texture_upload_memory_);
         }
+        if (texture_upload_buffer_ != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device_, texture_upload_buffer_, nullptr);
+        }
+        if (texture_upload_memory_ != VK_NULL_HANDLE) {
+            vkFreeMemory(device_, texture_upload_memory_, nullptr);
+        }
+        texture_upload_mapped_ = nullptr;
+        texture_upload_buffer_ = VK_NULL_HANDLE;
+        texture_upload_memory_ = VK_NULL_HANDLE;
+        texture_upload_capacity_ = 0;
+    }
 
-        VkMemoryRequirements memory_requirements{};
-        vkGetBufferMemoryRequirements(device_, buffer, &memory_requirements);
-        const uint32_t memory_type = find_memory_type(memory_requirements.memoryTypeBits,
+    [[nodiscard]] bool prepare_texture_uploads() {
+        const auto bytes = static_cast<VkDeviceSize>(texture_upload_bytes_.size());
+        if (bytes == 0) {
+            return true;
+        }
+        if (bytes > texture_upload_capacity_) {
+            destroy_texture_upload_buffer();
+            const VkDeviceSize capacity = std::max<VkDeviceSize>(65536, std::bit_ceil(bytes));
+            const VkBufferCreateInfo buffer_info{
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .size = capacity,
+                .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 0,
+                .pQueueFamilyIndices = nullptr,
+            };
+            if (!vk_ok(vkCreateBuffer(device_, &buffer_info, nullptr, &texture_upload_buffer_),
+                       "vkCreateBuffer(texture_batch)")) {
+                return false;
+            }
+            VkMemoryRequirements requirements{};
+            vkGetBufferMemoryRequirements(device_, texture_upload_buffer_, &requirements);
+            const auto memory_type = find_memory_type(requirements.memoryTypeBits,
                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-        if (memory_type == std::numeric_limits<uint32_t>::max()) {
-            NK_LOG_WARN("VulkanRenderer", "No upload memory type available for texture staging");
-            vkDestroyBuffer(device_, buffer, nullptr);
-            buffer = VK_NULL_HANDLE;
-            return false;
+            if (memory_type == std::numeric_limits<uint32_t>::max()) {
+                destroy_texture_upload_buffer();
+                return false;
+            }
+            const VkMemoryAllocateInfo memory_info{
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .pNext = nullptr,
+                .allocationSize = requirements.size,
+                .memoryTypeIndex = memory_type,
+            };
+            if (!vk_ok(vkAllocateMemory(device_, &memory_info, nullptr, &texture_upload_memory_),
+                       "vkAllocateMemory(texture_batch)") ||
+                !vk_ok(
+                    vkBindBufferMemory(device_, texture_upload_buffer_, texture_upload_memory_, 0),
+                    "vkBindBufferMemory(texture_batch)")) {
+                destroy_texture_upload_buffer();
+                return false;
+            }
+            void* mapped = nullptr;
+            if (!vk_ok(vkMapMemory(device_, texture_upload_memory_, 0, capacity, 0, &mapped),
+                       "vkMapMemory(texture_batch)")) {
+                destroy_texture_upload_buffer();
+                return false;
+            }
+            texture_upload_mapped_ = static_cast<uint8_t*>(mapped);
+            texture_upload_capacity_ = capacity;
         }
-
-        const VkMemoryAllocateInfo allocate_info = {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-            .pNext = nullptr,
-            .allocationSize = memory_requirements.size,
-            .memoryTypeIndex = memory_type,
-        };
-        if (!vk_ok(vkAllocateMemory(device_, &allocate_info, nullptr, &buffer_memory),
-                   "vkAllocateMemory(texture_upload)")) {
-            vkDestroyBuffer(device_, buffer, nullptr);
-            buffer = VK_NULL_HANDLE;
-            return false;
-        }
-
-        if (!vk_ok(vkBindBufferMemory(device_, buffer, buffer_memory, 0),
-                   "vkBindBufferMemory(texture_upload)")) {
-            vkFreeMemory(device_, buffer_memory, nullptr);
-            buffer_memory = VK_NULL_HANDLE;
-            vkDestroyBuffer(device_, buffer, nullptr);
-            buffer = VK_NULL_HANDLE;
-            return false;
-        }
-
-        void* mapped = nullptr;
-        if (!vk_ok(vkMapMemory(device_, buffer_memory, 0, size, 0, &mapped),
-                   "vkMapMemory(texture_upload)")) {
-            vkFreeMemory(device_, buffer_memory, nullptr);
-            buffer_memory = VK_NULL_HANDLE;
-            vkDestroyBuffer(device_, buffer, nullptr);
-            buffer = VK_NULL_HANDLE;
-            return false;
-        }
-
-        std::memcpy(mapped, data, static_cast<std::size_t>(size));
-        vkUnmapMemory(device_, buffer_memory);
+        std::memcpy(
+            texture_upload_mapped_, texture_upload_bytes_.data(), texture_upload_bytes_.size());
         return true;
     }
 
     [[nodiscard]] bool
     allocate_texture_image(uint32_t width, uint32_t height, TextureCacheEntry& entry) {
+        if (width > device_properties_.limits.maxImageDimension2D ||
+            height > device_properties_.limits.maxImageDimension2D) {
+            return false;
+        }
         const VkImageCreateInfo image_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .pNext = nullptr,
@@ -2572,6 +2750,10 @@ private:
             return false;
         }
 
+        if (!reserve_texture_bytes(memory_requirements.size)) {
+            destroy_texture_entry(entry);
+            return false;
+        }
         const VkMemoryAllocateInfo allocate_info = {
             .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
             .pNext = nullptr,
@@ -2583,6 +2765,10 @@ private:
             destroy_texture_entry(entry);
             return false;
         }
+
+        entry.allocated_bytes = memory_requirements.size;
+        texture_cache_bytes_ += entry.allocated_bytes;
+        ++last_hotspot_counters_.texture_allocation_count;
 
         if (!vk_ok(vkBindImageMemory(device_, entry.image, entry.memory, 0), "vkBindImageMemory")) {
             destroy_texture_entry(entry);
@@ -2625,66 +2811,47 @@ private:
                                            uint32_t width,
                                            uint32_t height,
                                            TextureCacheEntry& entry) {
-        const VkDeviceSize upload_size =
-            static_cast<VkDeviceSize>(width) * static_cast<VkDeviceSize>(height) * 4;
-        VkBuffer upload_buffer = VK_NULL_HANDLE;
-        VkDeviceMemory upload_memory = VK_NULL_HANDLE;
-        if (!create_upload_buffer(upload_size, rgba, upload_buffer, upload_memory)) {
+        // Validate dimensions before allocation and overflow-prone multiplication.
+        if (width == 0 || height == 0 || width > kTextureCacheMaxBytes / 4 ||
+            height > kTextureCacheMaxBytes / (static_cast<VkDeviceSize>(width) * 4)) {
             return false;
         }
-
-        if (!allocate_texture_image(width, height, entry)) {
-            vkFreeMemory(device_, upload_memory, nullptr);
-            vkDestroyBuffer(device_, upload_buffer, nullptr);
+        const auto bytes = static_cast<std::size_t>(width) * height * 4;
+        if (texture_upload_bytes_.size() > kTextureCacheMaxBytes - bytes) {
             return false;
         }
-
-        VkCommandBuffer temp_command_buffer = VK_NULL_HANDLE;
-        const VkCommandBufferAllocateInfo allocate_info = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-            .pNext = nullptr,
-            .commandPool = command_pool_,
-            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-            .commandBufferCount = 1,
-        };
-        if (!vk_ok(vkAllocateCommandBuffers(device_, &allocate_info, &temp_command_buffer),
-                   "vkAllocateCommandBuffers(texture_upload)")) {
-            vkFreeMemory(device_, upload_memory, nullptr);
-            vkDestroyBuffer(device_, upload_buffer, nullptr);
-            destroy_texture_entry(entry);
+        if (entry.image == VK_NULL_HANDLE && !allocate_texture_image(width, height, entry)) {
             return false;
         }
+        const auto offset = texture_upload_bytes_.size();
+        texture_upload_bytes_.insert(texture_upload_bytes_.end(), rgba, rgba + bytes);
+        pending_uploads_.push_back({&entry, static_cast<VkDeviceSize>(offset), width, height});
+        entry.upload_frame = frame_serial_;
+        entry.content_valid = false;
+        last_hotspot_counters_.texture_upload_byte_count += bytes;
+        return true;
+    }
 
-        const VkCommandBufferBeginInfo begin_info = {
-            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            .pNext = nullptr,
-            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-            .pInheritanceInfo = nullptr,
-        };
-        bool ok = vk_ok(vkBeginCommandBuffer(temp_command_buffer, &begin_info),
-                        "vkBeginCommandBuffer(texture_upload)");
-        if (ok) {
-            const VkImageMemoryBarrier to_transfer = {
+    void record_texture_uploads() {
+        for (const auto& upload : pending_uploads_) {
+            const auto& entry = *upload.entry;
+            VkImageMemoryBarrier barrier{
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .pNext = nullptr,
-                .srcAccessMask = 0,
+                .srcAccessMask =
+                    entry.initialized ? VkAccessFlags{VK_ACCESS_SHADER_READ_BIT} : VkAccessFlags{0},
                 .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+                .oldLayout = entry.initialized ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                               : VK_IMAGE_LAYOUT_UNDEFINED,
                 .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = entry.image,
-                .subresourceRange =
-                    {
-                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                        .baseMipLevel = 0,
-                        .levelCount = 1,
-                        .baseArrayLayer = 0,
-                        .layerCount = 1,
-                    },
+                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1},
             };
-            vkCmdPipelineBarrier(temp_command_buffer,
-                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            vkCmdPipelineBarrier(command_buffer_,
+                                 entry.initialized ? VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                                                   : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  0,
                                  0,
@@ -2692,49 +2859,26 @@ private:
                                  0,
                                  nullptr,
                                  1,
-                                 &to_transfer);
-
-            const VkBufferImageCopy region = {
-                .bufferOffset = 0,
+                                 &barrier);
+            const VkBufferImageCopy region{
+                .bufferOffset = upload.offset,
                 .bufferRowLength = 0,
                 .bufferImageHeight = 0,
-                .imageSubresource =
-                    {
-                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                        .mipLevel = 0,
-                        .baseArrayLayer = 0,
-                        .layerCount = 1,
-                    },
+                .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                 .imageOffset = {0, 0, 0},
-                .imageExtent = {width, height, 1},
+                .imageExtent = {upload.width, upload.height, 1},
             };
-            vkCmdCopyBufferToImage(temp_command_buffer,
-                                   upload_buffer,
+            vkCmdCopyBufferToImage(command_buffer_,
+                                   texture_upload_buffer_,
                                    entry.image,
                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                    1,
                                    &region);
-
-            const VkImageMemoryBarrier to_shader_read = {
-                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                .pNext = nullptr,
-                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = entry.image,
-                .subresourceRange =
-                    {
-                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                        .baseMipLevel = 0,
-                        .levelCount = 1,
-                        .baseArrayLayer = 0,
-                        .layerCount = 1,
-                    },
-            };
-            vkCmdPipelineBarrier(temp_command_buffer,
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            vkCmdPipelineBarrier(command_buffer_,
                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                                  0,
@@ -2743,37 +2887,8 @@ private:
                                  0,
                                  nullptr,
                                  1,
-                                 &to_shader_read);
-
-            ok = vk_ok(vkEndCommandBuffer(temp_command_buffer),
-                       "vkEndCommandBuffer(texture_upload)");
+                                 &barrier);
         }
-
-        if (ok) {
-            const VkSubmitInfo submit_info = {
-                .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                .pNext = nullptr,
-                .waitSemaphoreCount = 0,
-                .pWaitSemaphores = nullptr,
-                .pWaitDstStageMask = nullptr,
-                .commandBufferCount = 1,
-                .pCommandBuffers = &temp_command_buffer,
-                .signalSemaphoreCount = 0,
-                .pSignalSemaphores = nullptr,
-            };
-            ok = vk_ok(vkQueueSubmit(graphics_queue_, 1, &submit_info, VK_NULL_HANDLE),
-                       "vkQueueSubmit(texture_upload)") &&
-                 vk_ok(vkQueueWaitIdle(graphics_queue_), "vkQueueWaitIdle(texture_upload)");
-        }
-
-        vkFreeCommandBuffers(device_, command_pool_, 1, &temp_command_buffer);
-        vkFreeMemory(device_, upload_memory, nullptr);
-        vkDestroyBuffer(device_, upload_buffer, nullptr);
-
-        if (!ok) {
-            destroy_texture_entry(entry);
-        }
-        return ok;
     }
 
     [[nodiscard]] TextureCacheEntry* upload_image_texture(const ImageCommand& command) {
@@ -2781,58 +2896,50 @@ private:
             command.src_height <= 0) {
             return nullptr;
         }
-
-        const std::size_t byte_count = static_cast<std::size_t>(command.src_width) *
-                                       static_cast<std::size_t>(command.src_height) * 4;
-        const ImageTextureCacheKey cache_key{
-            .pixel_data = command.pixel_data,
-            .width = command.src_width,
-            .height = command.src_height,
-            .content_hash =
-                hash_bytes(reinterpret_cast<const uint8_t*>(command.pixel_data), byte_count),
-        };
-        if (auto it = image_texture_cache_.find(cache_key); it != image_texture_cache_.end()) {
-            it->second.last_used_frame = frame_serial_;
-            ++last_hotspot_counters_.image_texture_cache_hit_count;
-            if (!ensure_texture_descriptor_sets(it->second, true)) {
-                destroy_texture_entry(it->second);
-                image_texture_cache_.erase(it);
-                return nullptr;
-            }
-            return &it->second;
-        }
-
-        const std::size_t pixel_count = static_cast<std::size_t>(command.src_width) *
-                                        static_cast<std::size_t>(command.src_height);
-        image_upload_buffer_.resize(pixel_count * 4);
-        for (std::size_t index = 0; index < pixel_count; ++index) {
-            const uint32_t pixel = command.pixel_data[index];
-            image_upload_buffer_[(index * 4) + 0] = static_cast<uint8_t>((pixel >> 16) & 0xFF);
-            image_upload_buffer_[(index * 4) + 1] = static_cast<uint8_t>((pixel >> 8) & 0xFF);
-            image_upload_buffer_[(index * 4) + 2] = static_cast<uint8_t>(pixel & 0xFF);
-            image_upload_buffer_[(index * 4) + 3] = static_cast<uint8_t>((pixel >> 24) & 0xFF);
-        }
-
-        TextureCacheEntry entry{};
-        if (!upload_texture_rgba(image_upload_buffer_.data(),
-                                 static_cast<uint32_t>(command.src_width),
-                                 static_cast<uint32_t>(command.src_height),
-                                 entry)) {
+        const auto width = static_cast<std::size_t>(command.src_width);
+        const auto height = static_cast<std::size_t>(command.src_height);
+        if (width > kTextureCacheMaxBytes / 4 || height > kTextureCacheMaxBytes / (width * 4)) {
             return nullptr;
         }
-
-        ++last_hotspot_counters_.image_texture_upload_count;
+        const std::size_t bytes = width * height * 4;
+        const auto content_hash =
+            command.revision
+                ? 0
+                : hash_bytes(reinterpret_cast<const uint8_t*>(command.pixel_data), bytes);
+        const ImageTextureCacheKey key{command.pixel_data, command.src_width, command.src_height};
+        if (!image_texture_cache_.contains(key) &&
+            !make_texture_slot(image_texture_cache_, kImageTextureCacheMaxEntries)) {
+            return nullptr;
+        }
+        auto [it, inserted] = image_texture_cache_.try_emplace(key);
+        auto& entry = it->second;
         entry.last_used_frame = frame_serial_;
-        if (!ensure_texture_descriptor_sets(entry, true)) {
-            destroy_texture_entry(entry);
+        if (!inserted && entry.image != VK_NULL_HANDLE && entry.content_hash == content_hash &&
+            entry.revision == command.revision &&
+            ((entry.content_valid && entry.upload_frame == 0) ||
+             entry.upload_frame == frame_serial_)) {
+            ++last_hotspot_counters_.image_texture_cache_hit_count;
+            return &entry;
+        }
+        image_upload_buffer_.resize(bytes);
+        for (std::size_t index = 0; index < width * height; ++index) {
+            const uint32_t pixel = command.pixel_data[index];
+            image_upload_buffer_[index * 4] = static_cast<uint8_t>(pixel >> 16);
+            image_upload_buffer_[index * 4 + 1] = static_cast<uint8_t>(pixel >> 8);
+            image_upload_buffer_[index * 4 + 2] = static_cast<uint8_t>(pixel);
+            image_upload_buffer_[index * 4 + 3] = static_cast<uint8_t>(pixel >> 24);
+        }
+        if (!upload_texture_rgba(image_upload_buffer_.data(),
+                                 static_cast<uint32_t>(width),
+                                 static_cast<uint32_t>(height),
+                                 entry) ||
+            !ensure_texture_descriptor_sets(entry, true)) {
             return nullptr;
         }
-        auto [it, inserted] = image_texture_cache_.emplace(cache_key, entry);
-        if (!inserted) {
-            destroy_texture_entry(entry);
-            it->second.last_used_frame = frame_serial_;
-        }
-        return &it->second;
+        entry.content_hash = content_hash;
+        entry.revision = command.revision;
+        ++last_hotspot_counters_.image_texture_upload_count;
+        return &entry;
     }
 
     [[nodiscard]] TextureCacheEntry* upload_text_texture(const TextCommand& command) {
@@ -2841,44 +2948,32 @@ private:
             command.shaped_text->bitmap_width() <= 0 || command.shaped_text->bitmap_height() <= 0) {
             return nullptr;
         }
-
-        const TextTextureCacheKey cache_key{
-            .shaped_text = command.shaped_text.get(),
-            .bitmap_data = command.shaped_text->bitmap_data(),
-            .width = command.shaped_text->bitmap_width(),
-            .height = command.shaped_text->bitmap_height(),
-        };
-        if (auto it = text_texture_cache_.find(cache_key); it != text_texture_cache_.end()) {
-            it->second.last_used_frame = frame_serial_;
-            ++last_hotspot_counters_.text_texture_cache_hit_count;
-            if (!ensure_texture_descriptor_sets(it->second, false)) {
-                destroy_texture_entry(it->second);
-                text_texture_cache_.erase(it);
-                return nullptr;
-            }
-            return &it->second;
-        }
-
-        TextureCacheEntry entry{};
-        if (!upload_texture_rgba(command.shaped_text->bitmap_data(),
-                                 static_cast<uint32_t>(command.shaped_text->bitmap_width()),
-                                 static_cast<uint32_t>(command.shaped_text->bitmap_height()),
-                                 entry)) {
+        const auto& shaped = command.shaped_text;
+        const TextTextureCacheKey key{
+            shaped.get(), shaped->bitmap_data(), shaped->bitmap_width(), shaped->bitmap_height()};
+        if (!text_texture_cache_.contains(key) &&
+            !make_texture_slot(text_texture_cache_, kTextTextureCacheMaxEntries)) {
             return nullptr;
         }
-
-        ++last_hotspot_counters_.text_texture_upload_count;
+        auto [it, inserted] = text_texture_cache_.try_emplace(key);
+        auto& entry = it->second;
         entry.last_used_frame = frame_serial_;
-        if (!ensure_texture_descriptor_sets(entry, false)) {
-            destroy_texture_entry(entry);
+        if (!inserted && entry.image != VK_NULL_HANDLE &&
+            ((entry.content_valid && entry.upload_frame == 0) ||
+             entry.upload_frame == frame_serial_)) {
+            ++last_hotspot_counters_.text_texture_cache_hit_count;
+            return &entry;
+        }
+        entry.shaped_text = shaped;
+        if (!upload_texture_rgba(shaped->bitmap_data(),
+                                 static_cast<uint32_t>(shaped->bitmap_width()),
+                                 static_cast<uint32_t>(shaped->bitmap_height()),
+                                 entry) ||
+            !ensure_texture_descriptor_sets(entry, false)) {
             return nullptr;
         }
-        auto [it, inserted] = text_texture_cache_.emplace(cache_key, entry);
-        if (!inserted) {
-            destroy_texture_entry(entry);
-            it->second.last_used_frame = frame_serial_;
-        }
-        return &it->second;
+        ++last_hotspot_counters_.text_texture_upload_count;
+        return &entry;
     }
 
     std::shared_ptr<ShapedText> shape_text_node(const TextNode& text_node) {
@@ -2925,6 +3020,14 @@ private:
     }
 
     [[nodiscard]] bool ensure_draw_textures_ready() {
+        // Rendering a replacement scene in the same frame discards an
+        // unsubmitted batch. Only entries in the new batch may be cache hits
+        // by upload_frame; initialized contents are tracked separately.
+        for (auto& upload : pending_uploads_) {
+            upload.entry->upload_frame = 0;
+        }
+        pending_uploads_.clear();
+        texture_upload_bytes_.clear();
         draw_textures_.clear();
         draw_descriptor_sets_.clear();
         draw_textures_.reserve(draw_commands_.size());
@@ -3081,7 +3184,7 @@ private:
                 },
         };
         vkCmdPipelineBarrier(command_buffer_,
-                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT,
                              0,
                              0,
@@ -3164,6 +3267,8 @@ private:
             return false;
         }
 
+        record_texture_uploads();
+
         const bool full_redraw = full_redraw_ || !scene_initialized_ || damage_regions_.empty();
         const VkClearColorValue clear_color = {.float32 = {1.0F, 1.0F, 1.0F, 1.0F}};
         const VkImageSubresourceRange scene_range = {
@@ -3183,13 +3288,14 @@ private:
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::FullRedrawDirect;
             last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::BandwidthFavored;
             if (scene_layout_ == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-                transition_scene_image(command_buffer_,
-                                       scene_layout_,
-                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                                       VK_ACCESS_TRANSFER_WRITE_BIT,
-                                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                       VK_PIPELINE_STAGE_TRANSFER_BIT);
+                transition_scene_image(
+                    command_buffer_,
+                    scene_layout_,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
             } else if (scene_layout_ == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
                 transition_scene_image(command_buffer_,
                                        scene_layout_,
@@ -3214,13 +3320,14 @@ private:
                                  &clear_color,
                                  1,
                                  &scene_range);
-            transition_scene_image(command_buffer_,
-                                   scene_layout_,
-                                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                   VK_ACCESS_TRANSFER_WRITE_BIT,
-                                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                                   VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+            transition_scene_image(
+                command_buffer_,
+                scene_layout_,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
             gpu_draw_call_count += record_draw_commands_for_target(scene_framebuffer_, true);
             scene_initialized_ = true;
 
@@ -3244,7 +3351,7 @@ private:
                     },
             };
             vkCmdPipelineBarrier(command_buffer_,
-                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  0,
                                  0,
@@ -3264,7 +3371,8 @@ private:
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .pNext = nullptr,
                 .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .dstAccessMask =
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
                 .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -3295,7 +3403,8 @@ private:
             const VkImageMemoryBarrier swapchain_to_present = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .pNext = nullptr,
-                .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .srcAccessMask =
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
                 .dstAccessMask = 0,
                 .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
@@ -3346,7 +3455,7 @@ private:
                     },
             };
             vkCmdPipelineBarrier(command_buffer_,
-                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  0,
                                  0,
@@ -3366,7 +3475,8 @@ private:
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .pNext = nullptr,
                 .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .dstAccessMask =
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
                 .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -3397,7 +3507,8 @@ private:
             const VkImageMemoryBarrier swapchain_to_source = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
                 .pNext = nullptr,
-                .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .srcAccessMask =
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
                 .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
                 .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                 .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -3425,13 +3536,14 @@ private:
                                  &swapchain_to_source);
 
             if (scene_layout_ == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-                transition_scene_image(command_buffer_,
-                                       scene_layout_,
-                                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                                       VK_ACCESS_TRANSFER_WRITE_BIT,
-                                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                       VK_PIPELINE_STAGE_TRANSFER_BIT);
+                transition_scene_image(
+                    command_buffer_,
+                    scene_layout_,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT);
             } else if (scene_layout_ == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
                 transition_scene_image(command_buffer_,
                                        scene_layout_,
@@ -3512,40 +3624,44 @@ private:
             last_hotspot_counters_.gpu_present_path = GpuPresentPath::PartialRedrawCopy;
             last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::DrawFavored;
             if (scene_layout_ == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) {
-                transition_scene_image(command_buffer_,
-                                       scene_layout_,
-                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                       VK_ACCESS_TRANSFER_READ_BIT,
-                                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                                       VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+                transition_scene_image(
+                    command_buffer_,
+                    scene_layout_,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    VK_ACCESS_TRANSFER_READ_BIT,
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
             } else if (scene_layout_ == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-                transition_scene_image(command_buffer_,
-                                       scene_layout_,
-                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                       VK_ACCESS_TRANSFER_WRITE_BIT,
-                                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                                       VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+                transition_scene_image(
+                    command_buffer_,
+                    scene_layout_,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
             } else if (scene_layout_ != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
-                transition_scene_image(command_buffer_,
-                                       scene_layout_,
-                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                       0,
-                                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                                       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+                transition_scene_image(
+                    command_buffer_,
+                    scene_layout_,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    0,
+                    (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
             }
             gpu_draw_call_count = record_draw_commands_for_target(scene_framebuffer_, false);
             scene_initialized_ = true;
 
-            transition_scene_image(command_buffer_,
-                                   scene_layout_,
-                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                   VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                                   VK_ACCESS_TRANSFER_READ_BIT,
-                                   VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                   VK_PIPELINE_STAGE_TRANSFER_BIT);
+            transition_scene_image(
+                command_buffer_,
+                scene_layout_,
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                (VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT),
+                VK_ACCESS_TRANSFER_READ_BIT,
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT);
 
             const VkImageMemoryBarrier swapchain_to_transfer = {
                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -3567,7 +3683,7 @@ private:
                     },
             };
             vkCmdPipelineBarrier(command_buffer_,
-                                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
                                  0,
                                  0,
@@ -3659,6 +3775,10 @@ private:
             counters.gpu_estimated_draw_pixel_count = preserved.gpu_estimated_draw_pixel_count;
             counters.gpu_present_path = preserved.gpu_present_path;
             counters.gpu_present_tradeoff = preserved.gpu_present_tradeoff;
+            counters.texture_allocation_count = preserved.texture_allocation_count;
+            counters.texture_upload_byte_count = preserved.texture_upload_byte_count;
+            counters.texture_upload_batch_count = preserved.texture_upload_batch_count;
+            counters.texture_cache_byte_count = static_cast<std::size_t>(texture_cache_bytes_);
             last_hotspot_counters_ = counters;
         }
 
@@ -3901,6 +4021,7 @@ private:
 
     void destroy_context() {
         ready_ = false;
+        frame_pending_ = false;
         recreate_swapchain_ = false;
         graphics_queue_ = VK_NULL_HANDLE;
         queue_family_index_ = std::numeric_limits<uint32_t>::max();
@@ -3931,6 +4052,7 @@ private:
         }
 
         destroy_texture_caches();
+        destroy_texture_upload_buffer();
         destroy_staging_buffer();
         destroy_swapchain();
 
@@ -3953,10 +4075,6 @@ private:
         if (in_flight_fence_ != VK_NULL_HANDLE) {
             vkDestroyFence(device_, in_flight_fence_, nullptr);
             in_flight_fence_ = VK_NULL_HANDLE;
-        }
-        if (render_finished_semaphore_ != VK_NULL_HANDLE) {
-            vkDestroySemaphore(device_, render_finished_semaphore_, nullptr);
-            render_finished_semaphore_ = VK_NULL_HANDLE;
         }
         if (image_available_semaphore_ != VK_NULL_HANDLE) {
             vkDestroySemaphore(device_, image_available_semaphore_, nullptr);
@@ -4019,7 +4137,8 @@ private:
     VkCommandPool command_pool_ = VK_NULL_HANDLE;
     VkCommandBuffer command_buffer_ = VK_NULL_HANDLE;
     VkSemaphore image_available_semaphore_ = VK_NULL_HANDLE;
-    VkSemaphore render_finished_semaphore_ = VK_NULL_HANDLE;
+    std::vector<VkSemaphore> present_semaphores_;
+    bool frame_pending_ = false;
     VkFence in_flight_fence_ = VK_NULL_HANDLE;
     VkBuffer staging_buffer_ = VK_NULL_HANDLE;
     VkDeviceMemory staging_buffer_memory_ = VK_NULL_HANDLE;
@@ -4028,6 +4147,13 @@ private:
     uint8_t* staging_mapped_ = nullptr;
     std::vector<uint8_t> converted_pixels_;
     std::vector<uint8_t> image_upload_buffer_;
+    VkDeviceSize texture_cache_bytes_ = 0;
+    VkBuffer texture_upload_buffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory texture_upload_memory_ = VK_NULL_HANDLE;
+    VkDeviceSize texture_upload_capacity_ = 0;
+    uint8_t* texture_upload_mapped_ = nullptr;
+    std::vector<uint8_t> texture_upload_bytes_;
+    std::vector<TextureUpload> pending_uploads_;
     std::vector<DrawCommand> draw_commands_;
     std::vector<PrimitiveCommand> primitive_commands_;
     std::vector<ImageCommand> image_commands_;
