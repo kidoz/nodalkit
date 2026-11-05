@@ -349,6 +349,7 @@ void check_widgets() {
     check(dialog != nullptr, "Dialog::create");
     dialog->add_button("Cancel", nk::DialogResponse::Cancel);
     dialog->add_button("Save", nk::DialogResponse::Accept);
+    dialog->set_default_response(nk::DialogResponse::Cancel);
     check(!dialog->is_presented(), "Dialog starts unpresented");
 
     auto combo = nk::ComboBox::create();

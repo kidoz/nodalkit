@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <cstddef>
+#include <nk/layout/constraints.h>
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
@@ -40,6 +42,7 @@ struct Dialog::Impl {
     mutable bool backdrop_dirty = false;
     DialogPresentationStyle presentation_style = DialogPresentationStyle::Default;
     float minimum_panel_width = 280.0F;
+    DialogResponse default_response = DialogResponse::Accept;
     Rect panel_bounds{};
     Rect previous_panel_bounds{};
     bool has_previous_panel_bounds = false;
@@ -53,6 +56,47 @@ struct Dialog::Impl {
     };
 
     std::vector<ButtonEntry> buttons;
+
+    struct ButtonLayout {
+        std::vector<Rect> bounds;
+        float height = 0;
+    };
+
+    [[nodiscard]] ButtonLayout layout_buttons(float available_width) const {
+        ButtonLayout layout;
+        float x = 0;
+        float y = 0;
+        float row_height = 0;
+        std::size_t row_start = 0;
+        const auto align_row = [&] {
+            const float offset = std::max(0.0F, available_width - x);
+            for (std::size_t index = row_start; index < layout.bounds.size(); ++index) {
+                layout.bounds[index].x += offset;
+            }
+        };
+        for (const auto& entry : buttons) {
+            const auto request = entry.button->measure_for_diagnostics(Constraints::unbounded());
+            const float width =
+                std::min(available_width, std::max(ButtonMinimumWidth, request.natural_width));
+            const float height = std::max(ButtonHeight, request.natural_height);
+            if (x > 0 && x + ButtonSpacing + width > available_width) {
+                align_row();
+                row_start = layout.bounds.size();
+                y += row_height + ButtonSpacing;
+                x = 0;
+                row_height = 0;
+            }
+            if (x > 0) {
+                x += ButtonSpacing;
+            }
+            layout.bounds.push_back({x, y, width, height});
+            x += width;
+            row_height = std::max(row_height, height);
+        }
+        align_row();
+        layout.height = y + row_height;
+        return layout;
+    }
 
     [[nodiscard]] float button_width(const ButtonEntry& entry) const {
         return std::max(
@@ -125,6 +169,10 @@ void Dialog::set_minimum_panel_width(float width) {
     queue_redraw();
 }
 
+void Dialog::set_default_response(DialogResponse response) {
+    impl_->default_response = response;
+}
+
 void Dialog::present(Window& parent) {
     if (impl_->presented && host_window() == &parent) {
         return;
@@ -141,7 +189,7 @@ void Dialog::present(Window& parent) {
     // Move focus into the dialog so keyboard and assistive-technology users
     // land on it; the window restores the previous focus when it closes.
     const auto default_button =
-        std::ranges::find(impl_->buttons, DialogResponse::Accept, &Impl::ButtonEntry::response);
+        std::ranges::find(impl_->buttons, impl_->default_response, &Impl::ButtonEntry::response);
     if (default_button != impl_->buttons.end()) {
         default_button->button->grab_focus();
     } else if (!impl_->buttons.empty()) {
@@ -202,7 +250,8 @@ SizeRequest Dialog::measure(const Constraints& /*constraints*/) const {
     }
     natural_height += impl_->content ? content_req.natural_height : message_size.height;
     if (!impl_->buttons.empty()) {
-        natural_height += spacing + ButtonHeight;
+        natural_height +=
+            spacing + impl_->layout_buttons(std::max(0.0F, natural_width - padding * 2)).height;
     }
     natural_height += padding;
 
@@ -222,10 +271,36 @@ void Dialog::allocate(const Rect& allocation) {
     const float width_lo = std::min(preferred.minimum_width, allocation.width);
     const float width_hi = std::max(width_lo, std::max(0.0F, allocation.width - (margin * 2.0F)));
     const float panel_width = std::clamp(preferred.natural_width, width_lo, width_hi);
+    const float inner_width = std::max(0.0F, panel_width - padding * 2);
+    const auto title_size = measure_text_wrapped(impl_->title, dialog_title_font(), inner_width);
+    const auto message_size =
+        impl_->message.empty()
+            ? Size{}
+            : measure_text_wrapped(impl_->message, dialog_body_font(), inner_width);
+    const auto buttons = impl_->layout_buttons(inner_width);
+    float body_height = message_size.height;
+    if (impl_->content) {
+        body_height = impl_->content->has_height_for_width()
+                          ? impl_->content->height_for_width(inner_width)
+                          : impl_->content
+                                ->measure_for_diagnostics(
+                                    {0, 0, inner_width, Constraints::unbounded().max_height})
+                                .natural_height;
+    }
+    float desired_height = padding * 2 + title_size.height + body_height;
+    if (!impl_->message.empty() || impl_->content) {
+        desired_height += spacing;
+    }
+    if (!impl_->buttons.empty()) {
+        desired_height += buttons.height + spacing;
+    }
     const float height_lo = std::min(preferred.minimum_height, allocation.height);
-    const float height_hi =
-        std::max(height_lo, std::max(0.0F, allocation.height - (margin * 2.0F)));
-    float panel_height = std::clamp(preferred.natural_height, height_lo, height_hi);
+    const float top_margin =
+        impl_->presentation_style == DialogPresentationStyle::Sheet ? margin : 0;
+    const float height_hi = std::max(height_lo, std::max(0.0F, allocation.height - margin * 2));
+    const float panel_height =
+        std::min(std::max(height_lo, desired_height),
+                 std::max(0.0F, std::min(height_hi, allocation.height - top_margin)));
 
     const float panel_x = allocation.x + std::max(0.0F, (allocation.width - panel_width) * 0.5F);
     float panel_y = allocation.y + std::max(0.0F, (allocation.height - panel_height) * 0.5F);
@@ -241,43 +316,25 @@ void Dialog::allocate(const Rect& allocation) {
     }
     impl_->panel_bounds = next_panel_bounds;
 
-    float inner_x = impl_->panel_bounds.x + padding;
-    float inner_width = std::max(0.0F, impl_->panel_bounds.width - (padding * 2.0F));
-    float current_y = impl_->panel_bounds.y + padding;
-
-    const auto title_size = measure_text(impl_->title, dialog_title_font());
-    current_y += title_size.height;
+    const float inner_x = impl_->panel_bounds.x + padding;
+    float current_y = impl_->panel_bounds.y + padding + title_size.height;
     if (!impl_->message.empty() || impl_->content) {
         current_y += spacing;
     }
-
-    float buttons_total_width = 0.0F;
-    std::vector<float> button_widths;
-    button_widths.reserve(impl_->buttons.size());
-    for (const auto& entry : impl_->buttons) {
-        button_widths.push_back(impl_->button_width(entry));
-        buttons_total_width += button_widths.back();
-    }
-    if (!impl_->buttons.empty()) {
-        buttons_total_width += ButtonSpacing * static_cast<float>(impl_->buttons.size() - 1);
-    }
-
     float content_bottom = impl_->panel_bounds.bottom() - padding;
     if (!impl_->buttons.empty()) {
-        content_bottom -= ButtonHeight + spacing;
+        content_bottom -= buttons.height + spacing;
     }
-    float content_height = std::max(0.0F, content_bottom - current_y);
-
     if (impl_->content) {
-        impl_->content->allocate({inner_x, current_y, inner_width, content_height});
+        impl_->content->allocate(
+            {inner_x, current_y, inner_width, std::max(0.0F, content_bottom - current_y)});
     }
-
-    float button_x = impl_->panel_bounds.right() - padding - buttons_total_width;
-    const float button_y = impl_->panel_bounds.bottom() - padding - ButtonHeight;
+    const float button_y = impl_->panel_bounds.bottom() - padding - buttons.height;
     for (std::size_t index = 0; index < impl_->buttons.size(); ++index) {
-        impl_->buttons[index].button->allocate(
-            {button_x, button_y, button_widths[index], ButtonHeight});
-        button_x += button_widths[index] + ButtonSpacing;
+        auto bounds = buttons.bounds[index];
+        bounds.x += inner_x;
+        bounds.y += button_y;
+        impl_->buttons[index].button->allocate(bounds);
     }
 }
 
@@ -300,8 +357,8 @@ bool Dialog::handle_key_event(const KeyEvent& event) {
     }
 
     if (event.key == KeyCode::Return || event.key == KeyCode::Space) {
-        auto accept =
-            std::ranges::find(impl_->buttons, DialogResponse::Accept, &Impl::ButtonEntry::response);
+        auto accept = std::ranges::find(
+            impl_->buttons, impl_->default_response, &Impl::ButtonEntry::response);
         if (accept != impl_->buttons.end()) {
             close(accept->response);
             return true;
@@ -381,22 +438,25 @@ void Dialog::snapshot(SnapshotContext& ctx) const {
 
     const auto title_font = dialog_title_font();
     const auto body_font = dialog_body_font();
-    const auto title_size = measure_text(impl_->title, title_font);
+    const float inner_width = std::max(0.0F, impl_->panel_bounds.width - padding * 2);
+    const auto title_size = measure_text_wrapped(impl_->title, title_font, inner_width);
     const float inner_x = impl_->panel_bounds.x + padding;
     float current_y = impl_->panel_bounds.y + padding;
-    ctx.add_text({inner_x, current_y},
-                 impl_->title,
-                 theme_color("dialog-title-color", Color{0.1F, 0.1F, 0.12F, 1.0F}),
-                 title_font);
+    ctx.add_wrapped_text({inner_x, current_y},
+                         impl_->title,
+                         theme_color("dialog-title-color", Color{0.1F, 0.1F, 0.12F, 1.0F}),
+                         title_font,
+                         inner_width);
     current_y += title_size.height;
 
-    if (!impl_->message.empty()) {
+    if (!impl_->message.empty() && !impl_->content) {
         current_y += spacing;
-        const auto message_size = measure_text(impl_->message, body_font);
-        ctx.add_text({inner_x, current_y},
-                     impl_->message,
-                     theme_color("dialog-text-color", Color{0.26F, 0.29F, 0.33F, 1.0F}),
-                     body_font);
+        const auto message_size = measure_text_wrapped(impl_->message, body_font, inner_width);
+        ctx.add_wrapped_text({inner_x, current_y},
+                             impl_->message,
+                             theme_color("dialog-text-color", Color{0.26F, 0.29F, 0.33F, 1.0F}),
+                             body_font,
+                             inner_width);
         current_y += message_size.height;
     }
 
