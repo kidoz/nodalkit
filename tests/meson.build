@@ -239,6 +239,15 @@ test_accessibility_tree = executable('test_accessibility_tree',
 test('accessibility_tree', test_accessibility_tree)
 
 if host_system == 'darwin'
+    test_metal_renderer = executable('test_metal_renderer',
+        'metal_renderer_test.mm',
+        dependencies : [nk_dep, catch2_test_dep, cocoa_dep],
+    )
+    test('metal_renderer', test_metal_renderer,
+        env : {'MTL_DEBUG_LAYER': '1'},
+        timeout : 60,
+    )
+
     test_macos_accessibility = executable('test_macos_accessibility',
         'macos_accessibility_test.mm',
         '../examples/showcase/showcase_app.cpp',
