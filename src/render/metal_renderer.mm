@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <nk/foundation/logging.h>
 #include <nk/platform/platform_backend.h>
@@ -33,7 +34,7 @@ struct PrimitiveVertex {
     float unit_position[2];
 };
 
-struct ImageUniforms {
+struct alignas(16) ImageUniforms {
     float rect[4];
     uint32_t clip_count = 0;
     uint32_t clip_padding[3]{};
@@ -42,10 +43,11 @@ struct ImageUniforms {
     float viewport_size[2];
 };
 
+static_assert(sizeof(ImageUniforms) == 128);
 static_assert(offsetof(ImageUniforms, clip_rects) == 32);
 static_assert(offsetof(ImageUniforms, viewport_size) == 112);
 
-struct PrimitiveUniforms {
+struct alignas(16) PrimitiveUniforms {
     float rect[4];
     float color[4];
     float radius = 0.0F;
@@ -57,6 +59,11 @@ struct PrimitiveUniforms {
     float clip_radii[4]{};
     float viewport_size[2];
 };
+
+static_assert(sizeof(PrimitiveUniforms) == 160);
+static_assert(offsetof(PrimitiveUniforms, line_points) == 48);
+static_assert(offsetof(PrimitiveUniforms, clip_rects) == 64);
+static_assert(offsetof(PrimitiveUniforms, viewport_size) == 144);
 
 struct ClipRegion {
     Rect rect{};
@@ -113,12 +120,13 @@ struct TextKey {
     float g = 0.0F;
     float b = 0.0F;
     float a = 0.0F;
+    float max_width = 0.0F;
     float scale = 1.0F;
 
     bool operator==(const TextKey& other) const {
         return text == other.text && family == other.family && size == other.size &&
                weight == other.weight && style == other.style && r == other.r && g == other.g &&
-               b == other.b && a == other.a && scale == other.scale;
+               b == other.b && a == other.a && max_width == other.max_width && scale == other.scale;
     }
 };
 
@@ -133,6 +141,7 @@ struct TextKeyHash {
         hash ^= std::hash<float>{}(key.g) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.b) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.a) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<float>{}(key.max_width) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.scale) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         return hash;
     }
@@ -163,6 +172,43 @@ struct TextTextureCacheKey {
 };
 
 struct TextureCacheEntry {
+    TextureCacheEntry() = default;
+
+    // Adopts the caller's existing retain count.
+    TextureCacheEntry(id<MTLTexture> texture_value, uint64_t frame)
+        : texture(texture_value), last_used_frame(frame) {}
+
+    TextureCacheEntry(const TextureCacheEntry& other)
+        : texture([other.texture retain]), last_used_frame(other.last_used_frame) {}
+
+    TextureCacheEntry(TextureCacheEntry&& other) noexcept
+        : texture(other.texture), last_used_frame(other.last_used_frame) {
+        other.texture = nil;
+    }
+
+    TextureCacheEntry& operator=(const TextureCacheEntry& other) {
+        if (this != &other) {
+            id<MTLTexture> previous = texture;
+            texture = [other.texture retain];
+            last_used_frame = other.last_used_frame;
+            [previous release];
+        }
+        return *this;
+    }
+
+    TextureCacheEntry& operator=(TextureCacheEntry&& other) noexcept {
+        if (this != &other) {
+            id<MTLTexture> previous = texture;
+            texture = other.texture;
+            last_used_frame = other.last_used_frame;
+            other.texture = nil;
+            [previous release];
+        }
+        return *this;
+    }
+
+    ~TextureCacheEntry() { [texture release]; }
+
     id<MTLTexture> texture = nil;
     uint64_t last_used_frame = 0;
 };
@@ -224,6 +270,61 @@ Rect scale_rect(Rect rect, float scale_factor) {
         rect.width * scale_factor,
         rect.height * scale_factor,
     };
+}
+
+MTLStorageMode upload_texture_storage_mode(id<MTLDevice> device) {
+    return [device supportsFamily:MTLGPUFamilyApple1] ? MTLStorageModeShared
+                                                      : MTLStorageModePrivate;
+}
+
+bool upload_texture_region(id<MTLDevice> device,
+                           id<MTLCommandQueue> command_queue,
+                           id<MTLTexture> texture,
+                           MTLRegion region,
+                           const void* bytes,
+                           NSUInteger bytes_per_row) {
+    if (texture.storageMode == MTLStorageModeShared) {
+        [texture replaceRegion:region mipmapLevel:0 withBytes:bytes bytesPerRow:bytes_per_row];
+        return true;
+    }
+
+    const NSUInteger aligned_bytes_per_row = ((bytes_per_row + 255) / 256) * 256;
+    const NSUInteger buffer_length = aligned_bytes_per_row * region.size.height;
+    id<MTLBuffer> upload_buffer = [device newBufferWithLength:buffer_length
+                                                      options:MTLResourceStorageModeShared];
+    if (upload_buffer == nil) {
+        return false;
+    }
+
+    const auto* source = static_cast<const uint8_t*>(bytes);
+    auto* destination = static_cast<uint8_t*>(upload_buffer.contents);
+    for (NSUInteger row = 0; row < region.size.height; ++row) {
+        std::memcpy(
+            destination + row * aligned_bytes_per_row, source + row * bytes_per_row, bytes_per_row);
+    }
+
+    id<MTLCommandBuffer> command_buffer = [command_queue commandBuffer];
+    id<MTLBlitCommandEncoder> encoder =
+        command_buffer != nil ? [command_buffer blitCommandEncoder] : nil;
+    if (encoder == nil) {
+        [upload_buffer release];
+        return false;
+    }
+    [encoder copyFromBuffer:upload_buffer
+               sourceOffset:0
+          sourceBytesPerRow:aligned_bytes_per_row
+        sourceBytesPerImage:buffer_length
+                 sourceSize:region.size
+                  toTexture:texture
+           destinationSlice:0
+           destinationLevel:0
+          destinationOrigin:region.origin];
+    [encoder endEncoding];
+    void* buffer_context = (__bridge void*)upload_buffer;
+    [command_buffer
+        addCompletedHandler:^(id<MTLCommandBuffer>) { [(id<MTLBuffer>)buffer_context release]; }];
+    [command_buffer commit];
+    return true;
 }
 
 float effective_corner_radius(Rect rect, float requested_radius) {
@@ -485,9 +586,18 @@ public:
             [library_ newFunctionWithName:@"nk_metal_primitive_vertex"];
         id<MTLFunction> primitive_fragment_function =
             [library_ newFunctionWithName:@"nk_metal_primitive_fragment"];
+        const auto release_shader_functions = [&] {
+            [texture_vertex_function release];
+            [texture_fragment_function release];
+            [image_vertex_function release];
+            [image_fragment_function release];
+            [primitive_vertex_function release];
+            [primitive_fragment_function release];
+        };
         if (texture_vertex_function == nil || texture_fragment_function == nil ||
             image_vertex_function == nil || image_fragment_function == nil ||
             primitive_vertex_function == nil || primitive_fragment_function == nil) {
+            release_shader_functions();
             return;
         }
 
@@ -500,10 +610,12 @@ public:
         NSError* pipeline_error = nil;
         texture_pipeline_ = [device_ newRenderPipelineStateWithDescriptor:texture_descriptor
                                                                     error:&pipeline_error];
+        [texture_descriptor release];
         if (texture_pipeline_ == nil && pipeline_error != nil) {
             std::string message = "Failed to create Metal pipeline: ";
             message += pipeline_error.localizedDescription.UTF8String;
             NK_LOG_ERROR("MetalRenderer", message.c_str());
+            release_shader_functions();
             return;
         }
 
@@ -524,10 +636,12 @@ public:
         pipeline_error = nil;
         image_pipeline_ = [device_ newRenderPipelineStateWithDescriptor:image_descriptor
                                                                   error:&pipeline_error];
+        [image_descriptor release];
         if (image_pipeline_ == nil && pipeline_error != nil) {
             std::string message = "Failed to create Metal image pipeline: ";
             message += pipeline_error.localizedDescription.UTF8String;
             NK_LOG_ERROR("MetalRenderer", message.c_str());
+            release_shader_functions();
             return;
         }
 
@@ -549,12 +663,15 @@ public:
         pipeline_error = nil;
         primitive_pipeline_ = [device_ newRenderPipelineStateWithDescriptor:primitive_descriptor
                                                                       error:&pipeline_error];
+        [primitive_descriptor release];
         if (primitive_pipeline_ == nil && pipeline_error != nil) {
             std::string message = "Failed to create Metal primitive pipeline: ";
             message += pipeline_error.localizedDescription.UTF8String;
             NK_LOG_ERROR("MetalRenderer", message.c_str());
+            release_shader_functions();
             return;
         }
+        release_shader_functions();
 
         vertex_buffer_ = [device_
             newBufferWithBytes:kFullscreenQuad.data()
@@ -575,9 +692,24 @@ public:
         sampler_descriptor.minFilter = MTLSamplerMinMagFilterLinear;
         sampler_descriptor.magFilter = MTLSamplerMinMagFilterLinear;
         linear_sampler_state_ = [device_ newSamplerStateWithDescriptor:sampler_descriptor];
+        [sampler_descriptor release];
     }
 
-    ~MetalRenderer() override = default;
+    ~MetalRenderer() override {
+        image_texture_cache_.clear();
+        text_texture_cache_.clear();
+        [scene_texture_ release];
+        [sampler_state_ release];
+        [linear_sampler_state_ release];
+        [vertex_buffer_ release];
+        [primitive_vertex_buffer_ release];
+        [texture_pipeline_ release];
+        [image_pipeline_ release];
+        [primitive_pipeline_ release];
+        [library_ release];
+        [command_queue_ release];
+        [device_ release];
+    }
 
     [[nodiscard]] RendererBackend backend() const override { return RendererBackend::Metal; }
 
@@ -641,16 +773,20 @@ public:
         }
 
         damage_regions_.reserve(regions.size());
-        const Rect viewport = {0.0F,
-                               0.0F,
-                               logical_viewport_.width * scale_factor_,
-                               logical_viewport_.height * scale_factor_};
+        const Rect viewport = {
+            0.0F,
+            0.0F,
+            static_cast<float>(std::max(
+                1, static_cast<int>(std::lround(logical_viewport_.width * scale_factor_)))),
+            static_cast<float>(std::max(
+                1, static_cast<int>(std::lround(logical_viewport_.height * scale_factor_)))),
+        };
         for (const auto& region : regions) {
             Rect scaled = scale_rect(region, scale_factor_);
-            const float x0 = std::max(viewport.x, scaled.x);
-            const float y0 = std::max(viewport.y, scaled.y);
-            const float x1 = std::min(viewport.right(), scaled.right());
-            const float y1 = std::min(viewport.bottom(), scaled.bottom());
+            const float x0 = std::floor(std::max(viewport.x, scaled.x));
+            const float y0 = std::floor(std::max(viewport.y, scaled.y));
+            const float x1 = std::ceil(std::min(viewport.right(), scaled.right()));
+            const float y1 = std::ceil(std::min(viewport.bottom(), scaled.bottom()));
             scaled = {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
             if (scaled.width <= 0.0F || scaled.height <= 0.0F) {
                 continue;
@@ -690,6 +826,7 @@ public:
     void begin_frame(Size viewport, float scale_factor) override {
         logical_viewport_ = viewport;
         scale_factor_ = normalize_scale_factor(scale_factor);
+        software_->begin_frame(logical_viewport_, scale_factor_);
         ++frame_serial_;
         draw_commands_.clear();
         primitive_commands_.clear();
@@ -698,7 +835,10 @@ public:
         active_clips_.clear();
         trim_texture_cache(image_texture_cache_, kImageTextureCacheMaxEntries);
         trim_texture_cache(text_texture_cache_, kTextTextureCacheMaxEntries);
+        last_root_ = nullptr;
         needs_software_fallback_ = false;
+        software_frame_rendered_ = false;
+        software_frame_finalized_ = false;
         damage_regions_.clear();
         full_redraw_ = true;
         last_hotspot_counters_ = {};
@@ -708,28 +848,28 @@ public:
         const auto preserved_damage_region_count = last_hotspot_counters_.damage_region_count;
         last_hotspot_counters_ = {};
         last_hotspot_counters_.damage_region_count = preserved_damage_region_count;
+        last_root_ = &root;
         draw_commands_.clear();
         primitive_commands_.clear();
         image_commands_.clear();
         text_commands_.clear();
         active_clips_.clear();
-        if (!collect_draw_commands(root)) {
-            needs_software_fallback_ = true;
-            software_->begin_frame(logical_viewport_, scale_factor_);
-            software_->render(root);
-            last_hotspot_counters_ = software_->last_hotspot_counters();
+        needs_software_fallback_ = !collect_draw_commands(root);
+        if (needs_software_fallback_) {
+            (void)ensure_software_frame();
         }
     }
 
     void end_frame() override {
-        if (needs_software_fallback_) {
+        if (software_frame_rendered_ && !software_frame_finalized_) {
             software_->end_frame();
+            software_frame_finalized_ = true;
         }
     }
 
     void present(NativeSurface& surface) override {
         if (!attach_surface(surface) || layer_ == nil) {
-            software_->present(surface);
+            present_software_direct(surface);
             return;
         }
 
@@ -743,17 +883,22 @@ public:
 
         id<CAMetalDrawable> drawable = [layer_ nextDrawable];
         if (drawable == nil) {
-            software_->present(surface);
+            present_software_direct(surface);
             return;
         }
 
         id<MTLCommandBuffer> command_buffer = [command_queue_ commandBuffer];
         if (command_buffer == nil) {
-            software_->present(surface);
+            present_software_direct(surface);
             return;
         }
 
         if (needs_software_fallback_) {
+            scene_initialized_ = false;
+            if (!ensure_software_frame()) {
+                return;
+            }
+
             MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
             pass.colorAttachments[0].texture = drawable.texture;
             pass.colorAttachments[0].loadAction = MTLLoadActionClear;
@@ -762,38 +907,41 @@ public:
             id<MTLRenderCommandEncoder> encoder =
                 [command_buffer renderCommandEncoderWithDescriptor:pass];
             if (encoder == nil) {
-                software_->present(surface);
+                present_software_direct(surface);
                 return;
             }
 
-            if (staging_texture_ == nil || static_cast<int>(staging_texture_.width) != width ||
-                static_cast<int>(staging_texture_.height) != height) {
-                MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
-                    texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
-                                                 width:static_cast<NSUInteger>(width)
-                                                height:static_cast<NSUInteger>(height)
-                                             mipmapped:NO];
-                descriptor.usage = MTLTextureUsageShaderRead;
-                descriptor.storageMode = MTLStorageModeShared;
-                staging_texture_ = [device_ newTextureWithDescriptor:descriptor];
-            }
-
-            if (staging_texture_ == nil) {
+            MTLTextureDescriptor* descriptor = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                             width:static_cast<NSUInteger>(width)
+                                            height:static_cast<NSUInteger>(height)
+                                         mipmapped:NO];
+            descriptor.usage = MTLTextureUsageShaderRead;
+            descriptor.storageMode = upload_texture_storage_mode(device_);
+            id<MTLTexture> staging_texture = [device_ newTextureWithDescriptor:descriptor];
+            if (staging_texture == nil) {
                 [encoder endEncoding];
-                software_->present(surface);
+                present_software_direct(surface);
                 return;
             }
 
             const MTLRegion region = MTLRegionMake2D(
                 0, 0, static_cast<NSUInteger>(width), static_cast<NSUInteger>(height));
-            [staging_texture_ replaceRegion:region
-                                mipmapLevel:0
-                                  withBytes:software_->pixel_data()
-                                bytesPerRow:static_cast<NSUInteger>(width * 4)];
+            if (!upload_texture_region(device_,
+                                       command_queue_,
+                                       staging_texture,
+                                       region,
+                                       software_->pixel_data(),
+                                       static_cast<NSUInteger>(width * 4))) {
+                [staging_texture release];
+                [encoder endEncoding];
+                present_software_direct(surface);
+                return;
+            }
 
             [encoder setRenderPipelineState:texture_pipeline_];
             [encoder setVertexBuffer:vertex_buffer_ offset:0 atIndex:0];
-            [encoder setFragmentTexture:staging_texture_ atIndex:0];
+            [encoder setFragmentTexture:staging_texture atIndex:0];
             if (sampler_state_ != nil) {
                 [encoder setFragmentSamplerState:sampler_state_ atIndex:0];
             }
@@ -803,13 +951,17 @@ public:
             last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::None;
             last_hotspot_counters_.gpu_present_region_count = 0;
             [encoder endEncoding];
+            void* staging_context = (__bridge void*)staging_texture;
+            [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
+              [(id<MTLTexture>)staging_context release];
+            }];
             [command_buffer presentDrawable:drawable];
             [command_buffer commit];
             return;
         }
 
         if (!ensure_scene_texture(width, height)) {
-            software_->present(surface);
+            present_software_direct(surface);
             return;
         }
 
@@ -824,7 +976,7 @@ public:
         id<MTLRenderCommandEncoder> scene_encoder =
             [command_buffer renderCommandEncoderWithDescriptor:scene_pass];
         if (scene_encoder == nil) {
-            software_->present(surface);
+            present_software_direct(surface);
             return;
         }
 
@@ -873,7 +1025,7 @@ public:
         id<MTLRenderCommandEncoder> encoder =
             [command_buffer renderCommandEncoderWithDescriptor:pass];
         if (encoder == nil) {
-            software_->present(surface);
+            present_software_direct(surface);
             return;
         }
         [encoder setRenderPipelineState:texture_pipeline_];
@@ -899,6 +1051,30 @@ public:
     }
 
 private:
+    [[nodiscard]] bool ensure_software_frame() {
+        if (!software_frame_rendered_) {
+            if (last_root_ == nullptr) {
+                return false;
+            }
+            software_->render(*last_root_);
+            software_frame_rendered_ = true;
+        }
+        if (!software_frame_finalized_) {
+            software_->end_frame();
+            software_frame_finalized_ = true;
+        }
+        last_hotspot_counters_ = software_->last_hotspot_counters();
+        return true;
+    }
+
+    void present_software_direct(NativeSurface& surface) {
+        scene_initialized_ = false;
+        if (!ensure_software_frame()) {
+            return;
+        }
+        software_->present(surface);
+    }
+
     [[nodiscard]] bool ensure_scene_texture(int width, int height) {
         if (device_ == nil || width <= 0 || height <= 0) {
             return false;
@@ -916,9 +1092,14 @@ private:
                                                            mipmapped:NO];
         descriptor.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
         descriptor.storageMode = MTLStorageModePrivate;
-        scene_texture_ = [device_ newTextureWithDescriptor:descriptor];
+        id<MTLTexture> scene_texture = [device_ newTextureWithDescriptor:descriptor];
         scene_initialized_ = false;
-        return scene_texture_ != nil;
+        if (scene_texture == nil) {
+            return false;
+        }
+        [scene_texture_ release];
+        scene_texture_ = scene_texture;
+        return true;
     }
 
     [[nodiscard]] Rect scaled_command_bounds(const DrawCommand& draw_command) const {
@@ -1150,7 +1331,7 @@ private:
                                         height:static_cast<NSUInteger>(command.src_height)
                                      mipmapped:NO];
         descriptor.usage = MTLTextureUsageShaderRead;
-        descriptor.storageMode = MTLStorageModeShared;
+        descriptor.storageMode = upload_texture_storage_mode(device_);
         id<MTLTexture> texture = [device_ newTextureWithDescriptor:descriptor];
         if (texture == nil) {
             NK_LOG_ERROR("MetalRenderer", "Failed to allocate Metal image texture");
@@ -1161,12 +1342,18 @@ private:
                                                  0,
                                                  static_cast<NSUInteger>(command.src_width),
                                                  static_cast<NSUInteger>(command.src_height));
-        [texture replaceRegion:region
-                   mipmapLevel:0
-                     withBytes:image_upload_buffer_.data()
-                   bytesPerRow:static_cast<NSUInteger>(command.src_width * 4)];
+        if (!upload_texture_region(device_,
+                                   command_queue_,
+                                   texture,
+                                   region,
+                                   image_upload_buffer_.data(),
+                                   static_cast<NSUInteger>(command.src_width * 4))) {
+            [texture release];
+            NK_LOG_ERROR("MetalRenderer", "Failed to upload Metal image texture");
+            return nil;
+        }
         ++last_hotspot_counters_.image_texture_upload_count;
-        image_texture_cache_[cache_key] = {.texture = texture, .last_used_frame = frame_serial_};
+        image_texture_cache_.insert_or_assign(cache_key, TextureCacheEntry{texture, frame_serial_});
         return texture;
     }
 
@@ -1196,7 +1383,7 @@ private:
                                                    command.shaped_text->bitmap_height())
                                      mipmapped:NO];
         descriptor.usage = MTLTextureUsageShaderRead;
-        descriptor.storageMode = MTLStorageModeShared;
+        descriptor.storageMode = upload_texture_storage_mode(device_);
         id<MTLTexture> texture = [device_ newTextureWithDescriptor:descriptor];
         if (texture == nil) {
             NK_LOG_ERROR("MetalRenderer", "Failed to allocate Metal text texture");
@@ -1208,12 +1395,19 @@ private:
                             0,
                             static_cast<NSUInteger>(command.shaped_text->bitmap_width()),
                             static_cast<NSUInteger>(command.shaped_text->bitmap_height()));
-        [texture replaceRegion:region
-                   mipmapLevel:0
-                     withBytes:command.shaped_text->bitmap_data()
-                   bytesPerRow:static_cast<NSUInteger>(command.shaped_text->bitmap_width() * 4)];
+        if (!upload_texture_region(
+                device_,
+                command_queue_,
+                texture,
+                region,
+                command.shaped_text->bitmap_data(),
+                static_cast<NSUInteger>(command.shaped_text->bitmap_width() * 4))) {
+            [texture release];
+            NK_LOG_ERROR("MetalRenderer", "Failed to upload Metal text texture");
+            return nil;
+        }
         ++last_hotspot_counters_.text_texture_upload_count;
-        text_texture_cache_[cache_key] = {.texture = texture, .last_used_frame = frame_serial_};
+        text_texture_cache_.insert_or_assign(cache_key, TextureCacheEntry{texture, frame_serial_});
         return texture;
     }
 
@@ -1225,6 +1419,8 @@ private:
         auto font = text_node.font();
         font.size *= scale_factor_;
         const auto color = text_node.text_color();
+        const float max_width =
+            text_node.max_width() > 0.0F ? text_node.max_width() * scale_factor_ : 0.0F;
         TextKey key{
             .text = text_node.text(),
             .family = font.family,
@@ -1235,6 +1431,7 @@ private:
             .g = color.g,
             .b = color.b,
             .a = color.a,
+            .max_width = max_width,
             .scale = scale_factor_,
         };
 
@@ -1247,8 +1444,9 @@ private:
             shaped_text_cache_.clear();
         }
 
-        auto shaped =
-            std::make_shared<ShapedText>(text_shaper_->shape(text_node.text(), font, color));
+        auto shaped = std::make_shared<ShapedText>(
+            max_width > 0.0F ? text_shaper_->shape_wrapped(text_node.text(), font, color, max_width)
+                             : text_shaper_->shape(text_node.text(), font, color));
         shaped_text_cache_[key] = shaped;
         ++last_hotspot_counters_.text_shape_count;
         return shaped;
@@ -1284,7 +1482,7 @@ private:
         }
         case RenderNodeKind::Path:
         case RenderNodeKind::Transform:
-            return true;
+            return false;
         case RenderNodeKind::Container:
             for (const auto& child : node.children()) {
                 if (child != nullptr && !collect_draw_commands(*child)) {
@@ -1418,13 +1616,7 @@ private:
         case RenderNodeKind::Opacity:
         case RenderNodeKind::LinearGradient:
         case RenderNodeKind::Shadow:
-            // GPU-level opacity and gradient rendering not yet implemented on Metal.
-            for (const auto& child : node.children()) {
-                if (child != nullptr && !collect_draw_commands(*child)) {
-                    return false;
-                }
-            }
-            return true;
+            return false;
         }
         return false;
     }
@@ -1439,11 +1631,11 @@ private:
     id<MTLBuffer> primitive_vertex_buffer_ = nil;
     id<MTLSamplerState> sampler_state_ = nil;
     id<MTLSamplerState> linear_sampler_state_ = nil;
-    id<MTLTexture> staging_texture_ = nil;
     id<MTLTexture> scene_texture_ = nil;
     CAMetalLayer* layer_ = nil;
     std::unique_ptr<SoftwareRenderer> software_;
     TextShaper* text_shaper_ = nullptr;
+    const RenderNode* last_root_ = nullptr;
     std::unordered_map<TextKey, std::shared_ptr<ShapedText>, TextKeyHash> shaped_text_cache_;
     std::unordered_map<ImageTextureCacheKey, TextureCacheEntry, ImageTextureCacheKeyHash>
         image_texture_cache_;
@@ -1462,6 +1654,8 @@ private:
     bool full_redraw_ = true;
     bool scene_initialized_ = false;
     bool needs_software_fallback_ = false;
+    bool software_frame_rendered_ = false;
+    bool software_frame_finalized_ = false;
     RenderHotspotCounters last_hotspot_counters_{};
 };
 
