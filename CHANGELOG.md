@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-05
+
+The third patch release of the NodalKit framework. 0.3.3 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.3.2 and moves Vulkan lines, gradients, shadows, and nested
+opacity onto the GPU, adds application-managed image revisions and texture
+diagnostics counters, and hardens Vulkan device selection, texture uploads,
+synchronization, and recovery. Linux CI now checks synchronization and injected
+frame failures with validation layers.
+
+### Support Matrix for 0.3.3
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
+### Added
+*   **Streaming Image Revisions:** `ImageNode::set_content_revision()` and `content_revision()` let applications declare when mutable pixel buffers change while keeping their storage address. `SnapshotContext::add_image(dest, data, width, height, scale, revision)` supplies the revision at draw time, so GPU backends can skip content hashing; a revision must change with the pixels and must not repeat for different contents at the same address.
+*   **Texture Diagnostics Counters:** `RenderHotspotCounters` reports `texture_allocation_count`, `texture_upload_byte_count`, `texture_upload_batch_count`, and `texture_cache_byte_count` for each frame. The fields round-trip through frame diagnostics JSON, and older artifacts load them as zero.
+
+### Fixed
+*   **Vulkan GPU Drawing:** Lines, dropdown chevrons, gradients, box shadows, and nested opacity render through the GPU pipeline instead of forcing a software upload. Paths and affine transforms use a working software-upload fallback instead of disappearing; software path joins blend once, and affine layers preserve negative source coordinates and clipping. Wrapped text is shaped at the device-scaled wrapping width.
+*   **Vulkan Synchronization and Recovery:** Presentation semaphores follow swapchain images, resource mutation waits for submitted work, and the fence is reset immediately before submission. Failed recording, fence reset, and submission recover without hanging; software presentation tears down WSI before committing a `wl_shm` buffer instead of mixing explicit-sync state with software buffers. Render-pass and acquisition barriers cover their actual accesses.
+*   **Vulkan Device Selection:** Candidate devices must support presentation, the swapchain extension, usable surface formats, required surface usage, and linear-filtered RGBA textures. Swapchain recreation selects a supported composite-alpha mode and rejects zero-sized or oversized extents instead of silently falling back.
+
+### Changed
+*   **Vulkan Uploads and Memory:** Texture uploads share a persistent staging buffer and are recorded into the frame submission instead of waiting on a separate submit. Streaming images reuse their GPU allocation, and the texture cache enforces a 96 MiB budget by evicting cold allocations before growing. Image dimensions are validated against device limits, and frame diagnostics expose allocation, upload, batch, and residency counters.
+*   **Vulkan Validation:** `tests/vulkan_renderer_test.cpp` exercises texture batching, allocation reuse, wrapped text, and recovery at runtime. `tests/vulkan_fault_injection.cpp` injects recording, fence-reset, and submission failures through an `LD_PRELOAD` interposer, and `tools/run_vulkan_validation.py` turns synchronization and validation-layer messages into test failures. Linux CI runs the gate with Khronos validation layers.
+*   **Documentation:** The platform-support reference documents the Vulkan GPU draw path, software fallbacks, the 96 MiB texture budget, revision rules, and the validation command. The diagnostics reference documents the new texture counters and `gpu_present_path`.
+*   **C++ ABI:** `ImageNode` gained a content-revision member and `RenderHotspotCounters` gained four texture counters. Rebuild the library and all C++ consumers together: the class and aggregate layouts changed.
+
 ## [0.3.2] - 2026-11-05
 
 The second patch release of the NodalKit framework. 0.3.2 keeps the widget
@@ -37,12 +75,9 @@ in the Vulkan renderer.
 *   **Modal Focus and Drop Containment:** Programmatic focus stays inside the top visible modal, and external drops never reach content behind a modal even outside its bounds. Drag bubbling keeps its target alive when a handler detaches it, hovered drop state is cleared on detach, and focus restoration falls back to the first attached focusable control when the previous target is gone.
 *   **Accessibility Text Scaling:** Widget measurement and snapshot text share one accessibility text scale clamped to the theme's `text-scale` token, so labels, preference rows, dialogs, and controls size from the same nominal logical fonts. TextField and CommandPalette no longer apply a duplicate font scale, Label invalidates cached height-for-width results when the scale changes, and menu, combo, and log line heights follow the scaled text.
 *   **Dialog Layout:** Response buttons wrap inside narrow allocations and follow scaled control heights, while titles and messages wrap within the panel instead of overflowing.
-*   **Vulkan Drawing:** Lines, dropdown chevrons, gradients, shadows, and nested opacity render through the GPU pipeline. Paths and affine transforms use a working software-upload fallback instead of disappearing. Software path joins avoid repeated alpha blending, and affine layers preserve negative source coordinates and clipping.
-*   **Vulkan Synchronization and Recovery:** Presentation semaphores follow swapchain images; resource mutation waits for submitted work, and fence reset occurs immediately before submission. Failed recording, fence reset, and submission recover without hanging or mixing Wayland explicit-sync state with software buffers. Render-pass and acquisition barriers cover their actual accesses.
-*   **Vulkan Device Selection:** Candidates must provide presentation, swapchain extensions, usable formats, and required surface usage. Swapchain recreation selects a supported composition mode and rejects zero-sized extents.
+*   **Vulkan Line Strokes:** Vulkan preserves line strokes, including dropdown chevrons, by handing them to the software-upload fallback instead of silently omitting them.
 
 ### Changed
-*   **Vulkan Uploads and Memory:** Texture uploads share a persistent staging buffer and frame submission. Streaming images reuse GPU allocations; the optional image revision API avoids content hashing. The texture cache has a 96 MiB allocation budget, and diagnostics expose allocation, upload, batch, and residency counters. Native Vulkan tests use runtime capability checks, and Linux CI checks synchronization and injected frame failures with validation layers.
 *   **Documentation:** The new "Receive external files and text" how-to covers drop handlers, payload limits, URI rules, and modal routing. The accessibility how-to now documents shared text scaling, cache invalidation, command semantics, and safe dialog defaults. `tools/atspi_live_check.sh` also finds an AT-SPI bus launcher installed under `/usr/lib/at-spi-bus-launcher`.
 
 ## [0.3.1] - 2026-11-04
