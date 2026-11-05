@@ -64,7 +64,91 @@
 
 @end
 
+@interface NKMetalTestTextureFaultDevice : NSObject
+@property(nonatomic, retain) id<MTLDevice> realDevice;
+@property(nonatomic, assign) BOOL failUpload;
+@property(nonatomic, assign) NSUInteger failureCount;
+@end
+
+@implementation NKMetalTestTextureFaultDevice
+
+- (void)dealloc {
+    [_realDevice release];
+    [super dealloc];
+}
+
+- (id)forwardingTargetForSelector:(SEL)selector {
+    (void)selector;
+    return _realDevice;
+}
+
+- (BOOL)supportsFamily:(MTLGPUFamily)family {
+    return _failUpload ? NO : [_realDevice supportsFamily:family];
+}
+
+- (id<MTLTexture>)newTextureWithDescriptor:(MTLTextureDescriptor*)descriptor {
+    if (!_failUpload && descriptor.pixelFormat == MTLPixelFormatRGBA8Unorm) {
+        ++_failureCount;
+        return nil;
+    }
+    return [_realDevice newTextureWithDescriptor:descriptor];
+}
+
+- (id<MTLBuffer>)newBufferWithLength:(NSUInteger)length options:(MTLResourceOptions)options {
+    if (_failUpload) {
+        ++_failureCount;
+        return nil;
+    }
+    return [_realDevice newBufferWithLength:length options:options];
+}
+
+@end
+
 namespace {
+
+class GreenTextShaper final : public nk::TextShaper {
+public:
+    [[nodiscard]] nk::Size measure(std::string_view, const nk::FontDescriptor&) const override {
+        return {64, 64};
+    }
+
+    [[nodiscard]] nk::ShapedText
+    shape(std::string_view, const nk::FontDescriptor&, nk::Color) const override {
+        nk::ShapedText shaped;
+        std::vector<uint8_t> pixels(64U * 64U * 4U, 0);
+        for (std::size_t index = 0; index < pixels.size(); index += 4) {
+            pixels[index + 1] = 255;
+            pixels[index + 3] = 255;
+        }
+        shaped.set_bitmap(std::move(pixels), 64, 64);
+        return shaped;
+    }
+};
+
+class TextureFaultScope {
+public:
+    TextureFaultScope(nk::MetalRendererUnderTest& renderer, bool fail_upload)
+        : renderer_(renderer), original_device_(renderer.device_) {
+        device = [[NKMetalTestTextureFaultDevice alloc] init];
+        device.realDevice = original_device_;
+        device.failUpload = fail_upload;
+        renderer_.device_ = (id<MTLDevice>)device;
+    }
+
+    ~TextureFaultScope() {
+        renderer_.device_ = original_device_;
+        [device release];
+    }
+
+    TextureFaultScope(const TextureFaultScope&) = delete;
+    TextureFaultScope& operator=(const TextureFaultScope&) = delete;
+
+    NKMetalTestTextureFaultDevice* device = nil;
+
+private:
+    nk::MetalRendererUnderTest& renderer_;
+    id<MTLDevice> original_device_ = nil;
+};
 
 class TestSurface final : public nk::NativeSurface {
 public:
@@ -377,6 +461,182 @@ TEST_CASE("Metal drawable failure presents the current software frame", "[metal]
     CHECK(surface.cpu_pixels[1] == 255);
     CHECK(surface.cpu_pixels[2] == 0);
     CHECK(surface.cpu_pixels[3] == 255);
+}
+
+TEST_CASE("Metal recovery owns the rendered scene after render returns", "[metal][recovery]") {
+    TestSurface surface;
+    surface.window.contentView.wantsLayer = YES;
+    surface.window.contentView.layer = [NKMetalTestNilLayer layer];
+    auto renderer = nk::create_renderer(nk::RendererBackend::Metal);
+    REQUIRE(renderer != nullptr);
+    renderer->begin_frame({64, 64}, 1.0F);
+    SECTION("primitive tree") {
+        auto root = solid({0, 1, 0, 1});
+        renderer->render(*root);
+    }
+    SECTION("owned image pixels") {
+        auto pixels = std::make_shared<const std::vector<uint32_t>>(1, 0xFF00FF00U);
+        nk::ImageNode image({0, 0, 64, 64}, pixels, 1, 1);
+        renderer->render(image);
+    }
+    SECTION("borrowed image pixels") {
+        std::vector<uint32_t> pixels(1, 0xFF00FF00U);
+        nk::ImageNode image({0, 0, 64, 64}, pixels.data(), 1, 1);
+        renderer->render(image);
+    }
+    renderer->end_frame();
+    renderer->present(surface);
+    REQUIRE(surface.cpu_pixels.size() == 64U * 64U * 4U);
+    CHECK(surface.cpu_pixels[0] == 0);
+    CHECK(surface.cpu_pixels[1] == 255);
+    CHECK(surface.cpu_pixels[2] == 0);
+    CHECK(surface.cpu_pixels[3] == 255);
+}
+
+TEST_CASE("Metal rejects empty and invalid framebuffers before presentation", "[metal][recovery]") {
+    for (const auto viewport : std::array<nk::Size, 8>{{
+             {0, 64},
+             {64, 0},
+             {-1, 64},
+             {64, -1},
+             {std::nanf(""), 64},
+             {64, HUGE_VALF},
+             {16384, 16384},
+             {64, 64},
+         }}) {
+        CAPTURE(viewport.width, viewport.height);
+        MetalFixture fixture;
+        auto root = fallback_root({0, 1, 0, 1});
+        // The last case overflows the scaled extent instead of the logical size.
+        const float scale = viewport.width == 64 && viewport.height == 64 ? 1.0e30F : 1.0F;
+        fixture.renderer.begin_frame(viewport, scale);
+        fixture.renderer.render(*root);
+        fixture.renderer.end_frame();
+        fixture.renderer.present(fixture.surface);
+        CHECK(fixture.surface.cpu_presents == 0);
+        CHECK(fixture.layer.captured.count == 0);
+        CHECK_FALSE(fixture.renderer.scene_initialized_);
+
+        auto green = solid({0, 1, 0, 1});
+        frame(fixture.renderer, fixture.surface, *green);
+        check_pixel(fixture.renderer, fixture.renderer.scene_texture_, 5, 5, {0, 255, 0, 255});
+    }
+}
+
+TEST_CASE("Metal recovery replays a mixed scene after its tree is released", "[metal][recovery]") {
+    TestSurface surface;
+    surface.window.contentView.wantsLayer = YES;
+    surface.window.contentView.layer = [NKMetalTestNilLayer layer];
+    auto renderer = nk::create_renderer(nk::RendererBackend::Metal);
+    REQUIRE(renderer != nullptr);
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper != nullptr);
+    renderer->set_text_shaper(shaper.get());
+    renderer->begin_frame({64, 64}, 2.0F);
+    std::vector<uint8_t> expected;
+    {
+        nk::SnapshotContext snapshot(shaper.get());
+        snapshot.push_container({0, 0, 64, 64});
+        snapshot.add_color_rect({0, 0, 64, 64}, {0.2F, 0.3F, 0.4F, 1});
+        snapshot.push_rounded_clip({2, 2, 60, 60}, 8);
+        snapshot.add_rounded_rect({2, 2, 60, 60}, {1, 0, 0, 0.5F}, 7);
+        snapshot.add_border({4, 4, 56, 56}, {0, 0, 1, 1}, 2, 5);
+        snapshot.add_line({5, 5}, {55, 45}, {1, 1, 0, 1}, 2);
+        snapshot.add_wrapped_text({8, 8}, "recovery wraps text", {0, 0, 0, 1}, {}, 30);
+        std::vector<uint32_t> image(4, 0xFF00FF00U);
+        snapshot.add_image({40, 40, 12, 12}, image.data(), 2, 2);
+        snapshot.pop_container();
+        snapshot.pop_container();
+        auto root = snapshot.take_root();
+        nk::SoftwareRenderer reference;
+        reference.set_text_shaper(shaper.get());
+        reference.begin_frame({64, 64}, 2.0F);
+        reference.render(*root);
+        reference.end_frame();
+        expected.assign(reference.pixel_data(), reference.pixel_data() + 128U * 128U * 4U);
+        renderer->render(*root);
+    }
+    renderer->end_frame();
+    renderer->present(surface);
+    CHECK(surface.cpu_pixels == expected);
+}
+
+TEST_CASE("Metal owns deferred image pixels without changing texture cache identity",
+          "[metal][recovery]") {
+    MetalFixture fixture;
+    std::vector<uint32_t> pixels(1, 0xFF00FF00U);
+    for (int iteration = 0; iteration < 2; ++iteration) {
+        fixture.renderer.begin_frame({64, 64}, 1.0F);
+        {
+            nk::ImageNode image({0, 0, 64, 64}, pixels.data(), 1, 1);
+            fixture.renderer.render(image);
+        }
+        pixels[0] = 0xFFFF0000U;
+        fixture.renderer.end_frame();
+        fixture.renderer.present(fixture.surface);
+        check_pixel(fixture.renderer, fixture.renderer.scene_texture_, 5, 5, {0, 255, 0, 255});
+        CHECK(fixture.renderer.last_hotspot_counters().image_texture_upload_count ==
+              (iteration == 0 ? 1 : 0));
+        pixels[0] = 0xFF00FF00U;
+    }
+}
+
+TEST_CASE("Metal texture failures recover the full frame in software", "[metal][recovery]") {
+    bool text = false;
+    bool upload = false;
+    SECTION("image allocation") {}
+    SECTION("text allocation") {
+        text = true;
+    }
+    SECTION("image upload") {
+        upload = true;
+    }
+    SECTION("text upload") {
+        text = true;
+        upload = true;
+    }
+
+    for (const bool partial : {false, true}) {
+        CAPTURE(partial);
+        MetalFixture fixture;
+        GreenTextShaper shaper;
+        fixture.renderer.set_text_shaper(&shaper);
+        auto blue = solid({0, 0, 1, 1});
+        frame(fixture.renderer, fixture.surface, *blue);
+
+        nk::SnapshotContext snapshot;
+        snapshot.add_color_rect({0, 0, 64, 64}, {1, 0, 0, 1});
+        const uint32_t green_pixel = 0xFF00FF00U;
+        if (text) {
+            snapshot.add_text({0, 0}, "green", {0, 1, 0, 1});
+        } else {
+            snapshot.add_image({0, 0, 64, 64}, &green_pixel, 1, 1);
+        }
+        auto root = snapshot.take_root();
+        {
+            TextureFaultScope fault(fixture.renderer, upload);
+            const std::array<nk::Rect, 1> damage{{{40, 40, 10, 10}}};
+            frame(fixture.renderer,
+                  fixture.surface,
+                  *root,
+                  partial ? std::span<const nk::Rect>(damage) : std::span<const nk::Rect>{});
+            REQUIRE(fault.device.failureCount > 0);
+        }
+        REQUIRE(fixture.surface.cpu_presents == 1);
+        REQUIRE(fixture.surface.cpu_pixels.size() == 64U * 64U * 4U);
+        CHECK(fixture.surface.cpu_pixels[0] == 0);
+        CHECK(fixture.surface.cpu_pixels[1] == 255);
+        CHECK(fixture.surface.cpu_pixels[2] == 0);
+        CHECK(fixture.surface.cpu_pixels[3] == 255);
+        CHECK_FALSE(fixture.renderer.scene_initialized_);
+        CHECK(fixture.renderer.last_hotspot_counters().gpu_present_path ==
+              nk::GpuPresentPath::SoftwareUpload);
+
+        auto green = solid({0, 1, 0, 1});
+        const std::array<nk::Rect, 1> damage{{{40, 40, 10, 10}}};
+        frame(fixture.renderer, fixture.surface, *green, damage);
+        check_pixel(fixture.renderer, fixture.renderer.scene_texture_, 5, 5, {0, 255, 0, 255});
+    }
 }
 
 TEST_CASE("Metal uploads padded rows into private textures", "[metal][upload]") {
