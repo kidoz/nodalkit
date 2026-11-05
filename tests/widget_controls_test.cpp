@@ -16,6 +16,7 @@
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/style/theme.h>
 #include <nk/text/text_shaper.h>
 #include <nk/widgets/about_dialog.h>
 #include <nk/widgets/button.h>
@@ -24,6 +25,7 @@
 #include <nk/widgets/color_well.h>
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/headerbar.h>
+#include <nk/widgets/label.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/radio_button.h>
 #include <nk/widgets/search_field.h>
@@ -987,4 +989,47 @@ TEST_CASE("ContextMenu maps only while open and separates dismissal from activat
     // Dismissing an already closed menu is a no-op: no second signal.
     menu->dismiss();
     CHECK(dismissals == 1);
+}
+
+TEST_CASE("Text scaling agrees between measurement and snapshots and does not compound",
+          "[widgets][text-scale]") {
+    const auto previous_theme = nk::Theme::active();
+
+    struct RestoreTheme {
+        std::shared_ptr<nk::Theme> theme;
+
+        ~RestoreTheme() { nk::Theme::set_active(theme); }
+    } restore{previous_theme};
+
+    nk::SystemPreferences preferences;
+    nk::ThemeSelection selection;
+    preferences.text_scale_factor = 1.0F;
+    nk::Theme::set_active(
+        nk::make_theme(nk::resolve_theme_selection(selection, preferences), preferences));
+    auto label = nk::Label::create("A long instruction that must grow and wrap");
+    label->set_wrapping(true);
+    const float normal_height = label->height_for_width(120);
+    auto preferences_row = nk::SwitchRow::create("Audio output", "Use the selected device");
+    const auto normal_row = preferences_row->measure(nk::Constraints::unbounded());
+
+    auto button = SnapshotButton::create("Save");
+    const auto normal = button->measure(nk::Constraints::unbounded());
+    preferences.text_scale_factor = 2.0F;
+    nk::Theme::set_active(
+        nk::make_theme(nk::resolve_theme_selection(selection, preferences), preferences));
+    CHECK(label->height_for_width(120) > normal_height);
+    CHECK(preferences_row->measure(nk::Constraints::unbounded()).natural_height >
+          normal_row.natural_height);
+
+    const auto large = button->measure(nk::Constraints::unbounded());
+    CHECK(large.natural_width > normal.natural_width);
+    button->allocate({0, 0, large.natural_width, large.natural_height});
+    nk::SnapshotContext snapshot;
+    button->snapshot_for_test(snapshot);
+    auto root = snapshot.take_root();
+    const auto* text = find_text_node(*root, "Save");
+    REQUIRE(text != nullptr);
+    CHECK(text->font().size == Catch::Approx(27.0F));
+    auto field = nk::TextField::create();
+    CHECK(field->measure(nk::Constraints::unbounded()).natural_height == Catch::Approx(72.0F));
 }

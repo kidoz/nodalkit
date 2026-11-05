@@ -1,6 +1,8 @@
 /// @file log_view.cpp
 /// @brief Implementation of the append-only, virtualized LogView.
 
+#include "../style/text_scale.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -70,7 +72,7 @@ LogView::LogView() : impl_(std::make_unique<Impl>()) {
 LogView::~LogView() = default;
 
 float LogView::line_height() const {
-    return std::round(kFontSize + kLinePadding * 2.0F);
+    return std::round(kFontSize * detail::text_scale() + kLinePadding * 2.0F);
 }
 
 float LogView::max_scroll() const {

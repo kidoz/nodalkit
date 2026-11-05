@@ -1,3 +1,5 @@
+#include "../style/text_scale.h"
+
 #include <algorithm>
 #include <cassert>
 #include <nk/controllers/event_controller.h>
@@ -1017,13 +1019,14 @@ Size Widget::measure_text(std::string_view text, const FontDescriptor& font) con
     }
 
     note_text_measure_for_diagnostics();
+    const auto effective_font = detail::scaled_font(font);
 
     if (impl_->host_window != nullptr && impl_->host_window->text_shaper() != nullptr) {
-        return impl_->host_window->text_shaper()->measure(text, font);
+        return impl_->host_window->text_shaper()->measure(text, effective_font);
     }
 
     const auto length = static_cast<float>(text.size());
-    return {length * font.size * 0.55F, font.size * 1.35F};
+    return {length * effective_font.size * 0.55F, effective_font.size * 1.35F};
 }
 
 Size Widget::measure_text_wrapped(std::string_view text,
@@ -1033,11 +1036,13 @@ Size Widget::measure_text_wrapped(std::string_view text,
         return {};
     }
     note_text_measure_for_diagnostics();
+    const auto effective_font = detail::scaled_font(font);
     if (impl_->host_window != nullptr && impl_->host_window->text_shaper() != nullptr) {
-        return impl_->host_window->text_shaper()->measure_wrapped(text, font, max_width);
+        return impl_->host_window->text_shaper()->measure_wrapped(text, effective_font, max_width);
     }
     const auto length = static_cast<float>(text.size());
-    return {std::min(max_width, length * font.size * 0.55F), font.size * 1.35F * 2.0F};
+    return {std::min(max_width, length * effective_font.size * 0.55F),
+            effective_font.size * 1.35F * 2.0F};
 }
 
 void Widget::add_text_elided(SnapshotContext& ctx,
@@ -1051,7 +1056,7 @@ void Widget::add_text_elided(SnapshotContext& ctx,
     }
     // No glyph advances more than one em per byte, so short runs are drawn
     // without measuring at all.
-    if (static_cast<float>(text.size()) * font.size <= max_width) {
+    if (static_cast<float>(text.size()) * detail::scaled_font(font).size <= max_width) {
         ctx.add_text(origin, std::string(text), color, font);
         return;
     }

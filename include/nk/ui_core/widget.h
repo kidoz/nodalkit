@@ -318,7 +318,8 @@ protected:
     [[nodiscard]] Window* host_window() const;
 
     /// Measure text using the host window's active text shaper when
-    /// available. Falls back to a simple estimate otherwise.
+    /// available. Falls back to a simple estimate otherwise. Applies the same
+    /// accessibility text scale as SnapshotContext to nominal logical fonts.
     [[nodiscard]] Size measure_text(std::string_view text, const FontDescriptor& font) const;
 
     /// Measure wrapped text using the host window's active text shaper.

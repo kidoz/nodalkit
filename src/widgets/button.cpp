@@ -103,7 +103,7 @@ SizeRequest Button::measure(const Constraints& /*constraints*/) const {
     const float min_width = theme_number("min-width", 82.0F);
     const float min_height = theme_number("min-height", 36.0F);
     const float w = std::max(min_width, measured.width + (padding_x * 2.0F));
-    const float h = min_height;
+    const float h = std::max(min_height, measured.height + 12.0F);
     return {w, h, w, h};
 }
 

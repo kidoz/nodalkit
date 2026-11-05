@@ -31,12 +31,9 @@ using detail::previous_word_boundary;
 using detail::word_selection_range;
 
 FontDescriptor text_field_font() {
-    const float scale = Application::instance() != nullptr
-                            ? Application::instance()->system_preferences().text_scale_factor
-                            : 1.0F;
     return FontDescriptor{
         .family = {},
-        .size = 13.5F * scale,
+        .size = 13.5F,
         .weight = FontWeight::Regular,
     };
 }
@@ -281,10 +278,8 @@ Signal<>& TextField::on_activate() {
 
 SizeRequest TextField::measure(const Constraints& /*constraints*/) const {
     const float w = theme_number("min-width", 240.0F);
-    const float scale = Application::instance() != nullptr
-                            ? Application::instance()->system_preferences().text_scale_factor
-                            : 1.0F;
-    const float h = theme_number("min-height", 36.0F) * scale;
+    const float h = std::max(theme_number("min-height", 36.0F),
+                             measure_text("Ag", text_field_font()).height + 12.0F);
     return {120.0F, h, w, h};
 }
 

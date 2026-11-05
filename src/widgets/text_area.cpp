@@ -1,3 +1,4 @@
+#include "../style/text_scale.h"
 #include "../text/text_boundaries.h"
 #include "../text/text_clipboard.h"
 #include "../text/text_edit_buffer.h"
@@ -246,7 +247,7 @@ Rect TextArea::text_rect() const {
 }
 
 float TextArea::line_height() const {
-    return std::max(1.0F, theme_number("line-height", 20.0F));
+    return std::max(1.0F, theme_number("line-height", 20.0F) * detail::text_scale());
 }
 
 std::size_t TextArea::cursor_line() const {

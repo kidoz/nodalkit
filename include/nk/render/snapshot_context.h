@@ -41,10 +41,11 @@ public:
     /// Convenience: add a border stroke around a rectangle.
     void add_border(Rect rect, Color color, float thickness = 1.0F, float corner_radius = 0.0F);
 
-    /// Convenience: add a text node.
+    /// Convenience: add a text node. Font sizes are nominal logical sizes;
+    /// the active theme's accessibility text scale is applied here once.
     void add_text(Point origin, std::string text, Color color, FontDescriptor font = {});
 
-    /// Convenience: add a word-wrapped text node.
+    /// Convenience: add a word-wrapped text node, with the same font scaling.
     void add_wrapped_text(
         Point origin, std::string text, Color color, FontDescriptor font, float max_width);
 

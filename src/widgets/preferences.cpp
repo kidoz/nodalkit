@@ -21,6 +21,13 @@ FontDescriptor preference_font(float size, FontWeight weight = FontWeight::Regul
 // squeezing the title into an ellipsis.
 constexpr float kMaxSuffixWidthShare = 0.6F;
 
+float page_heading_height(Size title, Size description) {
+    if (title.height == 0 && description.height == 0) {
+        return 0;
+    }
+    return std::max(64.0F, title.height + description.height + 18.0F);
+}
+
 } // namespace
 
 struct PreferencesRow::Impl {
@@ -130,10 +137,13 @@ SizeRequest PreferencesRow::measure(const Constraints& constraints) const {
                                            : SizeRequest{};
     const float width = (padding * 2.0F) + std::max(title.width, subtitle.width) +
                         (impl_->suffix != nullptr ? suffix.natural_width + padding : 0.0F);
+    const float text_height =
+        title.height + (impl_->subtitle.empty() ? 0.0F : subtitle.height + 4.0F);
+    const float height = std::max({min_height, suffix.natural_height, text_height + 16.0F});
     return {std::min(width, constraints.max_width),
-            min_height,
+            height,
             std::min(width, constraints.max_width),
-            std::max(min_height, suffix.natural_height)};
+            height};
 }
 
 void PreferencesRow::allocate(const Rect& allocation) {
@@ -387,7 +397,15 @@ std::span<const std::shared_ptr<PreferencesRow>> PreferencesGroup::rows() const 
 }
 
 SizeRequest PreferencesGroup::measure(const Constraints& constraints) const {
-    const float header = impl_->title.empty() ? 0.0F : 30.0F;
+    const float header =
+        impl_->title.empty()
+            ? 0.0F
+            : std::max(30.0F,
+                       measure_text(impl_->title,
+                                    preference_font(theme_number("heading-font-size", 14.0F),
+                                                    FontWeight::Bold))
+                               .height +
+                           10.0F);
     const float spacing = theme_number("row-spacing", 6.0F);
     SizeRequest result{0.0F, header, 0.0F, header};
     for (const auto& row : impl_->rows) {
@@ -403,7 +421,16 @@ SizeRequest PreferencesGroup::measure(const Constraints& constraints) const {
 void PreferencesGroup::allocate(const Rect& allocation) {
     Widget::allocate(allocation);
     const float spacing = theme_number("row-spacing", 6.0F);
-    float y = allocation.y + (impl_->title.empty() ? 0.0F : 30.0F);
+    const float header =
+        impl_->title.empty()
+            ? 0.0F
+            : std::max(30.0F,
+                       measure_text(impl_->title,
+                                    preference_font(theme_number("heading-font-size", 14.0F),
+                                                    FontWeight::Bold))
+                               .height +
+                           10.0F);
+    float y = allocation.y + header;
     for (const auto& row : impl_->rows) {
         const float height =
             row->measure({0.0F, 0.0F, allocation.width, allocation.height}).natural_height;
@@ -500,7 +527,12 @@ std::span<const std::shared_ptr<PreferencesGroup>> PreferencesPage::groups() con
 SizeRequest PreferencesPage::measure(const Constraints& constraints) const {
     const float padding = theme_number("page-padding", 24.0F);
     const float spacing = theme_number("group-spacing", 24.0F);
-    const float header = impl_->title.empty() && impl_->description.empty() ? 0.0F : 64.0F;
+    const float header = page_heading_height(
+        measure_text(
+            impl_->title,
+            preference_font(theme_number("page-title-font-size", 18.0F), FontWeight::Bold)),
+        measure_text(impl_->description,
+                     preference_font(theme_number("description-font-size", 13.0F))));
     SizeRequest result{0.0F, header + (padding * 2.0F), 0.0F, header + (padding * 2.0F)};
     for (const auto& group : impl_->groups) {
         const auto request = group->measure_for_diagnostics(constraints);
@@ -524,7 +556,12 @@ void PreferencesPage::allocate(const Rect& allocation) {
                                  theme_number("maximum-width", 720.0F));
     const float x = allocation.x + ((allocation.width - width) * 0.5F);
     float y = allocation.y + padding +
-              (impl_->title.empty() && impl_->description.empty() ? 0.0F : 64.0F);
+              (page_heading_height(
+                  measure_text(impl_->title,
+                               preference_font(theme_number("page-title-font-size", 18.0F),
+                                               FontWeight::Bold)),
+                  measure_text(impl_->description,
+                               preference_font(theme_number("description-font-size", 13.0F)))));
     impl_->content_bounds = {
         x, allocation.y + padding, width, allocation.height - (padding * 2.0F)};
     for (const auto& group : impl_->groups) {

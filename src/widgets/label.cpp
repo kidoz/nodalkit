@@ -1,4 +1,7 @@
+#include "../style/text_scale.h"
+
 #include <algorithm>
+#include <cmath>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
 #include <nk/widgets/label.h>
@@ -58,6 +61,7 @@ void Label::set_text(std::string text) {
     if (text_ != text) {
         const auto previous_text = text_;
         text_ = std::move(text);
+        cached_hfw_width_ = -1.0F;
         ensure_accessible().set_name(text_);
         queue_layout();
 
@@ -128,7 +132,8 @@ float Label::height_for_width(float width) const {
     if (!wrapping_ || width <= 0.0F) {
         return measure(Constraints::unbounded()).natural_height;
     }
-    if (std::abs(cached_hfw_width_ - width) < 0.1F) {
+    if (std::abs(cached_hfw_width_ - width) < 0.1F &&
+        cached_hfw_text_scale_ == detail::text_scale()) {
         return cached_hfw_height_;
     }
     const auto font = label_font(*this);
@@ -136,6 +141,7 @@ float Label::height_for_width(float width) const {
     const float h = std::max(measured.height + (has_style_class("heading") ? 6.0F : 0.0F),
                              has_style_class("heading") ? 28.0F : 20.0F);
     cached_hfw_width_ = width;
+    cached_hfw_text_scale_ = detail::text_scale();
     cached_hfw_height_ = h;
     return h;
 }

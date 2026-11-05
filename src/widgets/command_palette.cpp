@@ -402,8 +402,7 @@ bool CommandPalette::handle_text_input_event(const TextInputEvent& event) {
 std::optional<WidgetTextInputState> CommandPalette::text_input_state() const {
     const auto search =
         search_rect(*this, resolved_search_height(), resolved_search_section_height());
-    const auto search_font =
-        palette_font(theme_number("title-font-size", 13.0F) * theme_number("text-scale", 1.0F));
+    const auto search_font = palette_font(theme_number("title-font-size", 13.0F));
 
     WidgetTextInputState state{};
     state.text = impl_->query;
@@ -464,7 +463,7 @@ void CommandPalette::snapshot(SnapshotContext& ctx) const {
     ctx.add_border(
         search, theme_color("search-border-color", Color{0.84F, 0.86F, 0.90F, 1.0F}), 1.0F, 8.0F);
 
-    const auto search_font = palette_font(theme_number("title-font-size", 13.0F) * text_scale);
+    const auto search_font = palette_font(theme_number("title-font-size", 13.0F));
     const auto query_text = impl_->query.empty() ? std::string("Search commands...") : impl_->query;
     const auto query_color = impl_->query.empty() ? muted_text : text_color;
     const auto query_measured = measure_text(query_text, search_font);
@@ -496,8 +495,8 @@ void CommandPalette::snapshot(SnapshotContext& ctx) const {
     }
 
     const auto title_font =
-        palette_font(theme_number("title-font-size", 13.0F) * text_scale, FontWeight::Medium);
-    const auto detail_font = palette_font(theme_number("detail-font-size", 12.0F) * text_scale);
+        palette_font(theme_number("title-font-size", 13.0F), FontWeight::Medium);
+    const auto detail_font = palette_font(theme_number("detail-font-size", 12.0F));
     const float row_height = resolved_row_height();
     const float row_padding_x = theme_number("row-padding-x", 12.0F) * text_scale;
     const float detail_indent = theme_number("detail-indent", 12.0F) * text_scale;
@@ -726,8 +725,8 @@ std::optional<std::size_t> CommandPalette::result_at_point(Point point) const {
 float CommandPalette::resolved_row_height() const {
     const float text_scale = theme_number("text-scale", 1.0F);
     const auto title_font =
-        palette_font(theme_number("title-font-size", 13.0F) * text_scale, FontWeight::Medium);
-    const auto detail_font = palette_font(theme_number("detail-font-size", 12.0F) * text_scale);
+        palette_font(theme_number("title-font-size", 13.0F), FontWeight::Medium);
+    const auto detail_font = palette_font(theme_number("detail-font-size", 12.0F));
     const float text_height = measure_text("Ag", title_font).height +
                               (theme_number("line-spacing", 4.0F) * text_scale) +
                               measure_text("Ag", detail_font).height;
@@ -738,7 +737,7 @@ float CommandPalette::resolved_row_height() const {
 
 float CommandPalette::resolved_search_height() const {
     const float text_scale = theme_number("text-scale", 1.0F);
-    const auto search_font = palette_font(theme_number("title-font-size", 13.0F) * text_scale);
+    const auto search_font = palette_font(theme_number("title-font-size", 13.0F));
     const float padded_text_height = measure_text("Ag", search_font).height + (16.0F * text_scale);
     return std::max(theme_number("search-height", 38.0F) * text_scale, padded_text_height);
 }

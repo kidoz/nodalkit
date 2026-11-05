@@ -1,3 +1,5 @@
+#include "../style/text_scale.h"
+
 #include <cassert>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/text_shaper.h>
@@ -68,6 +70,7 @@ void SnapshotContext::add_border(Rect rect, Color color, float thickness, float 
 }
 
 void SnapshotContext::add_text(Point origin, std::string text, Color color, FontDescriptor font) {
+    font = detail::scaled_font(std::move(font));
     Size measured{};
     if (impl_->text_shaper != nullptr) {
         measured = impl_->text_shaper->measure(text, font);
@@ -77,6 +80,7 @@ void SnapshotContext::add_text(Point origin, std::string text, Color color, Font
 
 void SnapshotContext::add_wrapped_text(
     Point origin, std::string text, Color color, FontDescriptor font, float max_width) {
+    font = detail::scaled_font(std::move(font));
     Size measured{};
     if (impl_->text_shaper != nullptr) {
         measured = impl_->text_shaper->measure_wrapped(text, font, max_width);

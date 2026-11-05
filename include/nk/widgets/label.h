@@ -46,6 +46,7 @@ private:
     bool wrapping_ = false;
     mutable float cached_hfw_width_ = -1.0F;
     mutable float cached_hfw_height_ = -1.0F;
+    mutable float cached_hfw_text_scale_ = -1.0F;
 };
 
 } // namespace nk
