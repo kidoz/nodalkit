@@ -281,6 +281,7 @@ private:
     [[nodiscard]] std::unique_ptr<RenderNode> build_window_debug_render_tree(Size viewport_size,
                                                                              Rect content_area);
     void focus_widget(Widget* widget, bool reveal = true);
+    void restore_focus_or_first(const std::weak_ptr<Widget>& previous);
     [[nodiscard]] bool dispatch_shortcut(const KeyEvent& event);
     void handle_widget_state_change(Widget& widget);
     void handle_widget_detached(Widget& widget);

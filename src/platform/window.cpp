@@ -30,6 +30,7 @@
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/scroll_area.h>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -2709,6 +2710,18 @@ void WindowInspector::sync_debug_selected_widget_from_render_selection() {
 }
 
 void Window::focus_widget(Widget* widget, bool reveal) {
+    // A programmatic restore (for example after a nested confirmation) must
+    // obey the same containment as Tab and assistive-technology focus.
+    if (widget != nullptr) {
+        for (const auto& entry : std::views::reverse(impl_->overlays)) {
+            if (entry.modal && entry.widget != nullptr && entry.widget->is_visible()) {
+                if (!is_descendant_of(widget, entry.widget.get())) {
+                    return;
+                }
+                break;
+            }
+        }
+    }
     auto is_attached_to_window = [this](const Widget* candidate) {
         if (candidate == nullptr) {
             return false;
@@ -4208,9 +4221,7 @@ void Window::dispatch_window_event(const WindowEvent& event) {
         if (impl_->child) {
             impl_->child->remove_style_class("window-inactive");
         }
-        if (auto restore = impl_->pending_focus_restore.lock()) {
-            focus_widget(restore.get());
-        }
+        restore_focus_or_first(impl_->pending_focus_restore);
         request_frame(FrameRequestReason::Expose);
         break;
     case WindowEvent::Type::FocusOut:
@@ -4362,10 +4373,29 @@ void Window::dismiss_overlay(Widget& overlay) {
     impl_->needs_layout = true;
     request_frame(FrameRequestReason::OverlayChanged);
 
-    if (auto widget = restore_focus.lock()) {
+    restore_focus_or_first(restore_focus);
+    sync_native_toolbar_state();
+}
+
+void Window::restore_focus_or_first(const std::weak_ptr<Widget>& previous) {
+    if (const auto widget = previous.lock()) {
         focus_widget(widget.get());
     }
-    sync_native_toolbar_state();
+    if (impl_->focused_widget != nullptr) {
+        return;
+    }
+    Widget* scope = impl_->child.get();
+    for (const auto& entry : std::views::reverse(impl_->overlays)) {
+        if (entry.modal && entry.widget != nullptr && entry.widget->is_visible()) {
+            scope = entry.widget.get();
+            break;
+        }
+    }
+    std::vector<Widget*> focusable;
+    collect_focusable_widgets(scope, focusable);
+    if (!focusable.empty()) {
+        focus_widget(focusable.front());
+    }
 }
 
 Signal<>& Window::on_close_requested() {
