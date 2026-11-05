@@ -32,7 +32,31 @@ void main() {
     uint kind = pc.params.z & 0xFFu;
     uint clip_count = pc.params.z >> 8u;
 
+    vec4 color = pc.color;
     float coverage = clamp(0.5 - rounded_rect_sd(v_pixel_position, pc.rect, radius), 0.0, 1.0);
+    if (kind == 2u) {
+        // Round-capped segment, including a zero-length segment. The final
+        // unused clip slot carries endpoints in device pixels.
+        vec2 start = pc.clip_rects[3].xy;
+        vec2 delta = pc.clip_rects[3].zw - start;
+        float length_squared = dot(delta, delta);
+        float t = length_squared > 0.0
+            ? clamp(dot(v_pixel_position - start, delta) / length_squared, 0.0, 1.0)
+            : 0.0;
+        coverage = clamp(radius + 0.5 - length(v_pixel_position - start - t * delta), 0.0, 1.0);
+    } else if (kind == 3u) {
+        vec4 shadow_rect = vec4(pc.rect.xy + vec2(thickness),
+                                max(pc.rect.zw - vec2(2.0 * thickness), vec2(0.0)));
+        float distance = rounded_rect_sd(v_pixel_position, shadow_rect, radius);
+        coverage = thickness > 0.0 ? clamp(1.0 - max(0.0, distance) / thickness, 0.0, 1.0)
+                                   : (distance < 0.0 ? 1.0 : 0.0);
+    } else if (kind == 4u || kind == 5u) {
+        float span = kind == 4u ? pc.rect.w : pc.rect.z;
+        float position = kind == 4u ? v_pixel_position.y - pc.rect.y
+                                    : v_pixel_position.x - pc.rect.x;
+        color = mix(pc.color, pc.clip_rects[3], span > 0.0 ? clamp(position / span, 0.0, 1.0) : 0.0);
+        coverage = 1.0;
+    }
     for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {
         float clip_radius = pc.clip_radii[clip_index];
         float clip_coverage =
@@ -53,5 +77,5 @@ void main() {
         coverage = clamp(coverage - inner_coverage, 0.0, 1.0);
     }
 
-    out_color = vec4(pc.color.rgb, pc.color.a * coverage);
+    out_color = vec4(color.rgb, color.a * coverage);
 }

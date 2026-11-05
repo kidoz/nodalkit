@@ -32,6 +32,7 @@
 #include <nk/render/render_node.h>
 #include <nk/text/shaped_text.h>
 #include <nk/text/text_shaper.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -71,6 +72,7 @@ struct PrimitiveCommand {
     float radius = 0.0F;
     float thickness = 0.0F;
     uint32_t kind = 0;
+    std::array<float, 4> auxiliary{};
     std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
@@ -81,6 +83,8 @@ struct ImageCommand {
     int src_width = 0;
     int src_height = 0;
     ScaleMode scale_mode = ScaleMode::NearestNeighbor;
+    float opacity = 1.0F;
+    std::optional<uint64_t> revision;
     std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
@@ -88,6 +92,7 @@ struct ImageCommand {
 struct TextCommand {
     Rect rect{};
     std::shared_ptr<ShapedText> shaped_text;
+    float opacity = 1.0F;
     std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
@@ -129,11 +134,12 @@ struct TextKey {
     float b = 0.0F;
     float a = 0.0F;
     float scale = 1.0F;
+    float max_width = 0.0F;
 
     bool operator==(const TextKey& other) const {
         return text == other.text && family == other.family && size == other.size &&
                weight == other.weight && style == other.style && r == other.r && g == other.g &&
-               b == other.b && a == other.a && scale == other.scale;
+               b == other.b && a == other.a && scale == other.scale && max_width == other.max_width;
     }
 };
 
@@ -148,6 +154,7 @@ struct TextKeyHash {
         hash ^= std::hash<float>{}(key.g) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.b) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.a) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^= std::hash<float>{}(key.max_width) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         hash ^= std::hash<float>{}(key.scale) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
         return hash;
     }
@@ -1288,6 +1295,11 @@ private:
                     command.radius,
                     command.thickness,
                     command.kind);
+                if (command.kind == 2 || command.kind == 4 || command.kind == 5) {
+                    std::copy(command.auxiliary.begin(),
+                              command.auxiliary.end(),
+                              &push_constants.clip_rects[(kMaxClipDepth - 1) * 4]);
+                }
                 if (full_redraw) {
                     vkCmdSetScissor(command_buffer_, 0, 1, &scissor);
                     vkCmdPushConstants(command_buffer_,
@@ -1376,7 +1388,7 @@ private:
                 populate_draw_push_constants(
                     push_constants,
                     command.rect,
-                    {},
+                    Color{1, 1, 1, command.opacity},
                     std::span<const ClipRegion>(command.clips.data(), command.clip_count),
                     command.clip_count,
                     scale_factor_,
@@ -1387,7 +1399,7 @@ private:
                 populate_draw_push_constants(
                     push_constants,
                     command.rect,
-                    {},
+                    Color{1, 1, 1, command.opacity},
                     std::span<const ClipRegion>(command.clips.data(), command.clip_count),
                     command.clip_count,
                     scale_factor_,
@@ -1845,7 +1857,7 @@ private:
             .srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
             .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
             .colorBlendOp = VK_BLEND_OP_ADD,
-            .srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
             .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
             .alphaBlendOp = VK_BLEND_OP_ADD,
             .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
@@ -2807,6 +2819,11 @@ private:
 
         auto font = renderer_font_for_shape(text_node.font(), scale_factor_);
         const auto color = text_node.text_color();
+#if defined(_WIN32)
+        const float max_width = text_node.max_width();
+#else
+        const float max_width = text_node.max_width() * scale_factor_;
+#endif
         TextKey key{
             .text = text_node.text(),
             .family = font.family,
@@ -2818,6 +2835,7 @@ private:
             .b = color.b,
             .a = color.a,
             .scale = scale_factor_,
+            .max_width = max_width,
         };
 
         if (auto it = shaped_text_cache_.find(key); it != shaped_text_cache_.end()) {
@@ -2829,8 +2847,9 @@ private:
             shaped_text_cache_.clear();
         }
 
-        auto shaped =
-            std::make_shared<ShapedText>(text_shaper_->shape(text_node.text(), font, color));
+        auto shaped = std::make_shared<ShapedText>(
+            max_width > 0.0F ? text_shaper_->shape_wrapped(text_node.text(), font, color, max_width)
+                             : text_shaper_->shape(text_node.text(), font, color));
         shaped_text_cache_[key] = shaped;
         ++last_hotspot_counters_.text_shape_count;
         return shaped;
@@ -3586,24 +3605,64 @@ private:
         if (!ensure_software_frame()) {
             return;
         }
+        // Tear down WSI before committing a wl_shm buffer. In particular,
+        // NVIDIA's Wayland WSI may own explicit-sync objects on this surface
+        // that cannot be used for software buffers.
+        if (device_ != VK_NULL_HANDLE) {
+            destroy_context();
+            software_frame_rendered_ = true;
+            software_frame_finalized_ = true;
+        }
+        last_hotspot_counters_.texture_cache_byte_count = 0;
         last_hotspot_counters_.gpu_present_path = GpuPresentPath::SoftwareDirect;
         last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::None;
         software_->present(surface);
     }
 
-    bool collect_draw_commands(const RenderNode& node) {
+    void append_primitive(PrimitiveCommand command, float opacity) {
+        command.color.a *= opacity;
+        const auto clips = active_clips_.active();
+        command.clip_count = static_cast<uint32_t>(clips.size());
+        std::copy(clips.begin(), clips.end(), command.clips.begin());
+        primitive_commands_.push_back(command);
+        draw_commands_.push_back(
+            {.kind = DrawCommandKind::Primitive, .command_index = primitive_commands_.size() - 1});
+    }
+
+    bool collect_draw_commands(const RenderNode& node, float opacity = 1.0F) {
         switch (node.kind()) {
-        case RenderNodeKind::Line:
-            // Strokes are rasterized by SoftwareRenderer and uploaded through
-            // the Vulkan presentation path until the GPU pipeline supports them.
-            // Reporting success here silently discarded dropdown chevrons.
-            return false;
+        case RenderNodeKind::Line: {
+            if (active_clips_.active().size() >= kMaxClipDepth) {
+                return false;
+            }
+            const auto& line = static_cast<const LineNode&>(node);
+            const float radius = std::max(0.5F / scale_factor_, line.thickness() * 0.5F);
+            const float padding = radius + 0.5F / scale_factor_;
+            const auto start = line.start();
+            const auto end = line.end();
+            PrimitiveCommand command{
+                .rect = {std::min(start.x, end.x) - padding,
+                         std::min(start.y, end.y) - padding,
+                         std::abs(end.x - start.x) + 2 * padding,
+                         std::abs(end.y - start.y) + 2 * padding},
+                .color = line.color(),
+                .radius = radius,
+                .kind = 2,
+                .auxiliary = {start.x * scale_factor_,
+                              start.y * scale_factor_,
+                              end.x * scale_factor_,
+                              end.y * scale_factor_},
+            };
+            append_primitive(command, opacity);
+            return true;
+        }
         case RenderNodeKind::Path:
         case RenderNodeKind::Transform:
-            return true;
+            // The software path implements these nodes; never silently discard them.
+            return false;
         case RenderNodeKind::Container:
             for (const auto& child : node.children()) {
-                if (child != nullptr && !collect_draw_commands(*child)) {
+                if (child != nullptr && !collect_draw_commands(*child, opacity)) {
                     return false;
                 }
             }
@@ -3617,12 +3676,7 @@ private:
                 .thickness = 0.0F,
                 .kind = 0,
             };
-            const auto active_clips = active_clips_.active();
-            command.clip_count = static_cast<uint32_t>(active_clips.size());
-            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
-            primitive_commands_.push_back(command);
-            draw_commands_.push_back({.kind = DrawCommandKind::Primitive,
-                                      .command_index = primitive_commands_.size() - 1});
+            append_primitive(command, opacity);
             return true;
         }
         case RenderNodeKind::RoundedRect: {
@@ -3635,12 +3689,7 @@ private:
                 .thickness = 0.0F,
                 .kind = 0,
             };
-            const auto active_clips = active_clips_.active();
-            command.clip_count = static_cast<uint32_t>(active_clips.size());
-            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
-            primitive_commands_.push_back(command);
-            draw_commands_.push_back({.kind = DrawCommandKind::Primitive,
-                                      .command_index = primitive_commands_.size() - 1});
+            append_primitive(command, opacity);
             return true;
         }
         case RenderNodeKind::Border: {
@@ -3653,12 +3702,7 @@ private:
                 .thickness = std::max(0.0F, border_node.thickness()),
                 .kind = 1,
             };
-            const auto active_clips = active_clips_.active();
-            command.clip_count = static_cast<uint32_t>(active_clips.size());
-            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
-            primitive_commands_.push_back(command);
-            draw_commands_.push_back({.kind = DrawCommandKind::Primitive,
-                                      .command_index = primitive_commands_.size() - 1});
+            append_primitive(command, opacity);
             return true;
         }
         case RenderNodeKind::RoundedClip: {
@@ -3678,7 +3722,7 @@ private:
                 return false;
             }
             for (const auto& child : node.children()) {
-                if (child != nullptr && !collect_draw_commands(*child)) {
+                if (child != nullptr && !collect_draw_commands(*child, opacity)) {
                     active_clips_.pop();
                     return false;
                 }
@@ -3706,6 +3750,8 @@ private:
                 .src_width = image_node.src_width(),
                 .src_height = image_node.src_height(),
                 .scale_mode = image_node.scale_mode(),
+                .opacity = opacity,
+                .revision = image_node.content_revision(),
             };
             const auto active_clips = active_clips_.active();
             command.clip_count = static_cast<uint32_t>(active_clips.size());
@@ -3734,6 +3780,7 @@ private:
                          shaped_text->bitmap_width() / scale_factor_,
                          shaped_text->bitmap_height() / scale_factor_},
                 .shaped_text = std::move(shaped_text),
+                .opacity = opacity,
             };
             const auto active_clips = active_clips_.active();
             command.clip_count = static_cast<uint32_t>(active_clips.size());
@@ -3744,15 +3791,41 @@ private:
             return true;
         }
         case RenderNodeKind::Opacity:
-        case RenderNodeKind::LinearGradient:
-        case RenderNodeKind::Shadow:
-            // GPU-level opacity and gradient rendering not yet implemented on Vulkan.
+            opacity *= static_cast<const OpacityNode&>(node).opacity();
             for (const auto& child : node.children()) {
-                if (child != nullptr && !collect_draw_commands(*child)) {
+                if (child != nullptr && !collect_draw_commands(*child, opacity)) {
                     return false;
                 }
             }
             return true;
+        case RenderNodeKind::LinearGradient: {
+            if (active_clips_.active().size() >= kMaxClipDepth) {
+                return false;
+            }
+            const auto& gradient = static_cast<const LinearGradientNode&>(node);
+            auto end = gradient.end_color();
+            end.a *= opacity;
+            PrimitiveCommand command{
+                .rect = gradient.bounds(),
+                .color = gradient.start_color(),
+                .kind = gradient.direction() == Orientation::Vertical ? 4U : 5U,
+                .auxiliary = {end.r, end.g, end.b, end.a},
+            };
+            append_primitive(command, opacity);
+            return true;
+        }
+        case RenderNodeKind::Shadow: {
+            const auto& shadow = static_cast<const ShadowNode&>(node);
+            PrimitiveCommand command{
+                .rect = shadow.bounds(),
+                .color = shadow.color(),
+                .radius = shadow.corner_radius(),
+                .thickness = std::max(0.0F, shadow.blur_radius()),
+                .kind = 3,
+            };
+            append_primitive(command, opacity);
+            return true;
+        }
         }
         return false;
     }

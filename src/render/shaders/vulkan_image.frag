@@ -42,5 +42,5 @@ void main() {
     }
 
     vec4 sample_color = texture(u_texture, v_tex_coord);
-    out_color = vec4(sample_color.rgb, sample_color.a * coverage);
+    out_color = vec4(sample_color.rgb, sample_color.a * coverage * pc.color.a);
 }

@@ -6293,6 +6293,8 @@ TEST_CASE("Vulkan preserves chevron strokes instead of silently omitting them",
     window.present();
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::Vulkan);
+    REQUIRE(window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path !=
+            nk::GpuPresentPath::SoftwareUpload);
     const auto captured = window.inspector().capture_debug_screenshot();
     REQUIRE(captured);
     REQUIRE(captured->source_backend == nk::RendererBackend::Vulkan);

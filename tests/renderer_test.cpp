@@ -132,6 +132,95 @@ public:
 
 } // namespace
 
+TEST_CASE("Software affine layers retain negative coordinates, alpha and nested transforms",
+          "[render][transform]") {
+    for (float scale : {1.0F, 1.5F, 2.0F}) {
+        INFO(scale);
+        nk::SnapshotContext context;
+        const auto black = nk::Color::from_rgb(0, 0, 0);
+        context.push_rounded_clip({0, 0, 24, 30}, 0);
+        context.push_transform({.m31 = 30, .m32 = 10});
+        context.push_opacity({-20, 0, 20, 10}, 0.5F);
+        context.add_color_rect({-20, 0, 20, 10}, black);
+        context.pop_container();
+        context.pop_transform();
+        context.pop_container();
+        context.push_transform({.m31 = 30, .m32 = 10});
+        context.push_transform({.m11 = 0, .m12 = 1, .m21 = -1, .m22 = 0, .m31 = 40});
+        context.add_color_rect({0, 0, 10, 10}, black);
+        context.pop_transform();
+        context.pop_transform();
+        context.push_transform({.m11 = 0, .m22 = 0});
+        context.add_color_rect({0, 0, 80, 60}, black);
+        context.pop_transform();
+        auto root = context.take_root();
+        nk::SoftwareRenderer renderer;
+        renderer.begin_frame({80, 60}, scale);
+        renderer.render(*root);
+        const auto gray =
+            pixel_at(renderer, static_cast<int>(15 * scale), static_cast<int>(15 * scale));
+        CHECK(gray.r >= 126);
+        CHECK(gray.r <= 129);
+        CHECK(gray.a == 255);
+        CHECK(pixel_at(renderer, static_cast<int>(26 * scale), static_cast<int>(15 * scale)).r ==
+              255);
+        CHECK(pixel_at(renderer, static_cast<int>(65 * scale), static_cast<int>(15 * scale)).r ==
+              0);
+        CHECK(pixel_at(renderer, static_cast<int>(45 * scale), static_cast<int>(35 * scale)).r ==
+              255);
+    }
+}
+
+TEST_CASE("Software paths stroke closing segments and blend translucent joins once",
+          "[render][path]") {
+    nk::SnapshotContext context;
+    context.add_path(
+        {.points = {{10, 10}, {30, 10}, {30, 30}}, .closed = true}, {0, 0, 0, 0.5F}, 4);
+    auto root = context.take_root();
+    nk::SoftwareRenderer renderer;
+    renderer.begin_frame({40, 40}, 2);
+    renderer.render(*root);
+    for (auto point : {nk::Point{20, 10}, nk::Point{30, 10}, nk::Point{20, 20}}) {
+        CHECK(pixel_at(renderer, static_cast<int>(point.x * 2), static_cast<int>(point.y * 2)).r ==
+              127);
+    }
+    CHECK(pixel_at(renderer, 10, 10).r == 255);
+}
+
+TEST_CASE("Frame diagnostics retain Vulkan upload and residency counters", "[render][debug]") {
+    nk::FrameDiagnostics frame;
+    auto& counters = frame.render_hotspot_counters;
+    counters.texture_allocation_count = 4;
+    counters.texture_upload_byte_count = 4096;
+    counters.texture_upload_batch_count = 1;
+    counters.texture_cache_byte_count = 65536;
+    const std::array frames{frame};
+    const auto parsed = nk::parse_frame_diagnostics_artifact_json(
+        nk::format_frame_diagnostics_artifact_json(frames));
+    REQUIRE(parsed);
+    REQUIRE(parsed->frames.size() == 1);
+    CHECK(parsed->frames.front().render_hotspot_counters == counters);
+}
+
+TEST_CASE("Vulkan shapes wrapped text using the device-scaled wrapping width", "[render][vulkan]") {
+    if (!nk::renderer_backend_available(nk::RendererBackend::Vulkan)) {
+        SKIP("Vulkan was not built");
+    }
+    RecordingTextShaper shaper;
+    auto renderer = nk::create_renderer(nk::RendererBackend::Vulkan);
+    renderer->set_text_shaper(&shaper);
+    renderer->begin_frame({80, 60}, 2);
+    nk::TextNode text({0, 0}, {20, 20}, "wrapped text", {0, 0, 0, 1}, {}, 20);
+    renderer->render(text);
+    CHECK(shaper.wrapped_shape_count == 1);
+    CHECK(shaper.shape_count == 0);
+#if defined(_WIN32)
+    CHECK(shaper.last_wrapped_shape_max_width == 20);
+#else
+    CHECK(shaper.last_wrapped_shape_max_width == 40);
+#endif
+}
+
 TEST_CASE("SoftwareRenderer scales logical content into a HiDPI framebuffer", "[renderer]") {
     nk::SnapshotContext snapshot;
     snapshot.add_color_rect({2.0F, 3.0F, 4.0F, 5.0F}, nk::Color::from_rgb(255, 0, 0));
