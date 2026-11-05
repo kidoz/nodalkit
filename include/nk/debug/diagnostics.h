@@ -102,6 +102,10 @@ struct RenderHotspotCounters {
     std::size_t image_dest_pixel_count = 0;
     std::size_t image_texture_upload_count = 0;
     std::size_t image_texture_cache_hit_count = 0;
+    std::size_t texture_allocation_count = 0;
+    std::size_t texture_upload_byte_count = 0;
+    std::size_t texture_upload_batch_count = 0;
+    std::size_t texture_cache_byte_count = 0;
     std::size_t damage_region_count = 0;
     std::size_t gpu_draw_call_count = 0;
     std::size_t gpu_replayed_command_count = 0;

@@ -10,6 +10,14 @@ The declarations are in
 [`nk/platform/window_inspector.h`](../../include/nk/platform/window_inspector.h).
 Every window exposes its inspector through `window.inspector()`.
 
+Vulkan's render hotspot counters include `texture_allocation_count`,
+`texture_upload_byte_count`, and `texture_upload_batch_count` for the frame,
+plus `texture_cache_byte_count` for resident image/text allocation bytes.
+Upload bytes count prepared pixel data; the batch count records submitted
+uploads. These fields round-trip through frame diagnostics JSON; older
+artifacts load them as zero. Use `gpu_present_path` to identify software
+fallback before comparing GPU workloads.
+
 ## Facilities
 
 | Facility | Entry points | Contents |

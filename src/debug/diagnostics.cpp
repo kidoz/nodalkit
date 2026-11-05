@@ -461,6 +461,10 @@ void append_render_hotspot_counters_json(std::ostringstream& out,
         << ",\"image_dest_pixel_count\":" << counters.image_dest_pixel_count
         << ",\"image_texture_upload_count\":" << counters.image_texture_upload_count
         << ",\"image_texture_cache_hit_count\":" << counters.image_texture_cache_hit_count
+        << ",\"texture_allocation_count\":" << counters.texture_allocation_count
+        << ",\"texture_upload_byte_count\":" << counters.texture_upload_byte_count
+        << ",\"texture_upload_batch_count\":" << counters.texture_upload_batch_count
+        << ",\"texture_cache_byte_count\":" << counters.texture_cache_byte_count
         << ",\"damage_region_count\":" << counters.damage_region_count
         << ",\"gpu_draw_call_count\":" << counters.gpu_draw_call_count
         << ",\"gpu_replayed_command_count\":" << counters.gpu_replayed_command_count
@@ -2484,6 +2488,14 @@ private:
                     counters.image_texture_upload_count = *value;
                 } else if (*key == "image_texture_cache_hit_count") {
                     counters.image_texture_cache_hit_count = *value;
+                } else if (*key == "texture_allocation_count") {
+                    counters.texture_allocation_count = *value;
+                } else if (*key == "texture_upload_byte_count") {
+                    counters.texture_upload_byte_count = *value;
+                } else if (*key == "texture_upload_batch_count") {
+                    counters.texture_upload_batch_count = *value;
+                } else if (*key == "texture_cache_byte_count") {
+                    counters.texture_cache_byte_count = *value;
                 } else if (*key == "damage_region_count") {
                     counters.damage_region_count = *value;
                 } else if (*key == "gpu_draw_call_count") {
