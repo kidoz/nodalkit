@@ -359,18 +359,26 @@ bool vk_ok(VkResult result, std::string_view step) {
     return false;
 }
 
-VkSurfaceFormatKHR choose_surface_format(const std::vector<VkSurfaceFormatKHR>& formats) {
-    for (const auto& format : formats) {
-        if ((format.format == VK_FORMAT_B8G8R8A8_UNORM ||
-             format.format == VK_FORMAT_R8G8B8A8_UNORM) &&
-            format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+std::optional<VkSurfaceFormatKHR>
+choose_surface_format(VkPhysicalDevice device, std::span<const VkSurfaceFormatKHR> formats) {
+    // Upload/readback currently use four-byte RGBA/BGRA pixels and shaders
+    // produce encoded colors. Do not silently choose a packed or sRGB target.
+    for (auto format : formats) {
+        if (format.format == VK_FORMAT_UNDEFINED) {
+            format.format = VK_FORMAT_B8G8R8A8_UNORM;
+        }
+        if ((format.format != VK_FORMAT_B8G8R8A8_UNORM &&
+             format.format != VK_FORMAT_R8G8B8A8_UNORM) ||
+            format.colorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            continue;
+        }
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(device, format.format, &properties);
+        if ((properties.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0) {
             return format;
         }
     }
-
-    return formats.empty()
-               ? VkSurfaceFormatKHR{VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
-               : formats.front();
+    return std::nullopt;
 }
 
 VkExtent2D choose_swapchain_extent(const VkSurfaceCapabilitiesKHR& capabilities,
@@ -528,6 +536,7 @@ public:
         }
 
         for (const auto candidate : physical_devices) {
+            uint32_t selected_family = std::numeric_limits<uint32_t>::max();
             uint32_t queue_family_count = 0;
             vkGetPhysicalDeviceQueueFamilyProperties(candidate, &queue_family_count, nullptr);
             if (queue_family_count == 0) {
@@ -554,12 +563,59 @@ public:
                     continue;
                 }
 
-                physical_device_ = candidate;
-                queue_family_index_ = queue_family_index;
+                selected_family = queue_family_index;
                 break;
             }
-
-            if (physical_device_ != VK_NULL_HANDLE) {
+            if (selected_family == std::numeric_limits<uint32_t>::max()) {
+                continue;
+            }
+            uint32_t extension_count = 0;
+            if (vkEnumerateDeviceExtensionProperties(
+                    candidate, nullptr, &extension_count, nullptr) != VK_SUCCESS) {
+                continue;
+            }
+            std::vector<VkExtensionProperties> extensions(extension_count);
+            if (vkEnumerateDeviceExtensionProperties(
+                    candidate, nullptr, &extension_count, extensions.data()) != VK_SUCCESS ||
+                !has_extension(extensions, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) {
+                continue;
+            }
+            VkSurfaceCapabilitiesKHR capabilities{};
+            uint32_t format_count = 0, present_mode_count = 0;
+            constexpr VkImageUsageFlags required_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                                         VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+            if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(candidate, vk_surface_, &capabilities) !=
+                    VK_SUCCESS ||
+                (capabilities.supportedUsageFlags & required_usage) != required_usage ||
+                capabilities.supportedCompositeAlpha == 0 ||
+                vkGetPhysicalDeviceSurfaceFormatsKHR(
+                    candidate, vk_surface_, &format_count, nullptr) != VK_SUCCESS ||
+                format_count == 0 ||
+                vkGetPhysicalDeviceSurfacePresentModesKHR(
+                    candidate, vk_surface_, &present_mode_count, nullptr) != VK_SUCCESS ||
+                present_mode_count == 0) {
+                continue;
+            }
+            std::vector<VkSurfaceFormatKHR> candidate_formats(format_count);
+            if (vkGetPhysicalDeviceSurfaceFormatsKHR(
+                    candidate, vk_surface_, &format_count, candidate_formats.data()) !=
+                VK_SUCCESS) {
+                continue;
+            }
+            if (!choose_surface_format(candidate, candidate_formats)) {
+                continue;
+            }
+            VkFormatProperties texture_format{};
+            vkGetPhysicalDeviceFormatProperties(
+                candidate, VK_FORMAT_R8G8B8A8_UNORM, &texture_format);
+            constexpr VkFormatFeatureFlags required_texture =
+                VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+            if ((texture_format.optimalTilingFeatures & required_texture) != required_texture) {
+                continue;
+            }
+            if (create_device(candidate, selected_family, extensions)) {
                 break;
             }
         }
@@ -567,62 +623,6 @@ public:
         if (physical_device_ == VK_NULL_HANDLE) {
             NK_LOG_WARN("VulkanRenderer",
                         "No Vulkan device with graphics and present support was found");
-            destroy_context();
-            return false;
-        }
-
-        uint32_t device_extension_count = 0;
-        if (!vk_ok(vkEnumerateDeviceExtensionProperties(
-                       physical_device_, nullptr, &device_extension_count, nullptr),
-                   "vkEnumerateDeviceExtensionProperties(count)")) {
-            destroy_context();
-            return false;
-        }
-        std::vector<VkExtensionProperties> available_device_extensions(device_extension_count);
-        if (device_extension_count > 0 &&
-            !vk_ok(vkEnumerateDeviceExtensionProperties(physical_device_,
-                                                        nullptr,
-                                                        &device_extension_count,
-                                                        available_device_extensions.data()),
-                   "vkEnumerateDeviceExtensionProperties(list)")) {
-            destroy_context();
-            return false;
-        }
-
-        const float queue_priority = 1.0F;
-        const VkDeviceQueueCreateInfo queue_info = {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .queueFamilyIndex = queue_family_index_,
-            .queueCount = 1,
-            .pQueuePriorities = &queue_priority,
-        };
-
-        std::vector<const char*> enabled_device_extensions = {
-            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        };
-        incremental_present_supported_ =
-            has_extension(available_device_extensions, VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
-        if (incremental_present_supported_) {
-            enabled_device_extensions.push_back(VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
-        }
-
-        const VkDeviceCreateInfo device_info = {
-            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-            .pNext = nullptr,
-            .flags = 0,
-            .queueCreateInfoCount = 1,
-            .pQueueCreateInfos = &queue_info,
-            .enabledLayerCount = 0,
-            .ppEnabledLayerNames = nullptr,
-            .enabledExtensionCount = static_cast<uint32_t>(enabled_device_extensions.size()),
-            .ppEnabledExtensionNames = enabled_device_extensions.data(),
-            .pEnabledFeatures = nullptr,
-        };
-
-        if (!vk_ok(vkCreateDevice(physical_device_, &device_info, nullptr, &device_),
-                   "vkCreateDevice")) {
             destroy_context();
             return false;
         }
@@ -1461,6 +1461,52 @@ private:
         return gpu_draw_call_count;
     }
 
+    [[nodiscard]] bool create_device(VkPhysicalDevice candidate,
+                                     uint32_t family,
+                                     std::span<const VkExtensionProperties> extensions) {
+        const float queue_priority = 1.0F;
+        const VkDeviceQueueCreateInfo queue_info = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .queueFamilyIndex = family,
+            .queueCount = 1,
+            .pQueuePriorities = &queue_priority,
+        };
+
+        std::vector<const char*> enabled_device_extensions = {
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        };
+        const bool incremental =
+            has_extension(extensions, VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+        if (incremental) {
+            enabled_device_extensions.push_back(VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
+        }
+
+        const VkDeviceCreateInfo device_info = {
+            .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+            .pNext = nullptr,
+            .flags = 0,
+            .queueCreateInfoCount = 1,
+            .pQueueCreateInfos = &queue_info,
+            .enabledLayerCount = 0,
+            .ppEnabledLayerNames = nullptr,
+            .enabledExtensionCount = static_cast<uint32_t>(enabled_device_extensions.size()),
+            .ppEnabledExtensionNames = enabled_device_extensions.data(),
+            .pEnabledFeatures = nullptr,
+        };
+
+        if (!vk_ok(vkCreateDevice(candidate, &device_info, nullptr, &device_), "vkCreateDevice")) {
+            return false;
+        }
+
+        physical_device_ = candidate;
+        queue_family_index_ = family;
+        incremental_present_supported_ = incremental;
+        vkGetPhysicalDeviceProperties(candidate, &device_properties_);
+        return true;
+    }
+
     [[nodiscard]] bool create_command_resources() {
         const VkCommandPoolCreateInfo pool_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -2223,7 +2269,11 @@ private:
             return false;
         }
 
-        const auto chosen_format = choose_surface_format(formats);
+        const auto supported_format = choose_surface_format(physical_device_, formats);
+        if (!supported_format) {
+            return false;
+        }
+        const auto chosen_format = *supported_format;
         VkPresentModeKHR chosen_present_mode = VK_PRESENT_MODE_FIFO_KHR;
         if (std::find(present_modes.begin(), present_modes.end(), VK_PRESENT_MODE_MAILBOX_KHR) !=
             present_modes.end()) {
@@ -2232,6 +2282,25 @@ private:
         const auto chosen_extent =
             choose_swapchain_extent(capabilities, desired_width, desired_height);
         const auto chosen_transform = choose_surface_transform(capabilities);
+        constexpr VkImageUsageFlags required_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                                     VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                                     VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        if (chosen_extent.width == 0 || chosen_extent.height == 0 || chosen_extent.width > 65535 ||
+            chosen_extent.height > 65535 ||
+            (capabilities.supportedUsageFlags & required_usage) != required_usage ||
+            capabilities.supportedCompositeAlpha == 0) {
+            return false;
+        }
+        VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        for (const auto candidate : {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+                                     VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+                                     VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+                                     VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR}) {
+            if ((capabilities.supportedCompositeAlpha & candidate) != 0) {
+                composite_alpha = candidate;
+                break;
+            }
+        }
 
         uint32_t image_count = capabilities.minImageCount + 1;
         if (capabilities.maxImageCount > 0) {
@@ -2256,7 +2325,7 @@ private:
             .queueFamilyIndexCount = 0,
             .pQueueFamilyIndices = nullptr,
             .preTransform = chosen_transform,
-            .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            .compositeAlpha = composite_alpha,
             .presentMode = chosen_present_mode,
             .clipped = VK_TRUE,
             .oldSwapchain = VK_NULL_HANDLE,
@@ -3911,6 +3980,8 @@ private:
             vkDestroyInstance(instance_, nullptr);
             instance_ = VK_NULL_HANDLE;
         }
+        physical_device_ = VK_NULL_HANDLE;
+        device_properties_ = {};
     }
 
     std::unique_ptr<SoftwareRenderer> software_;
@@ -3923,6 +3994,7 @@ private:
     VkInstance instance_ = VK_NULL_HANDLE;
     VkSurfaceKHR vk_surface_ = VK_NULL_HANDLE;
     VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
+    VkPhysicalDeviceProperties device_properties_{};
     VkDevice device_ = VK_NULL_HANDLE;
     VkQueue graphics_queue_ = VK_NULL_HANDLE;
     VkSwapchainKHR swapchain_ = VK_NULL_HANDLE;
