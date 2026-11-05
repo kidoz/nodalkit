@@ -4,24 +4,43 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
+## [0.3.2] - 2026-11-05
 
-- Wayland external file and text drop receiving, with asynchronous bounded
-  transfers, local file URI decoding, cancellation and surface cleanup.
-- Accessible command children for context menus and menu bars, and actionable
-  dropdown options with selection state and stable identity across reopening.
-- `Dialog::set_default_response()` allows a confirmation to start on Cancel.
+The second patch release of the NodalKit framework. 0.3.2 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.3.1 and adds external file and text drops on Wayland,
+accessible command children for menus and dropdowns, and an explicit safe
+default response for dialogs. It also applies accessibility text scaling
+consistently across measurement and snapshots, keeps focus and drops inside the
+active modal, wraps dialog content in narrow panels, and preserves line strokes
+in the Vulkan renderer.
+
+### Support Matrix for 0.3.2
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
+### Added
+*   **Wayland File and Text Drops:** External `text/uri-list` and text offers from other Wayland clients are routed to widget drop targets with `external` set, including Enter, Motion, Leave, and Drop. Transfers are asynchronous and bounded to 16 MiB and two seconds, accept Copy only, decode percent-escaped local file URIs (including `localhost`), reject remote hosts and non-file URLs, and cancel on selection changes, surface teardown, or malformed payloads. File lists are limited to 4096 entries, and receiving a URI never downloads a file. `Window::start_drag()` remains an in-process source.
+*   **Menu and Dropdown Accessibility:** `ContextMenu` and `MenuBar` expose their commands as menu-item children with stable identities across reopening, live enabled and checked state, and an Activate action that respects open, enabled, and modal conditions. `ComboBox` exposes its choices only while the popup is open, marks the selected option, and supports Activate on the field and each option. Dismissed, detached, disabled, and modal-covered commands reject activation. The live AT-SPI check now exercises menu and dropdown activation.
+*   **Safe Dialog Defaults:** `Dialog::set_default_response()` chooses the response focused on presentation and used for unhandled Return/Space, so destructive confirmations can start on Cancel; the first button remains the fallback when that response has no button.
 
 ### Fixed
+*   **Modal Focus and Drop Containment:** Programmatic focus stays inside the top visible modal, and external drops never reach content behind a modal even outside its bounds. Drag bubbling keeps its target alive when a handler detaches it, hovered drop state is cleared on detach, and focus restoration falls back to the first attached focusable control when the previous target is gone.
+*   **Accessibility Text Scaling:** Widget measurement and snapshot text share one accessibility text scale clamped to the theme's `text-scale` token, so labels, preference rows, dialogs, and controls size from the same nominal logical fonts. TextField and CommandPalette no longer apply a duplicate font scale, Label invalidates cached height-for-width results when the scale changes, and menu, combo, and log line heights follow the scaled text.
+*   **Dialog Layout:** Response buttons wrap inside narrow allocations and follow scaled control heights, while titles and messages wrap within the panel instead of overflowing.
+*   **Vulkan Line Strokes:** Vulkan preserves line strokes, including dropdown chevrons, by handing them to the software-upload fallback instead of silently omitting them.
 
-- Programmatic focus and external drops stay inside the active modal. Focus
-  restoration falls back to an attached control when the original target is gone.
-- Widget text measurement and snapshot text now share accessibility text scaling.
-  Text fields and command palettes no longer apply their own duplicate font scale.
-- Vulkan preserves line strokes, including dropdown chevrons, through its
-  software-upload fallback instead of silently omitting them.
-- Dialog response buttons wrap inside narrow allocations and follow scaled
-  control heights; dialog titles and messages wrap within the panel.
+### Changed
+*   **Documentation:** The new "Receive external files and text" how-to covers drop handlers, payload limits, URI rules, and modal routing. The accessibility how-to now documents shared text scaling, cache invalidation, command semantics, and safe dialog defaults. `tools/atspi_live_check.sh` also finds an AT-SPI bus launcher installed under `/usr/lib/at-spi-bus-launcher`.
 
 ## [0.3.1] - 2026-11-04
 

@@ -1,7 +1,7 @@
 
 # MSVC exposes its C++23 mode as /std:c++latest rather than /std:c++23.
 project('NodalKit', 'cpp',
-        version : '0.3.1',
+        version : '0.3.2',
         meson_version : '>=1.11.0',
         default_options : ['warning_level=3', 'werror=true', 'cpp_std=c++23,c++latest'])
 
