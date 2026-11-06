@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <nk/accessibility/atspi_bridge.h>
 #include <nk/foundation/types.h>
 #include <nk/layout/breakpoint.h>
 #include <nk/platform/application.h>
@@ -522,6 +523,104 @@ TEST_CASE("Breadcrumb builds, extends, and truncates its path", "[widgets][bread
     crumb->pop_to(2);
     REQUIRE(crumb->depth() == 2);
     REQUIRE(crumb->segment(1) == "Projects");
+}
+
+TEST_CASE("Breadcrumb activates from the keyboard and overflows a long path",
+          "[widgets][breadcrumb]") {
+    auto crumb = nk::Breadcrumb::create();
+    REQUIRE(crumb->accessible() != nullptr);
+    CHECK(crumb->accessible()->role() == nk::AccessibleRole::Navigation);
+    CHECK(crumb->accessible()->name() == "Breadcrumb");
+    CHECK(nk::atspi_role_name("navigation") == "landmark");
+
+    crumb->set_path({"Home"});
+    CHECK_FALSE(
+        crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    CHECK_FALSE(
+        crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+
+    crumb->set_path({"Home", "Projects", "NodalKit"});
+    int index = -1;
+    int calls = 0;
+    auto connection = crumb->on_navigate().connect([&](std::size_t segment) {
+        index = static_cast<int>(segment);
+        ++calls;
+    });
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(index == 0);
+    CHECK(calls == 1);
+    CHECK(crumb->depth() == 3);
+    CHECK(crumb->segment(2) == "NodalKit");
+
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Space}));
+    CHECK(index == 1);
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left}));
+    CHECK(crumb->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(index == 0);
+    CHECK(crumb->depth() == 3);
+
+    const auto fitted = crumb->measure(nk::Constraints::unbounded());
+    crumb->allocate({0.0F, 0.0F, fitted.natural_width + 40.0F, fitted.natural_height});
+    index = -1;
+    const float click_y = fitted.natural_height * 0.5F;
+    for (float x = 1.0F; x < fitted.natural_width && index < 0; x += 4.0F) {
+        crumb->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Press, .x = x, .y = click_y, .button = 1});
+        crumb->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Release, .x = x, .y = click_y, .button = 1});
+    }
+    CHECK(index == 0);
+    CHECK(crumb->depth() == 3);
+    connection.disconnect();
+
+    auto overflow = nk::Breadcrumb::create();
+    overflow->set_path({"Alpha", "Beta", "Gamma"});
+    const float bar_height = overflow->measure(nk::Constraints::unbounded()).natural_height;
+    overflow->allocate({10.0F, 20.0F, 40.0F, bar_height});
+    int picked = -1;
+    auto overflow_connection = overflow->on_navigate().connect(
+        [&](std::size_t segment) { picked = static_cast<int>(segment); });
+    auto* menu = dynamic_cast<nk::ContextMenu*>(overflow->children().back().get());
+    REQUIRE(menu != nullptr);
+    const float mid_y = 20.0F + (bar_height * 0.5F);
+    bool opened = false;
+    for (float x = 11.0F; x < 49.0F; x += 4.0F) {
+        overflow->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Press, .x = x, .y = mid_y, .button = 1});
+        overflow->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Release, .x = x, .y = mid_y, .button = 1});
+        if (menu->is_open()) {
+            opened = true;
+            break;
+        }
+    }
+    CHECK(opened);
+    CHECK(menu->item_count() == 2);
+    bool menu_hit = false;
+    for (float y = 20.0F + bar_height + 4.0F; y < 20.0F + bar_height + 80.0F && !menu_hit;
+         y += 8.0F) {
+        for (float x = 10.0F; x < 180.0F; x += 12.0F) {
+            const nk::Point point{x, y};
+            if (!overflow->allocation().contains(point) && overflow->hit_test(point)) {
+                menu_hit = true;
+                break;
+            }
+        }
+    }
+    CHECK(menu_hit);
+    CHECK(menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK_FALSE(menu->is_open());
+    CHECK(picked == 1);
+    CHECK(overflow->depth() == 3);
+    CHECK(overflow->segment(0) == "Alpha");
+    CHECK(overflow->segment(2) == "Gamma");
+    overflow_connection.disconnect();
 }
 
 TEST_CASE("ContextMenu returns focus to the widget that was active", "[widgets][context_menu]") {

@@ -49,6 +49,7 @@ enum class AtspiRoleValue : std::uint32_t {
     Link = 88,
     TreeItem = 91,
     LevelBar = 103,
+    Landmark = 110,
 };
 
 // AtspiStateType bit positions within the two-word state set.

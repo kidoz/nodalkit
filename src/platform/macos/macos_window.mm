@@ -1437,6 +1437,7 @@ static NSString* macos_accessibility_role(const nk::detail::AccessibleNodeInfo& 
     case Role::None:
     case Role::Dialog:
     case Role::Group:
+    case Role::Navigation:
     case Role::Separator:
     case Role::Status:
     case Role::TabPanel:
