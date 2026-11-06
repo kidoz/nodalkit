@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <nk/layout/box_layout.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/about_dialog.h>
@@ -24,6 +25,44 @@ public:
 
 private:
     VerticalBox() = default;
+};
+
+constexpr float kLogoMaxExtent = 128.0F;
+
+/// Gives the logo the full content width and centers the mark inside it.
+class CenteredLogo : public Widget {
+public:
+    static std::shared_ptr<CenteredLogo> create(std::shared_ptr<Widget> logo) {
+        auto frame = std::shared_ptr<CenteredLogo>(new CenteredLogo(std::move(logo)));
+        frame->set_horizontal_size_policy(SizePolicy::Expanding);
+        frame->append_child(frame->logo_);
+        return frame;
+    }
+
+    [[nodiscard]] SizeRequest measure(const Constraints& /*constraints*/) const override {
+        const auto request = logo_->measure(Constraints::unbounded());
+        const float width = std::clamp(request.natural_width, 1.0F, kLogoMaxExtent);
+        const float height = std::clamp(request.natural_height, 1.0F, kLogoMaxExtent);
+        return {width, height, width, height};
+    }
+
+    void allocate(const Rect& allocation) override {
+        Widget::allocate(allocation);
+        const auto request = logo_->measure(Constraints::unbounded());
+        const float width =
+            std::min(request.natural_width, std::min(allocation.width, kLogoMaxExtent));
+        const float height =
+            std::min(request.natural_height, std::min(allocation.height, kLogoMaxExtent));
+        logo_->allocate({allocation.x + ((allocation.width - width) * 0.5F),
+                         allocation.y + ((allocation.height - height) * 0.5F),
+                         width,
+                         height});
+    }
+
+private:
+    explicit CenteredLogo(std::shared_ptr<Widget> logo) : logo_(std::move(logo)) {}
+
+    std::shared_ptr<Widget> logo_;
 };
 
 std::shared_ptr<Label> centered_label(std::string text, std::string style_class) {
@@ -59,7 +98,10 @@ AboutDialog::AboutDialog(AboutInfo info) : impl_(std::make_unique<Impl>()) {
     auto content = VerticalBox::create(8.0F);
     content->add_style_class("about-dialog");
 
-    // Identity first: name, then version, then what the application is for.
+    // Identity first: optional logo, then name, version, and what the app is for.
+    if (about.logo != nullptr) {
+        content->append(CenteredLogo::create(about.logo));
+    }
     content->append(centered_label(about.application_name, "about-name"));
     if (!about.version.empty()) {
         content->append(centered_label(about.version, "about-version"));

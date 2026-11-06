@@ -29,6 +29,7 @@
 #include <nk/widgets/color_well.h>
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/headerbar.h>
+#include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/level_bar.h>
 #include <nk/widgets/link_button.h>
@@ -1092,6 +1093,66 @@ TEST_CASE("AboutDialog omits empty fields and reports link activation", "[widget
     // Only the website was supplied, so "Report an Issue" must not appear.
     CHECK(activatable_rows == 1);
     CHECK(activated == "https://example.invalid/nodalkit");
+    connection.disconnect();
+
+    REQUIRE(!about->dialog().children().empty());
+    const auto content = about->dialog().children().front();
+    REQUIRE(!content->children().empty());
+    const auto* first = dynamic_cast<const nk::Label*>(content->children().front().get());
+    REQUIRE(first != nullptr);
+    CHECK(first->text() == info.application_name);
+}
+
+TEST_CASE("AboutDialog centers a logo above the application name", "[widgets][about][gnome]") {
+    auto logo = nk::ImageView::create();
+    const std::uint32_t pixel = 0xFF2266CCU;
+    logo->update_pixel_buffer(&pixel, 1, 1);
+
+    nk::AboutInfo info;
+    info.application_name = "NodalKit Showcase";
+    info.version = "0.1.0";
+    info.logo = logo;
+    info.website = "https://example.invalid/nodalkit";
+
+    auto about = nk::AboutDialog::create(info);
+    const auto fitted = about->dialog().measure(nk::Constraints::unbounded());
+    about->dialog().allocate(
+        {0.0F, 0.0F, std::max(480.0F, fitted.natural_width), fitted.natural_height});
+
+    const nk::Label* name = nullptr;
+    const std::function<void(const nk::Widget&)> visit = [&](const nk::Widget& widget) {
+        for (const auto& child : widget.children()) {
+            if (const auto* label = dynamic_cast<const nk::Label*>(child.get());
+                label != nullptr && label->text() == info.application_name) {
+                name = label;
+            }
+            visit(*child);
+        }
+    };
+    visit(about->dialog());
+    REQUIRE(name != nullptr);
+    CHECK(logo->allocation().height > 0.0F);
+    CHECK(logo->allocation().bottom() <= name->allocation().y);
+    const auto* column = name->parent();
+    REQUIRE(column != nullptr);
+    const float logo_center = logo->allocation().x + (logo->allocation().width * 0.5F);
+    const float column_center = column->allocation().x + (column->allocation().width * 0.5F);
+    CHECK(logo_center == Catch::Approx(column_center).margin(1.0F));
+
+    std::string activated;
+    auto connection = about->on_link_activated().connect(
+        [&](std::string_view url) { activated = std::string(url); });
+    const std::function<void(nk::Widget&)> activate = [&](nk::Widget& widget) {
+        for (const auto& child : widget.children()) {
+            if (auto* row = dynamic_cast<nk::PreferencesRow*>(child.get());
+                row != nullptr && row->is_activatable()) {
+                row->on_activated().emit();
+            }
+            activate(*child);
+        }
+    };
+    activate(about->dialog());
+    CHECK(activated == info.website);
     connection.disconnect();
 }
 

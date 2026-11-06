@@ -18,6 +18,10 @@ class Window;
 /// required; every other field is omitted from the dialog when left empty.
 struct AboutInfo {
     std::string application_name;
+    /// Optional mark centered above the application name. Empty leaves the
+    /// identity block starting with the name. An `ImageView` is the usual
+    /// choice. The dialog does not open URLs.
+    std::shared_ptr<Widget> logo;
     std::string version;
     /// One-line description of what the application does.
     std::string comments;
