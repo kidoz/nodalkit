@@ -1799,6 +1799,83 @@ TEST_CASE("Avatar round-trips initials, diameter, and image", "[widgets][avatar]
     const std::array<std::uint32_t, 4> pixels{0xFFFFFFFFU, 0xFF000000U, 0xFFFF0000U, 0xFF00FF00U};
     avatar->set_image(pixels.data(), 2, 2);
     avatar->clear_image();
+    CHECK(avatar->status() == nk::AvatarStatus::None);
+}
+
+namespace {
+
+int count_rounded_rects(const nk::RenderNode& node) {
+    int count = node.kind() == nk::RenderNodeKind::RoundedRect ? 1 : 0;
+    for (const auto& child : node.children()) {
+        if (child != nullptr) {
+            count += count_rounded_rects(*child);
+        }
+    }
+    return count;
+}
+
+bool snapshot_has_color(const nk::RenderNode& node, nk::Color expected) {
+    if (node.kind() == nk::RenderNodeKind::RoundedRect) {
+        const auto color = static_cast<const nk::RoundedRectNode&>(node).color();
+        if (color.r == Catch::Approx(expected.r).margin(0.02F) &&
+            color.g == Catch::Approx(expected.g).margin(0.02F) &&
+            color.b == Catch::Approx(expected.b).margin(0.02F)) {
+            return true;
+        }
+    }
+    for (const auto& child : node.children()) {
+        if (child != nullptr && snapshot_has_color(*child, expected)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int avatar_rounds(nk::Widget& widget) {
+    nk::SnapshotContext snapshot;
+    widget.snapshot(snapshot);
+    const auto root = snapshot.take_root();
+    return root == nullptr ? 0 : count_rounded_rects(*root);
+}
+
+} // namespace
+
+TEST_CASE("Avatar draws a person and a status mark", "[widgets][avatar]") {
+    auto avatar = nk::Avatar::create();
+    avatar->allocate({0.0F, 0.0F, 40.0F, 40.0F});
+    CHECK(avatar->accessible() != nullptr);
+    CHECK(avatar->accessible()->name() == "Avatar");
+    CHECK(avatar->accessible()->description().empty());
+    CHECK(snapshot_text(*avatar).empty());
+    const int person_rounds = avatar_rounds(*avatar);
+    CHECK(person_rounds >= 3);
+
+    avatar->set_initials("AB");
+    CHECK(avatar->accessible()->name() == "AB");
+    CHECK(snapshot_text(*avatar).find("AB") != std::string::npos);
+    CHECK(avatar_rounds(*avatar) < person_rounds);
+
+    avatar->set_initials("");
+    const std::array<std::uint32_t, 1> pixel{0xFF2266CCU};
+    avatar->set_image(pixel.data(), 1, 1);
+    CHECK(snapshot_text(*avatar).empty());
+    CHECK(avatar->accessible()->name() == "Avatar");
+    avatar->clear_image();
+
+    avatar->set_status(nk::AvatarStatus::Online);
+    CHECK(avatar->status() == nk::AvatarStatus::Online);
+    CHECK(avatar->accessible()->description() == "Online");
+    CHECK(avatar->accessible()->name() == "Avatar");
+    nk::SnapshotContext snapshot;
+    nk::Widget& surface = *avatar;
+    surface.snapshot(snapshot);
+    const auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+    CHECK(snapshot_has_color(*root, nk::Color{0.18F, 0.72F, 0.35F, 1.0F}));
+
+    avatar->set_status(nk::AvatarStatus::None);
+    CHECK(avatar->accessible()->description().empty());
+    CHECK(avatar_rounds(*avatar) == person_rounds);
 }
 
 TEST_CASE("Separator reports its orientation", "[widgets][separator]") {

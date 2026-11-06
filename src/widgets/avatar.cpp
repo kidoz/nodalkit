@@ -23,7 +23,44 @@ struct Avatar::Impl {
     const uint32_t* image_data = nullptr;
     int image_width = 0;
     int image_height = 0;
+    AvatarStatus status = AvatarStatus::None;
 };
+
+namespace {
+
+const char* status_name(AvatarStatus status) {
+    switch (status) {
+    case AvatarStatus::Online:
+        return "Online";
+    case AvatarStatus::Busy:
+        return "Busy";
+    case AvatarStatus::Away:
+        return "Away";
+    case AvatarStatus::Offline:
+        return "Offline";
+    case AvatarStatus::None:
+        return "";
+    }
+    return "";
+}
+
+Color status_color(AvatarStatus status) {
+    switch (status) {
+    case AvatarStatus::Online:
+        return Color{0.18F, 0.72F, 0.35F, 1.0F};
+    case AvatarStatus::Busy:
+        return Color{0.86F, 0.22F, 0.24F, 1.0F};
+    case AvatarStatus::Away:
+        return Color{0.92F, 0.62F, 0.16F, 1.0F};
+    case AvatarStatus::Offline:
+        return Color{0.55F, 0.58F, 0.62F, 1.0F};
+    case AvatarStatus::None:
+        return Color{};
+    }
+    return Color{};
+}
+
+} // namespace
 
 std::shared_ptr<Avatar> Avatar::create(std::string initials) {
     return std::shared_ptr<Avatar>(new Avatar(std::move(initials)));
@@ -65,6 +102,19 @@ void Avatar::clear_image() {
     queue_redraw();
 }
 
+void Avatar::set_status(AvatarStatus status) {
+    if (impl_->status == status) {
+        return;
+    }
+    impl_->status = status;
+    ensure_accessible().set_description(status_name(status));
+    queue_redraw();
+}
+
+AvatarStatus Avatar::status() const {
+    return impl_->status;
+}
+
 float Avatar::diameter() const {
     return impl_->diameter;
 }
@@ -97,7 +147,6 @@ void Avatar::snapshot(SnapshotContext& ctx) const {
         circle_rect, theme_color("background", Color{0.75F, 0.78F, 0.82F, 1.0F}), circle_radius);
 
     if (impl_->image_data != nullptr && impl_->image_width > 0 && impl_->image_height > 0) {
-        // Clip image to circle.
         note_image_snapshot_for_diagnostics();
         ctx.push_rounded_clip(circle_rect, circle_radius);
         ctx.add_image(circle_rect,
@@ -107,7 +156,6 @@ void Avatar::snapshot(SnapshotContext& ctx) const {
                       ScaleMode::NearestNeighbor);
         ctx.pop_container();
     } else if (!impl_->initials.empty()) {
-        // Draw initials text centered.
         const auto font = avatar_font(d);
         const auto measured = measure_text(impl_->initials, font);
         const float text_x = cx + std::max(0.0F, (d - measured.width) * 0.5F);
@@ -116,6 +164,32 @@ void Avatar::snapshot(SnapshotContext& ctx) const {
                      std::string(impl_->initials),
                      theme_color("text-color", Color{1.0F, 1.0F, 1.0F, 1.0F}),
                      font);
+    } else {
+        const auto mark = theme_color("person-color", Color{0.45F, 0.48F, 0.52F, 1.0F});
+        ctx.push_rounded_clip(circle_rect, circle_radius);
+        const float head = d * 0.32F;
+        ctx.add_rounded_rect(
+            {cx + ((d - head) * 0.5F), cy + (d * 0.18F), head, head}, mark, head * 0.5F);
+        const float shoulder_w = d * 0.62F;
+        const float shoulder_h = d * 0.36F;
+        ctx.add_rounded_rect(
+            {cx + ((d - shoulder_w) * 0.5F), cy + (d * 0.52F), shoulder_w, shoulder_h},
+            mark,
+            shoulder_h * 0.5F);
+        ctx.pop_container();
+    }
+
+    if (impl_->status != AvatarStatus::None) {
+        const float mark = std::max(8.0F, d * 0.28F);
+        const float mark_x = circle_rect.right() - (mark * 0.78F);
+        const float mark_y = circle_rect.bottom() - (mark * 0.78F);
+        const float ring = 2.0F;
+        ctx.add_rounded_rect(
+            {mark_x - ring, mark_y - ring, mark + (ring * 2.0F), mark + (ring * 2.0F)},
+            theme_color("status-ring-color", Color{1.0F, 1.0F, 1.0F, 1.0F}),
+            (mark + (ring * 2.0F)) * 0.5F);
+        ctx.add_rounded_rect(
+            {mark_x, mark_y, mark, mark}, status_color(impl_->status), mark * 0.5F);
     }
 
     // Optional border.

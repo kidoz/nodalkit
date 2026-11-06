@@ -67,6 +67,7 @@
 #include <nk/ui_core/cursor_shape.h>
 #include <nk/ui_core/state_flags.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/avatar.h>
 #include <nk/widgets/badge.h>
 #include <nk/widgets/banner.h>
 #include <nk/widgets/box.h>
@@ -871,6 +872,15 @@ void force_symbol_references() {
     (void)&nk::PreferencesPage::add;
     (void)&nk::PreferencesPage::remove;
     (void)&nk::PreferencesPage::groups;
+    (void)&nk::Avatar::create;
+    (void)static_cast<std::string_view (nk::Avatar::*)() const>(&nk::Avatar::initials);
+    (void)static_cast<void (nk::Avatar::*)(std::string)>(&nk::Avatar::set_initials);
+    (void)static_cast<void (nk::Avatar::*)(const std::uint32_t*, int, int)>(&nk::Avatar::set_image);
+    (void)&nk::Avatar::clear_image;
+    (void)static_cast<void (nk::Avatar::*)(nk::AvatarStatus)>(&nk::Avatar::set_status);
+    (void)static_cast<nk::AvatarStatus (nk::Avatar::*)() const>(&nk::Avatar::status);
+    (void)static_cast<float (nk::Avatar::*)() const>(&nk::Avatar::diameter);
+    (void)static_cast<void (nk::Avatar::*)(float)>(&nk::Avatar::set_diameter);
     (void)static_cast<std::shared_ptr<nk::Badge> (*)(std::string)>(&nk::Badge::create);
     (void)static_cast<std::shared_ptr<nk::Badge> (*)(int)>(&nk::Badge::create);
     (void)static_cast<std::string_view (nk::Badge::*)() const>(&nk::Badge::text);

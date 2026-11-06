@@ -11,7 +11,21 @@
 
 namespace nk {
 
-/// A circular avatar showing an image or fallback initials.
+/// Presence shown on the bottom-trailing edge of an avatar.
+enum class AvatarStatus {
+    None,
+    Online,
+    Busy,
+    Away,
+    Offline,
+};
+
+/// A circular avatar showing an image, initials, or a person mark.
+///
+/// When both the initials and the image are empty, the circle draws a person
+/// mark. The accessible name stays "Avatar". `set_status()` draws a small
+/// mark at the bottom-trailing edge. `None` draws nothing. The accessible
+/// description names the status when one is set.
 class Avatar : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<Avatar> create(std::string initials = {});
@@ -23,6 +37,9 @@ public:
     /// Set a pixel buffer to display. ARGB8888 row-major.
     void set_image(const uint32_t* data, int width, int height);
     void clear_image();
+
+    void set_status(AvatarStatus status);
+    [[nodiscard]] AvatarStatus status() const;
 
     /// Diameter in logical pixels.
     [[nodiscard]] float diameter() const;
