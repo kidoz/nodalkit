@@ -1,17 +1,24 @@
 /// @file widget_views_test.cpp
-/// @brief Headless unit tests for navigation, container, and display widgets:
+/// @brief Unit tests for navigation, container, and display widgets:
 /// item/selection management, expand/split state, severity, and round-trip
-/// properties. No Window/event loop required.
+/// properties. The motion tests attach a widget to a window; the rest do not.
 
 #include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <nk/foundation/types.h>
 #include <nk/layout/breakpoint.h>
+#include <nk/platform/application.h>
 #include <nk/platform/events.h>
+#include <nk/platform/window.h>
+#include <nk/render/render_node.h>
+#include <nk/render/snapshot_context.h>
 #include <nk/runtime/event_loop.h>
+#include <nk/style/theme_selection.h>
 #include <nk/widgets/avatar.h>
 #include <nk/widgets/badge.h>
 #include <nk/widgets/banner.h>
@@ -38,6 +45,8 @@
 #include <nk/widgets/tooltip.h>
 #include <nk/widgets/visual_effect_view.h>
 #include <optional>
+#include <string_view>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -525,6 +534,73 @@ TEST_CASE("Popover starts closed and accepts content", "[widgets][popover]") {
     REQUIRE_FALSE(popover->is_open());
 }
 
+namespace {
+
+struct PaintedShape {
+    nk::Rect bounds{};
+    nk::Color color{};
+
+    bool operator==(const PaintedShape&) const = default;
+};
+
+void collect_rounded_rects(const nk::RenderNode& node, std::vector<PaintedShape>& out) {
+    if (node.kind() == nk::RenderNodeKind::RoundedRect) {
+        const auto& rounded = static_cast<const nk::RoundedRectNode&>(node);
+        out.push_back({node.bounds(), rounded.color()});
+    }
+    for (const auto& child : node.children()) {
+        if (child) {
+            collect_rounded_rects(*child, out);
+        }
+    }
+}
+
+std::vector<PaintedShape> paint_rounded_rects(nk::Widget& widget, nk::Rect allocation) {
+    widget.allocate(allocation);
+    nk::SnapshotContext snapshot;
+    widget.snapshot(snapshot);
+    auto root = snapshot.take_root();
+    std::vector<PaintedShape> shapes;
+    if (root) {
+        collect_rounded_rects(*root, shapes);
+    }
+    return shapes;
+}
+
+void pump(nk::EventLoop& loop, std::chrono::milliseconds duration) {
+    const auto deadline = std::chrono::steady_clock::now() + duration;
+    while (std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        loop.poll();
+    }
+}
+
+int timer_count(const nk::EventLoop& loop, std::string_view label) {
+    int count = 0;
+    for (const auto& event : loop.debug_trace_events()) {
+        if (event.source_label == label) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+bool pump_until(nk::EventLoop& loop,
+                std::chrono::milliseconds budget,
+                const std::function<bool()>& done) {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (done()) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+        loop.poll();
+    }
+    return done();
+}
+
+} // namespace
+
 TEST_CASE("ProgressBar round-trips fraction including indeterminate", "[widgets][progress_bar]") {
     auto bar = nk::ProgressBar::create();
     bar->set_fraction(0.5F);
@@ -547,6 +623,123 @@ TEST_CASE("Spinner round-trips spinning state and diameter", "[widgets][spinner]
 
     spinner->set_diameter(48.0F);
     REQUIRE(spinner->diameter() == Catch::Approx(48.0F));
+}
+
+TEST_CASE("Spinner snapshot does not advance the indicator", "[widgets][spinner][motion]") {
+    auto spinner = nk::Spinner::create();
+    const nk::Rect allocation{0.0F, 0.0F, 32.0F, 32.0F};
+    const auto first = paint_rounded_rects(*spinner, allocation);
+    const auto second = paint_rounded_rects(*spinner, allocation);
+    REQUIRE_FALSE(first.empty());
+    REQUIRE(first == second);
+}
+
+TEST_CASE("Spinner clock stops for hide, detach, and a hidden window",
+          "[widgets][spinner][motion]") {
+    nk::Application app(0, nullptr);
+    app.set_system_preferences_observation_enabled(false);
+    nk::ThemeSelection motion;
+    motion.motion_policy = nk::MotionPolicy::Normal;
+    app.set_theme_selection(motion);
+    nk::Window window({.title = "Spinner motion", .width = 320, .height = 240});
+    auto spinner = nk::Spinner::create();
+    window.set_child(spinner);
+    window.present();
+
+    const nk::Rect allocation{0.0F, 0.0F, 32.0F, 32.0F};
+    const auto initial = paint_rounded_rects(*spinner, allocation);
+    REQUIRE(pump_until(app.event_loop(), std::chrono::milliseconds{300}, [&] {
+        return paint_rounded_rects(*spinner, allocation) != initial;
+    }));
+    const auto moving = paint_rounded_rects(*spinner, allocation);
+    REQUIRE(paint_rounded_rects(*spinner, allocation) == moving);
+
+    spinner->set_visible(false);
+    app.event_loop().clear_debug_trace_events();
+    pump(app.event_loop(), std::chrono::milliseconds{80});
+    REQUIRE(timer_count(app.event_loop(), "spinner-motion") == 0);
+
+    spinner->set_visible(true);
+    const auto held = paint_rounded_rects(*spinner, allocation);
+    REQUIRE(paint_rounded_rects(*spinner, allocation) == held);
+    REQUIRE(pump_until(app.event_loop(), std::chrono::milliseconds{300}, [&] {
+        return paint_rounded_rects(*spinner, allocation) != held;
+    }));
+
+    nk::ThemeSelection reduced;
+    reduced.motion_policy = nk::MotionPolicy::Reduced;
+    app.set_theme_selection(reduced);
+    app.event_loop().clear_debug_trace_events();
+    pump(app.event_loop(), std::chrono::milliseconds{80});
+    REQUIRE(timer_count(app.event_loop(), "spinner-motion") == 0);
+    const auto parked = paint_rounded_rects(*spinner, allocation);
+    REQUIRE(paint_rounded_rects(*spinner, allocation) == parked);
+
+    app.set_theme_selection(motion);
+    REQUIRE(pump_until(app.event_loop(), std::chrono::milliseconds{300}, [&] {
+        return paint_rounded_rects(*spinner, allocation) != parked;
+    }));
+
+    window.hide();
+    app.event_loop().clear_debug_trace_events();
+    pump(app.event_loop(), std::chrono::milliseconds{80});
+    REQUIRE(timer_count(app.event_loop(), "spinner-motion") == 0);
+
+    window.present();
+    const auto hidden = paint_rounded_rects(*spinner, allocation);
+    REQUIRE(pump_until(app.event_loop(), std::chrono::milliseconds{300}, [&] {
+        return paint_rounded_rects(*spinner, allocation) != hidden;
+    }));
+
+    window.set_child(nullptr);
+    app.event_loop().clear_debug_trace_events();
+    pump(app.event_loop(), std::chrono::milliseconds{80});
+    REQUIRE(timer_count(app.event_loop(), "spinner-motion") == 0);
+}
+
+TEST_CASE("ProgressBar clock follows time, keeps pulse, and honors reduced motion",
+          "[widgets][progress_bar][motion]") {
+    nk::Application app(0, nullptr);
+    app.set_system_preferences_observation_enabled(false);
+    nk::ThemeSelection motion;
+    motion.motion_policy = nk::MotionPolicy::Normal;
+    app.set_theme_selection(motion);
+    nk::Window window({.title = "Progress motion", .width = 320, .height = 240});
+    auto bar = nk::ProgressBar::create();
+    bar->set_fraction(-1.0F);
+    window.set_child(bar);
+    window.present();
+
+    const nk::Rect allocation{0.0F, 0.0F, 200.0F, 8.0F};
+    const auto initial = paint_rounded_rects(*bar, allocation);
+    REQUIRE(pump_until(app.event_loop(), std::chrono::milliseconds{300}, [&] {
+        return paint_rounded_rects(*bar, allocation) != initial;
+    }));
+    const auto moving = paint_rounded_rects(*bar, allocation);
+    REQUIRE(paint_rounded_rects(*bar, allocation) == moving);
+
+    bar->set_fraction(0.4F);
+    app.event_loop().clear_debug_trace_events();
+    pump(app.event_loop(), std::chrono::milliseconds{80});
+    REQUIRE(timer_count(app.event_loop(), "progress-motion") == 0);
+    const auto determinate = paint_rounded_rects(*bar, allocation);
+    REQUIRE(paint_rounded_rects(*bar, allocation) == determinate);
+
+    nk::ThemeSelection reduced;
+    reduced.motion_policy = nk::MotionPolicy::Reduced;
+    app.set_theme_selection(reduced);
+    bar->set_fraction(-1.0F);
+    const auto parked = paint_rounded_rects(*bar, allocation);
+    app.event_loop().clear_debug_trace_events();
+    pump(app.event_loop(), std::chrono::milliseconds{80});
+    REQUIRE(timer_count(app.event_loop(), "progress-motion") == 0);
+    REQUIRE(paint_rounded_rects(*bar, allocation) == parked);
+
+    bar->pulse();
+    const auto stepped = paint_rounded_rects(*bar, allocation);
+    REQUIRE(stepped != parked);
+    bar->pulse();
+    REQUIRE(paint_rounded_rects(*bar, allocation) != stepped);
 }
 
 TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]") {

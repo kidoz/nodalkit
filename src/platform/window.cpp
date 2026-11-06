@@ -1905,6 +1905,9 @@ void Window::present() {
 
     impl_->needs_layout = true;
     request_frame(FrameRequestReason::Present);
+    if (impl_->child) {
+        impl_->child->dispatch_host_window_notice();
+    }
 
     NK_LOG_INFO("Window", "Window presented");
 }
@@ -1913,6 +1916,9 @@ void Window::hide() {
     impl_->visible = false;
     if (impl_->surface) {
         impl_->surface->hide();
+    }
+    if (impl_->child) {
+        impl_->child->dispatch_host_window_notice();
     }
 }
 

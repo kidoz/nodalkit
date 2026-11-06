@@ -735,13 +735,28 @@ void Widget::set_host_window(Window* window) {
     if (window == nullptr && impl_->host_window != nullptr) {
         impl_->host_window->handle_widget_detached(*this);
     }
+    const bool changed = impl_->host_window != window;
     impl_->host_window = window;
+    if (changed) {
+        on_host_window_changed(window);
+    }
     for (auto& child : impl_->children) {
         if (child) {
             child->set_host_window(window);
         }
     }
 }
+
+void Widget::dispatch_host_window_notice() {
+    on_host_window_changed(impl_->host_window);
+    for (auto& child : impl_->children) {
+        if (child) {
+            child->dispatch_host_window_notice();
+        }
+    }
+}
+
+void Widget::on_host_window_changed(Window* /*window*/) {}
 
 Color Widget::theme_color(std::string_view property_name, Color fallback) const {
     auto theme = Theme::active();

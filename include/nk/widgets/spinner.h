@@ -14,7 +14,12 @@ public:
     [[nodiscard]] static std::shared_ptr<Spinner> create();
     ~Spinner() override;
 
-    /// Whether the spinner is actively animating.
+    /// Whether the loading animation is requested.
+    ///
+    /// While this is true, a visible spinner in a visible window advances on
+    /// its own timer. Reduced motion, hiding the spinner, hiding the window,
+    /// and removing it from the window hold the indicator still. snapshot()
+    /// does not advance it.
     [[nodiscard]] bool is_spinning() const;
     void set_spinning(bool spinning);
 
@@ -28,8 +33,11 @@ public:
 protected:
     Spinner();
     void snapshot(SnapshotContext& ctx) const override;
+    void on_host_window_changed(Window* window) override;
 
 private:
+    void sync_motion();
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

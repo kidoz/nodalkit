@@ -102,6 +102,7 @@ nk_sources = files(
     'src/widgets/radio_button.cpp',
     'src/widgets/switch_widget.cpp',
     'src/widgets/separator.cpp',
+    'src/widgets/indeterminate_motion.cpp',
     'src/widgets/progress_bar.cpp',
     'src/widgets/tooltip.cpp',
     'src/widgets/slider.cpp',

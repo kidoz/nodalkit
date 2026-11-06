@@ -319,6 +319,11 @@ protected:
     /// use it for window-level state such as activation-aware selection.
     [[nodiscard]] Window* host_window() const;
 
+    /// Called when the host window pointer changes, and when that window is
+    /// shown or hidden. host_window() already reports the new pointer. The
+    /// default implementation does nothing.
+    virtual void on_host_window_changed(Window* window);
+
     /// Measure text using the host window's active text shaper when
     /// available. Falls back to a simple estimate otherwise. Applies the same
     /// accessibility text scale as SnapshotContext to nominal logical fonts.
@@ -385,6 +390,7 @@ private:
     void reset_debug_hotspot_counters_recursive();
     void snapshot_subtree(SnapshotContext& ctx) const;
     void set_host_window(Window* window);
+    void dispatch_host_window_notice();
     void dispatch_pointer_controllers(const MouseEvent& event);
     void dispatch_keyboard_controllers(const KeyEvent& event);
     void dispatch_focus_controllers(bool focused);
