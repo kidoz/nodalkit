@@ -6,8 +6,6 @@
 #include <any>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
-#include <string>
 #include <typeindex>
 #include <unordered_map>
 
@@ -34,17 +32,17 @@ public:
         register_service<Type, Type>(std::make_shared<Type>());
     }
 
-    /// Retrieves the registered service of the requested type.
-    /// @throws std::runtime_error if the service is not found.
+    /// Returns the registered service, or an empty pointer when it is missing
+    /// or the stored type does not match. Does not throw.
     template <typename Interface> [[nodiscard]] static std::shared_ptr<Interface> get() {
         std::lock_guard<std::mutex> lock(mutex());
         auto& s = services();
         auto it = s.find(std::type_index(typeid(Interface)));
         if (it == s.end()) {
-            throw std::runtime_error(std::string("Service not found in ServiceLocator: ") +
-                                     typeid(Interface).name());
+            return {};
         }
-        return std::any_cast<std::shared_ptr<Interface>>(it->second);
+        const auto* stored = std::any_cast<std::shared_ptr<Interface>>(&it->second);
+        return stored != nullptr ? *stored : std::shared_ptr<Interface>{};
     }
 
     /// Checks if a service is currently registered.

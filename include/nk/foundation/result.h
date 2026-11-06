@@ -4,11 +4,19 @@
 /// @brief Result<T, E> for fallible operations without exceptions.
 
 #include <cassert>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <variant>
 
 namespace nk {
+
+namespace detail {
+[[noreturn]] inline void abort_result_misuse() noexcept {
+    assert(false);
+    std::abort();
+}
+} // namespace detail
 
 /// Wrapper that marks a value as an error for Result construction.
 template <typename E> class Unexpected {
@@ -43,28 +51,42 @@ public:
 
     [[nodiscard]] explicit operator bool() const { return has_value(); }
 
+    /// The success value. Aborts when this result holds an error, in debug and
+    /// release builds.
     [[nodiscard]] T& value() & {
-        assert(has_value());
+        if (!has_value()) {
+            detail::abort_result_misuse();
+        }
         return std::get<T>(data_);
     }
 
     [[nodiscard]] const T& value() const& {
-        assert(has_value());
+        if (!has_value()) {
+            detail::abort_result_misuse();
+        }
         return std::get<T>(data_);
     }
 
     [[nodiscard]] T&& value() && {
-        assert(has_value());
+        if (!has_value()) {
+            detail::abort_result_misuse();
+        }
         return std::get<T>(std::move(data_));
     }
 
+    /// The error. Aborts when this result holds a value, in debug and release
+    /// builds.
     [[nodiscard]] E& error() & {
-        assert(!has_value());
+        if (has_value()) {
+            detail::abort_result_misuse();
+        }
         return std::get<Unexpected<E>>(data_).error();
     }
 
     [[nodiscard]] const E& error() const& {
-        assert(!has_value());
+        if (has_value()) {
+            detail::abort_result_misuse();
+        }
         return std::get<Unexpected<E>>(data_).error();
     }
 
@@ -92,13 +114,19 @@ public:
 
     [[nodiscard]] explicit operator bool() const { return has_value(); }
 
+    /// The error. Aborts when this result holds a value, in debug and release
+    /// builds.
     [[nodiscard]] E& error() & {
-        assert(has_error_);
+        if (!has_error_) {
+            detail::abort_result_misuse();
+        }
         return error_;
     }
 
     [[nodiscard]] const E& error() const& {
-        assert(has_error_);
+        if (!has_error_) {
+            detail::abort_result_misuse();
+        }
         return error_;
     }
 

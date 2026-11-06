@@ -2,7 +2,9 @@
 /// @brief Tests for ServiceLocator dependency injection container.
 
 #include <catch2/catch_test_macros.hpp>
+#include <memory>
 #include <nk/foundation/service_locator.h>
+#include <string>
 
 class IDatabase {
 public:
@@ -42,10 +44,11 @@ TEST_CASE("ServiceLocator supports overriding services (for mocks)", "[service_l
     REQUIRE(db->query() == "mock");
 }
 
-TEST_CASE("ServiceLocator throws when requesting unregistered service", "[service_locator]") {
+TEST_CASE("ServiceLocator returns an empty pointer for an unregistered service",
+          "[service_locator]") {
     nk::ServiceLocator::clear();
 
-    REQUIRE_THROWS_AS(nk::ServiceLocator::get<IDatabase>(), std::runtime_error);
+    REQUIRE_FALSE(nk::ServiceLocator::get<IDatabase>());
 }
 
 TEST_CASE("ServiceLocator generic registration helper works", "[service_locator]") {
