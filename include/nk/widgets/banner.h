@@ -2,6 +2,10 @@
 
 /// @file banner.h
 /// @brief Persistent contextual message with an optional action.
+///
+/// `set_revealed(false)` collapses the banner through a `Revealer`. Reduced
+/// motion hides it on that call. When motion is allowed, the height slides
+/// closed and the banner stays visible until the slide finishes.
 
 #include <memory>
 #include <nk/foundation/signal.h>
@@ -25,12 +29,12 @@ public:
     Signal<>& on_button_clicked();
 
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
     bool handle_key_event(const KeyEvent& event) override;
 
 protected:
     explicit Banner(std::string title);
-    void snapshot(SnapshotContext& ctx) const override;
 
 private:
     struct Impl;

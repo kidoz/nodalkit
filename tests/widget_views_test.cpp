@@ -437,6 +437,7 @@ TEST_CASE("Banner, status page, and toast overlay expose GNOME feedback patterns
     CHECK(retried);
     banner->set_revealed(false);
     CHECK_FALSE(banner->is_visible());
+    CHECK_FALSE(banner->is_revealed());
 
     auto status = nk::StatusPage::create("No Documents", "Open a document to get started");
     auto icon = FixedSizeWidget::create(48.0F, 48.0F);
