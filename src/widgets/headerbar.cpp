@@ -335,6 +335,7 @@ struct Headerbar::Impl {
     std::shared_ptr<HeaderbarControl> minimize;
     std::shared_ptr<HeaderbarControl> maximize;
     std::shared_ptr<HeaderbarControl> close;
+    std::shared_ptr<Widget> title_widget;
     ScopedConnection back_connection;
     ScopedConnection minimize_connection;
     ScopedConnection maximize_connection;
@@ -402,6 +403,24 @@ void Headerbar::set_title(std::string title) {
 
 std::string_view Headerbar::subtitle() const {
     return impl_->subtitle;
+}
+
+void Headerbar::set_title_widget(std::shared_ptr<Widget> widget) {
+    if (impl_->title_widget == widget) {
+        return;
+    }
+    if (impl_->title_widget != nullptr) {
+        remove_child(*impl_->title_widget);
+    }
+    impl_->title_widget = std::move(widget);
+    if (impl_->title_widget != nullptr) {
+        append_child(impl_->title_widget);
+    }
+    queue_layout();
+}
+
+Widget* Headerbar::title_widget() const {
+    return impl_->title_widget.get();
 }
 
 void Headerbar::set_subtitle(std::string subtitle) {
@@ -511,24 +530,34 @@ SizeRequest Headerbar::measure(const Constraints& constraints) const {
     for (const auto& child : impl_->trailing) {
         natural_width += child->measure(constraints).natural_width + spacing;
     }
-    const auto title_text = impl_->title.empty() && host_window() != nullptr
-                                ? std::string(host_window()->title())
-                                : impl_->title;
-    if (!title_text.empty()) {
-        float heading_width =
-            measure_text(title_text, headerbar_title_font(theme_number("title-font-size", 14.0F)))
-                .width;
-        if (!impl_->subtitle.empty()) {
-            // The heading is as wide as its wider line.
-            heading_width = std::max(
-                heading_width,
-                measure_text(impl_->subtitle,
-                             headerbar_title_font(theme_number("subtitle-font-size", 11.0F)))
-                    .width);
-        }
+    const float heading_width = centered_content_width();
+    if (heading_width > 0.0F) {
         natural_width += heading_width + spacing;
     }
     return {0.0F, height, natural_width, height};
+}
+
+float Headerbar::centered_content_width() const {
+    if (impl_->title_widget != nullptr) {
+        return impl_->title_widget->measure(Constraints::unbounded()).natural_width;
+    }
+    const auto title_text = impl_->title.empty() && host_window() != nullptr
+                                ? std::string(host_window()->title())
+                                : impl_->title;
+    if (title_text.empty() && impl_->subtitle.empty()) {
+        return 0.0F;
+    }
+    float heading_width =
+        measure_text(title_text, headerbar_title_font(theme_number("title-font-size", 14.0F)))
+            .width;
+    if (!impl_->subtitle.empty()) {
+        heading_width =
+            std::max(heading_width,
+                     measure_text(impl_->subtitle,
+                                  headerbar_title_font(theme_number("subtitle-font-size", 11.0F)))
+                         .width);
+    }
+    return heading_width;
 }
 
 void Headerbar::allocate(const Rect& allocation) {
@@ -638,21 +667,7 @@ void Headerbar::allocate(const Rect& allocation) {
             std::max(0.0F, allocation.width - (symmetric_extent * 2.0F)),
             height,
         };
-        const auto title_text = impl_->title.empty() && host_window() != nullptr
-                                    ? std::string(host_window()->title())
-                                    : impl_->title;
-        float title_width =
-            measure_text(title_text, headerbar_title_font(theme_number("title-font-size", 14.0F)))
-                .width;
-        if (!impl_->subtitle.empty()) {
-            // The heading block is as wide as its wider line, so a long subtitle
-            // must not be squeezed by centering that only considered the title.
-            title_width = std::max(
-                title_width,
-                measure_text(impl_->subtitle,
-                             headerbar_title_font(theme_number("subtitle-font-size", 11.0F)))
-                    .width);
-        }
+        const float title_width = centered_content_width();
         // Preserve strict window-relative centering whenever the title fits.
         // At narrow widths, fall back to the full free span instead of
         // needlessly eliding a title because one side contains more controls.
@@ -667,6 +682,21 @@ void Headerbar::allocate(const Rect& allocation) {
             std::max(0.0F, trailing_x - leading_x),
             height,
         };
+    }
+
+    if (impl_->title_widget != nullptr) {
+        const bool hide_title =
+            host_window() != nullptr && host_window()->titlebar_style() == TitlebarStyle::Hidden;
+        impl_->title_widget->set_visible(!hide_title);
+        const auto request = impl_->title_widget->measure(row_constraints);
+        const float width = std::min(request.natural_width, impl_->title_bounds.width);
+        const float child_height = std::min(request.natural_height, impl_->title_bounds.height);
+        const float x = width <= impl_->title_bounds.width
+                            ? impl_->title_bounds.x + ((impl_->title_bounds.width - width) * 0.5F)
+                            : impl_->title_bounds.x;
+        const float y =
+            impl_->title_bounds.y + ((impl_->title_bounds.height - child_height) * 0.5F);
+        impl_->title_widget->allocate({x, y, width, child_height});
     }
 }
 
@@ -706,6 +736,12 @@ void Headerbar::snapshot(SnapshotContext& ctx) const {
 
     const bool hide_title =
         host_window() != nullptr && host_window()->titlebar_style() == TitlebarStyle::Hidden;
+    if (impl_->title_widget != nullptr) {
+        Widget::snapshot(ctx);
+        ctx.add_color_rect({allocation.x, allocation.bottom() - 1.0F, allocation.width, 1.0F},
+                           border);
+        return;
+    }
     const auto title_text = impl_->title.empty() && host_window() != nullptr
                                 ? std::string(host_window()->title())
                                 : impl_->title;

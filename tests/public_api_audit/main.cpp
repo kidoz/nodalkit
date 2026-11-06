@@ -691,6 +691,9 @@ void force_symbol_references() {
     (void)static_cast<std::string_view (nk::Headerbar::*)() const>(&nk::Headerbar::title);
     (void)static_cast<void (nk::Headerbar::*)(std::string)>(&nk::Headerbar::set_title);
     (void)static_cast<void (nk::Headerbar::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::Headerbar::set_title_widget);
+    (void)static_cast<nk::Widget* (nk::Headerbar::*)() const>(&nk::Headerbar::title_widget);
+    (void)static_cast<void (nk::Headerbar::*)(std::shared_ptr<nk::Widget>)>(
         &nk::Headerbar::add_leading);
     (void)static_cast<void (nk::Headerbar::*)(std::shared_ptr<nk::Widget>)>(
         &nk::Headerbar::add_trailing);

@@ -34,12 +34,14 @@
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/radio_button.h>
 #include <nk/widgets/search_field.h>
+#include <nk/widgets/segmented_control.h>
 #include <nk/widgets/shortcut_label.h>
 #include <nk/widgets/slider.h>
 #include <nk/widgets/spin_button.h>
 #include <nk/widgets/split_button.h>
 #include <nk/widgets/switch_widget.h>
 #include <nk/widgets/text_area.h>
+#include <nk/widgets/window_title.h>
 #include <string>
 #include <vector>
 
@@ -694,6 +696,68 @@ TEST_CASE("Button labels elide instead of painting past the body", "[widgets][bu
         REQUIRE(text != nullptr);
         REQUIRE(text->text() == label);
     }
+}
+
+TEST_CASE("WindowTitle centers its subtitle and Headerbar can center that widget",
+          "[widgets][window_title][headerbar]") {
+    auto heading = nk::WindowTitle::create("Notes");
+    heading->allocate({0.0F, 0.0F, 200.0F, 46.0F});
+    nk::Widget& heading_widget = *heading;
+    nk::SnapshotContext alone;
+    heading_widget.snapshot(alone);
+    const auto alone_root = alone.take_root();
+    REQUIRE(alone_root != nullptr);
+    const auto* title_only = find_text_node(*alone_root, "Notes");
+    REQUIRE(title_only != nullptr);
+    const float single_line_y = title_only->bounds().y;
+
+    heading->set_subtitle("Today");
+    heading->allocate({0.0F, 0.0F, 200.0F, 46.0F});
+    nk::SnapshotContext stacked;
+    heading_widget.snapshot(stacked);
+    const auto stacked_root = stacked.take_root();
+    REQUIRE(stacked_root != nullptr);
+    const auto* title = find_text_node(*stacked_root, "Notes");
+    const auto* subtitle = find_text_node(*stacked_root, "Today");
+    REQUIRE(title != nullptr);
+    REQUIRE(subtitle != nullptr);
+    CHECK(title->bounds().y < single_line_y);
+    CHECK(subtitle->bounds().y >= title->bounds().bottom());
+
+    auto bar = SnapshotHeaderbar::create("Document title");
+    auto leading = FixedWidget::create(64.0F);
+    auto trailing = FixedWidget::create(72.0F);
+    bar->add_leading(leading);
+    bar->add_trailing(trailing);
+    bar->set_title_widget(heading);
+    bar->allocate({0.0F, 0.0F, 520.0F, 46.0F});
+    CHECK(bar->title_widget() == heading.get());
+    CHECK(heading->allocation().x >= leading->allocation().right());
+    CHECK(heading->allocation().right() <= trailing->allocation().x);
+
+    nk::SnapshotContext with_widget;
+    bar->snapshot_for_test(with_widget);
+    const auto widget_root = with_widget.take_root();
+    REQUIRE(widget_root != nullptr);
+    CHECK(find_text_node(*widget_root, "Notes") != nullptr);
+    CHECK(find_text_node(*widget_root, "Today") != nullptr);
+    CHECK(find_text_node(*widget_root, "Document title") == nullptr);
+
+    auto switcher = nk::SegmentedControl::create();
+    switcher->set_segments({"Inbox", "Archive"});
+    bar->set_title_widget(switcher);
+    bar->allocate({0.0F, 0.0F, 520.0F, 46.0F});
+    CHECK(switcher->allocation().x >= leading->allocation().right());
+    CHECK(switcher->allocation().right() <= trailing->allocation().x);
+
+    bar->set_title_widget(nullptr);
+    CHECK(bar->title_widget() == nullptr);
+    bar->allocate({0.0F, 0.0F, 520.0F, 46.0F});
+    nk::SnapshotContext restored;
+    bar->snapshot_for_test(restored);
+    const auto restored_root = restored.take_root();
+    REQUIRE(restored_root != nullptr);
+    CHECK(find_text_node(*restored_root, "Document title") != nullptr);
 }
 
 TEST_CASE("Headerbar keeps actions clear of its title and exposes window controls",

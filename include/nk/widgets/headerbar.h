@@ -38,6 +38,13 @@ public:
     [[nodiscard]] std::string_view subtitle() const;
     void set_subtitle(std::string subtitle);
 
+    /// Replace the centered title string with a widget, such as a
+    /// `WindowTitle` or a view switcher. Null restores the title string.
+    /// The widget stays between the leading and trailing controls and follows
+    /// the bar's centering policy.
+    void set_title_widget(std::shared_ptr<Widget> widget);
+    [[nodiscard]] Widget* title_widget() const;
+
     /// Add a widget to the leading (start) side of the bar.
     void add_leading(std::shared_ptr<Widget> item);
     /// Add a widget to the trailing (end) side, before the window controls.
@@ -71,6 +78,8 @@ protected:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    [[nodiscard]] float centered_content_width() const;
 };
 
 } // namespace nk
