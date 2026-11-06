@@ -115,6 +115,7 @@ nk_sources = files(
     'src/widgets/clamp.cpp',
     'src/widgets/banner.cpp',
     'src/widgets/navigation_split_view.cpp',
+    'src/widgets/navigation_stack.cpp',
     'src/widgets/overlay_split_view.cpp',
     'src/widgets/preferences.cpp',
     'src/widgets/status_page.cpp',

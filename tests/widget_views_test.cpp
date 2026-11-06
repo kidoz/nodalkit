@@ -852,6 +852,66 @@ TEST_CASE("ProgressBar clock follows time, keeps pulse, and honors reduced motio
     REQUIRE(paint_rounded_rects(*bar, allocation) != stepped);
 }
 
+TEST_CASE("NavigationStack pushes pages and drives the header bar back button",
+          "[widgets][navigation]") {
+    auto stack = nk::NavigationStack::create();
+    auto root = nk::Label::create("Inbox");
+    auto message = nk::Label::create("Hello");
+    std::vector<std::size_t> depths;
+    [[maybe_unused]] auto connection = stack->on_depth_changed().connect(
+        [&depths](std::size_t depth) { depths.push_back(depth); });
+
+    CHECK_THROWS_AS(stack->push(nullptr, "Missing"), std::invalid_argument);
+
+    stack->set_root(root, "Inbox");
+    CHECK(stack->depth() == 1);
+    CHECK(stack->title() == "Inbox");
+    CHECK(stack->current() == root.get());
+    CHECK(root->is_visible());
+
+    stack->push(message, "Message");
+    CHECK(stack->depth() == 2);
+    CHECK(stack->title() == "Message");
+    CHECK(stack->current() == message.get());
+    CHECK(message->is_visible());
+    CHECK_FALSE(root->is_visible());
+
+    stack->pop();
+    CHECK(stack->depth() == 1);
+    CHECK(stack->title() == "Inbox");
+    CHECK(root->is_visible());
+    CHECK(root->parent() == stack.get());
+    CHECK(message->parent() == nullptr);
+
+    stack->pop();
+    CHECK(stack->depth() == 1);
+    CHECK(depths == std::vector<std::size_t>{1, 2, 1});
+
+    stack->push(message, "Message");
+    stack->push(nk::Label::create("Thread"), "Thread");
+    stack->pop_to(1);
+    CHECK(stack->depth() == 1);
+    CHECK(stack->current() == root.get());
+
+    auto bar = nk::Headerbar::create("Window");
+    stack->bind_headerbar(*bar);
+    CHECK(bar->title() == "Inbox");
+    CHECK_FALSE(bar->shows_back_button());
+
+    stack->push(message, "Message");
+    CHECK(bar->title() == "Message");
+    CHECK(bar->shows_back_button());
+    bar->on_back_requested().emit();
+    CHECK(stack->depth() == 1);
+    CHECK(bar->title() == "Inbox");
+    CHECK_FALSE(bar->shows_back_button());
+
+    stack->unbind_headerbar();
+    stack->push(message, "Message");
+    CHECK(bar->title() == "Inbox");
+    CHECK_FALSE(bar->shows_back_button());
+}
+
 TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]") {
     auto badge = nk::Badge::create("3");
     REQUIRE(badge->text() == "3");
