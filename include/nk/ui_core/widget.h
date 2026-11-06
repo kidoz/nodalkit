@@ -135,6 +135,12 @@ public:
     void set_debug_name(std::string_view name);
     [[nodiscard]] std::string_view debug_name() const;
 
+    /// Text shown beside the widget, and stored as its accessible description.
+    /// A hover shows it after a short delay. Keyboard focus shows it
+    /// immediately. An empty string clears the tooltip and the description.
+    void set_tooltip(std::string text);
+    [[nodiscard]] std::string_view tooltip() const;
+
     // --- Layout ---
 
     /// Whether this widget's height depends on its allocated width.
@@ -395,6 +401,11 @@ private:
     void snapshot_subtree(SnapshotContext& ctx) const;
     void set_host_window(Window* window);
     void dispatch_host_window_notice();
+    void sync_tooltip();
+    void cancel_tooltip_timer();
+    [[nodiscard]] bool tooltip_trigger_active() const;
+    [[nodiscard]] Rect tooltip_bounds() const;
+    void paint_tooltip(SnapshotContext& ctx) const;
     void dispatch_pointer_controllers(const MouseEvent& event);
     void dispatch_keyboard_controllers(const KeyEvent& event);
     void dispatch_focus_controllers(bool focused);

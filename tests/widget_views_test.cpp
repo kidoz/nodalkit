@@ -883,6 +883,50 @@ bool frame_contains(const nk::Window& window, std::string_view text) {
 
 } // namespace
 
+TEST_CASE("Widget tooltip describes the control and follows hover and keyboard focus",
+          "[widgets][tooltip]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Tooltip", .width = 320, .height = 240});
+    auto button = nk::Button::create("Save");
+    button->set_tooltip("Save document");
+    CHECK(button->tooltip() == "Save document");
+    CHECK(button->ensure_accessible().description() == "Save document");
+    auto root = nk::Box::create(nk::Orientation::Vertical, 8.0F);
+    root->append(button);
+    root->append(nk::Button::create("Other"));
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    CHECK_FALSE(frame_contains(window, "Save document"));
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(app.event_loop().poll());
+    CHECK(frame_contains(window, "Save document"));
+
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Tab});
+    REQUIRE(app.event_loop().poll());
+    CHECK_FALSE(frame_contains(window, "Save document"));
+
+    const auto target = button->allocation().origin();
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Move, .x = target.x + 8.0F, .y = target.y + 8.0F});
+    REQUIRE(app.event_loop().poll());
+    CHECK_FALSE(frame_contains(window, "Save document"));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{450});
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(app.event_loop().poll());
+    CHECK(frame_contains(window, "Save document"));
+
+    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Move, .x = -20.0F, .y = -20.0F});
+    REQUIRE(app.event_loop().poll());
+    CHECK_FALSE(frame_contains(window, "Save document"));
+
+    button->set_tooltip("");
+    CHECK(button->tooltip().empty());
+    CHECK(button->ensure_accessible().description().empty());
+}
+
 TEST_CASE("Avatar round-trips initials, diameter, and image", "[widgets][avatar]") {
     auto avatar = nk::Avatar::create("AB");
     REQUIRE(avatar->initials() == "AB");

@@ -7,6 +7,7 @@
 #include <nk/platform/events.h>
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/runtime/event_loop.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_defaults.h>
 #include <nk/text/font.h>
@@ -77,6 +78,9 @@ struct Widget::Impl {
     StateFlags state = StateFlags::None;
     std::vector<std::string> style_classes;
     std::string debug_name;
+    std::string tooltip;
+    bool tooltip_shown = false;
+    CallbackHandle tooltip_timer{};
 
     bool visible = true;
     bool sensitive = true;
@@ -113,6 +117,7 @@ struct Widget::Impl {
 Widget::Widget() : impl_(std::make_unique<Impl>()) {}
 
 Widget::~Widget() {
+    cancel_tooltip_timer();
     impl_->on_destroy.emit();
     if (impl_->host_window != nullptr) {
         impl_->host_window->purge_dirty_widget(*this);
@@ -155,6 +160,7 @@ void Widget::set_visible(bool visible) {
         }
         sync_accessible_state();
         queue_layout();
+        sync_tooltip();
     }
 }
 
@@ -199,6 +205,15 @@ void Widget::set_state_flag(StateFlags flag, bool active) {
         preserve_damage_regions_for_next_redraw();
         sync_accessible_state();
         queue_redraw();
+        const bool tooltip_state_changed = has_flag(previous, StateFlags::Hovered) !=
+                                               has_flag(impl_->state, StateFlags::Hovered) ||
+                                           has_flag(previous, StateFlags::Focused) !=
+                                               has_flag(impl_->state, StateFlags::Focused) ||
+                                           has_flag(previous, StateFlags::FocusVisible) !=
+                                               has_flag(impl_->state, StateFlags::FocusVisible);
+        if (tooltip_state_changed) {
+            sync_tooltip();
+        }
     }
 }
 
@@ -242,6 +257,122 @@ void Widget::set_debug_name(std::string_view name) {
 
 std::string_view Widget::debug_name() const {
     return impl_->debug_name;
+}
+
+void Widget::set_tooltip(std::string text) {
+    if (impl_->tooltip == text) {
+        return;
+    }
+    impl_->tooltip = std::move(text);
+    ensure_accessible().set_description(impl_->tooltip);
+    sync_tooltip();
+}
+
+std::string_view Widget::tooltip() const {
+    return impl_->tooltip;
+}
+
+bool Widget::tooltip_trigger_active() const {
+    if (impl_->tooltip.empty() || !impl_->visible) {
+        return false;
+    }
+    const bool hovered = has_flag(impl_->state, StateFlags::Hovered);
+    const bool keyboard_focus = has_flag(impl_->state, StateFlags::Focused) &&
+                                has_flag(impl_->state, StateFlags::FocusVisible);
+    return hovered || keyboard_focus;
+}
+
+void Widget::cancel_tooltip_timer() {
+    if (!impl_->tooltip_timer.valid()) {
+        return;
+    }
+    if (auto* loop = EventLoop::current()) {
+        loop->cancel(impl_->tooltip_timer);
+    }
+    impl_->tooltip_timer = {};
+}
+
+void Widget::sync_tooltip() {
+    const bool keyboard_focus = has_flag(impl_->state, StateFlags::Focused) &&
+                                has_flag(impl_->state, StateFlags::FocusVisible);
+    if (!tooltip_trigger_active()) {
+        cancel_tooltip_timer();
+        if (impl_->tooltip_shown) {
+            preserve_damage_regions_for_next_redraw();
+            impl_->tooltip_shown = false;
+            queue_redraw();
+        }
+        return;
+    }
+    if (keyboard_focus || impl_->tooltip_shown) {
+        cancel_tooltip_timer();
+        if (!impl_->tooltip_shown) {
+            impl_->tooltip_shown = true;
+            queue_redraw();
+        }
+        return;
+    }
+    if (impl_->tooltip_timer.valid() || weak_from_this().expired()) {
+        return;
+    }
+    auto* loop = EventLoop::current();
+    if (loop == nullptr) {
+        impl_->tooltip_shown = true;
+        queue_redraw();
+        return;
+    }
+    impl_->tooltip_timer = loop->set_timeout(
+        std::chrono::milliseconds{400},
+        [weak = weak_from_this()] {
+            auto widget = weak.lock();
+            if (widget == nullptr) {
+                return;
+            }
+            widget->impl_->tooltip_timer = {};
+            if (!widget->tooltip_trigger_active()) {
+                return;
+            }
+            widget->impl_->tooltip_shown = true;
+            widget->queue_redraw();
+        },
+        "widget-tooltip");
+}
+
+Rect Widget::tooltip_bounds() const {
+    const auto font = FontDescriptor{.family = {}, .size = 12.0F, .weight = FontWeight::Regular};
+    const auto measured = measure_text(impl_->tooltip, font);
+    const float width = measured.width + 16.0F;
+    const float height = std::max(24.0F, measured.height + 8.0F);
+    float x = allocation().x;
+    float y = allocation().bottom() + 4.0F;
+    if (impl_->host_window != nullptr) {
+        const auto window_size = impl_->host_window->size();
+        if (y + height > window_size.height && allocation().y >= height + 4.0F) {
+            y = allocation().y - height - 4.0F;
+        }
+        if (x + width > window_size.width) {
+            x = std::max(0.0F, window_size.width - width);
+        }
+    }
+    return {x, y, width, height};
+}
+
+void Widget::paint_tooltip(SnapshotContext& ctx) const {
+    if (!impl_->tooltip_shown || impl_->tooltip.empty()) {
+        return;
+    }
+    const auto bounds = tooltip_bounds();
+    const auto font = FontDescriptor{.family = {}, .size = 12.0F, .weight = FontWeight::Regular};
+    const auto measured = measure_text(impl_->tooltip, font);
+    ctx.push_overlay_container(bounds);
+    ctx.add_rounded_rect(
+        bounds, theme_color("tooltip-background", Color{0.15F, 0.15F, 0.17F, 0.95F}), 4.0F);
+    ctx.add_text(
+        {bounds.x + 8.0F, bounds.y + std::max(0.0F, (bounds.height - measured.height) * 0.5F)},
+        impl_->tooltip,
+        theme_color("tooltip-text", Color{1.0F, 1.0F, 1.0F, 1.0F}),
+        font);
+    ctx.pop_container();
 }
 
 // --- Layout ---
@@ -951,6 +1082,7 @@ void Widget::snapshot_subtree(SnapshotContext& ctx) const {
     } else {
         snapshot(ctx);
     }
+    paint_tooltip(ctx);
     impl_->debug_pending_redraw = false;
 }
 
@@ -1010,9 +1142,9 @@ bool Widget::hit_test(Point point) const {
 }
 
 std::vector<Rect> Widget::damage_regions() const {
+    std::vector<Rect> regions;
     if (!impl_->queued_redraw_regions.empty()) {
-        std::vector<Rect> regions;
-        regions.reserve(impl_->queued_redraw_regions.size());
+        regions.reserve(impl_->queued_redraw_regions.size() + 1);
         for (const auto& region : impl_->queued_redraw_regions) {
             regions.push_back({
                 allocation().x + region.x,
@@ -1021,9 +1153,13 @@ std::vector<Rect> Widget::damage_regions() const {
                 region.height,
             });
         }
-        return regions;
+    } else {
+        regions.push_back(allocation());
     }
-    return {allocation()};
+    if (impl_->tooltip_shown) {
+        regions.push_back(tooltip_bounds());
+    }
+    return regions;
 }
 
 CursorShape Widget::cursor_shape() const {

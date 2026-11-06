@@ -11,7 +11,8 @@
 namespace nk {
 
 /// A non-interactive overlay that displays informational text.
-/// Typically shown by a parent widget in response to hover events.
+/// For the usual hover and keyboard-focus behavior, call `Widget::set_tooltip()`
+/// instead of placing this widget yourself.
 class Tooltip : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<Tooltip> create(std::string text = {});
