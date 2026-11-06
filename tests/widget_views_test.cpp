@@ -151,10 +151,155 @@ TEST_CASE("TabBar manages tabs and selection", "[widgets][tab_bar]") {
     conn.disconnect();
 }
 
+std::string snapshot_text(nk::Widget& widget);
+
 TEST_CASE("TabBar throws on out-of-range selection", "[widgets][tab_bar]") {
     auto bar = nk::TabBar::create();
     bar->append_tab("Only");
     REQUIRE_THROWS_AS(bar->set_selected_index(5), std::out_of_range);
+    REQUIRE_THROWS_AS(bar->set_tab_icon(4, nk::SymbolicIcon::Add), std::out_of_range);
+    REQUIRE_THROWS_AS(bar->set_tab_page(4, nk::Label::create("Missing")), std::out_of_range);
+}
+
+TEST_CASE("TabBar shows an icon, a page, a close button, and overflow", "[widgets][tab_bar]") {
+    auto bar = nk::TabBar::create();
+    bar->append_tab("One");
+    bar->append_tab("Two");
+    bar->append_tab("Six");
+    const auto fitted = bar->measure(nk::Constraints::unbounded());
+    const float each = fitted.natural_width / 3.0F;
+    bar->allocate({0.0F, 0.0F, fitted.natural_width, fitted.natural_height});
+
+    int changes = 0;
+    int last = -1;
+    auto connection = bar->on_selection_changed().connect([&](int index) {
+        ++changes;
+        last = index;
+    });
+    const auto click = [&](float x, float y) {
+        bar->handle_mouse_event({.type = nk::MouseEvent::Type::Press, .x = x, .y = y, .button = 1});
+        bar->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Release, .x = x, .y = y, .button = 1});
+    };
+    click(each * 1.5F, fitted.natural_height * 0.5F);
+    CHECK(bar->selected_index() == 1);
+    CHECK(changes == 1);
+    CHECK(last == 1);
+
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    CHECK(bar->selected_index() == 0);
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    CHECK(bar->selected_index() == 2);
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left}));
+    CHECK(bar->selected_index() == 1);
+
+    CHECK(bar->tab_icon(0) == nk::SymbolicIcon::None);
+    bar->set_tab_icon(0, nk::SymbolicIcon::Search);
+    CHECK(bar->tab_icon(0) == nk::SymbolicIcon::Search);
+    CHECK(bar->tab_label(0) == "One");
+
+    auto alpha = nk::Label::create("Alpha");
+    auto beta = nk::Label::create("Beta");
+    bar->set_tab_page(0, alpha);
+    bar->set_tab_page(1, beta);
+    CHECK(bar->tab_page(0) == alpha.get());
+    CHECK(alpha->parent() == bar.get());
+    const auto with_pages = bar->measure(nk::Constraints::unbounded());
+    bar->allocate({0.0F, 0.0F, with_pages.natural_width, with_pages.natural_height});
+    CHECK_FALSE(alpha->is_visible());
+    CHECK(beta->is_visible());
+    CHECK(beta->allocation().y > 0.0F);
+    CHECK(deepest_hit(*bar, {8.0F, beta->allocation().y + 4.0F}) == beta.get());
+    CHECK_FALSE(bar->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                         .x = 8.0F,
+                                         .y = beta->allocation().y + 4.0F,
+                                         .button = 1}));
+    CHECK(bar->selected_index() == 1);
+    CHECK(snapshot_text(*bar).find("Beta") != std::string::npos);
+    CHECK(snapshot_text(*bar).find("One") != std::string::npos);
+    CHECK(snapshot_text(*bar).find("Alpha") == std::string::npos);
+
+    bar->set_selected_index(0);
+    CHECK(alpha->is_visible());
+    CHECK_FALSE(beta->is_visible());
+    CHECK(snapshot_text(*bar).find("Alpha") != std::string::npos);
+
+    bar->set_tab_page(0, nullptr);
+    CHECK(bar->tab_page(0) == nullptr);
+    CHECK(alpha->parent() == nullptr);
+    bar->insert_tab(0, "Zero");
+    CHECK(bar->tab_label(0) == "Zero");
+    CHECK(bar->selected_index() == 1);
+    connection.disconnect();
+
+    auto closing = nk::TabBar::create();
+    closing->append_tab("One");
+    closing->append_tab("Two");
+    closing->append_tab("Three");
+    closing->set_tab_closable(0, true);
+    closing->set_tab_closable(1, true);
+    closing->set_tab_closable(2, true);
+    const auto close_size = closing->measure(nk::Constraints::unbounded());
+    closing->allocate({0.0F, 0.0F, close_size.natural_width + 20.0F, close_size.natural_height});
+    int closed_last = 5;
+    auto closed_connection =
+        closing->on_selection_changed().connect([&](int index) { closed_last = index; });
+    const float close_y = close_size.natural_height * 0.5F;
+    const auto click_close = [&](float x) {
+        closing->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Press, .x = x, .y = close_y, .button = 1});
+        closing->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Release, .x = x, .y = close_y, .button = 1});
+    };
+    click_close(close_size.natural_width - 16.0F);
+    CHECK(closing->tab_count() == 2);
+    CHECK(closing->tab_label(1) == "Two");
+    CHECK(closing->selected_index() == 0);
+    CHECK(closed_last == 5);
+
+    closing->set_selected_index(1);
+    const auto two_tabs = closing->measure(nk::Constraints::unbounded());
+    click_close(two_tabs.natural_width - 16.0F);
+    CHECK(closing->tab_count() == 1);
+    CHECK(closing->tab_label(0) == "One");
+    CHECK(closing->selected_index() == 0);
+
+    const auto one_tab = closing->measure(nk::Constraints::unbounded());
+    click_close(one_tab.natural_width - 16.0F);
+    CHECK(closing->tab_count() == 0);
+    CHECK(closing->selected_index() < 0);
+    CHECK(closed_last == -1);
+    closed_connection.disconnect();
+
+    auto overflow = nk::TabBar::create();
+    overflow->append_tab("One");
+    overflow->append_tab("Two");
+    overflow->append_tab("Six");
+    const float bar_height = overflow->measure(nk::Constraints::unbounded()).natural_height;
+    overflow->allocate({10.0F, 20.0F, 1.0F, bar_height});
+    int overflow_index = -1;
+    auto overflow_connection =
+        overflow->on_selection_changed().connect([&](int index) { overflow_index = index; });
+    overflow->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                  .x = 10.2F,
+                                  .y = 20.0F + (bar_height * 0.5F),
+                                  .button = 1});
+    overflow->handle_mouse_event({.type = nk::MouseEvent::Type::Release,
+                                  .x = 10.2F,
+                                  .y = 20.0F + (bar_height * 0.5F),
+                                  .button = 1});
+    auto* menu = dynamic_cast<nk::ContextMenu*>(overflow->children().back().get());
+    REQUIRE(menu != nullptr);
+    CHECK(menu->is_open());
+    CHECK(menu->item_count() == 3);
+    CHECK(overflow->hit_test({10.5F, 20.0F + bar_height + 8.0F}));
+    CHECK(menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK_FALSE(menu->is_open());
+    CHECK(overflow->selected_index() == 1);
+    CHECK(overflow_index == 1);
+    overflow_connection.disconnect();
 }
 
 TEST_CASE("Expander toggles and emits on change only", "[widgets][expander]") {
