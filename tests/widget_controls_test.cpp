@@ -31,6 +31,7 @@
 #include <nk/widgets/headerbar.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/level_bar.h>
+#include <nk/widgets/link_button.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/menu_button.h>
 #include <nk/widgets/preferences.h>
@@ -1174,6 +1175,37 @@ void collect_rounded_colors(const nk::RenderNode& node, std::vector<nk::Color>& 
             collect_rounded_colors(*child, colors);
         }
     }
+}
+
+TEST_CASE("LinkButton reports its target and stays as wide as its label",
+          "[widgets][link_button]") {
+    auto link = nk::LinkButton::create("Docs", "https://example.invalid/docs");
+    REQUIRE(link->accessible() != nullptr);
+    CHECK(link->accessible()->role() == nk::AccessibleRole::Link);
+    CHECK(link->accessible()->name() == "Docs");
+    CHECK(nk::atspi_role_name("link") == "link");
+    const auto size = link->measure({});
+    CHECK(size.natural_width > 0.0F);
+    CHECK(size.natural_width < 80.0F);
+    link->allocate({0.0F, 0.0F, size.natural_width, std::max(size.natural_height, 1.0F)});
+
+    std::string activated;
+    [[maybe_unused]] auto connection = link->on_activated().connect(
+        [&activated](std::string_view value) { activated = std::string(value); });
+    CHECK(link->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(activated == "https://example.invalid/docs");
+
+    link->set_target("");
+    CHECK(link->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Space}));
+    CHECK(activated == "Docs");
+
+    activated.clear();
+    link->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 1.0F, .y = 1.0F, .button = 1});
+    link->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 1.0F, .y = 1.0F, .button = 1});
+    CHECK(activated == "Docs");
+    CHECK(link->cursor_shape() == nk::CursorShape::PointingHand);
 }
 
 TEST_CASE("LevelBar fills discrete blocks and does not animate", "[widgets][level_bar]") {

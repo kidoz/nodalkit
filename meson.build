@@ -81,6 +81,7 @@ nk_sources = files(
     'src/text/text_clipboard.cpp',
     'src/text/text_shaper.cpp',
     'src/widgets/label.cpp',
+    'src/widgets/link_button.cpp',
     'src/widgets/level_bar.cpp',
     'src/widgets/button.cpp',
     'src/widgets/box.cpp',
