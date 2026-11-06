@@ -12,6 +12,7 @@
 #include <nk/ui_core/widget.h>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace nk {
 
@@ -48,6 +49,11 @@ public:
     /// Add a widget to the leading (start) side of the bar.
     void add_leading(std::shared_ptr<Widget> item);
     /// Add a widget to the trailing (end) side, before the window controls.
+    ///
+    /// Trailing widgets that fit at their natural width stay, packed inward
+    /// from the window controls. The ones that do not fit move into an
+    /// overflow popover opened from a button at the inner edge of that group.
+    /// They stay the same widgets. A wide bar has no overflow button.
     void add_trailing(std::shared_ptr<Widget> item);
 
     /// Show or hide the minimize/maximize/close buttons (shown by default).
@@ -70,6 +76,8 @@ public:
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
     void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
+    [[nodiscard]] bool hit_test(Point point) const override;
+    [[nodiscard]] std::vector<Rect> damage_regions() const override;
 
 protected:
     explicit Headerbar(std::string title);
@@ -80,6 +88,8 @@ private:
     std::unique_ptr<Impl> impl_;
 
     [[nodiscard]] float centered_content_width() const;
+    void sync_trailing_overflow(const std::vector<int>& overflow);
+    void open_trailing_overflow();
 };
 
 } // namespace nk

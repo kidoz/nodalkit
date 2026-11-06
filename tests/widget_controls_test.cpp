@@ -34,6 +34,7 @@
 #include <nk/widgets/link_button.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/menu_button.h>
+#include <nk/widgets/popover.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/radio_button.h>
 #include <nk/widgets/search_field.h>
@@ -797,6 +798,74 @@ TEST_CASE("Headerbar keeps actions clear of its title and exposes window control
     CHECK(headerbar->accessible()->role() == nk::AccessibleRole::Group);
     CHECK(nk::atspi_role_name("group") == "panel");
     CHECK(headerbar->centering_policy() == nk::HeaderbarCenteringPolicy::Strict);
+}
+
+TEST_CASE("Headerbar moves trailing actions that do not fit into an overflow popover",
+          "[widgets][headerbar]") {
+    auto wide = SnapshotHeaderbar::create("Title");
+    auto first = nk::Button::create("More");
+    auto second = FixedWidget::create(80.0F);
+    wide->add_trailing(first);
+    wide->add_trailing(second);
+    const auto fitted = wide->measure({0.0F, 0.0F, 1200.0F, 46.0F});
+    wide->allocate({0.0F, 0.0F, fitted.natural_width + 80.0F, 46.0F});
+    CHECK(first->parent() == wide.get());
+    CHECK(second->parent() == wide.get());
+    CHECK(second->allocation().width == Catch::Approx(80.0F));
+
+    auto bar = SnapshotHeaderbar::create("Title");
+    bar->set_window_controls_enabled(false);
+    auto overflowed = nk::Button::create("More");
+    auto kept = FixedWidget::create(80.0F);
+    auto leading = FixedWidget::create(40.0F);
+    bar->add_leading(leading);
+    bar->add_trailing(overflowed);
+    bar->add_trailing(kept);
+    bar->allocate({0.0F, 0.0F, 250.0F, 46.0F});
+
+    CHECK(leading->parent() == bar.get());
+    CHECK(kept->parent() == bar.get());
+    CHECK(kept->allocation().width == Catch::Approx(80.0F));
+    CHECK(overflowed->parent() != bar.get());
+    CHECK(overflowed->parent() != nullptr);
+
+    nk::SnapshotContext context;
+    bar->snapshot_for_test(context);
+    const auto root = context.take_root();
+    REQUIRE(root != nullptr);
+    CHECK(find_text_node(*root, "Title") != nullptr);
+    CHECK(find_text_node(*root, "…") != nullptr);
+
+    bool opened = false;
+    nk::Popover* popover = nullptr;
+    for (const auto& child : bar->children()) {
+        if (auto* candidate = dynamic_cast<nk::Popover*>(child.get())) {
+            popover = candidate;
+        }
+    }
+    REQUIRE(popover != nullptr);
+    CHECK_FALSE(popover->is_open());
+    for (float x = 0.0F; x < 250.0F && !popover->is_open(); x += 4.0F) {
+        bar->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Press, .x = x, .y = 20.0F, .button = 1});
+        bar->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Release, .x = x, .y = 20.0F, .button = 1});
+        opened = popover->is_open();
+    }
+    CHECK(opened);
+    CHECK(bar->hit_test({8.0F, 200.0F}));
+
+    int clicks = 0;
+    auto connection = overflowed->on_clicked().connect([&] { ++clicks; });
+    CHECK(overflowed->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(clicks == 1);
+    connection.disconnect();
+
+    bar->allocate({0.0F, 0.0F, fitted.natural_width + 80.0F, 46.0F});
+    CHECK_FALSE(popover->is_open());
+    CHECK(overflowed->parent() == bar.get());
+    CHECK(kept->parent() == bar.get());
 }
 
 TEST_CASE("Headerbar centers titles, follows decoration layout, and exposes back navigation",

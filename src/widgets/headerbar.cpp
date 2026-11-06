@@ -11,6 +11,7 @@
 #include <nk/text/font.h>
 #include <nk/ui_core/state_flags.h>
 #include <nk/widgets/headerbar.h>
+#include <nk/widgets/popover.h>
 #include <string>
 #include <utility>
 #include <vector>
@@ -322,6 +323,61 @@ private:
     Signal<> clicked_;
 };
 
+constexpr float kOverflowWidth = 36.0F;
+
+class OverflowColumn : public Widget {
+public:
+    [[nodiscard]] static std::shared_ptr<OverflowColumn> create() {
+        return std::shared_ptr<OverflowColumn>(new OverflowColumn());
+    }
+
+    void set_widgets(std::vector<std::shared_ptr<Widget>> widgets) {
+        clear_children();
+        for (const auto& widget : widgets) {
+            if (widget != nullptr) {
+                append_child(widget);
+            }
+        }
+        widgets_ = std::move(widgets);
+    }
+
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override {
+        float width = 0.0F;
+        float height = 0.0F;
+        bool any = false;
+        for (const auto& widget : widgets_) {
+            if (widget == nullptr) {
+                continue;
+            }
+            if (any) {
+                height += 4.0F;
+            }
+            any = true;
+            const auto request = widget->measure(constraints);
+            width = std::max(width, request.natural_width);
+            height += request.natural_height;
+        }
+        return {width, height, width, height};
+    }
+
+    void allocate(const Rect& allocation) override {
+        Widget::allocate(allocation);
+        float y = allocation.y;
+        for (const auto& widget : widgets_) {
+            if (widget == nullptr) {
+                continue;
+            }
+            const auto request = widget->measure(Constraints::unbounded());
+            widget->allocate({allocation.x, y, allocation.width, request.natural_height});
+            y += request.natural_height + 4.0F;
+        }
+    }
+
+private:
+    OverflowColumn() = default;
+    std::vector<std::shared_ptr<Widget>> widgets_;
+};
+
 } // namespace
 
 struct Headerbar::Impl {
@@ -341,9 +397,15 @@ struct Headerbar::Impl {
     ScopedConnection maximize_connection;
     ScopedConnection close_connection;
     Signal<> back_requested;
+    std::shared_ptr<OverflowColumn> overflow_column;
+    std::shared_ptr<Popover> overflow_popover;
+    std::vector<int> overflow_indices;
+    Rect overflow_rect{};
     Rect title_bounds{};
     bool window_controls_enabled = true;
     bool show_back_button = false;
+    bool has_trailing_overflow = false;
+    bool overflow_armed = false;
 };
 
 std::shared_ptr<Headerbar> Headerbar::create(std::string title) {
@@ -361,6 +423,10 @@ Headerbar::Headerbar(std::string title) : impl_(std::make_unique<Impl>()) {
     append_child(impl_->minimize);
     append_child(impl_->maximize);
     append_child(impl_->close);
+    impl_->overflow_column = OverflowColumn::create();
+    impl_->overflow_popover = Popover::create();
+    impl_->overflow_popover->set_child(impl_->overflow_column);
+    append_child(impl_->overflow_popover);
 
     impl_->back_connection = ScopedConnection(
         impl_->back->on_clicked().connect([this] { impl_->back_requested.emit(); }));
@@ -537,6 +603,50 @@ SizeRequest Headerbar::measure(const Constraints& constraints) const {
     return {0.0F, height, natural_width, height};
 }
 
+void Headerbar::sync_trailing_overflow(const std::vector<int>& overflow) {
+    if (overflow == impl_->overflow_indices) {
+        return;
+    }
+    std::vector<std::shared_ptr<Widget>> overflow_widgets;
+    overflow_widgets.reserve(overflow.size());
+    for (const int index : overflow) {
+        auto& item = impl_->trailing[static_cast<std::size_t>(index)];
+        if (item != nullptr && item->parent() == this) {
+            remove_child(*item);
+        }
+        overflow_widgets.push_back(item);
+    }
+    impl_->overflow_column->set_widgets(std::move(overflow_widgets));
+
+    std::size_t insert_at = children().size();
+    for (std::size_t index = 0; index < children().size(); ++index) {
+        if (children()[index].get() == impl_->overflow_popover.get()) {
+            insert_at = index;
+            break;
+        }
+    }
+    for (std::size_t index = 0; index < impl_->trailing.size(); ++index) {
+        if (std::find(overflow.begin(), overflow.end(), static_cast<int>(index)) !=
+            overflow.end()) {
+            continue;
+        }
+        auto& item = impl_->trailing[index];
+        if (item != nullptr && item->parent() != this) {
+            insert_child(insert_at, item);
+            ++insert_at;
+        }
+    }
+    impl_->overflow_indices = overflow;
+}
+
+void Headerbar::open_trailing_overflow() {
+    if (!impl_->has_trailing_overflow) {
+        return;
+    }
+    const auto& rect = impl_->overflow_rect;
+    impl_->overflow_popover->show_at({rect.x + (rect.width * 0.5F), rect.bottom()});
+}
+
 float Headerbar::centered_content_width() const {
     if (impl_->title_widget != nullptr) {
         return impl_->title_widget->measure(Constraints::unbounded()).natural_width;
@@ -646,15 +756,73 @@ void Headerbar::allocate(const Rect& allocation) {
     if (!layout.end.empty() && show_controls) {
         trailing_x -= spacing;
     }
-    for (auto iterator = impl_->trailing.rbegin(); iterator != impl_->trailing.rend(); ++iterator) {
-        const auto request = (*iterator)->measure(row_constraints);
-        const float width =
-            std::min(request.natural_width, std::max(0.0F, trailing_x - allocation.x));
-        const float child_height = std::min(request.natural_height, height);
-        trailing_x -= width;
-        const float y = allocation.y + ((height - child_height) * 0.5F);
-        (*iterator)->allocate({trailing_x, y, width, child_height});
+    std::vector<float> trailing_widths;
+    trailing_widths.reserve(impl_->trailing.size());
+    float trailing_total = 0.0F;
+    for (const auto& child : impl_->trailing) {
+        const float width = child->measure(Constraints::unbounded()).natural_width;
+        trailing_widths.push_back(width);
+        trailing_total += width + spacing;
+    }
+    const float title_reserve = centered_content_width();
+    const float inner_left = leading_x + (title_reserve > 0.0F ? title_reserve + spacing : 0.0F);
+    const float available = trailing_x - inner_left;
+    const bool overflow =
+        !impl_->trailing.empty() && allocation.width > 0.0F && trailing_total > available;
+    std::vector<int> overflow_indices;
+    if (!overflow) {
+        for (int index = static_cast<int>(impl_->trailing.size()) - 1; index >= 0; --index) {
+            auto& child = impl_->trailing[static_cast<std::size_t>(index)];
+            const float width = std::min(trailing_widths[static_cast<std::size_t>(index)],
+                                         std::max(0.0F, trailing_x - allocation.x));
+            const auto request = child->measure(Constraints::unbounded());
+            const float child_height = std::min(request.natural_height, height);
+            trailing_x -= width;
+            const float y = allocation.y + ((height - child_height) * 0.5F);
+            child->allocate({trailing_x, y, width, child_height});
+            trailing_x -= spacing;
+        }
+        impl_->has_trailing_overflow = false;
+        impl_->overflow_rect = {};
+    } else {
+        const float gap = std::max(0.0F, trailing_x - leading_x);
+        const float button_width = std::min(kOverflowWidth, gap);
+        const float item_budget = std::max(0.0F, available - button_width - spacing);
+        std::vector<int> visible;
+        float used = 0.0F;
+        for (int index = static_cast<int>(impl_->trailing.size()) - 1; index >= 0; --index) {
+            const float width = trailing_widths[static_cast<std::size_t>(index)];
+            const float need = width + (used > 0.0F ? spacing : 0.0F);
+            if (used + need > item_budget) {
+                break;
+            }
+            used += need;
+            visible.push_back(index);
+        }
+        for (int index = 0; index < static_cast<int>(impl_->trailing.size()); ++index) {
+            if (std::find(visible.begin(), visible.end(), index) == visible.end()) {
+                overflow_indices.push_back(index);
+            }
+        }
+        for (const int index : visible) {
+            auto& child = impl_->trailing[static_cast<std::size_t>(index)];
+            const float width = trailing_widths[static_cast<std::size_t>(index)];
+            const auto request = child->measure(Constraints::unbounded());
+            const float child_height = std::min(request.natural_height, height);
+            trailing_x -= width;
+            const float y = allocation.y + ((height - child_height) * 0.5F);
+            child->allocate({trailing_x, y, width, child_height});
+            trailing_x -= spacing;
+        }
+        trailing_x -= button_width;
+        const float y = allocation.y;
+        impl_->overflow_rect = {trailing_x, y, button_width, height};
+        impl_->has_trailing_overflow = button_width > 0.0F;
         trailing_x -= spacing;
+    }
+    sync_trailing_overflow(overflow_indices);
+    if (!impl_->has_trailing_overflow && impl_->overflow_popover->is_open()) {
+        impl_->overflow_popover->dismiss();
     }
 
     if (impl_->centering_policy == HeaderbarCenteringPolicy::Strict) {
@@ -700,9 +868,34 @@ void Headerbar::allocate(const Rect& allocation) {
     }
 }
 
+bool Headerbar::hit_test(Point point) const {
+    return Widget::hit_test(point) || impl_->overflow_popover->hit_test(point);
+}
+
+std::vector<Rect> Headerbar::damage_regions() const {
+    auto regions = Widget::damage_regions();
+    const auto popup = impl_->overflow_popover->damage_regions();
+    regions.insert(regions.end(), popup.begin(), popup.end());
+    return regions;
+}
+
 bool Headerbar::handle_mouse_event(const MouseEvent& event) {
+    const Point point{event.x, event.y};
+    const bool on_overflow = impl_->has_trailing_overflow && impl_->overflow_rect.contains(point);
+    if (event.type == MouseEvent::Type::Press && event.button == 1 && on_overflow) {
+        impl_->overflow_armed = true;
+        return true;
+    }
+    if (event.type == MouseEvent::Type::Release && event.button == 1) {
+        const bool open = impl_->overflow_armed && on_overflow;
+        impl_->overflow_armed = false;
+        if (open) {
+            open_trailing_overflow();
+            return true;
+        }
+    }
     if (event.type != MouseEvent::Type::Press || event.button != 1 ||
-        !allocation().contains({event.x, event.y})) {
+        !allocation().contains(point)) {
         return false;
     }
     if (auto* window = host_window(); window != nullptr) {
@@ -736,6 +929,17 @@ void Headerbar::snapshot(SnapshotContext& ctx) const {
 
     const bool hide_title =
         host_window() != nullptr && host_window()->titlebar_style() == TitlebarStyle::Hidden;
+    if (impl_->has_trailing_overflow) {
+        const auto font = FontDescriptor{.family = {}, .size = 13.5F, .weight = FontWeight::Medium};
+        const auto mark = measure_text("…", font);
+        const auto& rect = impl_->overflow_rect;
+        ctx.add_text({rect.x + ((rect.width - mark.width) * 0.5F),
+                      rect.y + ((rect.height - mark.height) * 0.5F)},
+                     "…",
+                     foreground,
+                     font);
+    }
+
     if (impl_->title_widget != nullptr) {
         Widget::snapshot(ctx);
         ctx.add_color_rect({allocation.x, allocation.bottom() - 1.0F, allocation.width, 1.0F},
