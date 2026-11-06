@@ -912,6 +912,58 @@ TEST_CASE("NavigationStack pushes pages and drives the header bar back button",
     CHECK_FALSE(bar->shows_back_button());
 }
 
+TEST_CASE("ViewStack shows one page and follows a segmented control", "[widgets][view_stack]") {
+    auto stack = nk::ViewStack::create();
+    auto inbox = nk::Label::create("Inbox");
+    auto archive = nk::Label::create("Archive");
+    std::vector<int> selections;
+    [[maybe_unused]] auto connection = stack->on_selection_changed().connect(
+        [&selections](int index) { selections.push_back(index); });
+
+    CHECK_THROWS_AS(stack->append(nullptr, "Missing"), std::invalid_argument);
+    CHECK_THROWS_AS(stack->set_selected_index(0), std::out_of_range);
+
+    stack->append(inbox, "Inbox");
+    stack->append(archive, "Archive");
+    CHECK(stack->page_count() == 2);
+    CHECK(stack->title(1) == "Archive");
+    CHECK(stack->selected_index() == 0);
+    CHECK(stack->current() == inbox.get());
+    CHECK(inbox->is_visible());
+    CHECK_FALSE(archive->is_visible());
+
+    stack->set_selected_index(1);
+    CHECK(stack->current() == archive.get());
+    CHECK_FALSE(inbox->is_visible());
+    CHECK(archive->is_visible());
+
+    auto control = nk::SegmentedControl::create();
+    stack->bind_switcher(*control);
+    CHECK(control->segment_count() == 2);
+    CHECK(control->segment(0) == "Inbox");
+    CHECK(control->selected_index() == 1);
+
+    control->set_selected_index(0);
+    CHECK(stack->selected_index() == 0);
+    CHECK(inbox->is_visible());
+    CHECK(control->selected_index() == 0);
+
+    stack->set_selected_index(1);
+    CHECK(control->selected_index() == 1);
+
+    stack->unbind_switcher();
+    stack->set_selected_index(0);
+    CHECK(control->selected_index() == 1);
+
+    stack->remove(*inbox);
+    CHECK(stack->page_count() == 1);
+    CHECK(stack->current() == archive.get());
+    CHECK(archive->is_visible());
+    CHECK(inbox->parent() == nullptr);
+    CHECK(selections.front() == 0);
+    CHECK(selections.back() == 0);
+}
+
 TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]") {
     auto badge = nk::Badge::create("3");
     REQUIRE(badge->text() == "3");
