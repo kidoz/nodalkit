@@ -190,6 +190,25 @@ TEST_CASE("default_path is under a per-app directory", "[settings]") {
     const std::filesystem::path path = nk::Settings::default_path("NodalKitTestApp");
     CHECK(path.filename() == "settings.conf");
     CHECK(path.parent_path().filename() == "NodalKitTestApp");
+    CHECK(nk::Settings::default_path("").empty());
+    CHECK(nk::Settings::default_path(".").empty());
+    CHECK(nk::Settings::default_path("..").empty());
+    CHECK(nk::Settings::default_path("a/b").empty());
+    CHECK(nk::Settings::default_path("../escape").empty());
+}
+
+TEST_CASE("saved settings are owner-only on POSIX", "[settings]") {
+    TempSettingsFile temp("permissions");
+    nk::Settings settings(temp.path);
+    settings.set_string("token", "value");
+    REQUIRE(settings.save());
+#if !defined(_WIN32)
+    const auto permissions = std::filesystem::status(temp.path).permissions();
+    const auto others = std::filesystem::perms::others_all | std::filesystem::perms::group_all;
+    CHECK((permissions & others) == std::filesystem::perms::none);
+    CHECK((permissions & std::filesystem::perms::owner_read) != std::filesystem::perms::none);
+    CHECK((permissions & std::filesystem::perms::owner_write) != std::filesystem::perms::none);
+#endif
 }
 
 TEST_CASE("Repeated saves replace content without leaving temporary files", "[settings]") {

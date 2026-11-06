@@ -47,6 +47,8 @@ public:
     ///              (falling back to `~/.config/<app_name>/settings.conf`)
     /// Falls back to `<app_name>/settings.conf` relative to the working
     /// directory if no home/appdata location can be resolved.
+    /// `app_name` must be a single path segment: empty names, `.`, `..`, and
+    /// names containing a separator return an empty path.
     [[nodiscard]] static std::filesystem::path default_path(std::string_view app_name);
 
     explicit Settings(std::filesystem::path file);
@@ -58,7 +60,9 @@ public:
     bool load();
 
     /// Write the in-memory values to disk, creating parent directories as
-    /// needed and atomically replacing the previous file. Returns false on I/O failure.
+    /// needed and atomically replacing the previous file. On POSIX the file is
+    /// owner-readable and owner-writable only, and its contents are flushed
+    /// before the replace. Returns false on I/O failure.
     [[nodiscard]] bool save() const;
 
     // Typed accessors. The get_*() overloads return @p fallback when the key is

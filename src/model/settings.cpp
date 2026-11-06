@@ -11,6 +11,11 @@
 #include <string>
 #include <system_error>
 
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #endif
@@ -108,9 +113,18 @@ std::string join_list(const std::vector<std::string>& values) {
     return out;
 }
 
+bool single_path_segment(std::string_view name) {
+    return !name.empty() && name != "." && name != ".." &&
+           name.find_first_of("/\\:") == std::string_view::npos &&
+           name.find('\0') == std::string_view::npos;
+}
+
 } // namespace
 
 std::filesystem::path Settings::default_path(std::string_view app_name) {
+    if (!single_path_segment(app_name)) {
+        return {};
+    }
     const std::string name(app_name);
 #if defined(_WIN32)
     if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr && *appdata != '\0') {
@@ -175,6 +189,18 @@ bool Settings::save() const {
     if (!out) {
         return false;
     }
+#if !defined(_WIN32)
+    std::filesystem::permissions(temporary,
+                                 std::filesystem::perms::owner_read |
+                                     std::filesystem::perms::owner_write,
+                                 std::filesystem::perm_options::replace,
+                                 ec);
+    if (ec) {
+        out.close();
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+#endif
     for (const auto& [key, value] : values_) {
         out << percent_encode(key, kFileReserved) << '=' << percent_encode(value, kFileReserved)
             << '\n';
@@ -190,6 +216,20 @@ bool Settings::save() const {
         std::filesystem::remove(temporary, ec);
         return false;
     }
+
+#if !defined(_WIN32)
+    if (const int fd = ::open(temporary.c_str(), O_RDONLY | O_CLOEXEC); fd >= 0) {
+        const int synced = ::fsync(fd);
+        ::close(fd);
+        if (synced != 0) {
+            std::filesystem::remove(temporary, ec);
+            return false;
+        }
+    } else {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+#endif
 
 #if defined(_WIN32)
     if (MoveFileExW(temporary.c_str(),
