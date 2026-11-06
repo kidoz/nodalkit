@@ -109,6 +109,54 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// An entry row whose field masks its text.
+///
+/// The row is not a Tab stop. Focus stays on the secure field. Add it to a
+/// `PreferencesGroup` the same way as an `EntryRow`.
+class PasswordRow : public PreferencesRow {
+public:
+    [[nodiscard]] static std::shared_ptr<PasswordRow> create(std::string title,
+                                                             std::string subtitle = {});
+    ~PasswordRow() override;
+
+    [[nodiscard]] std::string_view text() const;
+    void set_text(std::string text);
+    void set_placeholder(std::string placeholder);
+    Signal<std::string_view>& on_text_changed();
+
+protected:
+    PasswordRow(std::string title, std::string subtitle);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+/// A preference row whose control is a numeric spin button.
+///
+/// The row is not a Tab stop. Focus stays on the spin button. Add it to a
+/// `PreferencesGroup` the same way as an `EntryRow`.
+class SpinRow : public PreferencesRow {
+public:
+    [[nodiscard]] static std::shared_ptr<SpinRow> create(std::string title,
+                                                         std::string subtitle = {});
+    ~SpinRow() override;
+
+    [[nodiscard]] double value() const;
+    void set_value(double value);
+    void set_range(double minimum, double maximum);
+    void set_step(double step);
+    void set_precision(int digits);
+    Signal<double>& on_value_changed();
+
+protected:
+    SpinRow(std::string title, std::string subtitle);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 /// A preference row that navigates instead of editing a value.
 ///
 /// The row is activatable immediately. A click, Return, or Space emits

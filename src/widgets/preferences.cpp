@@ -7,6 +7,7 @@
 #include <nk/ui_core/state_flags.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/preferences.h>
+#include <nk/widgets/spin_button.h>
 #include <nk/widgets/switch_widget.h>
 #include <nk/widgets/text_field.h>
 
@@ -339,6 +340,83 @@ void EntryRow::set_placeholder(std::string placeholder) {
 
 Signal<std::string_view>& EntryRow::on_text_changed() {
     return impl_->control->on_text_changed();
+}
+
+struct PasswordRow::Impl {
+    std::shared_ptr<TextField> control;
+};
+
+std::shared_ptr<PasswordRow> PasswordRow::create(std::string title, std::string subtitle) {
+    return std::shared_ptr<PasswordRow>(new PasswordRow(std::move(title), std::move(subtitle)));
+}
+
+PasswordRow::PasswordRow(std::string title, std::string subtitle)
+    : PreferencesRow(std::move(title), std::move(subtitle)), impl_(std::make_unique<Impl>()) {
+    add_style_class("password-row");
+    impl_->control = TextField::create();
+    impl_->control->set_secure_text_entry(true);
+    set_suffix(impl_->control);
+    set_focusable(false);
+}
+
+PasswordRow::~PasswordRow() = default;
+
+std::string_view PasswordRow::text() const {
+    return impl_->control->text();
+}
+
+void PasswordRow::set_text(std::string text) {
+    impl_->control->set_text(std::move(text));
+}
+
+void PasswordRow::set_placeholder(std::string placeholder) {
+    impl_->control->set_placeholder(std::move(placeholder));
+}
+
+Signal<std::string_view>& PasswordRow::on_text_changed() {
+    return impl_->control->on_text_changed();
+}
+
+struct SpinRow::Impl {
+    std::shared_ptr<SpinButton> control;
+};
+
+std::shared_ptr<SpinRow> SpinRow::create(std::string title, std::string subtitle) {
+    return std::shared_ptr<SpinRow>(new SpinRow(std::move(title), std::move(subtitle)));
+}
+
+SpinRow::SpinRow(std::string title, std::string subtitle)
+    : PreferencesRow(std::move(title), std::move(subtitle)), impl_(std::make_unique<Impl>()) {
+    add_style_class("spin-row");
+    impl_->control = SpinButton::create();
+    set_suffix(impl_->control);
+    set_focusable(false);
+}
+
+SpinRow::~SpinRow() = default;
+
+double SpinRow::value() const {
+    return impl_->control->value();
+}
+
+void SpinRow::set_value(double value) {
+    impl_->control->set_value(value);
+}
+
+void SpinRow::set_range(double minimum, double maximum) {
+    impl_->control->set_range(minimum, maximum);
+}
+
+void SpinRow::set_step(double step) {
+    impl_->control->set_step(step);
+}
+
+void SpinRow::set_precision(int digits) {
+    impl_->control->set_precision(digits);
+}
+
+Signal<double>& SpinRow::on_value_changed() {
+    return impl_->control->on_value_changed();
 }
 
 struct PreferencesGroup::Impl {

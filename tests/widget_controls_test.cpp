@@ -46,6 +46,7 @@
 #include <nk/widgets/split_button.h>
 #include <nk/widgets/switch_widget.h>
 #include <nk/widgets/text_area.h>
+#include <nk/widgets/text_field.h>
 #include <nk/widgets/window_title.h>
 #include <string>
 #include <vector>
@@ -968,6 +969,49 @@ TEST_CASE("Boxed-list rows wrap their control and keep focus on it",
         connection.disconnect();
     }
 
+    SECTION("PasswordRow masks text and stays out of the focus order") {
+        auto row = nk::PasswordRow::create("Password", "At least 8 characters");
+        CHECK_FALSE(row->is_focusable());
+        auto* field = dynamic_cast<nk::TextField*>(row->suffix());
+        REQUIRE(field != nullptr);
+        CHECK(field->is_focusable());
+        CHECK(field->is_secure_text_entry());
+        row->set_placeholder("Secret");
+        std::string observed;
+        auto connection = row->on_text_changed().connect(
+            [&](std::string_view text) { observed = std::string(text); });
+        row->set_text("hunter2");
+        CHECK(row->text() == "hunter2");
+        CHECK(observed == "hunter2");
+        auto group = nk::PreferencesGroup::create("Security");
+        group->add(row);
+        CHECK(group->rows().size() == 1);
+        connection.disconnect();
+    }
+
+    SECTION("SpinRow edits a number and stays out of the focus order") {
+        auto row = nk::SpinRow::create("Volume", "Output level");
+        CHECK_FALSE(row->is_focusable());
+        auto* spin = dynamic_cast<nk::SpinButton*>(row->suffix());
+        REQUIRE(spin != nullptr);
+        CHECK(spin->is_focusable());
+        row->set_range(0.0, 10.0);
+        row->set_step(0.5);
+        row->set_precision(1);
+        double observed = -1.0;
+        auto connection = row->on_value_changed().connect([&](double value) { observed = value; });
+        row->set_value(3.5);
+        CHECK(row->value() == Catch::Approx(3.5));
+        CHECK(observed == Catch::Approx(3.5));
+        row->set_value(50.0);
+        CHECK(row->value() == Catch::Approx(10.0));
+        CHECK(observed == Catch::Approx(10.0));
+        auto group = nk::PreferencesGroup::create("Sound");
+        group->add(row);
+        CHECK(group->rows().size() == 1);
+        connection.disconnect();
+    }
+
     SECTION("A switch row paints its title, subtitle, and control") {
         // Colors resolve during snapshot, so only rendering exercises that path.
         auto row = SnapshotSwitchRow::create("Show Sidebar", "Keep the sidebar visible");
@@ -987,7 +1031,9 @@ TEST_CASE("Boxed-list rows wrap their control and keep focus on it",
         for (const std::shared_ptr<nk::PreferencesRow>& row :
              {std::static_pointer_cast<nk::PreferencesRow>(nk::SwitchRow::create("a")),
               std::static_pointer_cast<nk::PreferencesRow>(nk::ComboRow::create("b")),
-              std::static_pointer_cast<nk::PreferencesRow>(nk::EntryRow::create("c"))}) {
+              std::static_pointer_cast<nk::PreferencesRow>(nk::EntryRow::create("c")),
+              std::static_pointer_cast<nk::PreferencesRow>(nk::PasswordRow::create("d")),
+              std::static_pointer_cast<nk::PreferencesRow>(nk::SpinRow::create("e"))}) {
             CHECK(row->has_style_class("preferences-row"));
         }
     }
