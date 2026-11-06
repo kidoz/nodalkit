@@ -162,11 +162,11 @@ void EventLoop::quit(int exit_code) {
     wake();
 }
 
-void EventLoop::post(std::function<void()> task, std::string_view source_label) {
+bool EventLoop::post(std::function<void()> task, std::string_view source_label) {
     {
         std::lock_guard lock(impl_->task_queue->mutex);
         if (!impl_->task_queue->accepting_tasks) {
-            return;
+            return false;
         }
         impl_->task_queue->posted_tasks.push_back({
             .queued_at = std::chrono::steady_clock::now(),
@@ -176,6 +176,7 @@ void EventLoop::post(std::function<void()> task, std::string_view source_label) 
     }
     impl_->task_queue->work_available.notify_all();
     wake();
+    return true;
 }
 
 EventLoop::TaskPoster EventLoop::task_poster(std::string_view source_label) const {

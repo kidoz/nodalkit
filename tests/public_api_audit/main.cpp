@@ -1012,7 +1012,7 @@ void force_symbol_references() {
     (void)static_cast<nk::EventLoop::TaskPoster (nk::EventLoop::*)(std::string_view) const>(
         &nk::EventLoop::task_poster);
     (void)static_cast<void (nk::EventLoop::*)(int)>(&nk::EventLoop::quit);
-    (void)static_cast<void (nk::EventLoop::*)(std::function<void()>, std::string_view)>(
+    (void)static_cast<bool (nk::EventLoop::*)(std::function<void()>, std::string_view)>(
         &nk::EventLoop::post);
     (void)static_cast<nk::CallbackHandle (nk::EventLoop::*)(
         std::chrono::milliseconds, std::function<void()>, std::string_view)>(

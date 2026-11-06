@@ -42,7 +42,8 @@ public:
     void quit(int exit_code = 0);
 
     /// Post a task to be executed on the next iteration of the loop.
-    void post(std::function<void()> task, std::string_view source_label = {});
+    /// Returns false when the loop is no longer accepting tasks.
+    bool post(std::function<void()> task, std::string_view source_label = {});
 
     /// A thread-safe posting handle that becomes a no-op after loop destruction.
     /// Unlike a captured EventLoop pointer, this handle may outlive the loop.
