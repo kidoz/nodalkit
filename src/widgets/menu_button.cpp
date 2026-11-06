@@ -2,36 +2,23 @@
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
-#include <nk/text/font.h>
 #include <nk/ui_core/state_flags.h>
+#include <nk/widgets/button_content.h>
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/menu_button.h>
 #include <utility>
 
 namespace nk {
 
-namespace {
-
-FontDescriptor menu_button_font() {
-    return FontDescriptor{
-        .family = {},
-        .size = 13.5F,
-        .weight = FontWeight::Medium,
-    };
-}
-
-void add_chevron(SnapshotContext& ctx, Point tip, Color color) {
-    ctx.add_line({tip.x - 4.0F, tip.y - 2.0F}, {tip.x, tip.y + 2.0F}, color, 1.5F);
-    ctx.add_line({tip.x, tip.y + 2.0F}, {tip.x + 4.0F, tip.y - 2.0F}, color, 1.5F);
-}
-
-} // namespace
-
 struct MenuButton::Impl {
-    explicit Impl(std::string label) : label(std::move(label)), menu(ContextMenu::create()) {}
+    explicit Impl(std::string label)
+        : label(std::move(label))
+        , menu(ContextMenu::create())
+        , content(ButtonContent::create(this->label)) {}
 
     std::string label;
     std::shared_ptr<ContextMenu> menu;
+    std::shared_ptr<ButtonContent> content;
     bool armed = false;
 };
 
@@ -42,7 +29,9 @@ std::shared_ptr<MenuButton> MenuButton::create(std::string label) {
 MenuButton::MenuButton(std::string label) : impl_(std::make_unique<Impl>(std::move(label))) {
     set_focusable(true);
     add_style_class("menu-button");
+    impl_->content->set_shows_indicator(true);
     append_child(impl_->menu);
+    append_child(impl_->content);
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Button);
     accessible.set_name(impl_->label);
@@ -60,6 +49,7 @@ void MenuButton::set_label(std::string label) {
         return;
     }
     impl_->label = std::move(label);
+    impl_->content->set_label(impl_->label);
     ensure_accessible().set_name(impl_->label);
     queue_layout();
     queue_redraw();
@@ -113,15 +103,23 @@ bool MenuButton::activate() {
     return impl_->menu->item_count() > 0 || impl_->menu->is_open();
 }
 
-SizeRequest MenuButton::measure(const Constraints& /*constraints*/) const {
-    const auto measured = measure_text(impl_->label, menu_button_font());
+SizeRequest MenuButton::measure(const Constraints& constraints) const {
+    const auto content = impl_->content->measure(constraints);
     const float padding_x = theme_number("padding-x", 16.0F);
     const float min_width = theme_number("min-width", 82.0F);
     const float min_height = theme_number("min-height", 36.0F);
-    constexpr float kChevronSpace = 18.0F;
-    const float width = std::max(min_width, measured.width + (padding_x * 2.0F) + kChevronSpace);
-    const float height = std::max(min_height, measured.height + 12.0F);
+    const float width = std::max(min_width, content.natural_width + (padding_x * 2.0F));
+    const float height = std::max(min_height, content.natural_height + 12.0F);
     return {width, height, width, height};
+}
+
+void MenuButton::allocate(const Rect& allocation) {
+    Widget::allocate(allocation);
+    const float inset = theme_number("padding-x", 16.0F) * 0.5F;
+    impl_->content->allocate({allocation.x + inset,
+                              allocation.y,
+                              std::max(0.0F, allocation.width - (inset * 2.0F)),
+                              allocation.height});
 }
 
 bool MenuButton::handle_mouse_event(const MouseEvent& event) {
@@ -205,17 +203,6 @@ void MenuButton::snapshot(SnapshotContext& ctx) const {
                          corner_radius);
     ctx.add_border(
         body, theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F}), 1.0F, corner_radius);
-
-    const auto font = menu_button_font();
-    const auto measured = measure_text(impl_->label, font);
-    constexpr float kChevronSpace = 18.0F;
-    const float inset = theme_number("padding-x", 16.0F) * 0.5F;
-    const float max_label_width = std::max(0.0F, body.width - (inset * 2.0F) - kChevronSpace);
-    const float text_x = body.x + inset;
-    const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
-    const auto color = theme_color("text-color");
-    add_text_elided(ctx, {text_x, text_y}, impl_->label, measured, max_label_width, color, font);
-    add_chevron(ctx, {body.right() - 14.0F, body.y + (body.height * 0.5F)}, color);
 
     Widget::snapshot(ctx);
 }

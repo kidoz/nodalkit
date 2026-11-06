@@ -23,6 +23,7 @@
 #include <nk/text/text_shaper.h>
 #include <nk/widgets/about_dialog.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/button_content.h>
 #include <nk/widgets/calendar.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/color_well.h>
@@ -1161,6 +1162,53 @@ TEST_CASE("ContextMenu uses the shared menu model", "[widgets][context_menu]") {
     menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
     CHECK(reported == "app.quit");
     CHECK(index == 0);
+}
+
+TEST_CASE("ButtonContent shares icon, label, and chevron measurement",
+          "[widgets][button_content]") {
+    auto empty = nk::ButtonContent::create();
+    empty->set_shows_indicator(true);
+    CHECK(empty->measure({}).natural_width == Catch::Approx(0.0F));
+    CHECK(painted_text(*empty).empty());
+
+    auto label_only = nk::ButtonContent::create("Save");
+    auto with_icon = nk::ButtonContent::create("Save", nk::SymbolicIcon::Add);
+    with_icon->set_shows_indicator(true);
+    CHECK(with_icon->measure({}).natural_width > label_only->measure({}).natural_width);
+
+    nk::Widget& content_widget = *with_icon;
+    with_icon->allocate({0.0F, 0.0F, 180.0F, 36.0F});
+    nk::SnapshotContext short_snapshot;
+    content_widget.snapshot(short_snapshot);
+    const auto short_root = short_snapshot.take_root();
+    REQUIRE(short_root != nullptr);
+    const auto* short_text = find_text_node(*short_root, "Save");
+    REQUIRE(short_text != nullptr);
+
+    with_icon->allocate({0.0F, 0.0F, 180.0F, 60.0F});
+    nk::SnapshotContext tall_snapshot;
+    content_widget.snapshot(tall_snapshot);
+    const auto tall_root = tall_snapshot.take_root();
+    REQUIRE(tall_root != nullptr);
+    const auto* tall_text = find_text_node(*tall_root, "Save");
+    REQUIRE(tall_text != nullptr);
+    CHECK(tall_text->bounds().y > short_text->bounds().y);
+
+    auto menu = nk::MenuButton::create("File");
+    menu->allocate({0.0F, 0.0F, 140.0F, 36.0F});
+    CHECK(painted_text(*menu).find("File") != std::string::npos);
+
+    auto split = nk::SplitButton::create("Save");
+    split->allocate({0.0F, 0.0F, 160.0F, 36.0F});
+    CHECK(painted_text(*split).find("Save") != std::string::npos);
+
+    auto bar = SnapshotHeaderbar::create("Title");
+    auto slot = nk::ButtonContent::create("New", nk::SymbolicIcon::Add);
+    bar->add_leading(slot);
+    bar->allocate({0.0F, 0.0F, 520.0F, 46.0F});
+    CHECK(slot->allocation().width > 0.0F);
+    CHECK(slot->allocation().x < 160.0F);
+    CHECK(painted_text(*bar).find("New") != std::string::npos);
 }
 
 TEST_CASE("ShortcutLabel formats modifiers in a fixed order and menus draw it",

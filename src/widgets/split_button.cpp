@@ -2,8 +2,8 @@
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
-#include <nk/text/font.h>
 #include <nk/ui_core/state_flags.h>
+#include <nk/widgets/button_content.h>
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/split_button.h>
 #include <utility>
@@ -12,28 +12,19 @@ namespace nk {
 
 namespace {
 
-FontDescriptor split_button_font() {
-    return FontDescriptor{
-        .family = {},
-        .size = 13.5F,
-        .weight = FontWeight::Medium,
-    };
-}
-
-void add_chevron(SnapshotContext& ctx, Point tip, Color color) {
-    ctx.add_line({tip.x - 4.0F, tip.y - 2.0F}, {tip.x, tip.y + 2.0F}, color, 1.5F);
-    ctx.add_line({tip.x, tip.y + 2.0F}, {tip.x + 4.0F, tip.y - 2.0F}, color, 1.5F);
-}
-
 enum class Arm { None, Primary, Menu };
 
 } // namespace
 
 struct SplitButton::Impl {
-    explicit Impl(std::string label) : label(std::move(label)), menu(ContextMenu::create()) {}
+    explicit Impl(std::string label)
+        : label(std::move(label))
+        , menu(ContextMenu::create())
+        , content(ButtonContent::create(this->label)) {}
 
     std::string label;
     std::shared_ptr<ContextMenu> menu;
+    std::shared_ptr<ButtonContent> content;
     std::shared_ptr<Action> action;
     ScopedConnection action_changed;
     Signal<> clicked;
@@ -47,7 +38,9 @@ std::shared_ptr<SplitButton> SplitButton::create(std::string label) {
 SplitButton::SplitButton(std::string label) : impl_(std::make_unique<Impl>(std::move(label))) {
     set_focusable(true);
     add_style_class("split-button");
+    impl_->content->set_shows_indicator(true);
     append_child(impl_->menu);
+    append_child(impl_->content);
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Button);
     accessible.set_name(impl_->label);
@@ -65,6 +58,7 @@ void SplitButton::set_label(std::string label) {
         return;
     }
     impl_->label = std::move(label);
+    sync_content_label();
     ensure_accessible().set_name(impl_->label);
     queue_layout();
     queue_redraw();
@@ -168,21 +162,34 @@ void SplitButton::sync_action() {
         impl_->armed = Arm::None;
     }
     set_sensitive(!bound || bound->is_enabled());
+    sync_content_label();
     queue_layout();
     queue_redraw();
 }
 
-SizeRequest SplitButton::measure(const Constraints& /*constraints*/) const {
+void SplitButton::sync_content_label() {
     const auto text =
         has_flag(state_flags(), StateFlags::Checked) ? "\u2713 " + impl_->label : impl_->label;
-    const auto measured = measure_text(text, split_button_font());
+    impl_->content->set_label(text);
+}
+
+SizeRequest SplitButton::measure(const Constraints& constraints) const {
+    const auto content = impl_->content->measure(constraints);
     const float padding_x = theme_number("padding-x", 16.0F);
-    const float menu_width = theme_number("menu-width", 32.0F);
     const float min_width = theme_number("min-width", 82.0F);
     const float min_height = theme_number("min-height", 36.0F);
-    const float width = std::max(min_width, measured.width + (padding_x * 2.0F) + menu_width);
-    const float height = std::max(min_height, measured.height + 12.0F);
+    const float width = std::max(min_width, content.natural_width + (padding_x * 2.0F));
+    const float height = std::max(min_height, content.natural_height + 12.0F);
     return {width, height, width, height};
+}
+
+void SplitButton::allocate(const Rect& allocation) {
+    Widget::allocate(allocation);
+    const float inset = theme_number("padding-x", 16.0F) * 0.5F;
+    impl_->content->allocate({allocation.x + inset,
+                              allocation.y,
+                              std::max(0.0F, allocation.width - (inset * 2.0F)),
+                              allocation.height});
 }
 
 bool SplitButton::handle_mouse_event(const MouseEvent& event) {
@@ -292,17 +299,6 @@ void SplitButton::snapshot(SnapshotContext& ctx) const {
                  {menu.x, body.bottom() - 6.0F},
                  theme_color("separator-color", Color{0.78F, 0.8F, 0.84F, 1.0F}),
                  1.0F);
-
-    const auto font = split_button_font();
-    const auto text =
-        has_flag(state_flags(), StateFlags::Checked) ? "\u2713 " + impl_->label : impl_->label;
-    const auto measured = measure_text(text, font);
-    const float inset = theme_number("padding-x", 16.0F) * 0.5F;
-    const float max_label_width = std::max(0.0F, menu.x - body.x - (inset * 2.0F));
-    const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
-    const auto color = theme_color("text-color");
-    add_text_elided(ctx, {body.x + inset, text_y}, text, measured, max_label_width, color, font);
-    add_chevron(ctx, {menu.x + (menu.width * 0.5F), body.y + (body.height * 0.5F)}, color);
 
     Widget::snapshot(ctx);
 }

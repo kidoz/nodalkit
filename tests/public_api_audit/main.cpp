@@ -70,6 +70,7 @@
 #include <nk/widgets/banner.h>
 #include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/button_content.h>
 #include <nk/widgets/clamp.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/command_palette.h>
@@ -1239,6 +1240,15 @@ void force_symbol_references() {
     // (nk::Widget::*)(nk::Widget&)>(&nk::Widget::remove_child); REMOVED (protected member, caught
     // by audit iteration): (void)static_cast<void (nk::Widget::*)()>(&nk::Widget::clear_children);
     // REMOVED (protected): set_state_flag
+    (void)&nk::ButtonContent::create;
+    (void)static_cast<std::string_view (nk::ButtonContent::*)() const>(&nk::ButtonContent::label);
+    (void)static_cast<void (nk::ButtonContent::*)(std::string)>(&nk::ButtonContent::set_label);
+    (void)static_cast<nk::SymbolicIcon (nk::ButtonContent::*)() const>(&nk::ButtonContent::icon);
+    (void)static_cast<void (nk::ButtonContent::*)(nk::SymbolicIcon)>(&nk::ButtonContent::set_icon);
+    (void)static_cast<bool (nk::ButtonContent::*)() const>(&nk::ButtonContent::shows_indicator);
+    (void)static_cast<void (nk::ButtonContent::*)(bool)>(&nk::ButtonContent::set_shows_indicator);
+    (void)static_cast<nk::SizeRequest (nk::ButtonContent::*)(const nk::Constraints&) const>(
+        &nk::ButtonContent::measure);
     (void)&nk::Button::create;
     (void)static_cast<std::string_view (nk::Button::*)() const>(&nk::Button::label);
     (void)static_cast<void (nk::Button::*)(std::string)>(&nk::Button::set_label);

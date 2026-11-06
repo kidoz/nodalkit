@@ -44,6 +44,7 @@ public:
     Signal<>& on_dismissed();
 
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
     bool handle_key_event(const KeyEvent& event) override;
     [[nodiscard]] bool hit_test(Point point) const override;
