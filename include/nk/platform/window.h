@@ -104,6 +104,8 @@ public:
     /// Resize the window.
     void resize(int width, int height);
     [[nodiscard]] Size size() const;
+    /// Whether the window was created with `WindowConfig::resizable`.
+    [[nodiscard]] bool is_resizable() const;
     [[nodiscard]] float scale_factor() const;
     [[nodiscard]] Size framebuffer_size() const;
 

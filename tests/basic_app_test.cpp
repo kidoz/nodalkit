@@ -27,6 +27,7 @@
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
 #include <nk/platform/window_inspector.h>
+#include <nk/render/render_node.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/style/style_class.h>
 #include <nk/style/theme.h>
@@ -44,6 +45,7 @@
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
+#include <nk/widgets/progress_bar.h>
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/status_bar.h>
@@ -2626,6 +2628,117 @@ TEST_CASE("StatusBar carries a right-aligned trailing detail", "[app][status]") 
     status->set_segments({});
     status->set_trailing("12 ms");
     CHECK(status->ensure_accessible().description() == "12 ms");
+}
+
+namespace {
+
+void append_status_text(const nk::RenderNode& node, std::string& out) {
+    if (node.kind() == nk::RenderNodeKind::Text) {
+        out += static_cast<const nk::TextNode&>(node).text();
+        out += '\n';
+    }
+    for (const auto& child : node.children()) {
+        if (child != nullptr) {
+            append_status_text(*child, out);
+        }
+    }
+}
+
+std::string status_snapshot_text(nk::Widget& widget) {
+    nk::SnapshotContext snapshot;
+    widget.snapshot(snapshot);
+    const auto root = snapshot.take_root();
+    std::string text;
+    if (root != nullptr) {
+        append_status_text(*root, text);
+    }
+    return text;
+}
+
+} // namespace
+
+TEST_CASE("StatusBar shows a segment widget and a client-side resize grip", "[app][status]") {
+    auto status = nk::StatusBar::create();
+    status->set_segments({"Load", "Ready"});
+    status->set_trailing("idle");
+    auto progress = nk::ProgressBar::create();
+    status->set_segment_widget(0, progress);
+    CHECK(status->segment_widget(0) == progress.get());
+    CHECK(progress->parent() == status.get());
+    CHECK(status->segment(0) == "Load");
+    CHECK(status->ensure_accessible().description() == "Load | Ready | idle");
+
+    status->allocate({0.0F, 0.0F, 420.0F, 28.0F});
+    CHECK(progress->allocation().width > 0.0F);
+    CHECK(progress->allocation().x >= status->allocation().x);
+    const auto painted = status_snapshot_text(*status);
+    CHECK(painted.find("Load") == std::string::npos);
+    CHECK(painted.find("Ready") != std::string::npos);
+    CHECK(painted.find("idle") != std::string::npos);
+
+    status->set_segment_widget(0, nullptr);
+    CHECK(status->segment_widget(0) == nullptr);
+    CHECK(progress->parent() == nullptr);
+    CHECK(status_snapshot_text(*status).find("Load") != std::string::npos);
+
+    status->set_segment_widget(0, progress);
+    status->set_segments({"Only"});
+    CHECK(status->segment_count() == 1);
+    CHECK(status->segment_widget(0) == progress.get());
+    status->set_segments({});
+    CHECK(status->segment_count() == 0);
+    CHECK(progress->parent() == nullptr);
+    status->set_segments({"Load"});
+    REQUIRE_THROWS_AS(status->set_segment_widget(3, nk::ProgressBar::create()), std::out_of_range);
+
+    status->allocate({0.0F, 0.0F, 420.0F, 28.0F});
+    CHECK_FALSE(status->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 416.0F, .y = 24.0F, .button = 1}));
+
+    nk::Application app(0, nullptr);
+    nk::WindowConfig config;
+    config.title = "Status grip";
+    config.width = 400;
+    config.height = 300;
+    config.titlebar_style = nk::TitlebarStyle::Unified;
+    config.resizable = true;
+    nk::Window window(config);
+    auto gripped = nk::StatusBar::create();
+    window.set_child(gripped);
+    gripped->allocate({0.0F, 0.0F, 400.0F, 28.0F});
+    CHECK(window.uses_client_side_decorations());
+    CHECK(window.is_resizable());
+    const float grip_x = gripped->allocation().right() - 4.0F;
+    const float grip_y = gripped->allocation().bottom() - 4.0F;
+    CHECK(gripped->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = grip_x, .y = grip_y, .button = 1}));
+    CHECK(gripped->cursor_shape() == nk::CursorShape::ResizeLeftRight);
+    CHECK(gripped->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Move, .x = grip_x + 30.0F, .y = grip_y + 20.0F}));
+    CHECK(window.size().width == Catch::Approx(430.0F));
+    CHECK(window.size().height == Catch::Approx(320.0F));
+
+    nk::WindowConfig fixed = config;
+    fixed.resizable = false;
+    fixed.title = "Fixed status";
+    nk::Window fixed_window(fixed);
+    auto plain = nk::StatusBar::create();
+    fixed_window.set_child(plain);
+    plain->allocate({0.0F, 0.0F, 400.0F, 28.0F});
+    CHECK_FALSE(plain->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 396.0F, .y = 24.0F, .button = 1}));
+    CHECK(fixed_window.size().width == Catch::Approx(400.0F));
+
+    config.titlebar_style = nk::TitlebarStyle::Regular;
+    config.title = "Native corner";
+    nk::Window native_window(config);
+    auto native = nk::StatusBar::create();
+    native_window.set_child(native);
+    native->allocate({0.0F, 0.0F, 400.0F, 28.0F});
+    CHECK_FALSE(native_window.uses_client_side_decorations());
+    CHECK_FALSE(native->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 396.0F, .y = 24.0F, .button = 1}));
+    CHECK(native_window.size().width == Catch::Approx(400.0F));
 }
 
 TEST_CASE("SegmentedControl selects segments through API, mouse, and keyboard", "[app][widgets]") {

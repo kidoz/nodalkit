@@ -1726,6 +1726,10 @@ void Window::resize(int width, int height) {
     request_frame(FrameRequestReason::Resize);
 }
 
+bool Window::is_resizable() const {
+    return impl_->config.resizable;
+}
+
 Size Window::size() const {
     if (impl_->surface) {
         return impl_->surface->size();
