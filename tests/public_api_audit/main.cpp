@@ -82,17 +82,23 @@
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
+#include <nk/widgets/menu_button.h>
 #include <nk/widgets/navigation_split_view.h>
+#include <nk/widgets/navigation_stack.h>
 #include <nk/widgets/overlay_split_view.h>
+#include <nk/widgets/popover.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/scroll_area.h>
+#include <nk/widgets/search_bar.h>
 #include <nk/widgets/segmented_control.h>
+#include <nk/widgets/split_button.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/status_page.h>
 #include <nk/widgets/text_field.h>
 #include <nk/widgets/toast_overlay.h>
 #include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tree_view.h>
+#include <nk/widgets/view_stack.h>
 
 namespace {
 
@@ -724,6 +730,22 @@ void force_symbol_references() {
     (void)&nk::NavigationSplitView::on_collapsed_changed;
     (void)&nk::NavigationSplitView::on_show_content_changed;
     (void)&nk::NavigationSplitView::on_show_sidebar_changed;
+    (void)&nk::NavigationStack::create;
+    (void)static_cast<void (nk::NavigationStack::*)(std::shared_ptr<nk::Widget>, std::string)>(
+        &nk::NavigationStack::set_root);
+    (void)static_cast<void (nk::NavigationStack::*)(std::shared_ptr<nk::Widget>, std::string)>(
+        &nk::NavigationStack::push);
+    (void)&nk::NavigationStack::pop;
+    (void)static_cast<void (nk::NavigationStack::*)(std::size_t)>(&nk::NavigationStack::pop_to);
+    (void)static_cast<std::size_t (nk::NavigationStack::*)() const>(&nk::NavigationStack::depth);
+    (void)static_cast<std::string_view (nk::NavigationStack::*)() const>(
+        &nk::NavigationStack::title);
+    (void)static_cast<nk::Widget* (nk::NavigationStack::*)() const>(&nk::NavigationStack::current);
+    (void)static_cast<void (nk::NavigationStack::*)(nk::Headerbar&)>(
+        &nk::NavigationStack::bind_headerbar);
+    (void)&nk::NavigationStack::unbind_headerbar;
+    (void)static_cast<nk::Signal<std::size_t>& (nk::NavigationStack::*)()>(
+        &nk::NavigationStack::on_depth_changed);
     (void)&nk::OverlaySplitView::create;
     (void)&nk::OverlaySplitView::set_sidebar;
     (void)&nk::OverlaySplitView::sidebar;
@@ -1132,6 +1154,8 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Widget::*)() const>(&nk::Widget::is_focusable);
     (void)static_cast<void (nk::Widget::*)(bool)>(&nk::Widget::set_focusable);
     (void)static_cast<void (nk::Widget::*)()>(&nk::Widget::grab_focus);
+    (void)static_cast<void (nk::Widget::*)(std::string)>(&nk::Widget::set_tooltip);
+    (void)static_cast<std::string_view (nk::Widget::*)() const>(&nk::Widget::tooltip);
     (void)static_cast<nk::Accessible* (nk::Widget::*)()>(&nk::Widget::accessible);
     (void)static_cast<const nk::Accessible* (nk::Widget::*)() const>(&nk::Widget::accessible);
     (void)static_cast<nk::Accessible& (nk::Widget::*)()>(&nk::Widget::ensure_accessible);
@@ -1230,7 +1254,75 @@ void force_symbol_references() {
     (void)static_cast<void (nk::ComboBox::*)(bool)>(&nk::ComboBox::on_focus_changed);
     (void)static_cast<void (nk::ComboBox::*)(const nk::Rect&)>(&nk::ComboBox::allocate);
     (void)static_cast<void (nk::ContextMenu::*)(const nk::Rect&)>(&nk::ContextMenu::allocate);
+    (void)static_cast<void (nk::ContextMenu::*)(std::vector<nk::NativeMenuItem>)>(
+        &nk::ContextMenu::set_items);
+    (void)static_cast<void (nk::ContextMenu::*)(std::shared_ptr<nk::ActionGroup>)>(
+        &nk::ContextMenu::set_action_group);
+    (void)static_cast<nk::ActionGroup* (nk::ContextMenu::*)() const>(
+        &nk::ContextMenu::action_group);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::ContextMenu::*)()>(
+        &nk::ContextMenu::on_action);
     (void)static_cast<void (nk::MenuBar::*)(const nk::Rect&)>(&nk::MenuBar::allocate);
+    (void)&nk::MenuButton::create;
+    (void)static_cast<std::string_view (nk::MenuButton::*)() const>(&nk::MenuButton::label);
+    (void)static_cast<void (nk::MenuButton::*)(std::string)>(&nk::MenuButton::set_label);
+    (void)static_cast<void (nk::MenuButton::*)(std::vector<nk::NativeMenuItem>)>(
+        &nk::MenuButton::set_items);
+    (void)static_cast<void (nk::MenuButton::*)(std::shared_ptr<nk::ActionGroup>)>(
+        &nk::MenuButton::set_action_group);
+    (void)static_cast<nk::ActionGroup* (nk::MenuButton::*)() const>(&nk::MenuButton::action_group);
+    (void)static_cast<bool (nk::MenuButton::*)() const>(&nk::MenuButton::is_open);
+    (void)static_cast<nk::Signal<int>& (nk::MenuButton::*)()>(&nk::MenuButton::on_item_activated);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::MenuButton::*)()>(
+        &nk::MenuButton::on_action);
+    (void)static_cast<nk::Signal<>& (nk::MenuButton::*)()>(&nk::MenuButton::on_dismissed);
+    (void)static_cast<nk::SizeRequest (nk::MenuButton::*)(const nk::Constraints&) const>(
+        &nk::MenuButton::measure);
+    (void)static_cast<bool (nk::MenuButton::*)(const nk::MouseEvent&)>(
+        &nk::MenuButton::handle_mouse_event);
+    (void)static_cast<bool (nk::MenuButton::*)(const nk::KeyEvent&)>(
+        &nk::MenuButton::handle_key_event);
+    (void)static_cast<bool (nk::MenuButton::*)(nk::Point) const>(&nk::MenuButton::hit_test);
+    (void)static_cast<std::vector<nk::Rect> (nk::MenuButton::*)() const>(
+        &nk::MenuButton::damage_regions);
+    (void)static_cast<nk::CursorShape (nk::MenuButton::*)() const>(&nk::MenuButton::cursor_shape);
+    (void)&nk::SplitButton::create;
+    (void)static_cast<std::string_view (nk::SplitButton::*)() const>(&nk::SplitButton::label);
+    (void)static_cast<void (nk::SplitButton::*)(std::string)>(&nk::SplitButton::set_label);
+    (void)static_cast<void (nk::SplitButton::*)(std::shared_ptr<nk::Action>)>(
+        &nk::SplitButton::set_action);
+    (void)static_cast<nk::Action* (nk::SplitButton::*)() const>(&nk::SplitButton::action);
+    (void)static_cast<nk::Signal<>& (nk::SplitButton::*)()>(&nk::SplitButton::on_clicked);
+    (void)static_cast<void (nk::SplitButton::*)(std::vector<nk::NativeMenuItem>)>(
+        &nk::SplitButton::set_items);
+    (void)static_cast<void (nk::SplitButton::*)(std::shared_ptr<nk::ActionGroup>)>(
+        &nk::SplitButton::set_action_group);
+    (void)static_cast<nk::ActionGroup* (nk::SplitButton::*)() const>(
+        &nk::SplitButton::action_group);
+    (void)static_cast<bool (nk::SplitButton::*)() const>(&nk::SplitButton::is_open);
+    (void)static_cast<nk::Signal<int>& (nk::SplitButton::*)()>(&nk::SplitButton::on_item_activated);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::SplitButton::*)()>(
+        &nk::SplitButton::on_action);
+    (void)static_cast<nk::Signal<>& (nk::SplitButton::*)()>(&nk::SplitButton::on_dismissed);
+    (void)static_cast<nk::SizeRequest (nk::SplitButton::*)(const nk::Constraints&) const>(
+        &nk::SplitButton::measure);
+    (void)static_cast<bool (nk::SplitButton::*)(const nk::MouseEvent&)>(
+        &nk::SplitButton::handle_mouse_event);
+    (void)static_cast<bool (nk::SplitButton::*)(const nk::KeyEvent&)>(
+        &nk::SplitButton::handle_key_event);
+    (void)static_cast<bool (nk::SplitButton::*)(nk::Point) const>(&nk::SplitButton::hit_test);
+    (void)static_cast<std::vector<nk::Rect> (nk::SplitButton::*)() const>(
+        &nk::SplitButton::damage_regions);
+    (void)static_cast<nk::CursorShape (nk::SplitButton::*)() const>(&nk::SplitButton::cursor_shape);
+    (void)&nk::Popover::create;
+    (void)static_cast<void (nk::Popover::*)(std::shared_ptr<nk::Widget>)>(&nk::Popover::set_child);
+    (void)static_cast<void (nk::Popover::*)(nk::Widget&)>(&nk::Popover::set_anchor);
+    (void)&nk::Popover::clear_anchor;
+    (void)&nk::Popover::show;
+    (void)static_cast<void (nk::Popover::*)(nk::Point)>(&nk::Popover::show_at);
+    (void)&nk::Popover::dismiss;
+    (void)static_cast<bool (nk::Popover::*)() const>(&nk::Popover::is_open);
+    (void)static_cast<nk::Signal<>& (nk::Popover::*)()>(&nk::Popover::on_dismissed);
     (void)&nk::Dialog::create;
     (void)static_cast<void (nk::Dialog::*)(std::string, nk::DialogResponse)>(
         &nk::Dialog::add_button);
@@ -1343,6 +1435,36 @@ void force_symbol_references() {
         &nk::SegmentedControl::cursor_shape);
     (void)static_cast<void (nk::SegmentedControl::*)(bool)>(
         &nk::SegmentedControl::on_focus_changed);
+    (void)&nk::ViewStack::create;
+    (void)static_cast<void (nk::ViewStack::*)(std::shared_ptr<nk::Widget>, std::string)>(
+        &nk::ViewStack::append);
+    (void)static_cast<void (nk::ViewStack::*)(
+        std::size_t, std::shared_ptr<nk::Widget>, std::string)>(&nk::ViewStack::insert);
+    (void)static_cast<void (nk::ViewStack::*)(nk::Widget&)>(&nk::ViewStack::remove);
+    (void)&nk::ViewStack::clear;
+    (void)static_cast<std::size_t (nk::ViewStack::*)() const>(&nk::ViewStack::page_count);
+    (void)static_cast<std::string_view (nk::ViewStack::*)(std::size_t) const>(
+        &nk::ViewStack::title);
+    (void)static_cast<nk::Widget* (nk::ViewStack::*)(std::size_t) const>(&nk::ViewStack::page);
+    (void)static_cast<int (nk::ViewStack::*)() const>(&nk::ViewStack::selected_index);
+    (void)static_cast<void (nk::ViewStack::*)(int)>(&nk::ViewStack::set_selected_index);
+    (void)static_cast<nk::Widget* (nk::ViewStack::*)() const>(&nk::ViewStack::current);
+    (void)static_cast<void (nk::ViewStack::*)(nk::SegmentedControl&)>(
+        &nk::ViewStack::bind_switcher);
+    (void)&nk::ViewStack::unbind_switcher;
+    (void)&nk::SearchBar::create;
+    (void)static_cast<std::string_view (nk::SearchBar::*)() const>(&nk::SearchBar::text);
+    (void)static_cast<void (nk::SearchBar::*)(std::string)>(&nk::SearchBar::set_text);
+    (void)static_cast<std::string_view (nk::SearchBar::*)() const>(&nk::SearchBar::placeholder);
+    (void)static_cast<void (nk::SearchBar::*)(std::string)>(&nk::SearchBar::set_placeholder);
+    (void)static_cast<bool (nk::SearchBar::*)() const>(&nk::SearchBar::is_revealed);
+    (void)static_cast<void (nk::SearchBar::*)(bool)>(&nk::SearchBar::set_revealed);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::SearchBar::*)()>(
+        &nk::SearchBar::on_text_changed);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::SearchBar::*)()>(
+        &nk::SearchBar::on_search);
+    (void)static_cast<nk::Signal<bool>& (nk::SearchBar::*)()>(&nk::SearchBar::on_revealed_changed);
+    (void)static_cast<nk::Signal<int>& (nk::ViewStack::*)()>(&nk::ViewStack::on_selection_changed);
     (void)&nk::StatusBar::create;
     (void)static_cast<void (nk::StatusBar::*)(std::vector<std::string>)>(
         &nk::StatusBar::set_segments);
