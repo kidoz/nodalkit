@@ -46,6 +46,7 @@ public:
     [[nodiscard]] NativeWindowHandle native_handle() const override;
     [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
+    void text_input_state_changed() override;
     void set_titlebar_style(TitlebarStyle style) override;
 
     /// Access the owning Window for event delivery.

@@ -83,6 +83,7 @@ struct WindowTextInputState {
     std::size_t anchor = 0;
     Rect caret_rect{};
     bool composing = false; ///< Uncommitted composition text is displayed.
+    bool secure = false;    ///< Password input requiring platform privacy protections.
 };
 
 /// A top-level application window. Owns a root widget and manages

@@ -255,5 +255,6 @@ if host_system == 'darwin'
         '../examples/showcase/showcase_profile.cpp',
         dependencies : [nk_dep, catch2_test_dep, cocoa_dep],
     )
-    test('macos_accessibility', test_macos_accessibility)
+    # Secure-input checks require exclusive ownership of native keyboard focus.
+    test('macos_accessibility', test_macos_accessibility, is_parallel : false)
 endif

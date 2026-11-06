@@ -5,6 +5,7 @@
 
 #include "../examples/showcase/showcase_app.h"
 
+#import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -16,6 +17,7 @@
 #include <nk/platform/native_toolbar.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
+#include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/dialog.h>
@@ -72,6 +74,94 @@ void settle(nk::Application& app) {
 }
 
 } // namespace
+
+TEST_CASE("macOS secure input follows focus, field mode, hiding, and teardown", "[macos][secure]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        if (IsSecureEventInputEnabled()) {
+            SKIP("Another input client already holds secure event input");
+        }
+        auto window = std::make_unique<nk::Window>(nk::WindowConfig{.title = "Secure input"});
+        auto box = nk::Box::create(nk::Orientation::Vertical);
+        auto secret = nk::TextField::create("secret");
+        auto ordinary = nk::TextField::create();
+        secret->set_secure_text_entry(true);
+        box->append(secret);
+        box->append(ordinary);
+        window->set_child(box);
+        window->present();
+        settle(app);
+        auto* native = (__bridge NSWindow*)window->native_surface()->native_handle();
+        [native makeKeyAndOrderFront:nil];
+        [NSApp activateIgnoringOtherApps:YES];
+        for (int attempt = 0; attempt < 50 && !NSApp.active; ++attempt) {
+            NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                                untilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]
+                                                   inMode:NSDefaultRunLoopMode
+                                                  dequeue:YES];
+            if (event != nil) {
+                [NSApp sendEvent:event];
+            }
+        }
+        [native makeFirstResponder:native.contentView];
+        secret->grab_focus();
+        settle(app);
+        REQUIRE(NSApp.active);
+        REQUIRE(native.isKeyWindow);
+        REQUIRE(IsSecureEventInputEnabled());
+        CHECK([native.contentView inputContext] == nil);
+
+        NSEvent* typed = [NSEvent keyEventWithType:NSEventTypeKeyDown
+                                          location:NSZeroPoint
+                                     modifierFlags:0
+                                         timestamp:0
+                                      windowNumber:native.windowNumber
+                                           context:nil
+                                        characters:@"x"
+                       charactersIgnoringModifiers:@"x"
+                                         isARepeat:NO
+                                           keyCode:kVK_ANSI_X];
+        [native.contentView keyDown:typed];
+        CHECK(secret->text() == "secretx");
+        ordinary->grab_focus();
+        CHECK_FALSE(IsSecureEventInputEnabled());
+        CHECK([native.contentView inputContext] != nil);
+        [native.contentView setMarkedText:@"pending"
+                            selectedRange:NSMakeRange(7, 0)
+                         replacementRange:NSMakeRange(NSNotFound, 0)];
+        REQUIRE([native.contentView hasMarkedText]);
+        ordinary->set_secure_text_entry(true);
+        CHECK_FALSE([native.contentView hasMarkedText]);
+        [native.contentView unmarkText];
+        CHECK(ordinary->text().empty());
+        ordinary->set_secure_text_entry(false);
+        secret->grab_focus();
+        REQUIRE(IsSecureEventInputEnabled());
+        secret->set_secure_text_entry(false);
+        CHECK_FALSE(IsSecureEventInputEnabled());
+        secret->set_secure_text_entry(true);
+        REQUIRE(IsSecureEventInputEnabled());
+        secret->set_editable(false);
+        CHECK_FALSE(IsSecureEventInputEnabled());
+        secret->set_editable(true);
+        REQUIRE(IsSecureEventInputEnabled());
+        [native makeFirstResponder:nil];
+        CHECK_FALSE(IsSecureEventInputEnabled());
+        [native makeFirstResponder:native.contentView];
+        window->native_surface()->text_input_state_changed();
+        REQUIRE(IsSecureEventInputEnabled());
+        window->hide();
+        CHECK_FALSE(IsSecureEventInputEnabled());
+        window->present();
+        [native makeKeyAndOrderFront:nil];
+        [native makeFirstResponder:native.contentView];
+        secret->grab_focus();
+        window->native_surface()->text_input_state_changed();
+        REQUIRE(IsSecureEventInputEnabled());
+        window.reset();
+        CHECK_FALSE(IsSecureEventInputEnabled());
+    }
+}
 
 TEST_CASE("macOS bridge exposes widget elements with roles, labels, and values",
           "[accessibility][macos]") {

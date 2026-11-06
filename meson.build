@@ -153,7 +153,7 @@ if host_system == 'darwin'
     nk_enabled_languages += ['objcpp']
 
     cocoa_dep = dependency('appleframeworks',
-        modules : ['Cocoa', 'CoreGraphics', 'CoreText', 'Metal', 'QuartzCore', 'UniformTypeIdentifiers'])
+        modules : ['Cocoa', 'Carbon', 'CoreGraphics', 'CoreText', 'Metal', 'QuartzCore', 'UniformTypeIdentifiers'])
 
     nk_sources += files(
         'src/platform/macos/macos_backend.mm',

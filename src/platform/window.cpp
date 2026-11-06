@@ -2774,6 +2774,9 @@ void Window::focus_widget(Widget* widget, bool reveal) {
             }
         }
     }
+    if (impl_->surface != nullptr) {
+        impl_->surface->text_input_state_changed();
+    }
 }
 
 void Window::handle_widget_state_change(Widget& widget) {
@@ -2879,6 +2882,7 @@ std::optional<WindowTextInputState> Window::current_text_input_state() const {
         .anchor = widget_state->anchor,
         .caret_rect = widget_state->caret_rect,
         .composing = widget_state->composing,
+        .secure = widget_state->secure,
     };
 }
 
@@ -3387,6 +3391,9 @@ Result<void> WindowInspector::save_debug_screenshot_ppm_file(std::string_view pa
 }
 
 void Window::note_widget_redraw_request(Widget& widget) {
+    if (impl_->focused_widget == &widget && impl_->surface != nullptr) {
+        impl_->surface->text_input_state_changed();
+    }
     append_unique_widget(impl_->dirty_widgets, &widget);
     ++impl_->redraw_request_count;
     request_frame(FrameRequestReason::WidgetRedraw);

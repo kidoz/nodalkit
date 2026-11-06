@@ -47,7 +47,7 @@ enum class SizePolicy {
 /// for IME activation, composition, and candidate-window placement.
 ///
 /// `text`, `cursor`, and `anchor` describe committed text only. Secure-entry
-/// editors leave them empty so input methods never receive secret text.
+/// editors leave them empty so secrets are not sent as surrounding text.
 struct WidgetTextInputState {
     std::string text;
     std::size_t cursor = 0;
@@ -57,6 +57,8 @@ struct WidgetTextInputState {
     /// True while uncommitted composition text is shown in place of the
     /// selection. Backends discard native composition state once it ends.
     bool composing = false;
+    /// Password input: suppress surrounding text and request platform privacy protections.
+    bool secure = false;
 };
 
 /// Base class for all widgets. Parents retain shared ownership of their children;

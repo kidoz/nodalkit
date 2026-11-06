@@ -259,6 +259,7 @@ void TextField::set_secure_text_entry(bool secure) {
         return;
     }
     impl_->secure_text_entry = secure;
+    clear_preedit();
     sync_primary_selection_ownership();
     ensure_accessible().set_value(impl_->accessible_value());
     queue_text_redraw();
@@ -562,7 +563,7 @@ bool TextField::handle_text_input_event(const TextInputEvent& event) {
         replace_selection(event.text, event.text.size() == 1 && !has_selection());
         return true;
     case TextInputEvent::Type::DeleteSurrounding:
-        if (!impl_->editable) {
+        if (!impl_->editable || impl_->secure_text_entry) {
             return false;
         }
         return delete_surrounding_text(event.delete_before_length, event.delete_after_length);
@@ -584,6 +585,7 @@ std::optional<WidgetTextInputState> TextField::text_input_state() const {
     WidgetTextInputState state{};
     state.caret_rect = *caret_rect;
     state.composing = has_preedit();
+    state.secure = impl_->secure_text_entry;
     if (impl_->secure_text_entry) {
         return state;
     }

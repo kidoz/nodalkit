@@ -19,6 +19,19 @@ struct Utf8Unit {
 // grapheme-break implementation. Multiline callers segment each line separately.
 std::optional<Utf8Unit> decode_utf8_unit(std::string_view text, std::size_t index);
 std::vector<Utf8Unit> decode_utf8_units(std::string_view text);
+
+struct SurroundingText {
+    std::string_view text;
+    std::size_t cursor = 0;
+    std::size_t anchor = 0;
+};
+
+// A UTF-8 window containing the full selection with byte offsets relative to it.
+// Omit surrounding-text support when the selection cannot fit or offsets are invalid.
+std::optional<SurroundingText> bounded_surrounding_text(std::string_view text,
+                                                        std::size_t cursor,
+                                                        std::size_t anchor,
+                                                        std::size_t max_bytes);
 std::vector<std::size_t> grapheme_boundaries(std::string_view text);
 std::size_t previous_grapheme_boundary(std::string_view text, std::size_t position);
 std::size_t next_grapheme_boundary(std::string_view text, std::size_t position);

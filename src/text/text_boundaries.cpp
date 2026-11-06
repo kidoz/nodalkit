@@ -78,6 +78,38 @@ std::vector<Utf8Unit> decode_utf8_units(std::string_view text) {
     return units;
 }
 
+std::optional<SurroundingText> bounded_surrounding_text(std::string_view text,
+                                                        std::size_t cursor,
+                                                        std::size_t anchor,
+                                                        std::size_t max_bytes) {
+    const auto boundary = [text](std::size_t offset) {
+        return offset == text.size() || (static_cast<unsigned char>(text[offset]) & 0xC0U) != 0x80U;
+    };
+    if (cursor > text.size() || anchor > text.size() || !boundary(cursor) || !boundary(anchor)) {
+        return std::nullopt;
+    }
+    const auto first = std::min(cursor, anchor);
+    const auto last = std::max(cursor, anchor);
+    if (last - first > max_bytes) {
+        return std::nullopt;
+    }
+    const auto padding = (max_bytes - (last - first)) / 2;
+    auto start = first - std::min(first, padding);
+    auto end = start + std::min(max_bytes, text.size() - start);
+    start = end - std::min(end, max_bytes);
+    while (start < first && !boundary(start)) {
+        ++start;
+    }
+    while (end > last && !boundary(end)) {
+        --end;
+    }
+    const auto excerpt = text.substr(start, end - start);
+    if (excerpt.find('\0') != std::string_view::npos) {
+        return std::nullopt;
+    }
+    return SurroundingText{.text = excerpt, .cursor = cursor - start, .anchor = anchor - start};
+}
+
 namespace {
 
 bool is_combining_mark(char32_t cp) {

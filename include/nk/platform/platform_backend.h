@@ -144,6 +144,9 @@ public:
     /// Apply a platform cursor shape for the current pointer location.
     virtual void set_cursor_shape(CursorShape shape) = 0;
 
+    /// Refresh the owning window's focused editor state after focus or text changes.
+    virtual void text_input_state_changed() {}
+
     /// Apply a titlebar presentation style. Default no-op; macOS implements
     /// full-size content-view and transparent-titlebar variants.
     virtual void set_titlebar_style(TitlebarStyle style) { (void)style; }

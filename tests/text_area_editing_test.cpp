@@ -566,6 +566,101 @@ TEST_CASE("Secure single-line composition does not paint preedit characters",
     CHECK(painted_text(*field) == std::vector<std::string>{"\u2022\u2022"});
 }
 
+TEST_CASE("Secure editors advertise privacy and ignore surrounding deletion",
+          "[text][ime][secure]") {
+    auto field = nk::TextField::create("secret");
+    field->allocate({0, 0, 240, 36});
+    CHECK_FALSE(field->text_input_state()->secure);
+    field->set_secure_text_entry(true);
+    const auto state = field->text_input_state();
+    REQUIRE(state.has_value());
+    CHECK(state->secure);
+    CHECK(state->text.empty());
+    CHECK_FALSE(field->handle_text_input_event({.type = nk::TextInputEvent::Type::DeleteSurrounding,
+                                                .text = {},
+                                                .delete_before_length = 2,
+                                                .delete_after_length = 2}));
+    CHECK(field->text() == "secret");
+    REQUIRE(key(*field, nk::KeyCode::Backspace));
+    CHECK(field->text() == "secre");
+    field->set_secure_text_entry(false);
+    CHECK_FALSE(field->text_input_state()->secure);
+    REQUIRE(field->handle_text_input_event({.type = nk::TextInputEvent::Type::DeleteSurrounding,
+                                            .text = {},
+                                            .delete_before_length = 2}));
+    CHECK(field->text() == "sec");
+}
+
+TEST_CASE("Enabling secure entry discards existing composition", "[text][ime][secure]") {
+    auto field = nk::TextField::create("secret");
+    field->allocate({0, 0, 240, 36});
+    REQUIRE(field->handle_text_input_event(
+        {.type = nk::TextInputEvent::Type::Preedit, .text = "pending"}));
+    field->set_secure_text_entry(true);
+    CHECK_FALSE(field->text_input_state()->composing);
+    CHECK(field->text() == "secret");
+}
+
+TEST_CASE("Surrounding text fits the wire limit and retains UTF-8 selections",
+          "[text][ime][wayland]") {
+    std::string text;
+    for (int i = 0; i < 3000; ++i) {
+        text += "\u754C";
+    }
+    for (const auto cursor : {0U, 3000U, 4500U, 8997U, 9000U}) {
+        for (const auto anchor : {cursor, cursor >= 300U ? cursor - 300U : 0U}) {
+            const auto state = nk::detail::bounded_surrounding_text(text, cursor, anchor, 4000);
+            REQUIRE(state.has_value());
+            CHECK(state->text.size() <= 4000);
+            CHECK(state->text.size() % 3 == 0);
+            CHECK(state->cursor % 3 == 0);
+            CHECK(state->anchor % 3 == 0);
+            CHECK(state->cursor <= state->text.size());
+            CHECK(state->anchor <= state->text.size());
+            CHECK(
+                state->text.substr(std::min(state->cursor, state->anchor),
+                                   std::max(state->cursor, state->anchor) -
+                                       std::min(state->cursor, state->anchor)) ==
+                std::string_view(text).substr(std::min(cursor, anchor),
+                                              std::max(cursor, anchor) - std::min(cursor, anchor)));
+        }
+    }
+    const auto small = nk::detail::bounded_surrounding_text("caf\u00E9", 5, 0, 4000);
+    REQUIRE(small.has_value());
+    CHECK(small->text == "caf\u00E9");
+    CHECK(small->cursor == 5);
+    CHECK(small->anchor == 0);
+}
+
+TEST_CASE("Surrounding text omits selections that cannot be represented", "[text][ime][wayland]") {
+    const std::string text(5000, 'x');
+    CHECK_FALSE(nk::detail::bounded_surrounding_text(text, 0, 4001, 4000).has_value());
+    const auto exact = nk::detail::bounded_surrounding_text(text, 0, 4000, 4000);
+    REQUIRE(exact.has_value());
+    CHECK(exact->text.size() == 4000);
+    CHECK_FALSE(nk::detail::bounded_surrounding_text("abc", 4, 0, 4000).has_value());
+    CHECK_FALSE(nk::detail::bounded_surrounding_text("caf\u00E9", 4, 0, 4000).has_value());
+    CHECK_FALSE(
+        nk::detail::bounded_surrounding_text(std::string_view("a\0b", 3), 0, 0, 4000).has_value());
+}
+
+TEST_CASE("Surrounding excerpts rebase both ends of a multibyte selection",
+          "[text][ime][wayland]") {
+    const std::string text = std::string(5000, 'a') + "\U0001F30D" + std::string(5000, 'c');
+    for (const auto cursor : {5000U, 5004U}) {
+        const auto state =
+            nk::detail::bounded_surrounding_text(text, cursor, 10004U - cursor, 4000);
+        REQUIRE(state.has_value());
+        CHECK(state->text.size() <= 4000);
+        const auto first = std::min(state->cursor, state->anchor);
+        const auto last = std::max(state->cursor, state->anchor);
+        CHECK(state->text.substr(first, last - first) == "\U0001F30D");
+        REQUIRE(first > 0);
+        CHECK(state->text[first - 1] == 'a');
+        CHECK(state->text[last] == 'c');
+    }
+}
+
 TEST_CASE("macOS gives marked-text navigation to the input context", "[text][ime][macos]") {
     for (const auto code : {nk::KeyCode::Return,
                             nk::KeyCode::Escape,
@@ -713,6 +808,7 @@ TEST_CASE("Window reports composition and withholds secure text from input metho
     field->set_secure_text_entry(true);
     state = window.current_text_input_state();
     REQUIRE(state.has_value());
+    CHECK(state->secure);
     CHECK(state->text.empty());
     CHECK(state->cursor == 0);
     CHECK(state->anchor == 0);

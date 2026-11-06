@@ -602,6 +602,12 @@ NativeWindowHandle WaylandSurface::native_display_handle() const {
     return static_cast<NativeWindowHandle>(backend_.display());
 }
 
+void WaylandSurface::text_input_state_changed() {
+    if (auto* input = backend_.input(); input != nullptr) {
+        input->sync_text_input_state();
+    }
+}
+
 void WaylandSurface::set_cursor_shape(CursorShape shape) {
     if (auto* input = backend_.input(); input != nullptr) {
         input->set_cursor_shape(shape);

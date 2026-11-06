@@ -437,6 +437,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     std::optional<nk::detail::AccessibleId> accessibility_focus_;
     std::string accessibility_focus_value_;
     BOOL accessibility_active_;
+    bool secure_event_input_;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame surface:(nk::MacosSurface*)surface {
@@ -445,6 +446,13 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
         _surface = surface;
         [self registerForDraggedTypes:@[ NSPasteboardTypeFileURL ]];
         [self updateTrackingAreas];
+        for (const auto name :
+             {NSApplicationDidBecomeActiveNotification, NSApplicationDidResignActiveNotification}) {
+            [[NSNotificationCenter defaultCenter] addObserver:self
+                                                     selector:@selector(applicationActivityChanged:)
+                                                         name:name
+                                                       object:NSApp];
+        }
     }
     return self;
 }
@@ -464,16 +472,58 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [self disableSecureInput];
     [self releaseAccessibilityElements];
     [super dealloc];
 }
 
 - (void)setSurface:(nk::MacosSurface*)surface {
     if (surface != _surface) {
+        [self disableSecureInput];
         // The tree and every proxy refer to the owning Window through the surface.
         [self releaseAccessibilityElements];
         _surface = surface;
     }
+}
+
+- (void)disableSecureInput {
+    if (secure_event_input_) {
+        DisableSecureEventInput();
+        secure_event_input_ = false;
+    }
+}
+
+- (void)synchronizeSecureInput {
+    const auto state = _surface ? _surface->owner().current_text_input_state() : std::nullopt;
+    const bool needed = state.has_value() && state->secure && NSApp.active &&
+                        self.window.isKeyWindow && self.window.firstResponder == self;
+    if (needed && !secure_event_input_) {
+        secure_event_input_ = EnableSecureEventInput() == noErr;
+    } else if (!needed) {
+        [self disableSecureInput];
+    }
+}
+
+- (void)applicationActivityChanged:(NSNotification*)notification {
+    (void)notification;
+    [self synchronizeSecureInput];
+}
+
+- (BOOL)becomeFirstResponder {
+    const BOOL accepted = [super becomeFirstResponder];
+    if (accepted) {
+        [self synchronizeSecureInput];
+    }
+    return accepted;
+}
+
+- (BOOL)resignFirstResponder {
+    const BOOL accepted = [super resignFirstResponder];
+    if (accepted) {
+        [self disableSecureInput];
+    }
+    return accepted;
 }
 
 // -- Accessibility --
@@ -949,10 +999,26 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     [self synchronizeNativeState:NO];
     const auto modifiers = macos_modifiers(event.modifierFlags);
     const auto key = macos_keycode_to_nk(event.keyCode);
-    const bool text_input_active = _surface->owner().current_text_input_state().has_value();
+    const auto input_state = _surface->owner().current_text_input_state();
+    const bool text_input_active = input_state.has_value();
     if (text_input_active &&
         !nk::detail::macos_dispatch_key_directly(key, modifiers, [self hasMarkedText])) {
-        [self interpretKeyEvents:@[ event ]];
+        if (input_state->secure) {
+            // Password keystrokes use the keyboard layout directly, bypassing
+            // input methods and their composition/candidate storage.
+            NSString* characters = event.characters;
+            if (characters.length > 0) {
+                const unichar first = [characters characterAtIndex:0];
+                if (first >= 0x20 && first != 0x7F &&
+                    !(first >= NSUpArrowFunctionKey && first <= NSModeSwitchFunctionKey)) {
+                    _surface->owner().dispatch_text_input_event(
+                        {.type = nk::TextInputEvent::Type::Commit,
+                         .text = objc_text_to_utf8(characters)});
+                }
+            }
+        } else {
+            [self interpretKeyEvents:@[ event ]];
+        }
     } else {
         nk::KeyEvent ke{};
         ke.type = nk::KeyEvent::Type::Press;
@@ -1034,6 +1100,16 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
 
 // -- Text input client --
 
+- (NSTextInputContext*)inputContext {
+    if (_surface) {
+        const auto state = _surface->owner().current_text_input_state();
+        if (state.has_value() && state->secure) {
+            return nil;
+        }
+    }
+    return [super inputContext];
+}
+
 // Cocoa addresses the committed text with the marked text in place of the
 // selection it replaces; nullopt when no focused editor accepts text input.
 - (std::optional<nk::detail::NativeInputDocument>)inputDocument {
@@ -1066,13 +1142,16 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
 // not keep composing text that the editor no longer shows, and let candidate
 // windows follow the caret after scrolling or window movement.
 - (void)synchronizeInputContext:(BOOL)moved {
+    [self synchronizeSecureInput];
     if (!_surface) {
         return;
     }
     const auto state = _surface->owner().current_text_input_state();
     if (!marked_text_.empty() && !(state.has_value() && state->composing)) {
         [self clearMarkedTextState];
-        [[self inputContext] discardMarkedText];
+        // The secure editor deliberately has no input context; cancel any
+        // composition retained by the preceding ordinary editor's context.
+        [[super inputContext] discardMarkedText];
     }
     std::optional<nk::Rect> caret_rect;
     if (state.has_value()) {
@@ -2089,6 +2168,12 @@ void MacosSurface::present(const uint8_t* rgba,
 void MacosSurface::sync_native_state(bool moved) {
     @autoreleasepool {
         [view_ synchronizeNativeState:moved ? YES : NO];
+    }
+}
+
+void MacosSurface::text_input_state_changed() {
+    @autoreleasepool {
+        [view_ synchronizeInputContext:NO];
     }
 }
 

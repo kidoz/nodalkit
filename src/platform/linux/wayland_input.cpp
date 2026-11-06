@@ -3,6 +3,7 @@
 
 #include "wayland_input.h"
 
+#include "../../text/text_boundaries.h"
 #include "cursor-shape-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
@@ -1033,6 +1034,7 @@ void WaylandInput::disable_text_input() {
     zwp_text_input_v3_disable(text_input_);
     zwp_text_input_v3_commit(text_input_);
     text_input_surface_ = nullptr;
+    text_input_has_surrounding_text_ = false;
 }
 
 void WaylandInput::sync_text_input_state() {
@@ -1051,24 +1053,42 @@ void WaylandInput::sync_text_input_state() {
         return;
     }
 
-    if (text_input_surface_ != keyboard_focus_) {
+    const auto surrounding =
+        state->secure
+            ? std::nullopt
+            : detail::bounded_surrounding_text(state->text, state->cursor, state->anchor, 4000);
+    // Surrounding-text support is fixed for a protocol input session. Reset it
+    // when privacy changes or a selection no longer fits in the wire buffer.
+    if (text_input_surface_ != keyboard_focus_ ||
+        text_input_has_surrounding_text_ != surrounding.has_value()) {
         if (text_input_surface_ != nullptr) {
             zwp_text_input_v3_disable(text_input_);
         }
         zwp_text_input_v3_enable(text_input_);
-        zwp_text_input_v3_set_content_type(text_input_,
-                                           ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
-                                           ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
         text_input_surface_ = keyboard_focus_;
+        text_input_has_surrounding_text_ = surrounding.has_value();
     }
+
+    zwp_text_input_v3_set_content_type(text_input_,
+                                       state->secure
+                                           ? ZWP_TEXT_INPUT_V3_CONTENT_HINT_SENSITIVE_DATA |
+                                                 ZWP_TEXT_INPUT_V3_CONTENT_HINT_HIDDEN_TEXT
+                                           : ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE,
+                                       state->secure ? ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_PASSWORD
+                                                     : ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
 
     const int x = static_cast<int>(std::floor(state->caret_rect.x));
     const int y = static_cast<int>(std::floor(state->caret_rect.y));
     const int width = std::max(1, static_cast<int>(std::ceil(state->caret_rect.width)));
     const int height = std::max(1, static_cast<int>(std::ceil(state->caret_rect.height)));
     zwp_text_input_v3_set_cursor_rectangle(text_input_, x, y, width, height);
-    zwp_text_input_v3_set_surrounding_text(
-        text_input_, state->text.c_str(), state->cursor, state->anchor);
+    if (surrounding.has_value()) {
+        const std::string text(surrounding->text);
+        zwp_text_input_v3_set_surrounding_text(text_input_,
+                                               text.c_str(),
+                                               static_cast<int32_t>(surrounding->cursor),
+                                               static_cast<int32_t>(surrounding->anchor));
+    }
     zwp_text_input_v3_commit(text_input_);
 }
 
@@ -1439,7 +1459,7 @@ void WaylandInput::text_input_delete_surrounding_text(void* data,
                                                       uint32_t before_length,
                                                       uint32_t after_length) {
     auto* self = static_cast<WaylandInput*>(data);
-    if (self->keyboard_focus_ == nullptr) {
+    if (self->keyboard_focus_ == nullptr || !self->text_input_has_surrounding_text_) {
         return;
     }
 

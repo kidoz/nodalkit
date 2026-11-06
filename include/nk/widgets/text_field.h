@@ -53,6 +53,8 @@ public:
     [[nodiscard]] bool is_spell_check_enabled() const;
 
     /// Enable or disable secure text entry (e.g. for passwords).
+    /// Masks display, suppresses copying and IME surrounding-text edits, and
+    /// requests platform input privacy. macOS keyboard entry bypasses IME composition.
     void set_secure_text_entry(bool secure);
     [[nodiscard]] bool is_secure_text_entry() const;
 

@@ -56,6 +56,7 @@ public:
     void set_clipboard_text(std::string text);
     void read_clipboard_text_async(std::function<void(std::string)> callback, bool primary);
     void poll_clipboard_transfers();
+    void sync_text_input_state();
 
     void set_cursor_shape(CursorShape shape);
 
@@ -187,7 +188,6 @@ private:
     [[nodiscard]] std::string preferred_primary_selection_mime_type() const;
     [[nodiscard]] int receive_offer_fd(bool primary) const;
     void send_clipboard_text(int fd, const std::string& text);
-    void sync_text_input_state();
     void disable_text_input();
     void reset_drag_offer(bool notify_leave);
     void poll_drag_transfer();
@@ -223,6 +223,7 @@ private:
     WaylandSurface* pointer_focus_ = nullptr;
     WaylandSurface* keyboard_focus_ = nullptr;
     WaylandSurface* text_input_surface_ = nullptr;
+    bool text_input_has_surrounding_text_ = false;
     float pointer_x_ = 0;
     float pointer_y_ = 0;
     uint32_t last_input_serial_ = 0;
