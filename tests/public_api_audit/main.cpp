@@ -69,6 +69,7 @@
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/banner.h>
 #include <nk/widgets/box.h>
+#include <nk/widgets/busy_overlay.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/button_content.h>
 #include <nk/widgets/clamp.h>
@@ -81,6 +82,8 @@
 #include <nk/widgets/headerbar.h>
 #include <nk/widgets/image_view.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/level_bar.h>
+#include <nk/widgets/link_button.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/menu_button.h>
@@ -798,6 +801,15 @@ void force_symbol_references() {
     (void)&nk::PreferencesRow::is_activatable;
     (void)&nk::PreferencesRow::set_activatable;
     (void)&nk::PreferencesRow::on_activated;
+    (void)&nk::ActionRow::create;
+    (void)&nk::ExpanderRow::create;
+    (void)static_cast<bool (nk::ExpanderRow::*)() const>(&nk::ExpanderRow::is_expanded);
+    (void)static_cast<void (nk::ExpanderRow::*)(bool)>(&nk::ExpanderRow::set_expanded);
+    (void)static_cast<void (nk::ExpanderRow::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::ExpanderRow::set_child);
+    (void)static_cast<nk::Widget* (nk::ExpanderRow::*)() const>(&nk::ExpanderRow::child);
+    (void)static_cast<nk::Signal<bool>& (nk::ExpanderRow::*)()>(
+        &nk::ExpanderRow::on_expanded_changed);
     (void)&nk::PreferencesGroup::create;
     (void)&nk::PreferencesGroup::title;
     (void)&nk::PreferencesGroup::set_title;
@@ -1240,6 +1252,16 @@ void force_symbol_references() {
     // (nk::Widget::*)(nk::Widget&)>(&nk::Widget::remove_child); REMOVED (protected member, caught
     // by audit iteration): (void)static_cast<void (nk::Widget::*)()>(&nk::Widget::clear_children);
     // REMOVED (protected): set_state_flag
+    (void)&nk::BusyOverlay::create;
+    (void)static_cast<void (nk::BusyOverlay::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::BusyOverlay::set_child);
+    (void)static_cast<nk::Widget* (nk::BusyOverlay::*)() const>(&nk::BusyOverlay::child);
+    (void)static_cast<bool (nk::BusyOverlay::*)() const>(&nk::BusyOverlay::is_busy);
+    (void)static_cast<void (nk::BusyOverlay::*)(bool)>(&nk::BusyOverlay::set_busy);
+    (void)static_cast<std::string_view (nk::BusyOverlay::*)() const>(&nk::BusyOverlay::message);
+    (void)static_cast<void (nk::BusyOverlay::*)(std::string)>(&nk::BusyOverlay::set_message);
+    (void)static_cast<nk::SizeRequest (nk::BusyOverlay::*)(const nk::Constraints&) const>(
+        &nk::BusyOverlay::measure);
     (void)&nk::ButtonContent::create;
     (void)static_cast<std::string_view (nk::ButtonContent::*)() const>(&nk::ButtonContent::label);
     (void)static_cast<void (nk::ButtonContent::*)(std::string)>(&nk::ButtonContent::set_label);
@@ -1377,6 +1399,27 @@ void force_symbol_references() {
     (void)static_cast<int (nk::ImageView::*)() const>(&nk::ImageView::source_height);
     (void)static_cast<nk::SizeRequest (nk::ImageView::*)(const nk::Constraints&) const>(
         &nk::ImageView::measure);
+    (void)&nk::LevelBar::create;
+    (void)static_cast<int (nk::LevelBar::*)() const>(&nk::LevelBar::value);
+    (void)static_cast<void (nk::LevelBar::*)(int)>(&nk::LevelBar::set_value);
+    (void)static_cast<int (nk::LevelBar::*)() const>(&nk::LevelBar::maximum);
+    (void)static_cast<void (nk::LevelBar::*)(int)>(&nk::LevelBar::set_maximum);
+    (void)static_cast<nk::SizeRequest (nk::LevelBar::*)(const nk::Constraints&) const>(
+        &nk::LevelBar::measure);
+    (void)&nk::LinkButton::create;
+    (void)static_cast<std::string_view (nk::LinkButton::*)() const>(&nk::LinkButton::label);
+    (void)static_cast<void (nk::LinkButton::*)(std::string)>(&nk::LinkButton::set_label);
+    (void)static_cast<std::string_view (nk::LinkButton::*)() const>(&nk::LinkButton::target);
+    (void)static_cast<void (nk::LinkButton::*)(std::string)>(&nk::LinkButton::set_target);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::LinkButton::*)()>(
+        &nk::LinkButton::on_activated);
+    (void)static_cast<nk::SizeRequest (nk::LinkButton::*)(const nk::Constraints&) const>(
+        &nk::LinkButton::measure);
+    (void)static_cast<bool (nk::LinkButton::*)(const nk::MouseEvent&)>(
+        &nk::LinkButton::handle_mouse_event);
+    (void)static_cast<bool (nk::LinkButton::*)(const nk::KeyEvent&)>(
+        &nk::LinkButton::handle_key_event);
+    (void)static_cast<nk::CursorShape (nk::LinkButton::*)() const>(&nk::LinkButton::cursor_shape);
     (void)&nk::Label::create;
     (void)static_cast<std::string_view (nk::Label::*)() const>(&nk::Label::text);
     (void)static_cast<void (nk::Label::*)(std::string)>(&nk::Label::set_text);
