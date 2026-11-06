@@ -78,6 +78,7 @@
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/dialog.h>
+#include <nk/widgets/expander.h>
 #include <nk/widgets/grid_view.h>
 #include <nk/widgets/headerbar.h>
 #include <nk/widgets/image_view.h>
@@ -683,6 +684,7 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_fullscreen);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::minimize);
     (void)static_cast<void (nk::Window::*)()>(&nk::Window::toggle_maximize);
+    (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_resizable);
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::is_maximized);
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::uses_client_side_decorations);
     (void)static_cast<void (nk::Window::*)(nk::TitlebarStyle)>(&nk::Window::set_titlebar_style);
@@ -714,6 +716,9 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Headerbar::*)() const>(&nk::Headerbar::shows_back_button);
     (void)static_cast<void (nk::Headerbar::*)(bool)>(&nk::Headerbar::set_show_back_button);
     (void)static_cast<nk::Signal<>& (nk::Headerbar::*)()>(&nk::Headerbar::on_back_requested);
+    (void)static_cast<bool (nk::Headerbar::*)(nk::Point) const>(&nk::Headerbar::hit_test);
+    (void)static_cast<std::vector<nk::Rect> (nk::Headerbar::*)() const>(
+        &nk::Headerbar::damage_regions);
     (void)&nk::Clamp::create;
     (void)&nk::Clamp::set_child;
     (void)&nk::Clamp::child;
@@ -814,6 +819,19 @@ void force_symbol_references() {
     (void)&nk::PreferencesRow::set_activatable;
     (void)&nk::PreferencesRow::on_activated;
     (void)&nk::ActionRow::create;
+    (void)&nk::Expander::create;
+    (void)static_cast<std::string_view (nk::Expander::*)() const>(&nk::Expander::title);
+    (void)static_cast<void (nk::Expander::*)(std::string)>(&nk::Expander::set_title);
+    (void)static_cast<std::string_view (nk::Expander::*)() const>(&nk::Expander::subtitle);
+    (void)static_cast<void (nk::Expander::*)(std::string)>(&nk::Expander::set_subtitle);
+    (void)static_cast<void (nk::Expander::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::Expander::set_suffix);
+    (void)static_cast<nk::Widget* (nk::Expander::*)() const>(&nk::Expander::suffix);
+    (void)static_cast<bool (nk::Expander::*)() const>(&nk::Expander::is_expanded);
+    (void)static_cast<void (nk::Expander::*)(bool)>(&nk::Expander::set_expanded);
+    (void)static_cast<void (nk::Expander::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::Expander::set_child);
+    (void)static_cast<nk::Signal<bool>& (nk::Expander::*)()>(&nk::Expander::on_expanded_changed);
     (void)&nk::ExpanderRow::create;
     (void)static_cast<bool (nk::ExpanderRow::*)() const>(&nk::ExpanderRow::is_expanded);
     (void)static_cast<void (nk::ExpanderRow::*)(bool)>(&nk::ExpanderRow::set_expanded);
@@ -861,6 +879,9 @@ void force_symbol_references() {
     (void)&nk::StatusPage::icon;
     (void)&nk::StatusPage::set_action;
     (void)&nk::StatusPage::action;
+    (void)static_cast<void (nk::StatusPage::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::StatusPage::set_content);
+    (void)static_cast<nk::Widget* (nk::StatusPage::*)() const>(&nk::StatusPage::content);
     (void)&nk::ToastOverlay::create;
     (void)&nk::ToastOverlay::set_child;
     (void)&nk::ToastOverlay::child;
@@ -1595,11 +1616,21 @@ void force_symbol_references() {
         &nk::StatusBar::set_segments);
     (void)static_cast<void (nk::StatusBar::*)(std::size_t, std::string)>(
         &nk::StatusBar::set_segment);
+    (void)static_cast<void (nk::StatusBar::*)(std::size_t, std::shared_ptr<nk::Widget>)>(
+        &nk::StatusBar::set_segment_widget);
+    (void)static_cast<nk::Widget* (nk::StatusBar::*)(std::size_t) const>(
+        &nk::StatusBar::segment_widget);
     (void)static_cast<std::size_t (nk::StatusBar::*)() const>(&nk::StatusBar::segment_count);
     (void)static_cast<std::string_view (nk::StatusBar::*)(std::size_t) const>(
         &nk::StatusBar::segment);
+    (void)static_cast<void (nk::StatusBar::*)(std::string)>(&nk::StatusBar::set_trailing);
+    (void)static_cast<std::string_view (nk::StatusBar::*)() const>(&nk::StatusBar::trailing);
     (void)static_cast<nk::SizeRequest (nk::StatusBar::*)(const nk::Constraints&) const>(
         &nk::StatusBar::measure);
+    (void)static_cast<void (nk::StatusBar::*)(const nk::Rect&)>(&nk::StatusBar::allocate);
+    (void)static_cast<bool (nk::StatusBar::*)(const nk::MouseEvent&)>(
+        &nk::StatusBar::handle_mouse_event);
+    (void)static_cast<nk::CursorShape (nk::StatusBar::*)() const>(&nk::StatusBar::cursor_shape);
     (void)&nk::TextField::create;
     (void)static_cast<std::string_view (nk::TextField::*)() const>(&nk::TextField::text);
     (void)static_cast<void (nk::TextField::*)(std::string)>(&nk::TextField::set_text);
