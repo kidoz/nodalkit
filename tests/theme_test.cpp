@@ -3,17 +3,65 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <nk/platform/system_preferences.h>
 #include <nk/style/gtk_palette.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_defaults.h>
 #include <nk/style/theme_selection.h>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
 
 namespace {
+
+struct ThemeHome {
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() /
+        ("nk-theme-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    std::optional<std::string> old_home;
+
+    ThemeHome() {
+        if (const char* home = std::getenv("HOME")) {
+            old_home = home;
+        }
+        std::filesystem::create_directories(path / ".config" / "gtk-4.0");
+        set_home(path.string());
+    }
+
+    ~ThemeHome() {
+        if (old_home.has_value()) {
+            set_home(*old_home);
+        } else {
+#if defined(_WIN32)
+            _putenv_s("HOME", "");
+#else
+            unsetenv("HOME");
+#endif
+        }
+        std::error_code error;
+        std::filesystem::remove_all(path, error);
+    }
+
+    static void set_home(const std::string& home) {
+#if defined(_WIN32)
+        _putenv_s("HOME", home.c_str());
+#else
+        setenv("HOME", home.c_str(), 1);
+#endif
+    }
+
+    void write(std::string_view filename, std::string_view text) const {
+        std::ofstream stream(path / ".config" / "gtk-4.0" / filename, std::ios::binary);
+        stream.write(text.data(), static_cast<std::streamsize>(text.size()));
+        REQUIRE(stream.good());
+    }
+};
 
 nk::Color color_token(const nk::Theme& theme, std::string_view name) {
     const auto* value = theme.token(name);
@@ -161,6 +209,51 @@ TEST_CASE("GTK palette parsing validates literals and honors later overrides",
     REQUIRE(invalid.has_value());
     CHECK_FALSE(invalid->has_window_bg);
     CHECK(invalid->has_accent_bg);
+}
+
+TEST_CASE("Palette loading rejects path-like theme names before reading CSS", "[theme][security]") {
+    const ThemeHome home;
+    home.write("gtk.css", "@define-color window_bg_color #102030;");
+    REQUIRE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+    for (const auto& name : {std::string{},
+                             std::string("."),
+                             std::string(".."),
+                             std::string("../escape"),
+                             std::string("folder/theme"),
+                             std::string("folder\\theme"),
+                             std::string("C:theme"),
+                             home.path.generic_string(),
+                             std::string("../../../") + home.path.relative_path().generic_string(),
+                             std::string("name\0suffix", 11)}) {
+        INFO("name: " << name);
+        CHECK_FALSE(nk::load_gtk_palette(name, false).has_value());
+    }
+}
+
+TEST_CASE("Palette loading bounds individual and combined stylesheet reads", "[theme][security]") {
+    const ThemeHome home;
+    constexpr std::size_t MaxBytes = 1024U * 1024U;
+    const std::string declaration = "@define-color window_bg_color #102030;";
+    std::string css = declaration;
+    css.resize(MaxBytes, ' ');
+    home.write("gtk.css", css);
+    REQUIRE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+
+    css.push_back(' ');
+    home.write("gtk.css", css);
+    CHECK_FALSE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+
+    css.resize(MaxBytes / 2 + 1);
+    home.write("gtk.css", css);
+    home.write("gtk-dark.css", css);
+    CHECK_FALSE(nk::load_gtk_palette("NodalKitMissingTheme", true).has_value());
+    CHECK(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+}
+
+TEST_CASE("Palette loading rejects nonregular stylesheets", "[theme][security]") {
+    const ThemeHome home;
+    std::filesystem::create_directory(home.path / ".config" / "gtk-4.0" / "gtk.css");
+    CHECK_FALSE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
 }
 
 TEST_CASE("Windows 11 theme is a native family, not a GNOME clone", "[theme][windows]") {

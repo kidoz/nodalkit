@@ -8,8 +8,10 @@
 #include <filesystem>
 #include <fstream>
 #include <nk/foundation/logging.h>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <vector>
 
@@ -151,22 +153,39 @@ std::unordered_map<std::string, Color> extract_define_colors(const std::string& 
     return result;
 }
 
-/// Read a file into a string. Returns an empty string on failure.
-std::string read_file(const std::filesystem::path& path) {
-    std::ifstream stream(path);
-    if (!stream) {
-        return {};
+constexpr std::size_t MaxThemeCssBytes = std::size_t{1024} * 1024;
+
+// Missing stylesheets are normal. Reject oversized or changing files instead
+// of parsing a truncated palette, and never read beyond the remaining budget.
+std::optional<std::string> read_file(const std::filesystem::path& path, std::size_t remaining) {
+    std::error_code error;
+    if (!std::filesystem::exists(path, error)) {
+        return std::string{};
     }
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    return buffer.str();
+    if (!std::filesystem::is_regular_file(path, error)) {
+        return std::nullopt;
+    }
+    const auto size = std::filesystem::file_size(path, error);
+    if (error || size > remaining) {
+        return std::nullopt;
+    }
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        return std::string{};
+    }
+    std::string content(static_cast<std::size_t>(size), '\0');
+    stream.read(content.data(), static_cast<std::streamsize>(content.size()));
+    if (!stream || stream.peek() != std::char_traits<char>::eof()) {
+        return std::nullopt;
+    }
+    return content;
 }
 
 /// Collect the combined CSS text for a theme. Searches the system theme
 /// directory and the user config, reading both `gtk.css` and `gtk-dark.css` as
 /// appropriate. Dark mode prefers `gtk-dark.css` but still pulls `gtk.css`
 /// (which `@import`s the variant).
-std::string collect_theme_css(std::string_view gtk_theme_name, bool dark) {
+std::optional<std::string> collect_theme_css(std::string_view gtk_theme_name, bool dark) {
     std::string combined;
 
     const auto system_dir =
@@ -176,13 +195,17 @@ std::string collect_theme_css(std::string_view gtk_theme_name, bool dark) {
         std::filesystem::path(home != nullptr ? home : ".") / ".config" / "gtk-4.0";
 
     // Later declarations override earlier ones, matching CSS cascade order.
-    combined += read_file(system_dir / "gtk.css");
-    if (dark) {
-        combined += read_file(system_dir / "gtk-dark.css");
-    }
-    combined += read_file(user_dir / "gtk.css");
-    if (dark) {
-        combined += read_file(user_dir / "gtk-dark.css");
+    for (const auto& directory : {system_dir, user_dir}) {
+        for (const auto* filename : {"gtk.css", "gtk-dark.css"}) {
+            if (!dark && std::string_view(filename) == "gtk-dark.css") {
+                continue;
+            }
+            auto content = read_file(directory / filename, MaxThemeCssBytes - combined.size());
+            if (!content.has_value()) {
+                return std::nullopt;
+            }
+            combined += *content;
+        }
     }
     return combined;
 }
@@ -234,16 +257,18 @@ std::optional<GtkPalette> parse_gtk_palette_css(std::string_view css) {
 }
 
 std::optional<GtkPalette> load_gtk_palette(std::string_view gtk_theme_name, bool dark) {
-    if (gtk_theme_name.empty()) {
+    if (gtk_theme_name.empty() || gtk_theme_name == "." || gtk_theme_name == ".." ||
+        gtk_theme_name.find_first_of("/\\:") != std::string_view::npos ||
+        gtk_theme_name.find('\0') != std::string_view::npos) {
         return std::nullopt;
     }
 
     auto css = collect_theme_css(gtk_theme_name, dark);
-    if (css.empty()) {
+    if (!css.has_value() || css->empty()) {
         NK_LOG_DEBUG("Theme", "No GTK stylesheet found for theme");
         return std::nullopt;
     }
-    return parse_gtk_palette_css(css);
+    return parse_gtk_palette_css(*css);
 }
 
 } // namespace nk

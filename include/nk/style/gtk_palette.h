@@ -45,7 +45,8 @@ struct GtkPalette {
 /// "Adwaita", "Adwaita-dark"). Resolves `/usr/share/themes/<name>/gtk-4.0/` and
 /// the user's `~/.config/gtk-4.0/gtk.css`, selecting `gtk-dark.css` when
 /// `dark` is true. Returns `std::nullopt` when no stylesheet is found or no
-/// recognized colors are defined.
+/// recognized colors are defined. The theme name must be one path segment;
+/// invalid names and stylesheets exceeding a combined 1 MiB are rejected.
 [[nodiscard]] std::optional<GtkPalette> load_gtk_palette(std::string_view gtk_theme_name,
                                                          bool dark);
 
