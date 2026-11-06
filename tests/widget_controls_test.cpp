@@ -29,10 +29,12 @@
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/headerbar.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/menu_bar.h>
 #include <nk/widgets/menu_button.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/radio_button.h>
 #include <nk/widgets/search_field.h>
+#include <nk/widgets/shortcut_label.h>
 #include <nk/widgets/slider.h>
 #include <nk/widgets/spin_button.h>
 #include <nk/widgets/split_button.h>
@@ -1095,6 +1097,37 @@ TEST_CASE("ContextMenu uses the shared menu model", "[widgets][context_menu]") {
     menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
     CHECK(reported == "app.quit");
     CHECK(index == 0);
+}
+
+TEST_CASE("ShortcutLabel formats modifiers in a fixed order and menus draw it",
+          "[widgets][shortcut_label]") {
+    const auto modifiers = nk::NativeMenuModifier::Shift | nk::NativeMenuModifier::Ctrl |
+                           nk::NativeMenuModifier::Super | nk::NativeMenuModifier::Alt;
+    const nk::NativeMenuShortcut shortcut{nk::KeyCode::S, modifiers};
+    CHECK(nk::ShortcutLabel::format(shortcut) == "Ctrl+Alt+Shift+Super+S");
+    CHECK(nk::ShortcutLabel::format({}).empty());
+    CHECK(nk::ShortcutLabel::format({nk::KeyCode::PrintScreen, nk::NativeMenuModifier::Ctrl})
+              .empty());
+
+    auto label = nk::ShortcutLabel::create({});
+    const auto empty = label->measure({});
+    CHECK(empty.natural_width == Catch::Approx(0.0F));
+    CHECK(painted_text(*label).empty());
+    label->set_shortcut({nk::KeyCode::S, nk::NativeMenuModifier::Ctrl});
+    label->allocate({0.0F, 0.0F, 80.0F, 16.0F});
+    CHECK(label->measure({}).natural_width > 0.0F);
+    CHECK(painted_text(*label).find("Ctrl+S") != std::string::npos);
+
+    auto bar = nk::MenuBar::create();
+    bar->allocate({0.0F, 0.0F, 320.0F, 32.0F});
+    bar->add_menu({"File",
+                   {nk::NativeMenuItem::action(
+                       "Save", "file.save", nk::NativeMenuShortcut{nk::KeyCode::S, modifiers})}});
+    CHECK(bar->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 24.0F, .y = 16.0F, .button = 1}));
+    CHECK(bar->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 24.0F, .y = 16.0F, .button = 1}));
+    CHECK(painted_text(*bar).find("Ctrl+Alt+Shift+Super+S") != std::string::npos);
 }
 
 TEST_CASE("SplitButton runs the primary action and opens its menu", "[widgets][split_button]") {

@@ -10,6 +10,7 @@
 #include <nk/text/font.h>
 #include <nk/ui_core/state_flags.h>
 #include <nk/widgets/menu_bar.h>
+#include <nk/widgets/shortcut_label.h>
 #include <optional>
 #include <utility>
 
@@ -219,7 +220,14 @@ float popup_width(const std::vector<MenuItem>& items, MeasureTextFn&& measure_te
             continue;
         }
         const auto measured = measure_text_fn(item.label);
-        width = std::max(width, measured.width + (item.children.empty() ? 28.0F : 44.0F));
+        float extra = item.children.empty() ? 28.0F : 44.0F;
+        if (item.shortcut.has_value()) {
+            const auto shortcut = ShortcutLabel::format(*item.shortcut);
+            if (!shortcut.empty()) {
+                extra += measure_text_fn(shortcut).width + 16.0F;
+            }
+        }
+        width = std::max(width, measured.width + extra);
     }
     return width;
 }
@@ -1069,10 +1077,24 @@ void MenuBar::snapshot(SnapshotContext& ctx) const {
                          item_enabled(item) ? popup_text : disabled_text,
                          font);
 
+            float trailing = 12.0F;
             if (!item.children.empty()) {
                 const auto arrow_size = measure_text(">", font);
-                ctx.add_text(
-                    {row_rect.right() - arrow_size.width - 12.0F, text_y}, ">", popup_text, font);
+                ctx.add_text({row_rect.right() - arrow_size.width - trailing, text_y},
+                             ">",
+                             item_enabled(item) ? popup_text : disabled_text,
+                             font);
+                trailing += arrow_size.width + 8.0F;
+            }
+            if (item.shortcut.has_value()) {
+                const auto shortcut = ShortcutLabel::format(*item.shortcut);
+                if (!shortcut.empty()) {
+                    const auto shortcut_size = measure_text(shortcut, font);
+                    ctx.add_text({row_rect.right() - shortcut_size.width - trailing, text_y},
+                                 shortcut,
+                                 item_enabled(item) ? popup_text : disabled_text,
+                                 font);
+                }
             }
         }
         ctx.pop_container();

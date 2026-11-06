@@ -12,6 +12,7 @@
 #include <nk/ui_core/state_flags.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/context_menu.h>
+#include <nk/widgets/shortcut_label.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -41,75 +42,11 @@ struct MenuHit {
     bool inside = false;
 };
 
-std::string key_label(KeyCode key) {
-    const auto value = static_cast<int>(key);
-    const auto letter = static_cast<int>(KeyCode::A);
-    if (value >= letter && value <= static_cast<int>(KeyCode::Z)) {
-        return std::string(1, static_cast<char>('A' + (value - letter)));
-    }
-    const auto digit = static_cast<int>(KeyCode::Num1);
-    if (value >= digit && value <= static_cast<int>(KeyCode::Num0)) {
-        const int offset = value - digit;
-        return std::string(1, offset == 9 ? '0' : static_cast<char>('1' + offset));
-    }
-    const auto function = static_cast<int>(KeyCode::F1);
-    if (value >= function && value <= static_cast<int>(KeyCode::F12)) {
-        return "F" + std::to_string(value - function + 1);
-    }
-    switch (key) {
-    case KeyCode::Return:
-        return "Return";
-    case KeyCode::Escape:
-        return "Esc";
-    case KeyCode::Tab:
-        return "Tab";
-    case KeyCode::Space:
-        return "Space";
-    case KeyCode::Delete:
-        return "Delete";
-    case KeyCode::Left:
-        return "Left";
-    case KeyCode::Right:
-        return "Right";
-    case KeyCode::Up:
-        return "Up";
-    case KeyCode::Down:
-        return "Down";
-    default:
-        return {};
-    }
-}
-
 std::string shortcut_label(const std::optional<NativeMenuShortcut>& shortcut) {
-    if (!shortcut.has_value() || shortcut->key == KeyCode::Unknown) {
+    if (!shortcut.has_value()) {
         return {};
     }
-    const auto key = key_label(shortcut->key);
-    if (key.empty()) {
-        return {};
-    }
-    std::string text;
-    auto append = [&text](std::string_view part) {
-        if (!text.empty()) {
-            text += '+';
-        }
-        text += part;
-    };
-    const auto modifiers = shortcut->modifiers;
-    if ((modifiers & NativeMenuModifier::Ctrl) != NativeMenuModifier::None) {
-        append("Ctrl");
-    }
-    if ((modifiers & NativeMenuModifier::Alt) != NativeMenuModifier::None) {
-        append("Alt");
-    }
-    if ((modifiers & NativeMenuModifier::Shift) != NativeMenuModifier::None) {
-        append("Shift");
-    }
-    if ((modifiers & NativeMenuModifier::Super) != NativeMenuModifier::None) {
-        append("Super");
-    }
-    append(key);
-    return text;
+    return ShortcutLabel::format(*shortcut);
 }
 
 bool has_submenu(const NativeMenuItem& item) {

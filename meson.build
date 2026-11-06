@@ -124,6 +124,7 @@ nk_sources = files(
     'src/widgets/context_menu.cpp',
     'src/widgets/search_bar.cpp',
     'src/widgets/search_field.cpp',
+    'src/widgets/shortcut_label.cpp',
     'src/widgets/command_palette.cpp',
     'src/widgets/split_view.cpp',
     'src/widgets/info_bar.cpp',
