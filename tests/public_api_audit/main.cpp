@@ -100,8 +100,10 @@
 #include <nk/widgets/split_button.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/status_page.h>
+#include <nk/widgets/tab_bar.h>
 #include <nk/widgets/text_field.h>
 #include <nk/widgets/toast_overlay.h>
+#include <nk/widgets/toolbar.h>
 #include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tree_view.h>
 #include <nk/widgets/view_stack.h>
@@ -769,6 +771,16 @@ void force_symbol_references() {
     (void)&nk::OverlaySplitView::set_sidebar_width;
     (void)&nk::OverlaySplitView::on_collapsed_changed;
     (void)&nk::OverlaySplitView::on_show_sidebar_changed;
+    (void)&nk::Toolbar::create;
+    (void)static_cast<void (nk::Toolbar::*)(std::shared_ptr<nk::Widget>)>(&nk::Toolbar::add_item);
+    (void)&nk::Toolbar::add_separator;
+    (void)&nk::Toolbar::clear_items;
+    (void)static_cast<nk::SizeRequest (nk::Toolbar::*)(const nk::Constraints&) const>(
+        &nk::Toolbar::measure);
+    (void)static_cast<bool (nk::Toolbar::*)(const nk::MouseEvent&)>(
+        &nk::Toolbar::handle_mouse_event);
+    (void)static_cast<bool (nk::Toolbar::*)(const nk::KeyEvent&)>(&nk::Toolbar::handle_key_event);
+    (void)static_cast<bool (nk::Toolbar::*)(nk::Point) const>(&nk::Toolbar::hit_test);
     (void)&nk::ToolbarView::create;
     (void)&nk::ToolbarView::set_content;
     (void)&nk::ToolbarView::content;
@@ -857,7 +869,10 @@ void force_symbol_references() {
     (void)&nk::ToastOverlay::dismiss_all;
     (void)&nk::ToastOverlay::toast_count;
     (void)&nk::ToastOverlay::current_toast;
-    (void)&nk::ToastOverlay::on_action;
+    (void)static_cast<nk::Signal<std::string_view>& (nk::ToastOverlay::*)()>(
+        &nk::ToastOverlay::on_action);
+    (void)static_cast<bool (nk::ToastOverlay::*)(const nk::KeyEvent&)>(
+        &nk::ToastOverlay::handle_key_event);
     (void)&nk::ToastOverlay::on_dismissed;
     (void)static_cast<void (nk::Window::*)(nk::NativeToolbarConfig)>(
         &nk::Window::set_native_toolbar);
@@ -1502,6 +1517,34 @@ void force_symbol_references() {
         &nk::SegmentedControl::cursor_shape);
     (void)static_cast<void (nk::SegmentedControl::*)(bool)>(
         &nk::SegmentedControl::on_focus_changed);
+    (void)&nk::TabBar::create;
+    (void)static_cast<void (nk::TabBar::*)(std::string)>(&nk::TabBar::append_tab);
+    (void)static_cast<void (nk::TabBar::*)(std::size_t, std::string)>(&nk::TabBar::insert_tab);
+    (void)static_cast<void (nk::TabBar::*)(std::size_t)>(&nk::TabBar::remove_tab);
+    (void)&nk::TabBar::clear_tabs;
+    (void)static_cast<std::size_t (nk::TabBar::*)() const>(&nk::TabBar::tab_count);
+    (void)static_cast<std::string_view (nk::TabBar::*)(std::size_t) const>(&nk::TabBar::tab_label);
+    (void)static_cast<void (nk::TabBar::*)(std::size_t, std::string)>(&nk::TabBar::set_tab_label);
+    (void)static_cast<void (nk::TabBar::*)(std::size_t, nk::SymbolicIcon)>(
+        &nk::TabBar::set_tab_icon);
+    (void)static_cast<nk::SymbolicIcon (nk::TabBar::*)(std::size_t) const>(&nk::TabBar::tab_icon);
+    (void)static_cast<void (nk::TabBar::*)(std::size_t, bool)>(&nk::TabBar::set_tab_closable);
+    (void)static_cast<bool (nk::TabBar::*)(std::size_t) const>(&nk::TabBar::is_tab_closable);
+    (void)static_cast<void (nk::TabBar::*)(std::size_t, std::shared_ptr<nk::Widget>)>(
+        &nk::TabBar::set_tab_page);
+    (void)static_cast<nk::Widget* (nk::TabBar::*)(std::size_t) const>(&nk::TabBar::tab_page);
+    (void)static_cast<int (nk::TabBar::*)() const>(&nk::TabBar::selected_index);
+    (void)static_cast<void (nk::TabBar::*)(int)>(&nk::TabBar::set_selected_index);
+    (void)static_cast<nk::Signal<int>& (nk::TabBar::*)()>(&nk::TabBar::on_selection_changed);
+    (void)static_cast<nk::SizeRequest (nk::TabBar::*)(const nk::Constraints&) const>(
+        &nk::TabBar::measure);
+    (void)static_cast<void (nk::TabBar::*)(const nk::Rect&)>(&nk::TabBar::allocate);
+    (void)static_cast<bool (nk::TabBar::*)(const nk::MouseEvent&)>(&nk::TabBar::handle_mouse_event);
+    (void)static_cast<bool (nk::TabBar::*)(const nk::KeyEvent&)>(&nk::TabBar::handle_key_event);
+    (void)static_cast<bool (nk::TabBar::*)(nk::Point) const>(&nk::TabBar::hit_test);
+    (void)static_cast<std::vector<nk::Rect> (nk::TabBar::*)() const>(&nk::TabBar::damage_regions);
+    (void)static_cast<nk::CursorShape (nk::TabBar::*)() const>(&nk::TabBar::cursor_shape);
+    (void)static_cast<void (nk::TabBar::*)(bool)>(&nk::TabBar::on_focus_changed);
     (void)&nk::ViewStack::create;
     (void)static_cast<void (nk::ViewStack::*)(std::shared_ptr<nk::Widget>, std::string)>(
         &nk::ViewStack::append);
