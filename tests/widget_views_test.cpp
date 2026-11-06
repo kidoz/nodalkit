@@ -753,6 +753,23 @@ TEST_CASE("Banner, status page, and toast overlay expose GNOME feedback patterns
     CHECK(icon->allocation().bottom() < action->allocation().y);
     CHECK(action->allocation().width > 0.0F);
 
+    auto form = FixedSizeWidget::create(180.0F, 36.0F);
+    const auto before_content = status->measure(nk::Constraints::unbounded()).natural_height;
+    status->set_content(form);
+    CHECK(status->content() == form.get());
+    CHECK(form->parent() == status.get());
+    CHECK(status->measure(nk::Constraints::unbounded()).natural_height > before_content);
+    status->allocate({0.0F, 0.0F, 800.0F, 600.0F});
+    CHECK(form->allocation().y >= action->allocation().bottom());
+    CHECK(form->allocation().width > action->allocation().width);
+    CHECK(deepest_hit(*status, {form->allocation().x + 8.0F, form->allocation().y + 8.0F}) ==
+          form.get());
+    status->set_content(nullptr);
+    CHECK(status->content() == nullptr);
+    CHECK(form->parent() == nullptr);
+    CHECK(status->measure(nk::Constraints::unbounded()).natural_height ==
+          Catch::Approx(before_content));
+
     auto overlay = nk::ToastOverlay::create();
     auto content = nk::Label::create("Document");
     overlay->set_child(content);

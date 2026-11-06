@@ -11,6 +11,7 @@ struct StatusPage::Impl {
     std::string description;
     std::shared_ptr<Widget> icon;
     std::shared_ptr<Widget> action;
+    std::shared_ptr<Widget> content;
     Rect text_bounds{};
     float title_y = 0.0F;
     float description_y = 0.0F;
@@ -93,6 +94,24 @@ Widget* StatusPage::action() const {
     return impl_->action.get();
 }
 
+void StatusPage::set_content(std::shared_ptr<Widget> content) {
+    if (impl_->content == content) {
+        return;
+    }
+    if (impl_->content != nullptr) {
+        remove_child(*impl_->content);
+    }
+    impl_->content = std::move(content);
+    if (impl_->content != nullptr) {
+        append_child(impl_->content);
+    }
+    queue_layout();
+}
+
+Widget* StatusPage::content() const {
+    return impl_->content.get();
+}
+
 SizeRequest StatusPage::measure(const Constraints& constraints) const {
     const auto title_font = FontDescriptor{
         .family = {}, .size = theme_number("title-font-size", 20.0F), .weight = FontWeight::Bold};
@@ -106,15 +125,24 @@ SizeRequest StatusPage::measure(const Constraints& constraints) const {
     const auto action = impl_->action != nullptr
                             ? impl_->action->measure_for_diagnostics(constraints)
                             : SizeRequest{};
+    const auto content = impl_->content != nullptr
+                             ? impl_->content->measure_for_diagnostics(constraints)
+                             : SizeRequest{};
     const float icon_spacing = impl_->icon != nullptr ? theme_number("icon-spacing", 16.0F) : 0.0F;
     const float title_spacing =
         !impl_->description.empty() ? theme_number("title-spacing", 8.0F) : 0.0F;
     const float action_spacing =
         impl_->action != nullptr ? theme_number("action-spacing", 24.0F) : 0.0F;
-    const float width =
-        std::max({title.width, description.width, icon.natural_width, action.natural_width});
+    const float content_spacing =
+        impl_->content != nullptr ? theme_number("content-spacing", 16.0F) : 0.0F;
+    const float width = std::max({title.width,
+                                  description.width,
+                                  icon.natural_width,
+                                  action.natural_width,
+                                  content.natural_width});
     const float height = icon.natural_height + icon_spacing + title.height + title_spacing +
-                         description.height + action_spacing + action.natural_height;
+                         description.height + action_spacing + action.natural_height +
+                         content_spacing + content.natural_height;
     return {std::min(width, constraints.max_width),
             height,
             std::min(width, constraints.max_width),
@@ -138,13 +166,19 @@ void StatusPage::allocate(const Rect& allocation) {
     const auto action = impl_->action != nullptr
                             ? impl_->action->measure({0.0F, 0.0F, width, allocation.height})
                             : SizeRequest{};
+    const auto content = impl_->content != nullptr
+                             ? impl_->content->measure({0.0F, 0.0F, width, allocation.height})
+                             : SizeRequest{};
     const float icon_spacing = impl_->icon != nullptr ? theme_number("icon-spacing", 16.0F) : 0.0F;
     const float title_spacing =
         !impl_->description.empty() ? theme_number("title-spacing", 8.0F) : 0.0F;
     const float action_spacing =
         impl_->action != nullptr ? theme_number("action-spacing", 24.0F) : 0.0F;
+    const float content_spacing =
+        impl_->content != nullptr ? theme_number("content-spacing", 16.0F) : 0.0F;
     const float block_height = icon.natural_height + icon_spacing + title.height + title_spacing +
-                               description.height + action_spacing + action.natural_height;
+                               description.height + action_spacing + action.natural_height +
+                               content_spacing + content.natural_height;
     const float x = allocation.x + ((allocation.width - width) * 0.5F);
     float y = allocation.y + std::max(0.0F, (allocation.height - block_height) * 0.5F);
 
@@ -168,6 +202,11 @@ void StatusPage::allocate(const Rect& allocation) {
                                  y,
                                  action.natural_width,
                                  action.natural_height});
+        y += action.natural_height;
+    }
+    if (impl_->content != nullptr) {
+        y += content_spacing;
+        impl_->content->allocate({x, y, width, content.natural_height});
     }
 }
 
