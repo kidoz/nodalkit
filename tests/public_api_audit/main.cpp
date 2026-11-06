@@ -101,6 +101,7 @@
 #include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tree_view.h>
 #include <nk/widgets/view_stack.h>
+#include <nk/widgets/window_title.h>
 
 namespace {
 
@@ -1462,6 +1463,13 @@ void force_symbol_references() {
     (void)static_cast<void (nk::ViewStack::*)(nk::SegmentedControl&)>(
         &nk::ViewStack::bind_switcher);
     (void)&nk::ViewStack::unbind_switcher;
+    (void)&nk::WindowTitle::create;
+    (void)static_cast<std::string_view (nk::WindowTitle::*)() const>(&nk::WindowTitle::title);
+    (void)static_cast<void (nk::WindowTitle::*)(std::string)>(&nk::WindowTitle::set_title);
+    (void)static_cast<std::string_view (nk::WindowTitle::*)() const>(&nk::WindowTitle::subtitle);
+    (void)static_cast<void (nk::WindowTitle::*)(std::string)>(&nk::WindowTitle::set_subtitle);
+    (void)static_cast<nk::SizeRequest (nk::WindowTitle::*)(const nk::Constraints&) const>(
+        &nk::WindowTitle::measure);
     (void)&nk::SearchBar::create;
     (void)static_cast<std::string_view (nk::SearchBar::*)() const>(&nk::SearchBar::text);
     (void)static_cast<void (nk::SearchBar::*)(std::string)>(&nk::SearchBar::set_text);

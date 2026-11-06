@@ -139,6 +139,7 @@ nk_sources = files(
     'src/widgets/avatar.cpp',
     'src/widgets/spinner.cpp',
     'src/widgets/view_stack.cpp',
+    'src/widgets/window_title.cpp',
     'src/widgets/visual_effect_view.cpp',
 )
 
