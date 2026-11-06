@@ -54,6 +54,7 @@
 #include <nk/widgets/status_page.h>
 #include <nk/widgets/tab_bar.h>
 #include <nk/widgets/toast_overlay.h>
+#include <nk/widgets/toolbar.h>
 #include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tooltip.h>
 #include <nk/widgets/view_stack.h>
@@ -476,6 +477,96 @@ TEST_CASE("OverlaySplitView overlays and dismisses its sidebar", "[widgets][over
     split->allocate({0.0F, 0.0F, 420.0F, 500.0F});
     CHECK_FALSE(sidebar->is_visible());
     CHECK_FALSE(split->shows_sidebar());
+}
+
+TEST_CASE("Toolbar overflows items that do not fit and moves focus with arrows",
+          "[widgets][toolbar]") {
+    auto bar = nk::Toolbar::create();
+    CHECK(bar->is_focusable());
+    auto first = nk::Button::create("One");
+    auto second = nk::Button::create("Two");
+    auto third = nk::Button::create("Three");
+    CHECK(first->is_focusable());
+    bar->add_item(first);
+    bar->add_separator();
+    bar->add_item(second);
+    bar->add_item(third);
+    CHECK_FALSE(first->is_focusable());
+
+    int first_clicks = 0;
+    int second_clicks = 0;
+    int third_clicks = 0;
+    auto first_connection = first->on_clicked().connect([&] { ++first_clicks; });
+    auto second_connection = second->on_clicked().connect([&] { ++second_clicks; });
+    auto third_connection = third->on_clicked().connect([&] { ++third_clicks; });
+
+    const auto fitted = bar->measure(nk::Constraints::unbounded());
+    bar->allocate({0.0F, 0.0F, fitted.natural_width + 40.0F, fitted.natural_height});
+    CHECK(first->parent() == bar.get());
+    CHECK(second->parent() == bar.get());
+    CHECK(third->parent() == bar.get());
+
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(first_clicks == 1);
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(second_clicks == 1);
+    CHECK(first_clicks == 1);
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Space}));
+    CHECK(third_clicks == 1);
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(first_clicks == 2);
+
+    bar->allocate({10.0F, 20.0F, 48.0F, fitted.natural_height});
+    CHECK(first->parent() != bar.get());
+    CHECK(second->parent() == first->parent());
+    CHECK(third->parent() == first->parent());
+    CHECK(first->is_focusable());
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    nk::Popover* popover = nullptr;
+    for (const auto& child : bar->children()) {
+        popover = dynamic_cast<nk::Popover*>(child.get());
+        if (popover != nullptr) {
+            break;
+        }
+    }
+    REQUIRE(popover != nullptr);
+    CHECK(popover->is_open());
+    CHECK(bar->hit_test({0.0F, 400.0F}));
+    CHECK(
+        second->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(second_clicks == 2);
+    CHECK(bar->children().size() >= 1);
+
+    bool opened_from_pointer = false;
+    popover->dismiss();
+    const float mid_y = 20.0F + (fitted.natural_height * 0.5F);
+    for (float x = 10.0F; x < 58.0F && !popover->is_open(); x += 4.0F) {
+        bar->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Press, .x = x, .y = mid_y, .button = 1});
+        bar->handle_mouse_event(
+            {.type = nk::MouseEvent::Type::Release, .x = x, .y = mid_y, .button = 1});
+        opened_from_pointer = popover->is_open();
+    }
+    CHECK(opened_from_pointer);
+
+    bar->allocate({0.0F, 0.0F, fitted.natural_width + 40.0F, fitted.natural_height});
+    CHECK_FALSE(popover->is_open());
+    CHECK(first->parent() == bar.get());
+    CHECK_FALSE(first->is_focusable());
+
+    bar->clear_items();
+    CHECK(first->parent() == nullptr);
+    CHECK(first->is_focusable());
+    CHECK_FALSE(
+        bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    first_connection.disconnect();
+    second_connection.disconnect();
+    third_connection.disconnect();
 }
 
 TEST_CASE("ToolbarView coordinates page bars and edge extension", "[widgets][toolbar_view]") {
