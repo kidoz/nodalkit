@@ -83,6 +83,7 @@ nk_sources = files(
     'src/widgets/label.cpp',
     'src/widgets/button.cpp',
     'src/widgets/box.cpp',
+    'src/widgets/busy_overlay.cpp',
     'src/widgets/button_content.cpp',
     'src/widgets/canvas_widget.cpp',
     'src/widgets/text_field.cpp',

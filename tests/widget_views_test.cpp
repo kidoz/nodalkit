@@ -27,6 +27,7 @@
 #include <nk/widgets/banner.h>
 #include <nk/widgets/box.h>
 #include <nk/widgets/breadcrumb.h>
+#include <nk/widgets/busy_overlay.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/clamp.h>
 #include <nk/widgets/context_menu.h>
@@ -1098,6 +1099,89 @@ TEST_CASE("Revealer slides its height when motion is allowed", "[widgets][reveal
     CHECK_FALSE(child->is_visible());
     const auto collapsed = revealer->measure({});
     CHECK(collapsed.natural_height == Catch::Approx(0.0F));
+}
+
+void append_snapshot_text(const nk::RenderNode& node, std::string& out) {
+    if (node.kind() == nk::RenderNodeKind::Text) {
+        out += static_cast<const nk::TextNode&>(node).text();
+        out += '\n';
+    }
+    for (const auto& child : node.children()) {
+        if (child) {
+            append_snapshot_text(*child, out);
+        }
+    }
+}
+
+std::string snapshot_text(nk::Widget& widget) {
+    nk::Widget& surface = widget;
+    nk::SnapshotContext snapshot;
+    surface.snapshot(snapshot);
+    const auto root = snapshot.take_root();
+    std::string text;
+    if (root) {
+        append_snapshot_text(*root, text);
+    }
+    return text;
+}
+
+nk::Spinner* find_spinner(nk::Widget& widget) {
+    if (auto* spinner = dynamic_cast<nk::Spinner*>(&widget)) {
+        return spinner;
+    }
+    for (const auto& child : widget.children()) {
+        if (child != nullptr) {
+            if (auto* spinner = find_spinner(*child)) {
+                return spinner;
+            }
+        }
+    }
+    return nullptr;
+}
+
+TEST_CASE("BusyOverlay blocks one page without becoming a dialog", "[widgets][busy_overlay]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Busy page", .width = 400, .height = 300});
+    auto page = nk::Button::create("Save");
+    auto overlay = nk::BusyOverlay::create();
+    overlay->set_child(page);
+    overlay->set_message("Saving");
+    window.set_child(overlay);
+    overlay->allocate({0.0F, 0.0F, 400.0F, 300.0F});
+
+    int clicks = 0;
+    [[maybe_unused]] auto connection = page->on_clicked().connect([&clicks] { ++clicks; });
+    page->grab_focus();
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 40.0F, .y = 20.0F, .button = 1});
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 40.0F, .y = 20.0F, .button = 1});
+    CHECK(clicks == 1);
+
+    overlay->set_busy(true);
+    CHECK(overlay->is_busy());
+    auto* spinner = find_spinner(*overlay);
+    REQUIRE(spinner != nullptr);
+    CHECK(spinner->is_spinning());
+    CHECK(snapshot_text(*overlay).find("Saving") != std::string::npos);
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 40.0F, .y = 20.0F, .button = 1});
+    window.dispatch_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 40.0F, .y = 20.0F, .button = 1});
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    CHECK(clicks == 1);
+
+    overlay->set_message("");
+    CHECK(overlay->message().empty());
+    CHECK(snapshot_text(*overlay).find("Saving") == std::string::npos);
+    CHECK(spinner->is_spinning());
+
+    overlay->set_busy(false);
+    CHECK_FALSE(overlay->is_busy());
+    CHECK_FALSE(spinner->is_spinning());
+    CHECK(nk::has_flag(page->state_flags(), nk::StateFlags::Focused));
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    CHECK(clicks == 2);
 }
 
 TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]") {
