@@ -88,9 +88,11 @@
 #include <nk/widgets/overlay_split_view.h>
 #include <nk/widgets/popover.h>
 #include <nk/widgets/preferences.h>
+#include <nk/widgets/revealer.h>
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/search_bar.h>
 #include <nk/widgets/segmented_control.h>
+#include <nk/widgets/shortcut_label.h>
 #include <nk/widgets/split_button.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/status_page.h>
@@ -813,6 +815,14 @@ void force_symbol_references() {
     (void)&nk::Banner::is_revealed;
     (void)&nk::Banner::set_revealed;
     (void)&nk::Banner::on_button_clicked;
+    (void)&nk::Revealer::create;
+    (void)static_cast<void (nk::Revealer::*)(std::shared_ptr<nk::Widget>)>(
+        &nk::Revealer::set_child);
+    (void)static_cast<nk::Widget* (nk::Revealer::*)() const>(&nk::Revealer::child);
+    (void)static_cast<bool (nk::Revealer::*)() const>(&nk::Revealer::is_revealed);
+    (void)static_cast<void (nk::Revealer::*)(bool)>(&nk::Revealer::set_revealed);
+    (void)static_cast<float (nk::Revealer::*)() const>(&nk::Revealer::reveal_fraction);
+    (void)static_cast<nk::Signal<>& (nk::Revealer::*)()>(&nk::Revealer::on_settled);
     (void)&nk::StatusPage::create;
     (void)&nk::StatusPage::title;
     (void)&nk::StatusPage::set_title;
@@ -1464,6 +1474,14 @@ void force_symbol_references() {
     (void)static_cast<nk::Signal<std::string_view>& (nk::SearchBar::*)()>(
         &nk::SearchBar::on_search);
     (void)static_cast<nk::Signal<bool>& (nk::SearchBar::*)()>(&nk::SearchBar::on_revealed_changed);
+    (void)&nk::ShortcutLabel::create;
+    (void)static_cast<std::string (*)(const nk::NativeMenuShortcut&)>(&nk::ShortcutLabel::format);
+    (void)static_cast<nk::NativeMenuShortcut (nk::ShortcutLabel::*)() const>(
+        &nk::ShortcutLabel::shortcut);
+    (void)static_cast<void (nk::ShortcutLabel::*)(nk::NativeMenuShortcut)>(
+        &nk::ShortcutLabel::set_shortcut);
+    (void)static_cast<nk::SizeRequest (nk::ShortcutLabel::*)(const nk::Constraints&) const>(
+        &nk::ShortcutLabel::measure);
     (void)static_cast<nk::Signal<int>& (nk::ViewStack::*)()>(&nk::ViewStack::on_selection_changed);
     (void)&nk::StatusBar::create;
     (void)static_cast<void (nk::StatusBar::*)(std::vector<std::string>)>(
