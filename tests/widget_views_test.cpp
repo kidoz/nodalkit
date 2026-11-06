@@ -607,15 +607,15 @@ TEST_CASE("Banner, status page, and toast overlay expose GNOME feedback patterns
     REQUIRE(overlay->current_toast() != nullptr);
     CHECK(overlay->current_toast()->title == "Connection Lost");
     CHECK(overlay->toast_count() == 2);
-    bool action_requested = false;
-    auto action_connection = overlay->on_action().connect([&] {
-        action_requested = true;
+    std::string action_title;
+    auto action_connection = overlay->on_action().connect([&](std::string_view title) {
+        action_title = std::string(title);
         overlay->dismiss_current();
     });
     REQUIRE(overlay->accessible() != nullptr);
     REQUIRE(
         overlay->children().back()->accessible()->perform_action(nk::AccessibleAction::Activate));
-    CHECK(action_requested);
+    CHECK(action_title == "Connection Lost");
     REQUIRE(overlay->current_toast() != nullptr);
     CHECK(overlay->current_toast()->title == "Saved");
     CHECK(overlay->toast_count() == 1);
@@ -636,6 +636,50 @@ TEST_CASE("ToastOverlay automatically dismisses transient feedback", "[widgets][
     });
 
     CHECK(overlay->toast_count() == 1);
+    REQUIRE(event_loop.poll());
+    CHECK(overlay->toast_count() == 0);
+}
+
+TEST_CASE("ToastOverlay identifies the action and pauses while hovered", "[widgets][feedback]") {
+    nk::EventLoop event_loop;
+    auto overlay = nk::ToastOverlay::create();
+    overlay->allocate({0.0F, 0.0F, 640.0F, 480.0F});
+    std::string acted;
+    [[maybe_unused]] auto connection = overlay->on_action().connect(
+        [&acted](std::string_view title) { acted = std::string(title); });
+
+    overlay->add_toast({.title = "Saved", .action_label = {}});
+    CHECK_FALSE(
+        overlay->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(overlay->toast_count() == 1);
+    CHECK(
+        overlay->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape}));
+    CHECK(overlay->toast_count() == 0);
+    CHECK(acted.empty());
+
+    overlay->add_toast({.title = "Saved", .action_label = {}});
+    overlay->add_toast(
+        {.title = "Connection Lost", .action_label = "Retry", .priority = nk::ToastPriority::High});
+    CHECK(
+        overlay->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Space}));
+    CHECK(acted == "Connection Lost");
+    REQUIRE(overlay->current_toast() != nullptr);
+    CHECK(overlay->current_toast()->title == "Saved");
+
+    overlay->dismiss_all();
+    overlay->add_toast({
+        .title = "Syncing",
+        .action_label = {},
+        .timeout = std::chrono::milliseconds{80},
+    });
+    auto* surface = overlay->children().back().get();
+    REQUIRE(surface != nullptr);
+    surface->handle_mouse_event({.type = nk::MouseEvent::Type::Enter, .x = 320.0F, .y = 430.0F});
+    std::this_thread::sleep_for(std::chrono::milliseconds{120});
+    event_loop.poll();
+    CHECK(overlay->toast_count() == 1);
+    surface->handle_mouse_event({.type = nk::MouseEvent::Type::Leave, .x = 0.0F, .y = 0.0F});
+    std::this_thread::sleep_for(std::chrono::milliseconds{120});
     REQUIRE(event_loop.poll());
     CHECK(overlay->toast_count() == 0);
 }

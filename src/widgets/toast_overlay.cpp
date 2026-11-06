@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <nk/accessibility/accessible.h>
 #include <nk/platform/events.h>
+#include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/text/font.h>
@@ -28,7 +30,23 @@ public:
 
     Signal<>& on_dismissed() { return dismissed_; }
 
+    void set_pointer_handler(std::function<void(bool)> handler) {
+        pointer_handler_ = std::move(handler);
+    }
+
     bool handle_mouse_event(const MouseEvent& event) override {
+        const bool inside = allocation().contains({event.x, event.y});
+        if (event.type == MouseEvent::Type::Enter ||
+            (event.type == MouseEvent::Type::Move && inside)) {
+            if (pointer_handler_) {
+                pointer_handler_(true);
+            }
+        } else if (event.type == MouseEvent::Type::Leave ||
+                   (event.type == MouseEvent::Type::Move && !inside)) {
+            if (pointer_handler_) {
+                pointer_handler_(false);
+            }
+        }
         if (event.button != 1) {
             return false;
         }
@@ -100,6 +118,7 @@ private:
     Signal<> action_;
     Signal<> dismissed_;
     bool armed_ = false;
+    std::function<void(bool)> pointer_handler_;
 };
 
 } // namespace
@@ -110,11 +129,15 @@ struct ToastOverlay::Impl {
     std::deque<Toast> toasts;
     ScopedConnection action_connection;
     ScopedConnection dismissed_connection;
-    Signal<> action;
+    Signal<std::string_view> action;
     Signal<> dismissed;
     std::uint64_t current_generation = 0;
     EventLoop* timeout_loop = nullptr;
     CallbackHandle timeout_handle;
+    bool pointer_inside = false;
+    bool timeout_paused = false;
+    std::chrono::milliseconds remaining{0};
+    std::chrono::steady_clock::time_point deadline{};
 };
 
 std::shared_ptr<ToastOverlay> ToastOverlay::create() {
@@ -125,9 +148,10 @@ ToastOverlay::ToastOverlay() : impl_(std::make_unique<Impl>()) {
     impl_->surface = ToastSurface::create();
     impl_->surface->set_visible(false);
     append_child(impl_->surface);
+    impl_->surface->set_pointer_handler([this](bool inside) { set_pointer_inside(inside); });
     impl_->action_connection = ScopedConnection(impl_->surface->on_action().connect([this] {
         const auto generation = impl_->current_generation;
-        impl_->action.emit();
+        emit_current_action();
         if (impl_->current_generation == generation) {
             dismiss_current();
         }
@@ -185,7 +209,7 @@ void ToastOverlay::add_toast(Toast toast) {
     } else {
         accessible.add_action(AccessibleAction::Activate, [this] {
             const auto generation = impl_->current_generation;
-            impl_->action.emit();
+            emit_current_action();
             if (impl_->current_generation == generation) {
                 dismiss_current();
             }
@@ -194,7 +218,13 @@ void ToastOverlay::add_toast(Toast toast) {
     }
     queue_redraw();
     if (changes_current) {
-        schedule_timeout();
+        if (impl_->pointer_inside) {
+            cancel_timeout();
+            impl_->remaining = impl_->toasts.front().timeout;
+            impl_->timeout_paused = true;
+        } else {
+            schedule_timeout();
+        }
     }
 }
 
@@ -216,7 +246,7 @@ void ToastOverlay::dismiss_current() {
     } else {
         accessible.add_action(AccessibleAction::Activate, [this] {
             const auto generation = impl_->current_generation;
-            impl_->action.emit();
+            emit_current_action();
             if (impl_->current_generation == generation) {
                 dismiss_current();
             }
@@ -226,7 +256,12 @@ void ToastOverlay::dismiss_current() {
     queue_redraw();
     impl_->dismissed.emit();
     if (impl_->toasts.empty()) {
+        impl_->timeout_paused = false;
         cancel_timeout();
+    } else if (impl_->pointer_inside) {
+        cancel_timeout();
+        impl_->remaining = impl_->toasts.front().timeout;
+        impl_->timeout_paused = true;
     } else {
         schedule_timeout();
     }
@@ -244,6 +279,7 @@ void ToastOverlay::dismiss_all() {
     accessible.set_name("");
     accessible.remove_action(AccessibleAction::Activate);
     queue_redraw();
+    impl_->timeout_paused = false;
     cancel_timeout();
     impl_->dismissed.emit();
 }
@@ -257,11 +293,15 @@ void ToastOverlay::cancel_timeout() {
 }
 
 void ToastOverlay::schedule_timeout() {
-    cancel_timeout();
     if (impl_->toasts.empty()) {
+        cancel_timeout();
         return;
     }
-
+    const auto duration =
+        std::max(std::chrono::milliseconds::zero(), impl_->toasts.front().timeout);
+    cancel_timeout();
+    impl_->timeout_paused = false;
+    impl_->remaining = duration;
     auto* loop = EventLoop::current();
     if (loop == nullptr) {
         return;
@@ -269,13 +309,15 @@ void ToastOverlay::schedule_timeout() {
 
     const auto generation = impl_->current_generation;
     const std::weak_ptr<Widget> weak_self = weak_from_this();
+    impl_->deadline = std::chrono::steady_clock::now() + duration;
     impl_->timeout_loop = loop;
     impl_->timeout_handle = loop->set_timeout(
-        std::max(std::chrono::milliseconds::zero(), impl_->toasts.front().timeout),
+        duration,
         [weak_self, generation] {
             const auto widget = weak_self.lock();
             const auto overlay = std::dynamic_pointer_cast<ToastOverlay>(widget);
-            if (overlay == nullptr || overlay->impl_->current_generation != generation) {
+            if (overlay == nullptr || overlay->impl_->current_generation != generation ||
+                overlay->impl_->timeout_paused) {
                 return;
             }
             overlay->impl_->timeout_loop = nullptr;
@@ -283,6 +325,63 @@ void ToastOverlay::schedule_timeout() {
             overlay->dismiss_current();
         },
         "toast-overlay-timeout");
+}
+
+void ToastOverlay::pause_timeout() {
+    if (impl_->timeout_paused || impl_->toasts.empty()) {
+        return;
+    }
+    if (impl_->timeout_handle.valid()) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+            impl_->deadline - std::chrono::steady_clock::now());
+        impl_->remaining = std::max(std::chrono::milliseconds::zero(), left);
+    }
+    impl_->timeout_paused = true;
+    cancel_timeout();
+}
+
+void ToastOverlay::resume_timeout() {
+    if (!impl_->timeout_paused || impl_->toasts.empty()) {
+        return;
+    }
+    const auto duration = impl_->remaining;
+    impl_->timeout_paused = false;
+    if (duration.count() < 0) {
+        dismiss_current();
+        return;
+    }
+    // schedule_timeout reads the toast timeout. Temporarily substitute the
+    // remaining time so a hover does not restart the full interval.
+    auto& timeout = impl_->toasts.front().timeout;
+    const auto saved = timeout;
+    timeout = duration;
+    schedule_timeout();
+    if (!impl_->toasts.empty()) {
+        impl_->toasts.front().timeout = saved;
+    }
+}
+
+void ToastOverlay::set_pointer_inside(bool inside) {
+    if (impl_->pointer_inside == inside) {
+        return;
+    }
+    impl_->pointer_inside = inside;
+    if (impl_->toasts.empty()) {
+        return;
+    }
+    if (inside) {
+        pause_timeout();
+    } else {
+        resume_timeout();
+    }
+}
+
+void ToastOverlay::emit_current_action() {
+    if (impl_->toasts.empty()) {
+        return;
+    }
+    const std::string title = impl_->toasts.front().title;
+    impl_->action.emit(title);
 }
 
 std::size_t ToastOverlay::toast_count() const {
@@ -293,8 +392,30 @@ const Toast* ToastOverlay::current_toast() const {
     return impl_->toasts.empty() ? nullptr : &impl_->toasts.front();
 }
 
-Signal<>& ToastOverlay::on_action() {
+Signal<std::string_view>& ToastOverlay::on_action() {
     return impl_->action;
+}
+
+bool ToastOverlay::handle_key_event(const KeyEvent& event) {
+    if (impl_->toasts.empty() || event.type != KeyEvent::Type::Press) {
+        return false;
+    }
+    if (event.key == KeyCode::Escape) {
+        dismiss_current();
+        return true;
+    }
+    if (impl_->toasts.front().action_label.empty()) {
+        return false;
+    }
+    if (event.key == KeyCode::Return || event.key == KeyCode::Space) {
+        const auto generation = impl_->current_generation;
+        emit_current_action();
+        if (impl_->current_generation == generation) {
+            dismiss_current();
+        }
+        return true;
+    }
+    return false;
 }
 
 Signal<>& ToastOverlay::on_dismissed() {

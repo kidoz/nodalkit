@@ -10,6 +10,7 @@
 #include <nk/foundation/signal.h>
 #include <nk/ui_core/widget.h>
 #include <string>
+#include <string_view>
 
 namespace nk {
 
@@ -37,12 +38,15 @@ public:
     void dismiss_all();
     [[nodiscard]] std::size_t toast_count() const;
     [[nodiscard]] const Toast* current_toast() const;
-    Signal<>& on_action();
+
+    /// Emitted with the current toast's title when its action runs.
+    Signal<std::string_view>& on_action();
     Signal<>& on_dismissed();
 
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
     void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
 
 protected:
     ToastOverlay();
@@ -51,6 +55,10 @@ protected:
 private:
     void cancel_timeout();
     void schedule_timeout();
+    void pause_timeout();
+    void resume_timeout();
+    void set_pointer_inside(bool inside);
+    void emit_current_action();
 
     struct Impl;
     std::unique_ptr<Impl> impl_;
