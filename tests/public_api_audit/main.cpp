@@ -67,6 +67,7 @@
 #include <nk/ui_core/cursor_shape.h>
 #include <nk/ui_core/state_flags.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/badge.h>
 #include <nk/widgets/banner.h>
 #include <nk/widgets/box.h>
 #include <nk/widgets/busy_overlay.h>
@@ -840,6 +841,19 @@ void force_symbol_references() {
     (void)static_cast<nk::Widget* (nk::ExpanderRow::*)() const>(&nk::ExpanderRow::child);
     (void)static_cast<nk::Signal<bool>& (nk::ExpanderRow::*)()>(
         &nk::ExpanderRow::on_expanded_changed);
+    (void)&nk::PasswordRow::create;
+    (void)static_cast<std::string_view (nk::PasswordRow::*)() const>(&nk::PasswordRow::text);
+    (void)static_cast<void (nk::PasswordRow::*)(std::string)>(&nk::PasswordRow::set_text);
+    (void)static_cast<void (nk::PasswordRow::*)(std::string)>(&nk::PasswordRow::set_placeholder);
+    (void)static_cast<nk::Signal<std::string_view>& (nk::PasswordRow::*)()>(
+        &nk::PasswordRow::on_text_changed);
+    (void)&nk::SpinRow::create;
+    (void)static_cast<double (nk::SpinRow::*)() const>(&nk::SpinRow::value);
+    (void)static_cast<void (nk::SpinRow::*)(double)>(&nk::SpinRow::set_value);
+    (void)static_cast<void (nk::SpinRow::*)(double, double)>(&nk::SpinRow::set_range);
+    (void)static_cast<void (nk::SpinRow::*)(double)>(&nk::SpinRow::set_step);
+    (void)static_cast<void (nk::SpinRow::*)(int)>(&nk::SpinRow::set_precision);
+    (void)static_cast<nk::Signal<double>& (nk::SpinRow::*)()>(&nk::SpinRow::on_value_changed);
     (void)&nk::PreferencesGroup::create;
     (void)&nk::PreferencesGroup::title;
     (void)&nk::PreferencesGroup::set_title;
@@ -854,6 +868,18 @@ void force_symbol_references() {
     (void)&nk::PreferencesPage::add;
     (void)&nk::PreferencesPage::remove;
     (void)&nk::PreferencesPage::groups;
+    (void)static_cast<std::shared_ptr<nk::Badge> (*)(std::string)>(&nk::Badge::create);
+    (void)static_cast<std::shared_ptr<nk::Badge> (*)(int)>(&nk::Badge::create);
+    (void)static_cast<std::string_view (nk::Badge::*)() const>(&nk::Badge::text);
+    (void)static_cast<void (nk::Badge::*)(std::string)>(&nk::Badge::set_text);
+    (void)static_cast<void (nk::Badge::*)(int)>(&nk::Badge::set_count);
+    (void)static_cast<int (nk::Badge::*)() const>(&nk::Badge::count);
+    (void)static_cast<void (nk::Badge::*)(int)>(&nk::Badge::set_count_cap);
+    (void)static_cast<int (nk::Badge::*)() const>(&nk::Badge::count_cap);
+    (void)static_cast<void (nk::Badge::*)(bool)>(&nk::Badge::set_dot);
+    (void)static_cast<bool (nk::Badge::*)() const>(&nk::Badge::is_dot);
+    (void)static_cast<void (nk::Badge::*)(bool)>(&nk::Badge::set_conveys_status);
+    (void)static_cast<bool (nk::Badge::*)() const>(&nk::Badge::conveys_status);
     (void)&nk::Banner::create;
     (void)&nk::Banner::title;
     (void)&nk::Banner::set_title;
@@ -1408,6 +1434,11 @@ void force_symbol_references() {
     (void)&nk::Dialog::create;
     (void)static_cast<void (nk::Dialog::*)(std::string, nk::DialogResponse)>(
         &nk::Dialog::add_button);
+    (void)static_cast<void (nk::Dialog::*)(std::string, nk::DialogResponse, nk::DialogButtonStyle)>(
+        &nk::Dialog::add_button);
+    (void)static_cast<void (nk::Dialog::*)(std::string, int, nk::DialogButtonStyle)>(
+        &nk::Dialog::add_custom_button);
+    (void)static_cast<int (nk::Dialog::*)() const>(&nk::Dialog::custom_response_id);
     (void)static_cast<void (nk::Dialog::*)(std::shared_ptr<nk::Widget>)>(&nk::Dialog::set_content);
     (void)static_cast<void (nk::Dialog::*)(nk::DialogPresentationStyle)>(
         &nk::Dialog::set_presentation_style);
