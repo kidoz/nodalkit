@@ -1177,6 +1177,89 @@ void collect_rounded_colors(const nk::RenderNode& node, std::vector<nk::Color>& 
     }
 }
 
+TEST_CASE("ExpanderRow reveals an indented child and lets the next row move up",
+          "[widgets][preferences]") {
+    auto expander = nk::ExpanderRow::create("Details", "Optional notes");
+    auto body = nk::Label::create("Body text");
+    expander->set_child(body);
+    CHECK_FALSE(expander->is_expanded());
+    CHECK_FALSE(body->is_visible());
+    REQUIRE(expander->accessible() != nullptr);
+    CHECK(expander->accessible()->role() == nk::AccessibleRole::ToggleButton);
+    CHECK(expander->accessible()->name() == "Details");
+    CHECK_FALSE(nk::has_flag(expander->state_flags(), nk::StateFlags::Checked));
+
+    auto next = nk::ActionRow::create("Next");
+    auto group = nk::PreferencesGroup::create();
+    group->add(expander);
+    group->add(next);
+    group->allocate({0.0F, 0.0F, 420.0F, 400.0F});
+    const float collapsed_next_y = next->allocation().y;
+
+    int changes = 0;
+    [[maybe_unused]] auto connection =
+        expander->on_expanded_changed().connect([&changes](bool) { ++changes; });
+    CHECK(
+        expander->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Space}));
+    CHECK(expander->is_expanded());
+    CHECK(nk::has_flag(expander->state_flags(), nk::StateFlags::Checked));
+    CHECK(changes == 1);
+
+    group->allocate({0.0F, 0.0F, 420.0F, 400.0F});
+    CHECK(body->is_visible());
+    CHECK(body->allocation().x >= expander->allocation().x + 24.0F);
+    CHECK(next->allocation().y > collapsed_next_y);
+
+    const float body_y = body->allocation().y + 1.0F;
+    CHECK_FALSE(expander->handle_mouse_event({.type = nk::MouseEvent::Type::Release,
+                                              .x = body->allocation().x + 4.0F,
+                                              .y = body_y,
+                                              .button = 1}));
+    CHECK(expander->is_expanded());
+
+    expander->set_expanded(false);
+    group->allocate({0.0F, 0.0F, 420.0F, 400.0F});
+    CHECK_FALSE(body->is_visible());
+    CHECK(next->allocation().y == Catch::Approx(collapsed_next_y));
+    CHECK(changes == 2);
+}
+
+TEST_CASE("ActionRow activates and shows a trailing chevron", "[widgets][preferences]") {
+    auto row = nk::ActionRow::create("Keyboard Shortcuts", "View and change shortcuts");
+    CHECK(row->is_activatable());
+    REQUIRE(row->accessible() != nullptr);
+    CHECK(row->accessible()->role() == nk::AccessibleRole::Button);
+    CHECK(row->accessible()->name() == "Keyboard Shortcuts");
+    REQUIRE(row->suffix() != nullptr);
+    CHECK_FALSE(row->suffix()->is_focusable());
+
+    int activations = 0;
+    [[maybe_unused]] auto connection =
+        row->on_activated().connect([&activations] { ++activations; });
+    row->allocate({0.0F, 0.0F, 420.0F, 66.0F});
+    CHECK(row->suffix()->allocation().x > row->allocation().x + 200.0F);
+    CHECK(row->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(row->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 24.0F, .y = 20.0F, .button = 1}));
+    CHECK(row->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 24.0F, .y = 20.0F, .button = 1}));
+    CHECK(activations == 2);
+
+    nk::Widget& painted = *row;
+    nk::SnapshotContext snapshot;
+    painted.snapshot(snapshot);
+    const auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+    const auto* title = find_text_node(*root, "Keyboard Shortcuts");
+    REQUIRE(title != nullptr);
+    CHECK(title->bounds().right() <= row->suffix()->allocation().x);
+    CHECK(contains_node_kind(*root, nk::RenderNodeKind::Line));
+
+    auto group = nk::PreferencesGroup::create("Input");
+    group->add(row);
+    CHECK(group->rows().size() == 1);
+}
+
 TEST_CASE("LinkButton reports its target and stays as wide as its label",
           "[widgets][link_button]") {
     auto link = nk::LinkButton::create("Docs", "https://example.invalid/docs");

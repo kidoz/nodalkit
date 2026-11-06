@@ -109,6 +109,62 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+/// A preference row that navigates instead of editing a value.
+///
+/// The row is activatable immediately. A click, Return, or Space emits
+/// `on_activated()`. A trailing chevron is shown, and there is no suffix
+/// editor. The accessible role is a button and the accessible name is the
+/// title. Add it to a `PreferencesGroup` the same way as a `SwitchRow`.
+class ActionRow : public PreferencesRow {
+public:
+    [[nodiscard]] static std::shared_ptr<ActionRow> create(std::string title,
+                                                           std::string subtitle = {});
+    ~ActionRow() override;
+
+protected:
+    ActionRow(std::string title, std::string subtitle);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+/// A preference row that reveals one child, indented underneath.
+///
+/// The row shows a title, an optional subtitle, and a disclosure indicator.
+/// `set_expanded(true)` shows the child. `set_expanded(false)` hides it and
+/// drops its height so following rows move up. A click on the header, Return,
+/// or Space toggles it and emits `on_expanded_changed()`. The row does not
+/// edit a value. Add it to a `PreferencesGroup` the same way as an `ActionRow`.
+class ExpanderRow : public PreferencesRow {
+public:
+    [[nodiscard]] static std::shared_ptr<ExpanderRow> create(std::string title,
+                                                             std::string subtitle = {});
+    ~ExpanderRow() override;
+
+    [[nodiscard]] bool is_expanded() const;
+    void set_expanded(bool expanded);
+
+    void set_child(std::shared_ptr<Widget> child);
+    [[nodiscard]] Widget* child() const;
+
+    Signal<bool>& on_expanded_changed();
+
+    [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
+    void allocate(const Rect& allocation) override;
+    bool handle_mouse_event(const MouseEvent& event) override;
+
+protected:
+    ExpanderRow(std::string title, std::string subtitle);
+    void snapshot(SnapshotContext& ctx) const override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+
+    [[nodiscard]] float header_height() const;
+};
+
 /// A titled collection of preference rows.
 class PreferencesGroup : public Widget {
 public:

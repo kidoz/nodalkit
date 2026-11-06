@@ -4,6 +4,7 @@
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
+#include <nk/ui_core/state_flags.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/switch_widget.h>
@@ -344,6 +345,214 @@ struct PreferencesGroup::Impl {
     std::string title;
     std::vector<std::shared_ptr<PreferencesRow>> rows;
 };
+
+class ActionChevron : public Widget {
+public:
+    static std::shared_ptr<ActionChevron> create() {
+        return std::shared_ptr<ActionChevron>(new ActionChevron());
+    }
+
+    [[nodiscard]] SizeRequest measure(const Constraints& /*constraints*/) const override {
+        return {16.0F, 16.0F, 16.0F, 16.0F};
+    }
+
+protected:
+    ActionChevron() { ensure_accessible().set_hidden(true); }
+
+    void snapshot(SnapshotContext& ctx) const override {
+        const auto bounds = allocation();
+        const Point tip{bounds.x + (bounds.width * 0.5F), bounds.y + (bounds.height * 0.5F)};
+        const auto color = theme_color(
+            "subtitle-color", theme_color("text-secondary", Color::from_rgb(96, 103, 114)));
+        ctx.add_line({tip.x - 4.0F, tip.y - 5.0F}, {tip.x + 2.0F, tip.y}, color, 1.5F);
+        ctx.add_line({tip.x + 2.0F, tip.y}, {tip.x - 4.0F, tip.y + 5.0F}, color, 1.5F);
+    }
+};
+
+struct ActionRow::Impl {
+    std::shared_ptr<ActionChevron> chevron;
+};
+
+std::shared_ptr<ActionRow> ActionRow::create(std::string title, std::string subtitle) {
+    return std::shared_ptr<ActionRow>(new ActionRow(std::move(title), std::move(subtitle)));
+}
+
+ActionRow::ActionRow(std::string title, std::string subtitle)
+    : PreferencesRow(std::move(title), std::move(subtitle)), impl_(std::make_unique<Impl>()) {
+    add_style_class("action-row");
+    set_activatable(true);
+    impl_->chevron = ActionChevron::create();
+    set_suffix(impl_->chevron);
+}
+
+ActionRow::~ActionRow() = default;
+
+struct ExpanderRow::Impl {
+    bool expanded = false;
+    std::shared_ptr<Widget> child;
+    Signal<bool> expanded_changed;
+};
+
+std::shared_ptr<ExpanderRow> ExpanderRow::create(std::string title, std::string subtitle) {
+    return std::shared_ptr<ExpanderRow>(new ExpanderRow(std::move(title), std::move(subtitle)));
+}
+
+ExpanderRow::ExpanderRow(std::string title, std::string subtitle)
+    : PreferencesRow(std::move(title), std::move(subtitle)), impl_(std::make_unique<Impl>()) {
+    add_style_class("expander-row");
+    set_activatable(true);
+    auto& accessible = ensure_accessible();
+    accessible.set_role(AccessibleRole::ToggleButton);
+    accessible.add_action(AccessibleAction::Toggle, [this] {
+        set_expanded(!is_expanded());
+        return true;
+    });
+    (void)on_activated().connect([this] { set_expanded(!is_expanded()); });
+}
+
+ExpanderRow::~ExpanderRow() = default;
+
+bool ExpanderRow::is_expanded() const {
+    return impl_->expanded;
+}
+
+void ExpanderRow::set_expanded(bool expanded) {
+    if (impl_->expanded == expanded) {
+        return;
+    }
+    impl_->expanded = expanded;
+    set_state_flag(StateFlags::Checked, expanded);
+    if (impl_->child != nullptr) {
+        impl_->child->set_visible(expanded);
+    }
+    impl_->expanded_changed.emit(expanded);
+    queue_layout();
+    queue_redraw();
+}
+
+void ExpanderRow::set_child(std::shared_ptr<Widget> child) {
+    if (impl_->child == child) {
+        return;
+    }
+    if (impl_->child != nullptr) {
+        remove_child(*impl_->child);
+    }
+    impl_->child = std::move(child);
+    if (impl_->child != nullptr) {
+        append_child(impl_->child);
+        impl_->child->set_visible(impl_->expanded);
+    }
+    queue_layout();
+}
+
+Widget* ExpanderRow::child() const {
+    return impl_->child.get();
+}
+
+Signal<bool>& ExpanderRow::on_expanded_changed() {
+    return impl_->expanded_changed;
+}
+
+float ExpanderRow::header_height() const {
+    return PreferencesRow::measure(Constraints::unbounded()).natural_height;
+}
+
+SizeRequest ExpanderRow::measure(const Constraints& constraints) const {
+    auto result = PreferencesRow::measure(constraints);
+    if (!impl_->expanded || impl_->child == nullptr) {
+        return result;
+    }
+    const float indent = theme_number("indent", 24.0F);
+    const auto child_request = impl_->child->measure_for_diagnostics(constraints);
+    result.minimum_height += child_request.natural_height;
+    result.natural_height += child_request.natural_height;
+    result.minimum_width = std::max(result.minimum_width, child_request.minimum_width + indent);
+    result.natural_width = std::max(result.natural_width, child_request.natural_width + indent);
+    result.minimum_width = std::min(result.minimum_width, constraints.max_width);
+    result.natural_width = std::min(result.natural_width, constraints.max_width);
+    return result;
+}
+
+void ExpanderRow::allocate(const Rect& allocation) {
+    Widget::allocate(allocation);
+    if (impl_->child == nullptr) {
+        return;
+    }
+    if (!impl_->expanded) {
+        impl_->child->set_visible(false);
+        return;
+    }
+    const float indent = theme_number("indent", 24.0F);
+    const float header = header_height();
+    impl_->child->set_visible(true);
+    impl_->child->allocate({allocation.x + indent,
+                            allocation.y + header,
+                            std::max(0.0F, allocation.width - indent),
+                            std::max(0.0F, allocation.height - header)});
+}
+
+bool ExpanderRow::handle_mouse_event(const MouseEvent& event) {
+    if (impl_->expanded && impl_->child != nullptr && event.y >= allocation().y + header_height()) {
+        return false;
+    }
+    return PreferencesRow::handle_mouse_event(event);
+}
+
+void ExpanderRow::snapshot(SnapshotContext& ctx) const {
+    const auto bounds = allocation();
+    const float header = std::min(header_height(), bounds.height);
+    const Rect header_bounds{bounds.x, bounds.y, bounds.width, header};
+    const float radius = theme_number("corner-radius", 12.0F);
+    auto background =
+        theme_color("background", theme_color("card-bg", Color::from_rgb(253, 253, 254)));
+    if (has_flag(state_flags(), StateFlags::Hovered)) {
+        background = theme_color("hover-background", Color::from_rgb(240, 243, 247));
+    }
+    ctx.add_rounded_rect(header_bounds, background, radius);
+    ctx.add_border(
+        header_bounds, theme_color("border-color", Color::from_rgb(224, 228, 234)), 1.0F, radius);
+
+    const float padding = theme_number("padding-x", 16.0F);
+    const auto title_font =
+        preference_font(theme_number("title-font-size", 13.0F), FontWeight::Medium);
+    const auto subtitle_font = preference_font(theme_number("subtitle-font-size", 12.0F));
+    const auto title_size = measure_text(title(), title_font);
+    const float text_height =
+        title_size.height + (subtitle().empty() ? 0.0F : 4.0F) +
+        (subtitle().empty() ? 0.0F : measure_text(subtitle(), subtitle_font).height);
+    float y = header_bounds.y + ((header_bounds.height - text_height) * 0.5F);
+    const float indicator_left = header_bounds.right() - padding - 16.0F;
+    add_text_elided(ctx,
+                    {header_bounds.x + padding, y},
+                    title(),
+                    title_size,
+                    std::max(0.0F, indicator_left - header_bounds.x - (padding * 2.0F)),
+                    theme_color("text-color"),
+                    title_font);
+    if (!subtitle().empty()) {
+        y += title_size.height + 4.0F;
+        add_text_elided(ctx,
+                        {header_bounds.x + padding, y},
+                        subtitle(),
+                        measure_text(subtitle(), subtitle_font),
+                        std::max(0.0F, indicator_left - header_bounds.x - (padding * 2.0F)),
+                        theme_color("subtitle-color",
+                                    theme_color("text-secondary", Color::from_rgb(96, 103, 114))),
+                        subtitle_font);
+    }
+
+    const Point tip{indicator_left + 8.0F, header_bounds.y + (header_bounds.height * 0.5F)};
+    const auto indicator =
+        theme_color("subtitle-color", theme_color("text-secondary", Color::from_rgb(96, 103, 114)));
+    if (impl_->expanded) {
+        ctx.add_line({tip.x - 5.0F, tip.y - 2.0F}, {tip.x, tip.y + 3.0F}, indicator, 1.5F);
+        ctx.add_line({tip.x, tip.y + 3.0F}, {tip.x + 5.0F, tip.y - 2.0F}, indicator, 1.5F);
+    } else {
+        ctx.add_line({tip.x - 4.0F, tip.y - 5.0F}, {tip.x + 2.0F, tip.y}, indicator, 1.5F);
+        ctx.add_line({tip.x + 2.0F, tip.y}, {tip.x - 4.0F, tip.y + 5.0F}, indicator, 1.5F);
+    }
+    Widget::snapshot(ctx);
+}
 
 std::shared_ptr<PreferencesGroup> PreferencesGroup::create(std::string title) {
     return std::shared_ptr<PreferencesGroup>(new PreferencesGroup(std::move(title)));
