@@ -27,7 +27,11 @@ enum class ScrollPolicy {
 /// scrollable axes, then allocates the child at that size and offsets it by
 /// the current scroll position. Mouse wheel, trackpad precise scrolling,
 /// scrollbar thumb dragging, and scrollbar track click-to-jump are all
-/// handled by handle_mouse_event().
+/// handled by handle_mouse_event(). Arrow keys move one line, Page Up and
+/// Page Down move one viewport, and Home and End move to the start and end
+/// of the vertical range. An axis set to `ScrollPolicy::Never` ignores keys
+/// for that axis. Keys are accepted when the scroll area is focused, and
+/// when a focused descendant does not handle them.
 class ScrollArea : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<ScrollArea> create();
@@ -68,6 +72,7 @@ public:
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
     void allocate(const Rect& allocation) override;
     bool handle_mouse_event(const MouseEvent& event) override;
+    bool handle_key_event(const KeyEvent& event) override;
 
 protected:
     ScrollArea();

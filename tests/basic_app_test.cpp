@@ -2250,6 +2250,50 @@ TEST_CASE("ScrollArea uses precise scroll deltas without wheel-step amplificatio
     REQUIRE(scroll_area->v_offset() == Catch::Approx(12.0F));
 }
 
+TEST_CASE("ScrollArea scrolls from the keyboard", "[app][scroll]") {
+    auto scroll_area = nk::ScrollArea::create();
+    auto content = FixedWidget::create(400.0F, 500.0F);
+    scroll_area->set_content(content);
+    scroll_area->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+
+    int changes = 0;
+    auto connection = scroll_area->on_scroll_changed().connect([&](float, float) { ++changes; });
+    CHECK(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(scroll_area->v_offset() == Catch::Approx(40.0F));
+    CHECK(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right}));
+    CHECK(scroll_area->h_offset() == Catch::Approx(40.0F));
+    CHECK(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::PageDown}));
+    CHECK(scroll_area->v_offset() == Catch::Approx(120.0F));
+    CHECK(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    CHECK(scroll_area->v_offset() == Catch::Approx(420.0F));
+    CHECK(scroll_area->h_offset() == Catch::Approx(40.0F));
+    CHECK(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    CHECK(scroll_area->v_offset() == Catch::Approx(0.0F));
+    CHECK(scroll_area->h_offset() == Catch::Approx(40.0F));
+    CHECK(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Left}));
+    CHECK(scroll_area->h_offset() == Catch::Approx(0.0F));
+    CHECK(changes == 6);
+
+    scroll_area->set_v_scroll_policy(nk::ScrollPolicy::Never);
+    CHECK_FALSE(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK_FALSE(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::PageDown}));
+    CHECK_FALSE(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    CHECK(scroll_area->v_offset() == Catch::Approx(0.0F));
+    CHECK_FALSE(scroll_area->handle_key_event(
+        {.type = nk::KeyEvent::Type::Release, .key = nk::KeyCode::Right}));
+    CHECK(scroll_area->h_offset() == Catch::Approx(0.0F));
+    connection.disconnect();
+}
+
 TEST_CASE("ScrollArea supports dragging the vertical scrollbar thumb", "[app][scroll]") {
     nk::Window window({.title = "Scroll drag test", .width = 120, .height = 80});
     auto scroll_area = nk::ScrollArea::create();

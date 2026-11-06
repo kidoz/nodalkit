@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <limits>
 #include <nk/platform/events.h>
+#include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/scroll_area.h>
 
@@ -114,6 +116,66 @@ void ScrollArea::scroll_to(float h, float v) {
 
 Signal<float, float>& ScrollArea::on_scroll_changed() {
     return impl_->scroll_changed;
+}
+
+bool ScrollArea::handle_key_event(const KeyEvent& event) {
+    if (event.type != KeyEvent::Type::Press) {
+        return false;
+    }
+    const float line = theme_number("scroll-line", 40.0F);
+    const auto viewport = allocation();
+    switch (event.key) {
+    case KeyCode::Left:
+        if (impl_->h_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset - line, impl_->v_offset);
+        return true;
+    case KeyCode::Right:
+        if (impl_->h_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset + line, impl_->v_offset);
+        return true;
+    case KeyCode::Up:
+        if (impl_->v_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset, impl_->v_offset - line);
+        return true;
+    case KeyCode::Down:
+        if (impl_->v_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset, impl_->v_offset + line);
+        return true;
+    case KeyCode::PageUp:
+        if (impl_->v_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset, impl_->v_offset - viewport.height);
+        return true;
+    case KeyCode::PageDown:
+        if (impl_->v_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset, impl_->v_offset + viewport.height);
+        return true;
+    case KeyCode::Home:
+        if (impl_->v_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset, 0.0F);
+        return true;
+    case KeyCode::End:
+        if (impl_->v_policy == ScrollPolicy::Never) {
+            return false;
+        }
+        scroll_to(impl_->h_offset, std::numeric_limits<float>::max());
+        return true;
+    default:
+        return false;
+    }
 }
 
 namespace {

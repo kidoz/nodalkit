@@ -1558,6 +1558,8 @@ void force_symbol_references() {
     (void)static_cast<void (nk::ScrollArea::*)(const nk::Rect&)>(&nk::ScrollArea::allocate);
     (void)static_cast<bool (nk::ScrollArea::*)(const nk::MouseEvent&)>(
         &nk::ScrollArea::handle_mouse_event);
+    (void)static_cast<bool (nk::ScrollArea::*)(const nk::KeyEvent&)>(
+        &nk::ScrollArea::handle_key_event);
     (void)&nk::SegmentedControl::create;
     (void)static_cast<void (nk::SegmentedControl::*)(std::vector<std::string>)>(
         &nk::SegmentedControl::set_segments);
