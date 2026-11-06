@@ -29,18 +29,24 @@ float TimedAnimation::value() const {
 }
 
 float TimedAnimation::value_at(std::chrono::steady_clock::time_point now) const {
+    // A sample at or past the duration latches completion. Later samples,
+    // including value(), stay at 1 even if this timestamp was ahead of the
+    // wall clock.
+    if (finished_) {
+        return 1.0F;
+    }
     if (!running_) {
-        return finished_ ? 1.0F : 0.0F;
+        return 0.0F;
     }
 
     if (duration_.count() <= 0) {
-        const_cast<TimedAnimation*>(this)->finished_ = true;
+        finished_ = true;
         return 1.0F;
     }
 
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time_);
     if (elapsed >= duration_) {
-        const_cast<TimedAnimation*>(this)->finished_ = true;
+        finished_ = true;
         return 1.0F;
     }
 

@@ -5559,9 +5559,11 @@ TEST_CASE("TimedAnimation progresses from 0 to 1 over its duration", "[animation
     REQUIRE(anim.value_at(start + std::chrono::milliseconds(100)) ==
             Catch::Approx(0.5F).margin(0.05));
 
-    // Past duration: 1.0 and finished.
+    // Past duration: 1.0 and finished. The latch sticks for later samples,
+    // including value(), even when this timestamp is still ahead of the wall clock.
     REQUIRE(anim.value_at(start + std::chrono::milliseconds(300)) == Catch::Approx(1.0F));
     REQUIRE(anim.is_finished());
+    REQUIRE(anim.value() == Catch::Approx(1.0F));
 }
 
 TEST_CASE("TimedAnimation with zero duration completes immediately", "[animation]") {

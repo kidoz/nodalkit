@@ -64,7 +64,9 @@ private:
     EasingFunction easing_;
     std::chrono::steady_clock::time_point start_time_{};
     bool running_ = false;
-    bool finished_ = false;
+    // Latched when a sample reaches the end of the duration. Mutable so a const
+    // sample can record completion without a const_cast.
+    mutable bool finished_ = false;
 };
 
 } // namespace nk
