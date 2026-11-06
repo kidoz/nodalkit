@@ -328,6 +328,71 @@ TEST_CASE("Expander toggles and emits on change only", "[widgets][expander]") {
     conn.disconnect();
 }
 
+TEST_CASE("Expander shows a subtitle and a suffix that does not toggle", "[widgets][expander]") {
+    auto plain = nk::Expander::create("Storage");
+    const auto plain_height = plain->measure(nk::Constraints::unbounded()).natural_height;
+    CHECK(plain->subtitle().empty());
+    CHECK(plain->suffix() == nullptr);
+
+    auto expander = nk::Expander::create("Storage");
+    expander->set_subtitle("12 GB available");
+    CHECK(expander->subtitle() == "12 GB available");
+    CHECK(expander->accessible() != nullptr);
+    CHECK(expander->accessible()->description() == "12 GB available");
+    CHECK(expander->measure(nk::Constraints::unbounded()).natural_height > plain_height);
+
+    auto suffix = FixedSizeWidget::create(48.0F, 20.0F);
+    expander->set_suffix(suffix);
+    CHECK(expander->suffix() == suffix.get());
+    CHECK(suffix->parent() == expander.get());
+
+    auto body = nk::Label::create("Files");
+    expander->set_child(body);
+    expander->set_expanded(true);
+    const auto fitted = expander->measure(nk::Constraints::unbounded());
+    expander->allocate({0.0F, 0.0F, 320.0F, fitted.natural_height});
+    CHECK(suffix->allocation().right() <= expander->allocation().right());
+    CHECK(suffix->allocation().y < body->allocation().y);
+    CHECK(body->is_visible());
+    CHECK(body->allocation().y > suffix->allocation().bottom());
+
+    const auto painted = snapshot_text(*expander);
+    CHECK(painted.find("Storage") != std::string::npos);
+    CHECK(painted.find("12 GB available") != std::string::npos);
+
+    int changes = 0;
+    auto connection = expander->on_expanded_changed().connect([&](bool) { ++changes; });
+    expander->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                  .x = suffix->allocation().x + 4.0F,
+                                  .y = suffix->allocation().y + 4.0F,
+                                  .button = 1});
+    expander->handle_mouse_event({.type = nk::MouseEvent::Type::Release,
+                                  .x = suffix->allocation().x + 4.0F,
+                                  .y = suffix->allocation().y + 4.0F,
+                                  .button = 1});
+    CHECK(changes == 0);
+    CHECK(expander->is_expanded());
+    CHECK(deepest_hit(*expander, {suffix->allocation().x + 4.0F, suffix->allocation().y + 4.0F}) ==
+          suffix.get());
+
+    expander->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 48.0F, .y = 10.0F, .button = 1});
+    expander->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 48.0F, .y = 10.0F, .button = 1});
+    CHECK(changes == 1);
+    CHECK_FALSE(expander->is_expanded());
+    CHECK_FALSE(body->is_visible());
+
+    CHECK(expander->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(expander->is_expanded());
+    expander->set_subtitle("");
+    CHECK(expander->subtitle().empty());
+    CHECK(expander->measure(nk::Constraints::unbounded()).minimum_height ==
+          Catch::Approx(plain->measure(nk::Constraints::unbounded()).minimum_height));
+    connection.disconnect();
+}
+
 TEST_CASE("SplitView clamps the divider position and emits on change", "[widgets][split_view]") {
     auto split = nk::SplitView::create(nk::Orientation::Vertical);
     REQUIRE(split->orientation() == nk::Orientation::Vertical);
