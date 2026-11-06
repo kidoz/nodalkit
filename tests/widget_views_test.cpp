@@ -964,6 +964,88 @@ TEST_CASE("ViewStack shows one page and follows a segmented control", "[widgets]
     CHECK(selections.back() == 0);
 }
 
+nk::SearchField* search_field_in(nk::SearchBar& bar) {
+    for (const auto& child : bar.children()) {
+        if (auto* field = dynamic_cast<nk::SearchField*>(child.get())) {
+            return field;
+        }
+    }
+    return nullptr;
+}
+
+TEST_CASE("SearchBar reveals a field, fills a narrow bar, and keeps a wide field fixed",
+          "[widgets][search_bar]") {
+    nk::Application app(0, nullptr);
+    app.set_system_preferences_observation_enabled(false);
+    nk::ThemeSelection reduced;
+    reduced.motion_policy = nk::MotionPolicy::Reduced;
+    app.set_theme_selection(reduced);
+
+    nk::Window window({.title = "Search", .width = 480, .height = 200});
+    auto bar = nk::SearchBar::create();
+    window.set_child(bar);
+    bar->set_placeholder("Find");
+    CHECK(bar->placeholder() == "Find");
+    CHECK_FALSE(bar->is_revealed());
+
+    bar->allocate({0.0F, 0.0F, 400.0F, 36.0F});
+    CHECK_FALSE(bar->hit_test({8.0F, 18.0F}));
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(bar->is_revealed());
+    auto* field = search_field_in(*bar);
+    REQUIRE(field != nullptr);
+    CHECK(nk::has_flag(field->state_flags(), nk::StateFlags::Focused));
+    CHECK(field->allocation().width == Catch::Approx(172.0F));
+    CHECK(field->allocation().x == Catch::Approx(200.0F));
+
+    std::string typed;
+    std::string searched;
+    [[maybe_unused]] auto text_connection = bar->on_text_changed().connect(
+        [&typed](std::string_view text) { typed = std::string(text); });
+    [[maybe_unused]] auto search_connection = bar->on_search().connect(
+        [&searched](std::string_view text) { searched = std::string(text); });
+    bar->set_text("cat");
+    CHECK(bar->text() == "cat");
+    CHECK(typed == "cat");
+    CHECK(field->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(searched == "cat");
+
+    CHECK(bar->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 384.0F, .y = 18.0F, .button = 1}));
+    CHECK(bar->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 384.0F, .y = 18.0F, .button = 1}));
+    CHECK_FALSE(bar->is_revealed());
+    CHECK(nk::has_flag(bar->state_flags(), nk::StateFlags::Focused));
+
+    bar->allocate({0.0F, 0.0F, 160.0F, 36.0F});
+    bar->set_revealed(true);
+    CHECK(field->allocation().x == Catch::Approx(0.0F));
+    CHECK(field->allocation().width == Catch::Approx(132.0F));
+    CHECK(bar->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape}));
+    CHECK_FALSE(bar->is_revealed());
+}
+
+TEST_CASE("SearchBar slides open when motion is allowed", "[widgets][search_bar]") {
+    nk::Application app(0, nullptr);
+    app.set_system_preferences_observation_enabled(false);
+    nk::ThemeSelection motion;
+    motion.motion_policy = nk::MotionPolicy::Normal;
+    app.set_theme_selection(motion);
+
+    nk::Window window({.title = "Search motion", .width = 480, .height = 200});
+    auto bar = nk::SearchBar::create();
+    window.set_child(bar);
+    bar->allocate({0.0F, 0.0F, 400.0F, 36.0F});
+    bar->set_revealed(true);
+    auto* field = search_field_in(*bar);
+    REQUIRE(field != nullptr);
+    CHECK(field->allocation().width < 80.0F);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{250});
+    REQUIRE(app.event_loop().poll());
+    CHECK(field->allocation().width > 150.0F);
+}
+
 TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]") {
     auto badge = nk::Badge::create("3");
     REQUIRE(badge->text() == "3");

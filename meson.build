@@ -122,6 +122,7 @@ nk_sources = files(
     'src/widgets/toast_overlay.cpp',
     'src/widgets/toolbar_view.cpp',
     'src/widgets/context_menu.cpp',
+    'src/widgets/search_bar.cpp',
     'src/widgets/search_field.cpp',
     'src/widgets/command_palette.cpp',
     'src/widgets/split_view.cpp',
