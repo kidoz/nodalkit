@@ -41,6 +41,7 @@
 #include <nk/widgets/popover.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/progress_bar.h>
+#include <nk/widgets/revealer.h>
 #include <nk/widgets/scroll_area.h>
 #include <nk/widgets/search_bar.h>
 #include <nk/widgets/search_field.h>
@@ -1044,6 +1045,58 @@ TEST_CASE("SearchBar slides open when motion is allowed", "[widgets][search_bar]
     std::this_thread::sleep_for(std::chrono::milliseconds{250});
     REQUIRE(app.event_loop().poll());
     CHECK(field->allocation().width > 150.0F);
+}
+
+TEST_CASE("Revealer collapses height and jumps when reduced motion is on", "[widgets][revealer]") {
+    auto revealer = nk::Revealer::create();
+    auto child = FixedSizeWidget::create(100.0F, 40.0F);
+    auto below = FixedSizeWidget::create(100.0F, 20.0F);
+    revealer->set_child(child);
+    auto box = nk::Box::create(nk::Orientation::Vertical, 0.0F);
+    box->append(revealer);
+    box->append(below);
+    box->allocate({0.0F, 0.0F, 100.0F, 200.0F});
+    CHECK(revealer->is_revealed());
+    CHECK(child->is_visible());
+    CHECK(below->allocation().y == Catch::Approx(40.0F));
+    CHECK(deepest_hit(*box, {10.0F, 10.0F}) == child.get());
+
+    revealer->set_revealed(false);
+    CHECK(revealer->reveal_fraction() == Catch::Approx(0.0F));
+    CHECK_FALSE(child->is_visible());
+    box->allocate({0.0F, 0.0F, 100.0F, 200.0F});
+    CHECK(below->allocation().y == Catch::Approx(0.0F));
+    CHECK(deepest_hit(*box, {10.0F, 10.0F}) != child.get());
+
+    revealer->set_revealed(true);
+    CHECK(revealer->reveal_fraction() == Catch::Approx(1.0F));
+    CHECK(child->is_visible());
+    box->allocate({0.0F, 0.0F, 100.0F, 200.0F});
+    CHECK(below->allocation().y == Catch::Approx(40.0F));
+    CHECK(child->allocation().height == Catch::Approx(40.0F));
+}
+
+TEST_CASE("Revealer slides its height when motion is allowed", "[widgets][revealer]") {
+    nk::Application app(0, nullptr);
+    app.set_system_preferences_observation_enabled(false);
+    nk::ThemeSelection motion;
+    motion.motion_policy = nk::MotionPolicy::Normal;
+    app.set_theme_selection(motion);
+
+    auto revealer = nk::Revealer::create();
+    auto child = FixedSizeWidget::create(80.0F, 40.0F);
+    revealer->set_child(child);
+    revealer->allocate({0.0F, 0.0F, 80.0F, 40.0F});
+    revealer->set_revealed(false);
+    CHECK(revealer->reveal_fraction() == Catch::Approx(1.0F));
+    CHECK(child->is_visible());
+
+    std::this_thread::sleep_for(std::chrono::milliseconds{250});
+    REQUIRE(app.event_loop().poll());
+    CHECK(revealer->reveal_fraction() == Catch::Approx(0.0F));
+    CHECK_FALSE(child->is_visible());
+    const auto collapsed = revealer->measure({});
+    CHECK(collapsed.natural_height == Catch::Approx(0.0F));
 }
 
 TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]") {

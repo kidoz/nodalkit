@@ -130,6 +130,7 @@ nk_sources = files(
     'src/widgets/expander.cpp',
     'src/widgets/text_area.cpp',
     'src/widgets/popover.cpp',
+    'src/widgets/revealer.cpp',
     'src/widgets/breadcrumb.cpp',
     'src/widgets/calendar.cpp',
     'src/widgets/color_well.cpp',
