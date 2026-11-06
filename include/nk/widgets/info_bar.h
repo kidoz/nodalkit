@@ -20,6 +20,9 @@ enum class InfoBarSeverity : uint8_t {
 };
 
 /// An in-window notification bar with a message and optional close button.
+///
+/// The accessible role is status. The name is the message, and the
+/// description names the severity: Info, Warning, Error, or Success.
 class InfoBar : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<InfoBar>

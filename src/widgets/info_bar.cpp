@@ -17,6 +17,20 @@ FontDescriptor info_bar_font() {
     };
 }
 
+const char* severity_name(InfoBarSeverity severity) {
+    switch (severity) {
+    case InfoBarSeverity::Info:
+        return "Info";
+    case InfoBarSeverity::Warning:
+        return "Warning";
+    case InfoBarSeverity::Error:
+        return "Error";
+    case InfoBarSeverity::Success:
+        return "Success";
+    }
+    return "Info";
+}
+
 Color background_for_severity(InfoBarSeverity severity) {
     switch (severity) {
     case InfoBarSeverity::Info:
@@ -49,8 +63,9 @@ InfoBar::InfoBar(std::string message, InfoBarSeverity severity) : impl_(std::mak
     impl_->severity = severity;
     add_style_class("info-bar");
     auto& accessible = ensure_accessible();
-    accessible.set_role(AccessibleRole::Label);
+    accessible.set_role(AccessibleRole::Status);
     accessible.set_name(impl_->message);
+    accessible.set_description(severity_name(impl_->severity));
 }
 
 InfoBar::~InfoBar() = default;
@@ -75,6 +90,7 @@ InfoBarSeverity InfoBar::severity() const {
 void InfoBar::set_severity(InfoBarSeverity severity) {
     if (impl_->severity != severity) {
         impl_->severity = severity;
+        ensure_accessible().set_description(severity_name(impl_->severity));
         queue_redraw();
     }
 }

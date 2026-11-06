@@ -892,6 +892,10 @@ TEST_CASE("InfoBar round-trips message, severity, and closable", "[widgets][info
     REQUIRE(bar->message() == "Saved");
     REQUIRE(bar->severity() == nk::InfoBarSeverity::Success);
     REQUIRE(bar->is_closable());
+    REQUIRE(bar->accessible() != nullptr);
+    CHECK(bar->accessible()->role() == nk::AccessibleRole::Status);
+    CHECK(bar->accessible()->name() == "Saved");
+    CHECK(bar->accessible()->description() == "Success");
 
     bar->set_message("Failed");
     bar->set_severity(nk::InfoBarSeverity::Error);
@@ -899,6 +903,13 @@ TEST_CASE("InfoBar round-trips message, severity, and closable", "[widgets][info
     REQUIRE(bar->message() == "Failed");
     REQUIRE(bar->severity() == nk::InfoBarSeverity::Error);
     REQUIRE_FALSE(bar->is_closable());
+    CHECK(bar->accessible()->name() == "Failed");
+    CHECK(bar->accessible()->description() == "Error");
+
+    auto info = nk::InfoBar::create();
+    CHECK(info->accessible()->description() == "Info");
+    info->set_severity(nk::InfoBarSeverity::Warning);
+    CHECK(info->accessible()->description() == "Warning");
 }
 
 TEST_CASE("Breadcrumb builds, extends, and truncates its path", "[widgets][breadcrumb]") {
