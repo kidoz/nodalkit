@@ -53,6 +53,7 @@ struct Dialog::Impl {
     struct ButtonEntry {
         std::shared_ptr<Button> button;
         DialogResponse response = DialogResponse::None;
+        int custom_id = -1;
     };
 
     std::vector<ButtonEntry> buttons;
@@ -105,6 +106,8 @@ struct Dialog::Impl {
     }
 
     Signal<DialogResponse> on_response;
+    int custom_response_id = -1;
+    bool custom_id_from_button = false;
 };
 
 std::shared_ptr<Dialog> Dialog::create(std::string title, std::string message) {
@@ -124,15 +127,38 @@ Dialog::Dialog(std::string title, std::string message) : impl_(std::make_unique<
 Dialog::~Dialog() = default;
 
 void Dialog::add_button(std::string label, DialogResponse response) {
+    add_button(std::move(label), response, DialogButtonStyle::Normal);
+}
+
+void Dialog::add_button(std::string label, DialogResponse response, DialogButtonStyle style) {
+    append_response_button(std::move(label), response, -1, style);
+}
+
+void Dialog::add_custom_button(std::string label, int id, DialogButtonStyle style) {
+    append_response_button(std::move(label), DialogResponse::Custom, id, style);
+}
+
+void Dialog::append_response_button(std::string label,
+                                    DialogResponse response,
+                                    int custom_id,
+                                    DialogButtonStyle style) {
     auto button = Button::create(std::move(label));
     button->add_style_class("dialog-button");
-    (void)button->on_clicked().connect([weak = weak_from_this(), response] {
+    if (style == DialogButtonStyle::Destructive) {
+        button->add_style_class("destructive");
+    }
+    (void)button->on_clicked().connect([weak = weak_from_this(), response, custom_id] {
         if (auto widget = weak.lock()) {
-            static_cast<Dialog&>(*widget).close(response);
+            auto& dialog = static_cast<Dialog&>(*widget);
+            if (response == DialogResponse::Custom) {
+                dialog.impl_->custom_response_id = custom_id;
+                dialog.impl_->custom_id_from_button = true;
+            }
+            dialog.close(response);
         }
     });
     append_child(button);
-    impl_->buttons.push_back({std::move(button), response});
+    impl_->buttons.push_back(Impl::ButtonEntry{std::move(button), response, custom_id});
     queue_layout();
     queue_redraw();
 }
@@ -204,6 +230,16 @@ bool Dialog::is_presented() const {
 void Dialog::close(DialogResponse response) {
     auto keep_alive = shared_from_this();
     (void)keep_alive;
+    if (response != DialogResponse::Custom || !impl_->custom_id_from_button) {
+        if (response != DialogResponse::Custom) {
+            impl_->custom_response_id = -1;
+        } else {
+            const auto match = std::ranges::find(
+                impl_->buttons, DialogResponse::Custom, &Impl::ButtonEntry::response);
+            impl_->custom_response_id = match != impl_->buttons.end() ? match->custom_id : -1;
+        }
+    }
+    impl_->custom_id_from_button = false;
     if (impl_->presented && host_window() != nullptr) {
         impl_->backdrop_dirty = true;
         host_window()->dismiss_overlay(*this);
@@ -214,6 +250,10 @@ void Dialog::close(DialogResponse response) {
 
 Signal<DialogResponse>& Dialog::on_response() {
     return impl_->on_response;
+}
+
+int Dialog::custom_response_id() const {
+    return impl_->custom_response_id;
 }
 
 SizeRequest Dialog::measure(const Constraints& /*constraints*/) const {

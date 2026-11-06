@@ -2922,6 +2922,70 @@ TEST_CASE("Dialog present installs a modal overlay and routes Escape dismissal",
     REQUIRE_FALSE(dialog->is_presented());
 }
 
+TEST_CASE("Dialog destructive buttons keep their keys and report custom ids", "[app][dialog]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Delete item", .width = 420, .height = 280});
+    auto dialog = nk::Dialog::create("Delete item", "This cannot be undone.");
+    dialog->add_button("Cancel", nk::DialogResponse::Cancel);
+    dialog->add_custom_button("Archive", 4);
+    dialog->add_custom_button("Delete", 9, nk::DialogButtonStyle::Destructive);
+    CHECK(dialog->custom_response_id() == -1);
+    REQUIRE(dialog->children().size() == 3);
+    CHECK_FALSE(dialog->children()[0]->has_style_class("destructive"));
+    CHECK(dialog->children()[2]->has_style_class("destructive"));
+
+    dialog->children()[2]->allocate({0.0F, 0.0F, 96.0F, 36.0F});
+    nk::SnapshotContext snapshot;
+    dialog->children()[2]->snapshot(snapshot);
+    const auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+    const auto destructive = nk::Color::from_rgb(230, 45, 66);
+    bool painted_destructive = false;
+    const auto find_fill = [&](const auto& self, const nk::RenderNode& node) -> void {
+        if (node.kind() == nk::RenderNodeKind::RoundedRect) {
+            const auto color = static_cast<const nk::RoundedRectNode&>(node).color();
+            if (color.r == Catch::Approx(destructive.r).margin(0.02F) &&
+                color.g == Catch::Approx(destructive.g).margin(0.02F) &&
+                color.b == Catch::Approx(destructive.b).margin(0.02F)) {
+                painted_destructive = true;
+            }
+        }
+        for (const auto& child : node.children()) {
+            if (child != nullptr) {
+                self(self, *child);
+            }
+        }
+    };
+    find_fill(find_fill, *root);
+    CHECK(painted_destructive);
+
+    nk::DialogResponse response = nk::DialogResponse::None;
+    int seen_id = 99;
+    auto connection = dialog->on_response().connect([&](nk::DialogResponse value) {
+        response = value;
+        seen_id = dialog->custom_response_id();
+    });
+    CHECK(dialog->children()[1]->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(response == nk::DialogResponse::Custom);
+    CHECK(seen_id == 4);
+    CHECK(dialog->children()[2]->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(response == nk::DialogResponse::Custom);
+    CHECK(seen_id == 9);
+
+    dialog->present(window);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    CHECK(response == nk::DialogResponse::Cancel);
+    CHECK(seen_id == -1);
+
+    dialog->present(window);
+    window.dispatch_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    CHECK(response == nk::DialogResponse::Cancel);
+    CHECK(seen_id == -1);
+    connection.disconnect();
+}
+
 TEST_CASE("Dialog minimum width and sheet presentation style affect rendered geometry",
           "[app][dialog][render]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");

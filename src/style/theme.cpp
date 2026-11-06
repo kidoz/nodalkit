@@ -553,6 +553,15 @@ void install_shared_rules(Theme& theme) {
              });
 
     add_rule(theme,
+             {"destructive"},
+             StateFlags::None,
+             {
+                 {"background", StyleValue{Color::from_rgb(230, 45, 66)}},
+                 {"border-color", StyleValue{Color::from_rgb(196, 32, 51)}},
+                 {"text-color", token_ref("accent-contrast")},
+             });
+
+    add_rule(theme,
              {"expander"},
              StateFlags::None,
              {

@@ -29,6 +29,13 @@ enum class DialogPresentationStyle {
     Sheet,
 };
 
+/// Visual style of a dialog response button. The style does not change which
+/// key closes the dialog.
+enum class DialogButtonStyle {
+    Normal,
+    Destructive,
+};
+
 /// Async toolkit-level modal dialog.
 ///
 /// Dialogs are **toolkit-level modal overlays** composited into the parent
@@ -58,7 +65,17 @@ public:
     /// use the response kind: Escape picks the first Cancel button (fallback
     /// Close), Return/Space uses set_default_response() (fallback: the first
     /// button, or Close if none). Buttons wrap within narrow allocations.
+    /// `Destructive` paints the button as a destructive action and does not
+    /// change those keys.
     void add_button(std::string label, DialogResponse response);
+    void add_button(std::string label, DialogResponse response, DialogButtonStyle style);
+
+    /// Add a `DialogResponse::Custom` button distinguished by `id`.
+    /// While `on_response()` runs for that button, `custom_response_id()`
+    /// returns `id`. Any other response leaves the id at -1.
+    void add_custom_button(std::string label,
+                           int id,
+                           DialogButtonStyle style = DialogButtonStyle::Normal);
 
     /// Replace the default message label with a custom content widget.
     /// The dialog continues to render its title and button row around it.
@@ -94,7 +111,13 @@ public:
     /// Emitted from close() with the chosen DialogResponse. Slots are
     /// invoked synchronously from the event loop during key/mouse dispatch
     /// (or from the caller's thread when close() is called directly).
+    /// For `DialogResponse::Custom`, read `custom_response_id()` inside the
+    /// slot. For every other response that id is -1.
     Signal<DialogResponse>& on_response();
+
+    /// Id of the custom button that closed the dialog. -1 when the response
+    /// is not `DialogResponse::Custom`.
+    [[nodiscard]] int custom_response_id() const;
 
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
     void allocate(const Rect& allocation) override;
@@ -110,6 +133,11 @@ protected:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    void append_response_button(std::string label,
+                                DialogResponse response,
+                                int custom_id,
+                                DialogButtonStyle style);
 };
 
 } // namespace nk
