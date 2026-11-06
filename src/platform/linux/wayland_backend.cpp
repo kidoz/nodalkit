@@ -1240,9 +1240,10 @@ void WaylandBackend::start_accessibility_thread() {
                 if (app == nullptr || invocation == nullptr) {
                     return false;
                 }
-                // Reply from the UI thread with the real result. If the posted
-                // task is dropped, the destructor still answers false so the
-                // accessibility client is not left waiting.
+                // One reply for this invocation. The UI thread reports the real
+                // result. A dropped task or a loop that is no longer accepting
+                // work still answers false here, and true means this sink — not
+                // the bus handler — owns that reply.
                 struct Reply {
                     GDBusMethodInvocation* invocation = nullptr;
                     bool answered = false;
@@ -1260,18 +1261,27 @@ void WaylandBackend::start_accessibility_thread() {
 
                     ~Reply() { answer(false); }
                 };
-                auto reply = std::make_shared<Reply>();
+                std::shared_ptr<Reply> reply;
+                try {
+                    reply = std::make_shared<Reply>();
+                } catch (...) {
+                    return false;
+                }
                 g_object_ref(invocation);
                 reply->invocation = invocation;
-                const bool posted = app->event_loop().post(
-                    [impl, target, action, reply] {
-                        reply->answer(perform_accessible_action(*impl, target, action));
-                    },
-                    "atspi-action");
-                if (!posted) {
+                try {
+                    const bool posted = app->event_loop().post(
+                        [impl, target, action, reply] {
+                            reply->answer(perform_accessible_action(*impl, target, action));
+                        },
+                        "atspi-action");
+                    if (!posted) {
+                        reply->answer(false);
+                    }
+                } catch (...) {
                     reply->answer(false);
                 }
-                return posted;
+                return true;
             },
             [impl] {
                 impl->accessibility_in_use = true;
