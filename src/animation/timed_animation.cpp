@@ -10,9 +10,16 @@ void TimedAnimation::start() {
     start_time_ = std::chrono::steady_clock::now();
     running_ = true;
     finished_ = false;
+    held_ = 0.0F;
 }
 
 void TimedAnimation::stop() {
+    if (!running_) {
+        return;
+    }
+    // Sample before clearing running_, so the freeze keeps the in-progress
+    // value instead of the not-running result.
+    held_ = value();
     running_ = false;
 }
 
@@ -36,7 +43,7 @@ float TimedAnimation::value_at(std::chrono::steady_clock::time_point now) const 
         return 1.0F;
     }
     if (!running_) {
-        return 0.0F;
+        return held_;
     }
 
     if (duration_.count() <= 0) {

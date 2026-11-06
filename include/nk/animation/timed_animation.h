@@ -22,7 +22,7 @@ namespace nk {
 ///   // In snapshot():
 ///   float t = hover_anim_.value();
 ///   Color bg = lerp(normal_bg, hovered_bg, t);
-///   if (!hover_anim_.is_finished()) {
+///   if (hover_anim_.is_running()) {
 ///       queue_redraw();
 ///   }
 /// @endcode
@@ -40,7 +40,9 @@ public:
     /// Start (or restart) the animation from 0.0.
     void start();
 
-    /// Stop the animation at its current value.
+    /// Freeze the animation at its current value. A later `value()` keeps
+    /// returning that sample, and `is_running()` becomes false. Stopping
+    /// before the duration elapses does not mark the animation finished.
     void stop();
 
     /// Whether the animation is currently running (started and not finished).
@@ -49,11 +51,14 @@ public:
     /// Whether the animation has reached its full duration.
     [[nodiscard]] bool is_finished() const;
 
-    /// Current eased value in [0, 1]. Returns 0 before start(), 1 after
-    /// completion, and the eased progress in between.
+    /// Current eased value in [0, 1]. Returns 0 before start(), the frozen
+    /// sample after stop(), 1 after completion, and the eased progress while
+    /// running.
     [[nodiscard]] float value() const;
 
-    /// Current eased value computed at the given timestamp.
+    /// Eased value at `now` while the animation is running. After stop(),
+    /// every timestamp returns the frozen sample. A sample at or past the
+    /// duration latches completion for later calls.
     [[nodiscard]] float value_at(std::chrono::steady_clock::time_point now) const;
 
     /// The animation duration.
@@ -67,6 +72,8 @@ private:
     // Latched when a sample reaches the end of the duration. Mutable so a const
     // sample can record completion without a const_cast.
     mutable bool finished_ = false;
+    // Value captured by stop(), returned while the animation is not running.
+    float held_ = 0.0F;
 };
 
 } // namespace nk

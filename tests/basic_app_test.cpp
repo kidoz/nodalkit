@@ -5566,6 +5566,27 @@ TEST_CASE("TimedAnimation progresses from 0 to 1 over its duration", "[animation
     REQUIRE(anim.value() == Catch::Approx(1.0F));
 }
 
+TEST_CASE("TimedAnimation stop freezes the in-progress value", "[animation]") {
+    nk::TimedAnimation anim(std::chrono::milliseconds(5'000), nk::easing::linear);
+    anim.start();
+    anim.stop();
+
+    REQUIRE_FALSE(anim.is_running());
+    REQUIRE_FALSE(anim.is_finished());
+    const float held = anim.value();
+    REQUIRE(held >= 0.0F);
+    REQUIRE(held < 0.05F);
+    REQUIRE(anim.value_at(std::chrono::steady_clock::now() + std::chrono::seconds(30)) ==
+            Catch::Approx(held));
+
+    anim.start();
+    const auto started = std::chrono::steady_clock::now();
+    REQUIRE(anim.value_at(started + std::chrono::milliseconds(6'000)) == Catch::Approx(1.0F));
+    anim.stop();
+    REQUIRE(anim.is_finished());
+    REQUIRE(anim.value() == Catch::Approx(1.0F));
+}
+
 TEST_CASE("TimedAnimation with zero duration completes immediately", "[animation]") {
     nk::TimedAnimation anim(std::chrono::milliseconds(0));
     anim.start();
