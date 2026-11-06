@@ -14,27 +14,37 @@
 #include <nk/layout/breakpoint.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
+#include <nk/platform/key_codes.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/render/render_node.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/runtime/event_loop.h>
 #include <nk/style/theme_selection.h>
+#include <nk/ui_core/state_flags.h>
 #include <nk/widgets/avatar.h>
 #include <nk/widgets/badge.h>
 #include <nk/widgets/banner.h>
+#include <nk/widgets/box.h>
 #include <nk/widgets/breadcrumb.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/clamp.h>
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/expander.h>
+#include <nk/widgets/headerbar.h>
 #include <nk/widgets/info_bar.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/menu_button.h>
 #include <nk/widgets/navigation_split_view.h>
+#include <nk/widgets/navigation_stack.h>
 #include <nk/widgets/overlay_split_view.h>
 #include <nk/widgets/popover.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/progress_bar.h>
 #include <nk/widgets/scroll_area.h>
+#include <nk/widgets/search_bar.h>
+#include <nk/widgets/search_field.h>
+#include <nk/widgets/segmented_control.h>
 #include <nk/widgets/separator.h>
 #include <nk/widgets/spinner.h>
 #include <nk/widgets/split_view.h>
@@ -43,8 +53,11 @@
 #include <nk/widgets/toast_overlay.h>
 #include <nk/widgets/toolbar_view.h>
 #include <nk/widgets/tooltip.h>
+#include <nk/widgets/view_stack.h>
 #include <nk/widgets/visual_effect_view.h>
 #include <optional>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -508,6 +521,54 @@ TEST_CASE("Breadcrumb builds, extends, and truncates its path", "[widgets][bread
     REQUIRE(crumb->segment(1) == "Projects");
 }
 
+TEST_CASE("ContextMenu returns focus to the widget that was active", "[widgets][context_menu]") {
+    nk::Window window({.title = "Context menu focus", .width = 320, .height = 240});
+    auto root = nk::Box::create(nk::Orientation::Vertical, 0.0F);
+    auto button = nk::Button::create("Edit");
+    auto menu = nk::ContextMenu::create();
+    menu->add_item("Cut");
+    root->append(button);
+    root->append(menu);
+    window.set_child(root);
+
+    button->grab_focus();
+    REQUIRE(nk::has_flag(button->state_flags(), nk::StateFlags::Focused));
+
+    menu->show_at({12.0F, 12.0F});
+    CHECK(menu->is_open());
+    CHECK(nk::has_flag(menu->state_flags(), nk::StateFlags::Focused));
+    CHECK_FALSE(nk::has_flag(button->state_flags(), nk::StateFlags::Focused));
+
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    CHECK_FALSE(menu->is_open());
+    CHECK(nk::has_flag(button->state_flags(), nk::StateFlags::Focused));
+    CHECK_FALSE(nk::has_flag(menu->state_flags(), nk::StateFlags::Focused));
+}
+
+TEST_CASE("MenuButton closes when focus moves away", "[widgets][menu_button]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Menu button", .width = 320, .height = 240});
+    auto root = nk::Box::create(nk::Orientation::Vertical, 8.0F);
+    auto menu_button = nk::MenuButton::create("File");
+    menu_button->set_items({nk::NativeMenuItem::action("Quit", "app.quit")});
+    auto other = nk::Button::create("Other");
+    root->append(menu_button);
+    root->append(other);
+    window.set_child(root);
+    menu_button->allocate({8.0F, 8.0F, 140.0F, 36.0F});
+
+    menu_button->grab_focus();
+    REQUIRE(menu_button->handle_key_event(
+        {.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(menu_button->is_open());
+    CHECK(nk::has_flag(menu_button->state_flags(), nk::StateFlags::Focused) == false);
+
+    other->grab_focus();
+    REQUIRE(app.event_loop().poll());
+    CHECK_FALSE(menu_button->is_open());
+    CHECK(nk::has_flag(other->state_flags(), nk::StateFlags::Focused));
+}
+
 TEST_CASE("ContextMenu manages items and starts closed", "[widgets][context_menu]") {
     auto menu = nk::ContextMenu::create();
     REQUIRE(menu->item_count() == 0);
@@ -753,6 +814,25 @@ TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]"
     tooltip->set_text("Updated hint");
     REQUIRE(tooltip->text() == "Updated hint");
 }
+
+namespace {
+
+void append_snapshot_detail(const nk::FrameDiagnostics::RenderSnapshotNode& node,
+                            std::string& out) {
+    out += node.detail;
+    out += '\n';
+    for (const auto& child : node.children) {
+        append_snapshot_detail(child, out);
+    }
+}
+
+bool frame_contains(const nk::Window& window, std::string_view text) {
+    std::string detail;
+    append_snapshot_detail(window.inspector().last_frame_diagnostics().render_snapshot, detail);
+    return detail.find(text) != std::string::npos;
+}
+
+} // namespace
 
 TEST_CASE("Avatar round-trips initials, diameter, and image", "[widgets][avatar]") {
     auto avatar = nk::Avatar::create("AB");

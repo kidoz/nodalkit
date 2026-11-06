@@ -95,6 +95,8 @@ nk_sources = files(
     'src/widgets/dialog.cpp',
     'src/widgets/image_view.cpp',
     'src/widgets/menu_bar.cpp',
+    'src/widgets/menu_button.cpp',
+    'src/widgets/split_button.cpp',
     'src/widgets/status_bar.cpp',
     'src/widgets/combo_box.cpp',
     'src/widgets/segmented_control.cpp',

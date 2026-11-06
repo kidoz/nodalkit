@@ -28,6 +28,23 @@ auto menu = nk::MenuBar::create();
 menu->add_menu({"File", {nk::MenuItem::action("Save", "file.save")}});
 menu->set_action_group(actions);
 
+auto context = nk::ContextMenu::create();
+context->set_items({nk::NativeMenuItem::action(
+    "Save", "file.save",
+    nk::NativeMenuShortcut{nk::KeyCode::S, nk::NativeMenuModifier::Ctrl})});
+context->set_action_group(actions);
+
+auto file_menu = nk::MenuButton::create("File");
+file_menu->set_items({nk::NativeMenuItem::action("Save", "file.save")});
+file_menu->set_action_group(actions);
+
+auto save_as = std::make_shared<nk::Action>("file.save-as");
+actions->add(save_as);
+auto save_button = nk::SplitButton::create("Save");
+save_button->set_action(save);
+save_button->set_items({nk::NativeMenuItem::action("Save As", "file.save-as")});
+save_button->set_action_group(actions);
+
 auto palette = nk::CommandPalette::create();
 palette->set_commands({{.id = "file.save", .title = "Save",
                        .subtitle = {}, .category = "File"}});
@@ -47,9 +64,12 @@ widget headers. Attach the controls to the window's widget tree as in the
 example. Button labels and palette titles remain application-owned.
 
 Bound controls activate their action directly. They do **not** emit
-`Button::on_clicked()`, `MenuBar::on_action()`, or
+`Button::on_clicked()`, `MenuBar::on_action()`, `ContextMenu::on_action()`, or
 `CommandPalette::on_command_activated()`. Observe `Action::on_activated()`
 for command behavior; use the control signals for unbound controls.
+`ContextMenu` still emits `on_item_activated(index)` for a root-level leaf.
+Submenu commands are one level deep and report their action name only. A
+shortcut stored on the item is drawn beside its label.
 
 ## Update shared state
 

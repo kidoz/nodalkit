@@ -319,6 +319,10 @@ protected:
     /// use it for window-level state such as activation-aware selection.
     [[nodiscard]] Window* host_window() const;
 
+    /// The widget that currently holds keyboard focus in the host window, or
+    /// nullptr when this widget is not attached.
+    [[nodiscard]] Widget* host_focused_widget() const;
+
     /// Called when the host window pointer changes, and when that window is
     /// shown or hidden. host_window() already reports the new pointer. The
     /// default implementation does nothing.

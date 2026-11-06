@@ -11,8 +11,11 @@
 #include <limits>
 #include <memory>
 #include <nk/accessibility/atspi_bridge.h>
+#include <nk/actions/action.h>
 #include <nk/foundation/types.h>
 #include <nk/platform/events.h>
+#include <nk/platform/key_codes.h>
+#include <nk/platform/native_menu.h>
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
@@ -26,11 +29,13 @@
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/headerbar.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/menu_button.h>
 #include <nk/widgets/preferences.h>
 #include <nk/widgets/radio_button.h>
 #include <nk/widgets/search_field.h>
 #include <nk/widgets/slider.h>
 #include <nk/widgets/spin_button.h>
+#include <nk/widgets/split_button.h>
 #include <nk/widgets/switch_widget.h>
 #include <nk/widgets/text_area.h>
 #include <string>
@@ -988,6 +993,207 @@ TEST_CASE("ContextMenu maps only while open and separates dismissal from activat
 
     // Dismissing an already closed menu is a no-op: no second signal.
     menu->dismiss();
+    CHECK(dismissals == 1);
+}
+
+namespace {
+
+void collect_text(const nk::RenderNode& node, std::string& out) {
+    if (node.kind() == nk::RenderNodeKind::Text) {
+        out += static_cast<const nk::TextNode&>(node).text();
+        out += '\n';
+    }
+    for (const auto& child : node.children()) {
+        if (child) {
+            collect_text(*child, out);
+        }
+    }
+}
+
+std::string painted_text(nk::Widget& widget) {
+    nk::SnapshotContext snapshot;
+    widget.snapshot(snapshot);
+    auto root = snapshot.take_root();
+    std::string text;
+    if (root) {
+        collect_text(*root, text);
+    }
+    return text;
+}
+
+} // namespace
+
+TEST_CASE("ContextMenu uses the shared menu model", "[widgets][context_menu]") {
+    auto menu = nk::ContextMenu::create();
+    menu->set_items({
+        nk::NativeMenuItem::action(
+            "Save",
+            "file.save",
+            nk::NativeMenuShortcut{nk::KeyCode::S, nk::NativeMenuModifier::Ctrl}),
+        nk::NativeMenuItem::make_separator(),
+        nk::NativeMenuItem::action("Disabled", "file.disabled"),
+        nk::NativeMenuItem::submenu("Share", {nk::NativeMenuItem::action("Export", "file.export")}),
+    });
+
+    auto actions = std::make_shared<nk::ActionGroup>();
+    auto save = std::make_shared<nk::Action>("file.save");
+    save->set_checkable(true);
+    save->set_checked(true);
+    auto disabled = std::make_shared<nk::Action>("file.disabled");
+    disabled->set_enabled(false);
+    auto exported = std::make_shared<nk::Action>("file.export");
+    actions->add(save);
+    actions->add(disabled);
+    actions->add(exported);
+    menu->set_action_group(actions);
+
+    int saves = 0;
+    int exports = 0;
+    [[maybe_unused]] auto save_connection = save->on_activated().connect([&saves] { ++saves; });
+    [[maybe_unused]] auto export_connection =
+        exported->on_activated().connect([&exports] { ++exports; });
+    std::string reported;
+    int index = -1;
+    [[maybe_unused]] auto action_connection = menu->on_action().connect(
+        [&reported](std::string_view name) { reported = std::string(name); });
+    [[maybe_unused]] auto index_connection =
+        menu->on_item_activated().connect([&index](int value) { index = value; });
+
+    menu->show_at({20.0F, 20.0F});
+    const auto painted = painted_text(*menu);
+    CHECK(painted.find("Ctrl+S") != std::string::npos);
+    CHECK(painted.find("\u2713 Save") != std::string::npos);
+
+    menu->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 40.0F, .y = 30.0F, .button = 1});
+    menu->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 40.0F, .y = 90.0F, .button = 1});
+    CHECK(menu->is_open());
+    CHECK(saves == 0);
+
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    CHECK_FALSE(menu->is_open());
+    CHECK(saves == 1);
+    CHECK(index == 0);
+    CHECK(reported.empty());
+
+    index = -1;
+    menu->show_at({20.0F, 20.0F});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Right});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    CHECK(exports == 1);
+    CHECK(index == -1);
+    CHECK_FALSE(menu->is_open());
+
+    menu->set_action_group(nullptr);
+    menu->set_items({nk::NativeMenuItem::action("Quit", "app.quit")});
+    menu->show_at({20.0F, 20.0F});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down});
+    menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
+    CHECK(reported == "app.quit");
+    CHECK(index == 0);
+}
+
+TEST_CASE("SplitButton runs the primary action and opens its menu", "[widgets][split_button]") {
+    auto button = nk::SplitButton::create("Save");
+    button->allocate({0.0F, 0.0F, 160.0F, 36.0F});
+    button->set_items({nk::NativeMenuItem::action("Save As", "file.save-as")});
+
+    int clicks = 0;
+    std::string reported;
+    [[maybe_unused]] auto clicked = button->on_clicked().connect([&clicks] { ++clicks; });
+    [[maybe_unused]] auto action = button->on_action().connect(
+        [&reported](std::string_view name) { reported = std::string(name); });
+
+    CHECK(
+        button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(clicks == 1);
+    CHECK_FALSE(button->is_open());
+
+    CHECK(button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(button->is_open());
+    CHECK(button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(
+        button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK(reported == "file.save-as");
+    CHECK(clicks == 1);
+    CHECK_FALSE(button->is_open());
+
+    button->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 20.0F, .y = 18.0F, .button = 1});
+    button->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 20.0F, .y = 18.0F, .button = 1});
+    CHECK(clicks == 2);
+
+    button->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 148.0F, .y = 18.0F, .button = 1});
+    button->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 148.0F, .y = 18.0F, .button = 1});
+    CHECK(button->is_open());
+    CHECK(clicks == 2);
+    button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    CHECK_FALSE(button->is_open());
+
+    auto save = std::make_shared<nk::Action>("file.save");
+    int saves = 0;
+    [[maybe_unused]] auto saved = save->on_activated().connect([&saves] { ++saves; });
+    button->set_action(save);
+    CHECK(button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Space}));
+    CHECK(saves == 1);
+    CHECK(clicks == 2);
+
+    save->set_enabled(false);
+    CHECK_FALSE(button->is_sensitive());
+    CHECK_FALSE(
+        button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK_FALSE(button->is_open());
+}
+
+TEST_CASE("MenuButton opens its menu and runs the selected action", "[widgets][menu_button]") {
+    auto empty = nk::MenuButton::create("Empty");
+    empty->allocate({0.0F, 0.0F, 120.0F, 36.0F});
+    CHECK_FALSE(
+        empty->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK_FALSE(empty->is_open());
+
+    auto button = nk::MenuButton::create("File");
+    button->allocate({10.0F, 10.0F, 140.0F, 36.0F});
+    CHECK(button->label() == "File");
+    button->set_label("Document");
+    CHECK(button->label() == "Document");
+    button->set_items({nk::NativeMenuItem::action("Quit", "app.quit")});
+
+    std::string reported;
+    int index = -1;
+    int dismissals = 0;
+    [[maybe_unused]] auto action_connection = button->on_action().connect(
+        [&reported](std::string_view name) { reported = std::string(name); });
+    [[maybe_unused]] auto index_connection =
+        button->on_item_activated().connect([&index](int value) { index = value; });
+    [[maybe_unused]] auto dismissed_connection =
+        button->on_dismissed().connect([&dismissals] { ++dismissals; });
+
+    CHECK(button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(button->is_open());
+    CHECK(button->hit_test({20.0F, 60.0F}));
+    CHECK(button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(
+        button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    CHECK_FALSE(button->is_open());
+    CHECK(reported == "app.quit");
+    CHECK(index == 0);
+    CHECK(dismissals == 0);
+
+    button->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 40.0F, .y = 24.0F, .button = 1});
+    button->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 40.0F, .y = 24.0F, .button = 1});
+    CHECK(button->is_open());
+    button->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape});
+    CHECK_FALSE(button->is_open());
     CHECK(dismissals == 1);
 }
 

@@ -906,6 +906,10 @@ Window* Widget::host_window() const {
     return impl_->host_window;
 }
 
+Widget* Widget::host_focused_widget() const {
+    return impl_->host_window != nullptr ? impl_->host_window->focused_widget() : nullptr;
+}
+
 void Widget::snapshot(SnapshotContext& ctx) const {
     // Default: recursively snapshot visible children.
     for (const auto& child : impl_->children) {
