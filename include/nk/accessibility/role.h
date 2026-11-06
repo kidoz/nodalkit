@@ -25,6 +25,7 @@ enum class AccessibleRole : uint8_t {
     Menu,
     MenuBar,
     MenuItem,
+    Meter,
     ProgressBar,
     RadioButton,
     ScrollBar,

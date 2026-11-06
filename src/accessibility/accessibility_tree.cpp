@@ -79,6 +79,8 @@ std::string_view accessible_role_name(AccessibleRole role) {
         return "menubar";
     case AccessibleRole::MenuItem:
         return "menuitem";
+    case AccessibleRole::Meter:
+        return "meter";
     case AccessibleRole::ProgressBar:
         return "progressbar";
     case AccessibleRole::RadioButton:

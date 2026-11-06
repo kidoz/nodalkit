@@ -137,6 +137,9 @@ std::string atspi_role_name(std::string_view accessible_role) {
     if (accessible_role == "menuitem") {
         return "menu item";
     }
+    if (accessible_role == "meter") {
+        return "level bar";
+    }
     if (accessible_role == "progressbar") {
         return "progress bar";
     }

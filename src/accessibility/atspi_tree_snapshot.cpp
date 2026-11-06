@@ -83,6 +83,8 @@ RoleMapping atspi_role(const AccessibleNodeInfo& info) {
         return {AtspiRoleValue::MenuBar, "menu bar"};
     case Role::MenuItem:
         return {AtspiRoleValue::MenuItem, "menu item"};
+    case Role::Meter:
+        return {AtspiRoleValue::LevelBar, "level bar"};
     case Role::ProgressBar:
         return {AtspiRoleValue::ProgressBar, "progress bar"};
     case Role::RadioButton:

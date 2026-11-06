@@ -30,6 +30,7 @@
 #include <nk/widgets/context_menu.h>
 #include <nk/widgets/headerbar.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/level_bar.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/menu_button.h>
 #include <nk/widgets/preferences.h>
@@ -1162,6 +1163,62 @@ TEST_CASE("ContextMenu uses the shared menu model", "[widgets][context_menu]") {
     menu->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return});
     CHECK(reported == "app.quit");
     CHECK(index == 0);
+}
+
+void collect_rounded_colors(const nk::RenderNode& node, std::vector<nk::Color>& colors) {
+    if (node.kind() == nk::RenderNodeKind::RoundedRect) {
+        colors.push_back(static_cast<const nk::RoundedRectNode&>(node).color());
+    }
+    for (const auto& child : node.children()) {
+        if (child) {
+            collect_rounded_colors(*child, colors);
+        }
+    }
+}
+
+TEST_CASE("LevelBar fills discrete blocks and does not animate", "[widgets][level_bar]") {
+    auto bar = nk::LevelBar::create();
+    CHECK(bar->maximum() == 4);
+    CHECK(bar->value() == 0);
+    REQUIRE(bar->accessible() != nullptr);
+    CHECK(bar->accessible()->role() == nk::AccessibleRole::Meter);
+    CHECK(nk::atspi_role_name("meter") == "level bar");
+    CHECK(bar->accessible()->value() == "0 of 4");
+
+    bar->set_value(9);
+    CHECK(bar->value() == 4);
+    bar->set_value(-3);
+    CHECK(bar->value() == 0);
+    bar->set_value(2);
+    CHECK(bar->accessible()->value() == "2 of 4");
+
+    bar->set_maximum(0);
+    CHECK(bar->maximum() == 1);
+    CHECK(bar->value() == 1);
+    CHECK(bar->accessible()->value() == "1 of 1");
+    bar->set_maximum(4);
+    bar->set_value(2);
+
+    bar->allocate({0.0F, 0.0F, 96.0F, 16.0F});
+    nk::Widget& widget = *bar;
+    nk::SnapshotContext first;
+    widget.snapshot(first);
+    const auto first_root = first.take_root();
+    REQUIRE(first_root != nullptr);
+    std::vector<nk::Color> first_colors;
+    collect_rounded_colors(*first_root, first_colors);
+    REQUIRE(first_colors.size() == 4);
+    CHECK(first_colors[0] == first_colors[1]);
+    CHECK(first_colors[2] == first_colors[3]);
+    CHECK(first_colors[0] != first_colors[2]);
+
+    nk::SnapshotContext second;
+    widget.snapshot(second);
+    const auto second_root = second.take_root();
+    REQUIRE(second_root != nullptr);
+    std::vector<nk::Color> second_colors;
+    collect_rounded_colors(*second_root, second_colors);
+    CHECK(second_colors == first_colors);
 }
 
 TEST_CASE("ButtonContent shares icon, label, and chevron measurement",

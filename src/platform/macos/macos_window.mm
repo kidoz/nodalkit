@@ -1414,6 +1414,8 @@ static NSString* macos_accessibility_role(const nk::detail::AccessibleNodeInfo& 
         return NSAccessibilityMenuBarRole;
     case Role::MenuItem:
         return NSAccessibilityMenuItemRole;
+    case Role::Meter:
+        return NSAccessibilityLevelIndicatorRole;
     case Role::ProgressBar:
         return NSAccessibilityProgressIndicatorRole;
     case Role::RadioButton:
