@@ -595,6 +595,55 @@ TEST_CASE("Popover starts closed and accepts content", "[widgets][popover]") {
     REQUIRE_FALSE(popover->is_open());
 }
 
+TEST_CASE("Popover flips inside the window and activates its content", "[widgets][popover]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Popover", .width = 320, .height = 240});
+    auto anchor = nk::Button::create("Anchor");
+    auto action = nk::Button::create("Do it");
+    auto popover = nk::Popover::create();
+    popover->set_child(action);
+    auto root = nk::Box::create(nk::Orientation::Vertical, 0.0F);
+    root->append(anchor);
+    root->append(popover);
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    anchor->grab_focus();
+    popover->set_anchor(*anchor);
+    popover->show();
+    CHECK(popover->is_open());
+    CHECK(action->allocation().y >= anchor->allocation().bottom());
+    CHECK(nk::has_flag(action->state_flags(), nk::StateFlags::Focused));
+
+    int clicks = 0;
+    [[maybe_unused]] auto connection = action->on_clicked().connect([&clicks] { ++clicks; });
+    const auto action_center = nk::Point{
+        action->allocation().x + (action->allocation().width * 0.5F),
+        action->allocation().y + (action->allocation().height * 0.5F),
+    };
+    CHECK(popover->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                       .x = action_center.x,
+                                       .y = action_center.y,
+                                       .button = 1}));
+    CHECK(popover->handle_mouse_event({.type = nk::MouseEvent::Type::Release,
+                                       .x = action_center.x,
+                                       .y = action_center.y,
+                                       .button = 1}));
+    CHECK(clicks == 1);
+
+    CHECK(
+        popover->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape}));
+    CHECK_FALSE(popover->is_open());
+    CHECK(nk::has_flag(anchor->state_flags(), nk::StateFlags::Focused));
+
+    popover->show_at({160.0F, 220.0F});
+    CHECK(action->allocation().bottom() < 220.0F);
+    popover->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 8.0F, .y = 8.0F, .button = 1});
+    CHECK_FALSE(popover->is_open());
+}
+
 namespace {
 
 struct PaintedShape {
