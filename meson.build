@@ -59,7 +59,7 @@ nk_sources = files(
     'src/render/snapshot_context.cpp',
     'src/style/theme.cpp',
     'src/style/theme_selection.cpp',
-    'src/style/gtk_palette.cpp',
+    'src/style/desktop_palette.cpp',
     'src/accessibility/accessibility_tree.cpp',
     'src/accessibility/accessible.cpp',
     # Pure data conversion (WidgetDebugNode -> AtspiAccessibleSnapshot); no D-Bus/glib deps.

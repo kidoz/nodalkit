@@ -57,7 +57,7 @@
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/runtime/event_loop.h>
-#include <nk/style/gtk_palette.h>
+#include <nk/style/desktop_palette.h>
 #include <nk/style/style_class.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_selection.h>
@@ -672,8 +672,8 @@ void force_symbol_references() {
     (void)static_cast<bool (nk::Window::*)() const>(&nk::Window::uses_client_side_decorations);
     (void)static_cast<void (nk::Window::*)(nk::TitlebarStyle)>(&nk::Window::set_titlebar_style);
     (void)static_cast<nk::TitlebarStyle (nk::Window::*)() const>(&nk::Window::titlebar_style);
-    (void)&nk::parse_gtk_palette_css;
-    (void)&nk::load_gtk_palette;
+    (void)&nk::parse_desktop_palette_css;
+    (void)&nk::load_desktop_palette;
     (void)static_cast<void (nk::TextShaper::*)(std::string_view, bool)>(
         &nk::TextShaper::set_system_default_family);
     (void)static_cast<void (nk::TextShaper::*)(std::string_view)>(

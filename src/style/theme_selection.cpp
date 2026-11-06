@@ -1,5 +1,5 @@
 #include <algorithm>
-#include <nk/style/gtk_palette.h>
+#include <nk/style/desktop_palette.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_selection.h>
 
@@ -226,10 +226,10 @@ void apply_accent_override(Theme& theme,
     theme.set_token("accent-source", StyleValue{std::string("override")});
 }
 
-/// Override the hardcoded Linux palette with colors parsed from the on-disk GTK
-/// theme stylesheet. The accent slots are intentionally left untouched so the
-/// subsequent `apply_accent_override` (system/portal accent) still wins.
-void apply_gtk_palette_override(Theme& theme, const GtkPalette& palette) {
+/// Override the hardcoded Linux palette with colors parsed from the on-disk
+/// desktop theme stylesheet. The accent slots are intentionally left untouched
+/// so the subsequent `apply_accent_override` (system/portal accent) still wins.
+void apply_desktop_palette_override(Theme& theme, const DesktopPalette& palette) {
     if (palette.has_window_bg) {
         theme.set_token("window-bg", StyleValue{palette.window_bg});
     }
@@ -250,7 +250,7 @@ void apply_gtk_palette_override(Theme& theme, const GtkPalette& palette) {
     if (palette.has_borders_dark) {
         theme.set_token("border-strong", StyleValue{palette.borders_dark});
     }
-    theme.set_token("palette-source", StyleValue{std::string("gtk")});
+    theme.set_token("palette-source", StyleValue{std::string("stylesheet")});
 }
 
 } // namespace
@@ -353,8 +353,8 @@ std::shared_ptr<Theme> make_theme(const ResolvedThemeSelection& selection,
     if (selection.family == ThemeFamily::LinuxGnome && !selection.high_contrast &&
         system_preferences.gtk_theme_name.has_value()) {
         const bool dark = selection.color_scheme == ColorScheme::Dark;
-        if (auto palette = load_gtk_palette(*system_preferences.gtk_theme_name, dark)) {
-            apply_gtk_palette_override(*theme, *palette);
+        if (auto palette = load_desktop_palette(*system_preferences.gtk_theme_name, dark)) {
+            apply_desktop_palette_override(*theme, *palette);
         }
     }
 

@@ -9,7 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nk/platform/system_preferences.h>
-#include <nk/style/gtk_palette.h>
+#include <nk/style/desktop_palette.h>
 #include <nk/style/theme.h>
 #include <nk/style/theme_defaults.h>
 #include <nk/style/theme_selection.h>
@@ -187,7 +187,7 @@ TEST_CASE("Disabled combo boxes use muted borders and chevrons across theme fami
 
 TEST_CASE("GTK palette parsing validates literals and honors later overrides",
           "[theme][gtk-palette]") {
-    const auto palette = nk::parse_gtk_palette_css(R"css(
+    const auto palette = nk::parse_desktop_palette_css(R"css(
         @define-color window_bg_color #102030;
         @define-color window_bg_color rgb(64, 80, 96);
         @define-color window_fg_color rgba(240, 241, 242, 0.75);
@@ -202,7 +202,7 @@ TEST_CASE("GTK palette parsing validates literals and honors later overrides",
     CHECK(palette->window_bg.b == Catch::Approx(96.0F / 255.0F));
     CHECK(palette->window_fg.a == Catch::Approx(0.75F));
 
-    const auto invalid = nk::parse_gtk_palette_css(R"css(
+    const auto invalid = nk::parse_desktop_palette_css(R"css(
         @define-color window_bg_color rgb(999, 0, 0);
         @define-color accent_bg_color #3584e4;
     )css");
@@ -214,7 +214,7 @@ TEST_CASE("GTK palette parsing validates literals and honors later overrides",
 TEST_CASE("Palette loading rejects path-like theme names before reading CSS", "[theme][security]") {
     const ThemeHome home;
     home.write("gtk.css", "@define-color window_bg_color #102030;");
-    REQUIRE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+    REQUIRE(nk::load_desktop_palette("NodalKitMissingTheme", false).has_value());
     for (const auto& name : {std::string{},
                              std::string("."),
                              std::string(".."),
@@ -226,7 +226,7 @@ TEST_CASE("Palette loading rejects path-like theme names before reading CSS", "[
                              std::string("../../../") + home.path.relative_path().generic_string(),
                              std::string("name\0suffix", 11)}) {
         INFO("name: " << name);
-        CHECK_FALSE(nk::load_gtk_palette(name, false).has_value());
+        CHECK_FALSE(nk::load_desktop_palette(name, false).has_value());
     }
 }
 
@@ -237,23 +237,23 @@ TEST_CASE("Palette loading bounds individual and combined stylesheet reads", "[t
     std::string css = declaration;
     css.resize(MaxBytes, ' ');
     home.write("gtk.css", css);
-    REQUIRE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+    REQUIRE(nk::load_desktop_palette("NodalKitMissingTheme", false).has_value());
 
     css.push_back(' ');
     home.write("gtk.css", css);
-    CHECK_FALSE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+    CHECK_FALSE(nk::load_desktop_palette("NodalKitMissingTheme", false).has_value());
 
     css.resize(MaxBytes / 2 + 1);
     home.write("gtk.css", css);
     home.write("gtk-dark.css", css);
-    CHECK_FALSE(nk::load_gtk_palette("NodalKitMissingTheme", true).has_value());
-    CHECK(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+    CHECK_FALSE(nk::load_desktop_palette("NodalKitMissingTheme", true).has_value());
+    CHECK(nk::load_desktop_palette("NodalKitMissingTheme", false).has_value());
 }
 
 TEST_CASE("Palette loading rejects nonregular stylesheets", "[theme][security]") {
     const ThemeHome home;
     std::filesystem::create_directory(home.path / ".config" / "gtk-4.0" / "gtk.css");
-    CHECK_FALSE(nk::load_gtk_palette("NodalKitMissingTheme", false).has_value());
+    CHECK_FALSE(nk::load_desktop_palette("NodalKitMissingTheme", false).has_value());
 }
 
 TEST_CASE("Windows 11 theme is a native family, not a GNOME clone", "[theme][windows]") {

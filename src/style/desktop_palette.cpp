@@ -1,5 +1,3 @@
-#include "nk/style/gtk_palette.h"
-
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -8,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nk/foundation/logging.h>
+#include <nk/style/desktop_palette.h>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -212,9 +211,9 @@ std::optional<std::string> collect_theme_css(std::string_view gtk_theme_name, bo
 
 } // namespace
 
-std::optional<GtkPalette> parse_gtk_palette_css(std::string_view css) {
+std::optional<DesktopPalette> parse_desktop_palette_css(std::string_view css) {
     auto colors = extract_define_colors(std::string(css));
-    GtkPalette palette;
+    DesktopPalette palette;
     if (auto it = colors.find("window_bg_color"); it != colors.end()) {
         palette.window_bg = it->second;
         palette.has_window_bg = true;
@@ -256,19 +255,19 @@ std::optional<GtkPalette> parse_gtk_palette_css(std::string_view css) {
     return palette;
 }
 
-std::optional<GtkPalette> load_gtk_palette(std::string_view gtk_theme_name, bool dark) {
-    if (gtk_theme_name.empty() || gtk_theme_name == "." || gtk_theme_name == ".." ||
-        gtk_theme_name.find_first_of("/\\:") != std::string_view::npos ||
-        gtk_theme_name.find('\0') != std::string_view::npos) {
+std::optional<DesktopPalette> load_desktop_palette(std::string_view theme_name, bool dark) {
+    if (theme_name.empty() || theme_name == "." || theme_name == ".." ||
+        theme_name.find_first_of("/\\:") != std::string_view::npos ||
+        theme_name.find('\0') != std::string_view::npos) {
         return std::nullopt;
     }
 
-    auto css = collect_theme_css(gtk_theme_name, dark);
+    auto css = collect_theme_css(theme_name, dark);
     if (!css.has_value() || css->empty()) {
-        NK_LOG_DEBUG("Theme", "No GTK stylesheet found for theme");
+        NK_LOG_DEBUG("Theme", "No desktop stylesheet found for theme");
         return std::nullopt;
     }
-    return parse_gtk_palette_css(*css);
+    return parse_desktop_palette_css(*css);
 }
 
 } // namespace nk
