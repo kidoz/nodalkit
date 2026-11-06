@@ -33,17 +33,22 @@ LogLevel log_level() {
     return g_min_level;
 }
 
-void log(LogLevel level, std::string_view tag, std::string_view message) {
+void log(LogLevel level,
+         std::string_view tag,
+         std::string_view message,
+         const std::source_location& where) {
     if (level < g_min_level) {
         return;
     }
     std::fprintf(stderr,
-                 "[%s] %.*s: %.*s\n",
+                 "[%s] %.*s: %.*s (%s:%u)\n",
                  level_str(level),
                  static_cast<int>(tag.size()),
                  tag.data(),
                  static_cast<int>(message.size()),
-                 message.data());
+                 message.data(),
+                 where.file_name(),
+                 static_cast<unsigned>(where.line()));
 }
 
 namespace detail {
