@@ -1651,6 +1651,42 @@ TEST_CASE("Badge and Tooltip round-trip their text", "[widgets][badge][tooltip]"
     badge->set_text("99+");
     REQUIRE(badge->text() == "99+");
 
+    auto count = nk::Badge::create(100);
+    CHECK(count->text() == "99+");
+    CHECK(count->count() == 100);
+    CHECK(count->accessible() != nullptr);
+    CHECK(count->accessible()->role() == nk::AccessibleRole::Label);
+    CHECK(count->accessible()->name() == "99+");
+    count->set_count(0);
+    CHECK(count->text() == "0");
+    count->set_count(-4);
+    CHECK(count->text() == "0");
+    count->set_count_cap(9);
+    count->set_count(9);
+    CHECK(count->text() == "9");
+    count->set_count(12);
+    CHECK(count->text() == "9+");
+    count->allocate(
+        {0.0F, 0.0F, count->measure(nk::Constraints::unbounded()).natural_width, 20.0F});
+    CHECK(snapshot_text(*count).find("9+") != std::string::npos);
+    count->set_dot(true);
+    CHECK(count->is_dot());
+    CHECK(count->accessible()->name() == "9+");
+    const auto dot = count->measure(nk::Constraints::unbounded());
+    CHECK(dot.natural_width == Catch::Approx(dot.natural_height));
+    CHECK(dot.natural_width < 20.0F);
+    count->allocate({0.0F, 0.0F, dot.natural_width, dot.natural_height});
+    CHECK(snapshot_text(*count).find("9+") == std::string::npos);
+    count->set_conveys_status(true);
+    CHECK(count->conveys_status());
+    CHECK(count->accessible()->role() == nk::AccessibleRole::Status);
+    count->set_conveys_status(false);
+    CHECK(count->accessible()->role() == nk::AccessibleRole::Label);
+    count->set_text("New");
+    CHECK(count->text() == "New");
+    CHECK(count->is_dot());
+    CHECK(count->accessible()->name() == "New");
+
     auto tooltip = nk::Tooltip::create("Hint");
     REQUIRE(tooltip->text() == "Hint");
     tooltip->set_text("Updated hint");
