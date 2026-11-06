@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <fstream>
 #include <nk/model/settings.h>
 #include <string>
 #include <vector>
@@ -184,6 +185,22 @@ TEST_CASE("contains, remove, and clear behave", "[settings]") {
     settings.clear();
     CHECK(settings.size() == 0);
     CHECK_FALSE(settings.contains("b"));
+}
+
+TEST_CASE("load rejects a settings file larger than 1 MiB", "[settings]") {
+    TempSettingsFile temp("oversized");
+    std::filesystem::create_directories(temp.path.parent_path());
+    {
+        std::ofstream out(temp.path, std::ios::binary | std::ios::trunc);
+        REQUIRE(out);
+        out << "token=";
+        out << std::string(1024U * 1024U, 'x');
+        out << '\n';
+    }
+    nk::Settings settings(temp.path);
+    settings.set_string("keep", "memory");
+    CHECK_FALSE(settings.load());
+    CHECK(settings.get_string("keep").empty());
 }
 
 TEST_CASE("default_path is under a per-app directory", "[settings]") {

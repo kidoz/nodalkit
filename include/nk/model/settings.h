@@ -56,7 +56,8 @@ public:
     [[nodiscard]] const std::filesystem::path& path() const { return file_; }
 
     /// Load values from disk, replacing the in-memory set. Returns false if the
-    /// file does not exist (a fresh store) or cannot be read; true on success.
+    /// file does not exist (a fresh store), cannot be read, or is larger than
+    /// 1 MiB; true on success.
     bool load();
 
     /// Write the in-memory values to disk, creating parent directories as

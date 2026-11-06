@@ -150,6 +150,12 @@ Settings::Settings(std::filesystem::path file) : file_(std::move(file)) {}
 
 bool Settings::load() {
     values_.clear();
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(file_, ec);
+    constexpr auto kMaxSettingsBytes = std::uintmax_t{1024} * 1024;
+    if (ec || size > kMaxSettingsBytes) {
+        return false;
+    }
     std::ifstream in(file_, std::ios::binary);
     if (!in) {
         return false;
