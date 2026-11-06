@@ -765,10 +765,13 @@ void AtspiDbusServer::handle_method(GDBusConnection* connection,
             const auto target = current->targets.find(object_path);
             const bool focusable = target != current->targets.end() &&
                                    has_atspi_state(node->states, AtspiStateValue::Focusable);
-            if (focusable) {
-                actions_(target->second, AccessibleAction::Focus);
+            // Same reply path as DoAction: the UI thread reports whether focus
+            // actually moved.
+            const bool accepted = focusable && actions_ &&
+                                  actions_(target->second, AccessibleAction::Focus, invocation);
+            if (!accepted) {
+                reply(g_variant_new("(b)", FALSE));
             }
-            reply(g_variant_new("(b)", focusable ? TRUE : FALSE));
             return;
         }
     } else if (interface == ActionInterface) {
@@ -802,12 +805,13 @@ void AtspiDbusServer::handle_method(GDBusConnection* connection,
             g_variant_get(parameters, "(i)", &index);
             const auto target = current->targets.find(object_path);
             const auto action = atspi_action_from_name(action_name(index));
-            // Performed on the UI thread, which also rejects disabled or covered widgets.
-            const bool queued = target != current->targets.end() && action.has_value();
-            if (queued) {
-                actions_(target->second, *action);
+            // The UI thread performs the action and replies with its result.
+            // Disabled, hidden, destroyed, and covered widgets reply false.
+            const bool accepted = target != current->targets.end() && action.has_value() &&
+                                  actions_ && actions_(target->second, *action, invocation);
+            if (!accepted) {
+                reply(g_variant_new("(b)", FALSE));
             }
-            reply(g_variant_new("(b)", queued ? TRUE : FALSE));
             return;
         }
     } else if (interface == TextInterface) {

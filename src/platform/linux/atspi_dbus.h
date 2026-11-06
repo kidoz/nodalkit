@@ -36,7 +36,10 @@ struct AtspiPublishedTree {
 class AtspiDbusServer {
 public:
     // Both sinks are called on the bus thread and must hand work to the UI thread.
-    using ActionSink = std::function<void(AtspiActionTarget, AccessibleAction)>;
+    // The action sink owns `invocation` when it returns true and must reply to
+    // it. A false return means the caller replies that the action did not run.
+    using ActionSink =
+        std::function<bool(AtspiActionTarget, AccessibleAction, GDBusMethodInvocation*)>;
     using RefreshSink = std::function<void()>;
 
     AtspiDbusServer(std::string toolkit_version, ActionSink actions, RefreshSink refresh);

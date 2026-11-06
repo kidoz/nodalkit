@@ -1052,19 +1052,21 @@ void refresh_accessibility_snapshot(WaylandBackend::Impl& impl) {
 
 // UI thread: perform an action requested over AT-SPI through the stable identity, which also
 // rejects destroyed, hidden, disabled, and modal-covered widgets.
-void perform_accessible_action(WaylandBackend::Impl& impl,
+bool perform_accessible_action(WaylandBackend::Impl& impl,
                                detail::AtspiActionTarget target,
                                AccessibleAction action) {
+    bool performed = false;
     for (auto& [surface, state] : impl.accessibility_windows) {
         if (state.key != target.window) {
             continue;
         }
-        (void)(action == AccessibleAction::Focus
-                   ? state.tree->perform(target.node, action) || state.tree->focus(target.node)
-                   : state.tree->perform(target.node, action));
+        performed = action == AccessibleAction::Focus
+                        ? state.tree->perform(target.node, action) || state.tree->focus(target.node)
+                        : state.tree->perform(target.node, action);
         break;
     }
     refresh_accessibility_snapshot(impl);
+    return performed;
 }
 
 // Thread-safe: ask the UI thread to refresh after its current event-loop iteration.
@@ -1231,12 +1233,45 @@ void WaylandBackend::start_accessibility_thread() {
         auto* impl = impl_.get();
         impl_->atspi_server = std::make_unique<detail::AtspiDbusServer>(
             NK_VERSION,
-            [impl](detail::AtspiActionTarget target, AccessibleAction action) {
-                if (auto* app = Application::instance(); app != nullptr) {
-                    app->event_loop().post([impl, target, action] {
-                        perform_accessible_action(*impl, target, action);
-                    });
+            [impl](detail::AtspiActionTarget target,
+                   AccessibleAction action,
+                   GDBusMethodInvocation* invocation) {
+                auto* app = Application::instance();
+                if (app == nullptr || invocation == nullptr) {
+                    return false;
                 }
+                // Reply from the UI thread with the real result. If the posted
+                // task is dropped, the destructor still answers false so the
+                // accessibility client is not left waiting.
+                struct Reply {
+                    GDBusMethodInvocation* invocation = nullptr;
+                    bool answered = false;
+
+                    void answer(bool performed) {
+                        if (answered || invocation == nullptr) {
+                            return;
+                        }
+                        answered = true;
+                        g_dbus_method_invocation_return_value(
+                            invocation, g_variant_new("(b)", performed ? TRUE : FALSE));
+                        g_object_unref(invocation);
+                        invocation = nullptr;
+                    }
+
+                    ~Reply() { answer(false); }
+                };
+                auto reply = std::make_shared<Reply>();
+                g_object_ref(invocation);
+                reply->invocation = invocation;
+                const bool posted = app->event_loop().post(
+                    [impl, target, action, reply] {
+                        reply->answer(perform_accessible_action(*impl, target, action));
+                    },
+                    "atspi-action");
+                if (!posted) {
+                    reply->answer(false);
+                }
+                return posted;
             },
             [impl] {
                 impl->accessibility_in_use = true;
