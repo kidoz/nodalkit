@@ -9,10 +9,16 @@
 
 namespace nk {
 
+class Headerbar;
+
 /// Shows a sidebar and content side by side, or one pane at a time when
 /// collapsed. Applications typically connect a Breakpoint to set_collapsed().
 /// `set_show_sidebar(false)` hides the sidebar in the expanded layout.
 /// Collapsed navigation still chooses its pane with `set_show_content()`.
+///
+/// `bind_headerbar()` shows that bar's back button while the split is
+/// collapsed on the content pane. Activating it returns to the sidebar.
+/// `unbind_headerbar()` restores the bar's previous back-button visibility.
 class NavigationSplitView : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<NavigationSplitView> create();
@@ -44,6 +50,9 @@ public:
     Signal<bool>& on_show_content_changed();
     Signal<bool>& on_show_sidebar_changed();
 
+    void bind_headerbar(Headerbar& headerbar);
+    void unbind_headerbar();
+
     [[nodiscard]] SizeRequest measure(const Constraints& constraints) const override;
     void allocate(const Rect& allocation) override;
 
@@ -54,6 +63,8 @@ protected:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+
+    void sync_bound_back_button();
 };
 
 } // namespace nk

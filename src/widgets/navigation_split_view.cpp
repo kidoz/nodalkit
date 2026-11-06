@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <nk/accessibility/accessible.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/widgets/headerbar.h>
 #include <nk/widgets/navigation_split_view.h>
 
 namespace nk {
@@ -18,6 +19,10 @@ struct NavigationSplitView::Impl {
     Signal<bool> collapsed_changed;
     Signal<bool> show_content_changed;
     Signal<bool> show_sidebar_changed;
+    std::weak_ptr<Headerbar> headerbar;
+    ScopedConnection back_connection;
+    bool saved_back_button = false;
+    bool has_saved_back_button = false;
 };
 
 std::shared_ptr<NavigationSplitView> NavigationSplitView::create() {
@@ -31,7 +36,9 @@ NavigationSplitView::NavigationSplitView() : impl_(std::make_unique<Impl>()) {
     accessible.set_name("Navigation Split View");
 }
 
-NavigationSplitView::~NavigationSplitView() = default;
+NavigationSplitView::~NavigationSplitView() {
+    unbind_headerbar();
+}
 
 void NavigationSplitView::set_sidebar(std::shared_ptr<Widget> sidebar) {
     if (impl_->sidebar == sidebar) {
@@ -79,6 +86,7 @@ void NavigationSplitView::set_collapsed(bool collapsed) {
     }
     impl_->collapsed = collapsed;
     impl_->collapsed_changed.emit(collapsed);
+    sync_bound_back_button();
     queue_layout();
 }
 
@@ -92,6 +100,7 @@ void NavigationSplitView::set_show_content(bool show_content) {
     }
     impl_->show_content = show_content;
     impl_->show_content_changed.emit(show_content);
+    sync_bound_back_button();
     queue_layout();
 }
 
@@ -147,6 +156,39 @@ Signal<bool>& NavigationSplitView::on_show_content_changed() {
 
 Signal<bool>& NavigationSplitView::on_show_sidebar_changed() {
     return impl_->show_sidebar_changed;
+}
+
+void NavigationSplitView::sync_bound_back_button() {
+    const auto headerbar = impl_->headerbar.lock();
+    if (headerbar == nullptr) {
+        return;
+    }
+    headerbar->set_show_back_button(impl_->collapsed && impl_->show_content);
+}
+
+void NavigationSplitView::bind_headerbar(Headerbar& headerbar) {
+    const auto next = std::dynamic_pointer_cast<Headerbar>(headerbar.shared_from_this());
+    if (const auto current = impl_->headerbar.lock(); current == next) {
+        sync_bound_back_button();
+        return;
+    }
+    unbind_headerbar();
+    impl_->saved_back_button = next->shows_back_button();
+    impl_->has_saved_back_button = true;
+    impl_->headerbar = next;
+    impl_->back_connection =
+        ScopedConnection(next->on_back_requested().connect([this] { set_show_content(false); }));
+    sync_bound_back_button();
+}
+
+void NavigationSplitView::unbind_headerbar() {
+    const auto headerbar = impl_->headerbar.lock();
+    impl_->back_connection.disconnect();
+    impl_->headerbar.reset();
+    if (headerbar != nullptr && impl_->has_saved_back_button) {
+        headerbar->set_show_back_button(impl_->saved_back_button);
+    }
+    impl_->has_saved_back_button = false;
 }
 
 SizeRequest NavigationSplitView::measure(const Constraints& constraints) const {

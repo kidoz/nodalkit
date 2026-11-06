@@ -483,6 +483,36 @@ TEST_CASE("NavigationSplitView switches between sidebar and content",
     CHECK(content->allocation().width == Catch::Approx(360.0F));
 }
 
+TEST_CASE("NavigationSplitView drives the bound headerbar back button",
+          "[widgets][navigation_split_view]") {
+    auto split = nk::NavigationSplitView::create();
+    auto bar = nk::Headerbar::create("Mail");
+    bar->set_show_back_button(true);
+    split->bind_headerbar(*bar);
+    CHECK_FALSE(bar->shows_back_button());
+
+    split->set_collapsed(true);
+    CHECK_FALSE(bar->shows_back_button());
+    split->set_show_content(true);
+    CHECK(bar->shows_back_button());
+
+    bar->on_back_requested().emit();
+    CHECK_FALSE(split->shows_content());
+    CHECK_FALSE(bar->shows_back_button());
+
+    split->set_show_content(true);
+    CHECK(bar->shows_back_button());
+    split->set_collapsed(false);
+    CHECK_FALSE(bar->shows_back_button());
+
+    auto other = nk::Headerbar::create("Other");
+    split->bind_headerbar(*other);
+    CHECK(bar->shows_back_button());
+    CHECK_FALSE(other->shows_back_button());
+    split->unbind_headerbar();
+    CHECK_FALSE(other->shows_back_button());
+}
+
 TEST_CASE("NavigationSplitView hides the sidebar in the expanded layout",
           "[widgets][navigation_split_view]") {
     auto split = nk::NavigationSplitView::create();

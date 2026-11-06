@@ -748,6 +748,9 @@ void force_symbol_references() {
     (void)&nk::NavigationSplitView::on_collapsed_changed;
     (void)&nk::NavigationSplitView::on_show_content_changed;
     (void)&nk::NavigationSplitView::on_show_sidebar_changed;
+    (void)static_cast<void (nk::NavigationSplitView::*)(nk::Headerbar&)>(
+        &nk::NavigationSplitView::bind_headerbar);
+    (void)&nk::NavigationSplitView::unbind_headerbar;
     (void)&nk::NavigationStack::create;
     (void)static_cast<void (nk::NavigationStack::*)(std::shared_ptr<nk::Widget>, std::string)>(
         &nk::NavigationStack::set_root);
