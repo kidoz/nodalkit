@@ -16,11 +16,13 @@
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/platform/system_preferences.h>
 #include <nk/platform/window.h>
 #include <nk/platform/window_inspector.h>
 #include <nk/render/render_node.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/runtime/event_loop.h>
+#include <nk/style/theme.h>
 #include <nk/style/theme_selection.h>
 #include <nk/ui_core/state_flags.h>
 #include <nk/widgets/avatar.h>
@@ -1913,4 +1915,78 @@ TEST_CASE("VisualEffectView round-trips material, radius, and child",
 
     effect->set_fallback_tint(nk::Color{0.1F, 0.2F, 0.3F, 1.0F});
     effect->clear_fallback_tint();
+}
+
+namespace {
+
+const nk::ColorRectNode* first_color_rect(const nk::RenderNode& node) {
+    if (node.kind() == nk::RenderNodeKind::ColorRect) {
+        return static_cast<const nk::ColorRectNode*>(&node);
+    }
+    for (const auto& child : node.children()) {
+        if (child == nullptr) {
+            continue;
+        }
+        if (const auto* found = first_color_rect(*child)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+nk::Color backdrop_color(nk::VisualEffectView& effect) {
+    effect.allocate({0.0F, 0.0F, 120.0F, 48.0F});
+    nk::SnapshotContext snapshot;
+    nk::Widget& surface = effect;
+    surface.snapshot(snapshot);
+    const auto root = snapshot.take_root();
+    REQUIRE(root != nullptr);
+    const auto* fill = first_color_rect(*root);
+    REQUIRE(fill != nullptr);
+    return fill->color();
+}
+
+} // namespace
+
+TEST_CASE("VisualEffectView turns translucent materials opaque when transparency is reduced",
+          "[widgets][visual_effect_view]") {
+    const auto previous_theme = nk::Theme::active();
+
+    struct RestoreTheme {
+        std::shared_ptr<nk::Theme> theme;
+
+        ~RestoreTheme() { nk::Theme::set_active(std::move(theme)); }
+    } restore{previous_theme};
+
+    auto tooltip = nk::VisualEffectView::create(nk::VisualEffectMaterial::Tooltip);
+    const auto themeless = backdrop_color(*tooltip);
+    CHECK(themeless.a == Catch::Approx(0.95F));
+
+    nk::SystemPreferences preferences;
+    nk::ThemeSelection allowed_selection;
+    allowed_selection.transparency_policy = nk::TransparencyPolicy::Allowed;
+    nk::Theme::set_active(
+        nk::make_theme(nk::resolve_theme_selection(allowed_selection, preferences), preferences));
+    const auto allowed = backdrop_color(*tooltip);
+    CHECK(allowed.a == Catch::Approx(0.95F));
+
+    nk::ThemeSelection reduced_selection;
+    reduced_selection.transparency_policy = nk::TransparencyPolicy::Reduced;
+    nk::Theme::set_active(
+        nk::make_theme(nk::resolve_theme_selection(reduced_selection, preferences), preferences));
+    const auto reduced = backdrop_color(*tooltip);
+    CHECK(reduced.r == Catch::Approx(allowed.r));
+    CHECK(reduced.g == Catch::Approx(allowed.g));
+    CHECK(reduced.b == Catch::Approx(allowed.b));
+    CHECK(reduced.a == Catch::Approx(1.0F));
+
+    tooltip->set_fallback_tint(nk::Color{0.2F, 0.3F, 0.4F, 0.4F});
+    const auto tinted = backdrop_color(*tooltip);
+    CHECK(tinted.r == Catch::Approx(0.2F));
+    CHECK(tinted.a == Catch::Approx(1.0F));
+
+    nk::Theme::set_active(
+        nk::make_theme(nk::resolve_theme_selection(allowed_selection, preferences), preferences));
+    const auto translucent_tint = backdrop_color(*tooltip);
+    CHECK(translucent_tint.a == Catch::Approx(0.4F));
 }

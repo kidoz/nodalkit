@@ -126,8 +126,11 @@ void VisualEffectView::allocate(const Rect& allocation) {
 
 void VisualEffectView::snapshot(SnapshotContext& ctx) const {
     const auto style = style_for(impl_->material);
-    const Color tint =
+    Color tint =
         impl_->fallback_tint_override.value_or(theme_color(style.theme_token, style.fallback));
+    if (theme_string("transparency-mode", "allowed") == "reduced") {
+        tint.a = 1.0F;
+    }
 
     const Rect rect = allocation();
     if (impl_->corner_radius > 0.0F) {

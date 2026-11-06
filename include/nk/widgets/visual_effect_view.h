@@ -10,7 +10,7 @@
 namespace nk {
 
 /// Standard backdrop materials that select a themed surface color on every
-/// platform. This widget does not use native NSVisualEffectView compositing.
+/// platform, including macOS. This widget does not use NSVisualEffectView.
 enum class VisualEffectMaterial {
     Sidebar,
     HeaderView,
@@ -26,7 +26,10 @@ enum class VisualEffectMaterial {
 /// Each material resolves a semantic surface token through the theme's shared
 /// rules (sidebar, headerbar, popover, ...), so the backdrop follows the
 /// active color scheme; the literal tints are only defensive fallbacks for
-/// themeless use. The material's color determines the backdrop opacity.
+/// themeless use. When the theme token `transparency-mode` is `"reduced"`,
+/// the backdrop alpha is forced to 1, including a translucent tooltip material
+/// or fallback tint. When transparency is allowed, the material color is used
+/// as resolved.
 class VisualEffectView : public Widget {
 public:
     [[nodiscard]] static std::shared_ptr<VisualEffectView>
