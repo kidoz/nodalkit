@@ -44,3 +44,13 @@ executable('showcase',
     ],
     dependencies : nk_dep,
 )
+
+executable('trading_terminal',
+    [
+        'trading_terminal/main.cpp',
+        'trading_terminal/trading_terminal_app.cpp',
+        'trading_terminal/trading_model.cpp',
+        'trading_terminal/candlestick_chart.cpp',
+    ],
+    dependencies : nk_dep,
+)

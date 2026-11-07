@@ -192,6 +192,15 @@ test_showcase_navigation = executable('test_showcase_navigation',
 )
 test('showcase_navigation', test_showcase_navigation)
 
+test_trading_terminal_model = executable('test_trading_terminal_model',
+    'trading_terminal_model_test.cpp',
+    '../examples/trading_terminal/trading_model.cpp',
+    '../examples/trading_terminal/candlestick_chart.cpp',
+    include_directories : include_directories('..'),
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('trading_terminal_model', test_trading_terminal_model)
+
 test_editor_scale_validation = executable('test_editor_scale_validation',
     'editor_scale_validation_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],

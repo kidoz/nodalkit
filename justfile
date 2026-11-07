@@ -21,6 +21,11 @@ showcase *args="":
     meson compile -C {{builddir}} showcase
     {{builddir}}/examples/showcase {{args}}
 
+# Build and run the simulated trading-terminal demo
+trading-terminal *args="":
+    meson compile -C {{builddir}} trading_terminal
+    {{builddir}}/examples/trading_terminal {{args}}
+
 # Run all tests
 test *args="":
     meson test -C {{builddir}} {{args}}
