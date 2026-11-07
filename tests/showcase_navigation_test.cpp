@@ -79,3 +79,29 @@ TEST_CASE("Showcase inset columns reserve wrapped height at their allocated widt
         CHECK(property_stage->allocation().bottom() <= card->allocation().bottom());
     }
 }
+
+TEST_CASE("Showcase wrapped text reuses measurements and follows text and theme changes",
+          "[showcase][layout]") {
+    const auto previous_theme = nk::Theme::active();
+    auto theme = std::make_shared<nk::Theme>("Wrapped text test");
+    theme->set_token("font-size-body", 13.0F);
+    nk::Theme::set_active(theme);
+    auto text = SecondaryText::create("Repeated text wraps at the available column width.");
+    const auto initial = text->measure({.max_width = 120.0F});
+    const auto measured = text->debug_hotspot_counters().text_measure_count;
+    CHECK(measured > 0);
+    CHECK(text->measure({.max_width = 120.0F}).natural_height == initial.natural_height);
+    CHECK(text->debug_hotspot_counters().text_measure_count == measured);
+    const auto wide = text->measure({.max_width = 360.0F});
+    CHECK(wide.natural_height < initial.natural_height);
+
+    text->set_text("Short");
+    const auto short_text = text->measure({.max_width = 360.0F});
+    CHECK(short_text.natural_width < wide.natural_width);
+    theme->set_token("font-size-body", 20.0F);
+    const auto large = text->measure({.max_width = 360.0F});
+    CHECK(large.natural_width > short_text.natural_width);
+    theme->set_token("text-scale", 2.0F);
+    CHECK(text->measure({.max_width = 360.0F}).natural_width > large.natural_width);
+    nk::Theme::set_active(previous_theme);
+}

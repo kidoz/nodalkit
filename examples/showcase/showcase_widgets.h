@@ -15,6 +15,7 @@
 #include <nk/platform/key_codes.h>
 #include <nk/platform/window.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/style/theme.h>
 #include <nk/text/font.h>
 #include <nk/ui_core/widget.h>
 #include <nk/widgets/context_menu.h>
@@ -678,21 +679,24 @@ public:
     void set_text(std::string text) {
         if (text_ != text) {
             text_ = std::move(text);
+            cached_layouts_.clear();
             queue_layout();
             queue_redraw();
         }
     }
 
     [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& constraints) const override {
-        const auto layout = wrapped_layout(constraints.max_width);
+        const auto& layout = wrapped_layout(constraints.max_width);
         const float height = std::max(20.0F, layout.height);
         return {0.0F, height, layout.width, height};
     }
 
 protected:
+    void on_host_window_changed(nk::Window* /*window*/) override { cached_layouts_.clear(); }
+
     void snapshot(nk::SnapshotContext& ctx) const override {
         const auto a = allocation();
-        const auto layout = wrapped_layout(a.width);
+        const auto& layout = wrapped_layout(a.width);
         float text_y = a.y;
         if (layout.lines.size() == 1) {
             text_y = a.y + std::max(0.0F, (a.height - layout.line_height) * 0.5F);
@@ -718,15 +722,42 @@ private:
         };
     }
 
-    [[nodiscard]] showcase_detail::WrappedTextLayout wrapped_layout(float max_width) const {
-        return showcase_detail::wrap_text_lines(
-            text_,
-            [&](std::string_view line) { return measure_text(line, font_descriptor()); },
+    [[nodiscard]] const showcase_detail::WrappedTextLayout& wrapped_layout(float max_width) const {
+        const auto font = font_descriptor();
+        float scale = 1.0F;
+        if (const auto* token = nk::Theme::active()->token("text-scale")) {
+            if (const auto* value = std::get_if<float>(token); value && std::isfinite(*value)) {
+                scale = std::clamp(*value, 1.0F, 2.25F);
+            }
+        }
+        if (cached_font_size_ != font.size || cached_scale_ != scale) {
+            cached_layouts_.clear();
+            cached_font_size_ = font.size;
+            cached_scale_ = scale;
+        }
+        for (const auto& cached : cached_layouts_) {
+            if (cached.first == max_width) {
+                return cached.second;
+            }
+        }
+        // Layout probes a few column widths; keep these alongside the snapshot width.
+        if (cached_layouts_.size() == 8) {
+            cached_layouts_.erase(cached_layouts_.begin());
+        }
+        cached_layouts_.emplace_back(
             max_width,
-            2.0F);
+            showcase_detail::wrap_text_lines(
+                text_,
+                [&](std::string_view line) { return measure_text(line, font); },
+                max_width,
+                2.0F));
+        return cached_layouts_.back().second;
     }
 
     std::string text_;
+    mutable float cached_font_size_ = 0.0F;
+    mutable float cached_scale_ = 0.0F;
+    mutable std::vector<std::pair<float, showcase_detail::WrappedTextLayout>> cached_layouts_;
 };
 
 class FieldLabel : public nk::Widget {
