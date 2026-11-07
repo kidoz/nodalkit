@@ -19,7 +19,14 @@ def main():
         _fields_ = [("name", ctypes.c_char * 256), ("spec_version", ctypes.c_uint32),
                     ("version", ctypes.c_uint32), ("description", ctypes.c_char * 256)]
 
-    loader = ctypes.CDLL(ctypes.util.find_library("vulkan") or "libvulkan.so.1")
+    if os.name == "nt":
+        # SDK layers are not necessarily registered system-wide (e.g. Scoop).
+        sdk = os.environ.get("VULKAN_SDK")
+        if sdk and (Path(sdk) / "Bin" / "VkLayer_khronos_validation.json").is_file():
+            os.environ.setdefault("VK_LAYER_PATH", str(Path(sdk) / "Bin"))
+        loader = ctypes.WinDLL("vulkan-1.dll")
+    else:
+        loader = ctypes.CDLL(ctypes.util.find_library("vulkan") or "libvulkan.so.1")
     enumerate_layers = loader.vkEnumerateInstanceLayerProperties
     enumerate_layers.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(Layer)]
     enumerate_layers.restype = ctypes.c_int32
@@ -31,10 +38,10 @@ def main():
             layer.name == b"VK_LAYER_KHRONOS_validation" for layer in available):
         sys.exit("VK_LAYER_KHRONOS_validation is required for this gate")
     env = os.environ.copy()
-    layers = env.get("VK_INSTANCE_LAYERS", "").split(":")
+    layers = env.get("VK_INSTANCE_LAYERS", "").split(os.pathsep)
     if "VK_LAYER_KHRONOS_validation" not in layers:
         layers.append("VK_LAYER_KHRONOS_validation")
-    env["VK_INSTANCE_LAYERS"] = ":".join(layer for layer in layers if layer)
+    env["VK_INSTANCE_LAYERS"] = os.pathsep.join(layer for layer in layers if layer)
     env["VK_VALIDATION_VALIDATE_SYNC"] = "1"
     env["NK_REQUIRE_VULKAN"] = "1"
     # The settings-file key also works with SDKs predating the current
