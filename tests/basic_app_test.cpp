@@ -6773,6 +6773,258 @@ TEST_CASE("ListView preserves precise scrolling in logical pixels", "[app][scrol
     CHECK(row->allocation().y == Catch::Approx(initial_y - 33.0F));
 }
 
+namespace {
+
+std::shared_ptr<nk::Widget> make_scroll_test_view(std::string_view kind, std::size_t rows) {
+    std::vector<std::string> text;
+    for (std::size_t row = 0; row < rows; ++row) {
+        text.push_back("row-" + std::to_string(row));
+    }
+    if (kind == "tree") {
+        auto model = std::make_shared<nk::TreeModel>();
+        for (const auto& value : text) {
+            (void)model->add_root(value);
+        }
+        auto view = nk::TreeView::create();
+        view->set_model(model);
+        view->set_row_height(30.0F);
+        return view;
+    }
+    auto model = std::make_shared<nk::StringListModel>(std::move(text));
+    if (kind == "grid") {
+        auto view = nk::GridView::create();
+        view->set_model(model);
+        view->set_cell_width(80.0F);
+        view->set_cell_height(30.0F);
+        view->set_gap(0.0F);
+        return view;
+    }
+    auto view = nk::DataTable::create();
+    view->set_model(model);
+    view->set_columns({{.id = "name", .title = "Name", .width = 80.0F}});
+    view->set_row_height(30.0F);
+    return view;
+}
+
+std::unique_ptr<nk::RenderNode> snapshot_scroll_test_view(nk::Widget& parent) {
+    nk::SnapshotContext context;
+    parent.snapshot(context);
+    return context.take_root();
+}
+
+std::optional<nk::Rect> scroll_test_text_bounds(const nk::RenderNode& node, std::string_view text) {
+    if (node.kind() == nk::RenderNodeKind::Text &&
+        static_cast<const nk::TextNode&>(node).text() == text) {
+        return node.bounds();
+    }
+    for (const auto& child : node.children()) {
+        if (const auto found = scroll_test_text_bounds(*child, text)) {
+            return found;
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+TEST_CASE("Model views preserve fractional precise scrolling and wheel steps",
+          "[app][scroll][view-scroll]") {
+    for (const auto kind : {"grid", "tree", "table"}) {
+        DYNAMIC_SECTION(kind) {
+            auto view = make_scroll_test_view(kind, 10);
+            auto parent = TestContainer::create();
+            parent->append(view);
+            view->allocate({0.0F, 0.0F, 100.0F, 130.0F});
+            const auto initial =
+                scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+            REQUIRE(initial);
+            nk::MouseEvent event{.type = nk::MouseEvent::Type::Scroll,
+                                 .x = 20.0F,
+                                 .y = 60.0F,
+                                 .scroll_dy = -3.5F,
+                                 .precise_scrolling = true};
+            REQUIRE(view->handle_mouse_event(event));
+            CHECK(view->debug_pending_redraw());
+            CHECK_FALSE(view->debug_pending_layout());
+            const auto precise =
+                scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+            REQUIRE(precise);
+            CHECK(precise->y == Catch::Approx(initial->y - 3.5F));
+            event.scroll_dy = -0.25F;
+            REQUIRE(view->handle_mouse_event(event));
+            const auto fractional =
+                scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+            REQUIRE(fractional);
+            CHECK(fractional->y == Catch::Approx(initial->y - 3.75F));
+            event.precise_scrolling = false;
+            event.scroll_dy = -1.0F;
+            REQUIRE(view->handle_mouse_event(event));
+            const auto wheel =
+                scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+            REQUIRE(wheel);
+            CHECK(wheel->y == Catch::Approx(initial->y - 33.75F));
+        }
+    }
+}
+
+TEST_CASE("Model views release unchanged scrolling without requesting redraw",
+          "[app][scroll][view-scroll]") {
+    for (const auto kind : {"grid", "tree", "table"}) {
+        for (const std::size_t rows : {0, 1, 20}) {
+            DYNAMIC_SECTION(kind << " rows=" << rows) {
+                auto view = make_scroll_test_view(kind, rows);
+                auto parent = TestContainer::create();
+                parent->append(view);
+                view->allocate({0.0F, 0.0F, 100.0F, 130.0F});
+                (void)snapshot_scroll_test_view(*parent);
+                nk::MouseEvent event{.type = nk::MouseEvent::Type::Scroll,
+                                     .x = 20.0F,
+                                     .y = 60.0F,
+                                     .scroll_dy = 8.0F,
+                                     .precise_scrolling = true};
+                CHECK_FALSE(view->handle_mouse_event(event));
+                CHECK_FALSE(view->debug_pending_redraw());
+                event.scroll_dy = 0.0F;
+                CHECK_FALSE(view->handle_mouse_event(event));
+                event.scroll_dx = -4.0F;
+                CHECK_FALSE(view->handle_mouse_event(event));
+                CHECK_FALSE(view->debug_pending_redraw());
+                event.scroll_dx = 0.0F;
+                event.scroll_dy = -10000.0F;
+                CHECK(view->handle_mouse_event(event) == (rows == 20));
+                (void)snapshot_scroll_test_view(*parent);
+                CHECK_FALSE(view->handle_mouse_event(event));
+                CHECK_FALSE(view->debug_pending_redraw());
+                event.scroll_dy = 10000.0F;
+                CHECK(view->handle_mouse_event(event) == (rows == 20));
+                (void)snapshot_scroll_test_view(*parent);
+                CHECK_FALSE(view->handle_mouse_event(event));
+                CHECK_FALSE(view->debug_pending_redraw());
+                event.x = -1.0F;
+                event.scroll_dy = -8.0F;
+                CHECK_FALSE(view->handle_mouse_event(event));
+                CHECK_FALSE(view->debug_pending_redraw());
+            }
+        }
+    }
+}
+
+TEST_CASE("Nested model views pass boundary scrolling to their viewport",
+          "[app][scroll][view-scroll]") {
+    for (const auto kind : {"grid", "tree", "table"}) {
+        for (const std::size_t rows : {1, 20}) {
+            DYNAMIC_SECTION(kind << " rows=" << rows) {
+                nk::Window window({.title = "View scroll chaining", .width = 100, .height = 100});
+                auto scroll = nk::ScrollArea::create();
+                scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+                auto box = nk::Box::create(nk::Orientation::Vertical);
+                auto view = make_scroll_test_view(kind, rows);
+                box->append(view);
+                box->append(FixedWidget::create(100.0F, 500.0F));
+                scroll->set_content(box);
+                window.set_child(scroll);
+                scroll->allocate({0.0F, 0.0F, 100.0F, 100.0F});
+                const auto bounds = view->allocation();
+                nk::MouseEvent event{.type = nk::MouseEvent::Type::Scroll,
+                                     .x = bounds.x + 20.0F,
+                                     .y = bounds.y + std::min(60.0F, bounds.height - 4.0F),
+                                     .scroll_dy = -8.0F,
+                                     .precise_scrolling = true};
+                if (rows == 20) {
+                    window.dispatch_mouse_event(event);
+                    CHECK(scroll->v_offset() == 0.0F);
+                    auto end_event = event;
+                    end_event.scroll_dy = -10000.0F;
+                    window.dispatch_mouse_event(end_event);
+                    CHECK(scroll->v_offset() == 0.0F);
+                }
+                window.dispatch_mouse_event(event);
+                CHECK(scroll->v_offset() == Catch::Approx(8.0F));
+            }
+        }
+    }
+}
+
+TEST_CASE("DataTable preserves precise movement on both axes and releases blocked diagonals",
+          "[app][scroll][view-scroll]") {
+    auto table = std::static_pointer_cast<nk::DataTable>(make_scroll_test_view("table", 20));
+    table->set_columns({{.id = "name", .title = "Name", .width = 300.0F}});
+    auto parent = TestContainer::create();
+    parent->append(table);
+    table->allocate({0.0F, 0.0F, 100.0F, 130.0F});
+    const auto initial = scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+    REQUIRE(initial);
+    nk::MouseEvent event{.type = nk::MouseEvent::Type::Scroll,
+                         .x = 20.0F,
+                         .y = 60.0F,
+                         .scroll_dx = -0.005F,
+                         .precise_scrolling = true};
+    REQUIRE(table->handle_mouse_event(event));
+    const auto tiny = scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+    REQUIRE(tiny);
+    CHECK(tiny->x == Catch::Approx(initial->x - 0.005F).margin(0.00001F));
+    CHECK(tiny->y == initial->y);
+    event.scroll_dx = -3.5F;
+    event.scroll_dy = -2.25F;
+    REQUIRE(table->handle_mouse_event(event));
+    const auto precise = scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+    REQUIRE(precise);
+    CHECK(precise->x == Catch::Approx(initial->x - 3.505F));
+    CHECK(precise->y == Catch::Approx(initial->y - 2.25F));
+    event.precise_scrolling = false;
+    event.scroll_dx = -1.0F;
+    event.scroll_dy = -1.0F;
+    REQUIRE(table->handle_mouse_event(event));
+    const auto wheel = scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-1");
+    REQUIRE(wheel);
+    CHECK(wheel->x == Catch::Approx(initial->x - 35.505F));
+    CHECK(wheel->y == Catch::Approx(initial->y - 32.25F));
+    event.precise_scrolling = true;
+    event.scroll_dx = 10000.0F;
+    event.scroll_dy = -10000.0F;
+    REQUIRE(table->handle_mouse_event(event));
+    const auto bottom = scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-19");
+    REQUIRE(bottom);
+    event.scroll_dx = -1.0F;
+    event.scroll_dy = -1.0F;
+    REQUIRE(table->handle_mouse_event(event));
+    const auto horizontal = scroll_test_text_bounds(*snapshot_scroll_test_view(*parent), "row-19");
+    REQUIRE(horizontal);
+    CHECK(horizontal->x == Catch::Approx(bottom->x - 1.0F));
+    CHECK(horizontal->y == bottom->y);
+    event.scroll_dx = -10000.0F;
+    REQUIRE(table->handle_mouse_event(event));
+    (void)snapshot_scroll_test_view(*parent);
+    CHECK_FALSE(table->handle_mouse_event(event));
+    CHECK_FALSE(table->debug_pending_redraw());
+    CHECK_FALSE(table->debug_pending_layout());
+}
+
+TEST_CASE("Nested model views pass horizontal scrolling to their viewport",
+          "[app][scroll][view-scroll]") {
+    for (const auto kind : {"grid", "tree", "table"}) {
+        DYNAMIC_SECTION(kind) {
+            nk::Window window({.title = "Horizontal scroll chaining", .width = 100, .height = 100});
+            auto scroll = nk::ScrollArea::create();
+            auto box = nk::Box::create(nk::Orientation::Vertical);
+            auto view = make_scroll_test_view(kind, 1);
+            box->append(view);
+            box->append(FixedWidget::create(500.0F, 300.0F));
+            scroll->set_content(box);
+            window.set_child(scroll);
+            scroll->allocate({0.0F, 0.0F, 100.0F, 100.0F});
+            const auto bounds = view->allocation();
+            window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                         .x = bounds.x + 20.0F,
+                                         .y = bounds.y + std::min(60.0F, bounds.height - 4.0F),
+                                         .scroll_dx = -4.5F,
+                                         .precise_scrolling = true});
+            CHECK(scroll->h_offset() == Catch::Approx(4.5F));
+            CHECK(scroll->v_offset() == 0.0F);
+        }
+    }
+}
+
 TEST_CASE("Scrolling renders without a window layout pass", "[app][scroll]") {
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Scroll redraw", .width = 200, .height = 100});

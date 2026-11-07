@@ -508,19 +508,23 @@ bool DataTable::handle_mouse_event(const MouseEvent& event) {
             return false;
         }
         const float horizontal_unit = event.precise_scrolling ? 1.0F : 32.0F;
-        if (std::abs(event.scroll_dx) > 0.01F) {
-            impl_->horizontal_scroll_offset = std::clamp(
-                impl_->horizontal_scroll_offset - event.scroll_dx * horizontal_unit,
-                0.0F,
-                max_horizontal_scroll_offset(impl_->columns, table_inner_rect(*this).width));
-        }
-        impl_->scroll_offset = std::clamp(
-            impl_->scroll_offset - (event.scroll_dy * impl_->row_height),
+        const float vertical_unit = event.precise_scrolling ? 1.0F : impl_->row_height;
+        const float next_h =
+            std::clamp(impl_->horizontal_scroll_offset - event.scroll_dx * horizontal_unit,
+                       0.0F,
+                       max_horizontal_scroll_offset(impl_->columns, table_inner_rect(*this).width));
+        const float next_v = std::clamp(
+            impl_->scroll_offset - event.scroll_dy * vertical_unit,
             0.0F,
             max_scroll_offset(
                 impl_->display_model.get(),
                 impl_->row_height,
                 table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height));
+        if (next_h == impl_->horizontal_scroll_offset && next_v == impl_->scroll_offset) {
+            return false;
+        }
+        impl_->horizontal_scroll_offset = next_h;
+        impl_->scroll_offset = next_v;
         queue_redraw();
         return true;
     }

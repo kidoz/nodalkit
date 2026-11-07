@@ -426,15 +426,19 @@ bool GridView::handle_mouse_event(const MouseEvent& event) {
         if (!content.contains({event.x, event.y}) || !impl_->model) {
             return false;
         }
-        impl_->scroll_offset =
-            std::clamp(impl_->scroll_offset - (event.scroll_dy * impl_->cell_height),
-                       0.0F,
-                       max_scroll_offset(impl_->model.get(),
-                                         impl_->cell_width,
-                                         impl_->cell_height,
-                                         impl_->gap,
-                                         content.width,
-                                         content.height));
+        const float step = event.precise_scrolling ? 1.0F : impl_->cell_height;
+        const float next = std::clamp(impl_->scroll_offset - (event.scroll_dy * step),
+                                      0.0F,
+                                      max_scroll_offset(impl_->model.get(),
+                                                        impl_->cell_width,
+                                                        impl_->cell_height,
+                                                        impl_->gap,
+                                                        content.width,
+                                                        content.height));
+        if (next == impl_->scroll_offset) {
+            return false;
+        }
+        impl_->scroll_offset = next;
         queue_redraw();
         return true;
     }
