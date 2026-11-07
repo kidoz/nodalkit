@@ -13,8 +13,13 @@ endif
 # the fast unwinder records garbage PCs inside them and module-name suppressions
 # like leak:libfontconfig never match. The slow unwinder walks their DWARF CFI
 # and produces the real modules.
+test_environment = environment()
+test_environment.set('LSAN_OPTIONS', 'suppressions=' + (meson.current_source_dir() / 'lsan_suppressions.txt') + ':fast_unwind_on_malloc=0')
+if windows_sanitizer_runtime_dir != ''
+    test_environment.prepend('PATH', windows_sanitizer_runtime_dir)
+endif
 add_test_setup('nodalkit',
-    env : {'LSAN_OPTIONS': 'suppressions=' + (meson.current_source_dir() / 'lsan_suppressions.txt') + ':fast_unwind_on_malloc=0'},
+    env : test_environment,
     is_default : true,
 )
 

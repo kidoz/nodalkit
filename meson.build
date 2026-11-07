@@ -489,11 +489,43 @@ endif
 
 # --- Sanitizer support ---
 
+windows_sanitizer_runtime_dir = ''
 if get_option('b_sanitize') != 'none'
     foreach lang : nk_enabled_languages
         add_project_arguments('-fno-omit-frame-pointer', language : lang)
         add_project_link_arguments('-fno-omit-frame-pointer', language : lang)
     endforeach
+
+    if host_system == 'windows' and cpp_compiler.get_id() == 'clang'
+        # Meson's MSVC-ABI linker does not forward the GNU Clang sanitizer
+        # driver flags. The driver must select and link its own runtime.
+        windows_vscrt = get_option('b_vscrt')
+        if windows_vscrt == 'from_buildtype'
+            windows_vscrt = get_option('buildtype') == 'debug' ? 'mdd' : 'md'
+        elif windows_vscrt == 'static_from_buildtype'
+            windows_vscrt = get_option('buildtype') == 'debug' ? 'mtd' : 'mt'
+        endif
+        if get_option('b_sanitize').contains('address') and windows_vscrt in ['mdd', 'mtd']
+            error('Windows Clang AddressSanitizer requires the release CRT. Use -Db_vscrt=md or --native-file ci/windows-asan-clang.ini (debug symbols remain enabled).')
+        endif
+        add_project_link_arguments('-fsanitize=' + get_option('b_sanitize'), language : 'cpp')
+        if windows_vscrt == 'md'
+            # Clang selects the dynamic CRT sanitizer thunk from _DLL even
+            # when the link command contains only precompiled objects.
+            add_project_link_arguments('-D_DLL', language : 'cpp')
+        endif
+        if get_option('b_sanitize').contains('address')
+            asan_arch = host_cpu == 'x86' ? 'i386' : host_cpu
+            asan_dll = 'clang_rt.asan_dynamic-' + asan_arch + '.dll'
+            asan_dll_path = run_command(cpp_compiler.cmd_array(),
+                '--print-file-name=' + asan_dll, check : true).stdout().strip()
+            fs = import('fs')
+            if not fs.is_file(asan_dll_path)
+                error('Missing Windows Clang sanitizer runtime: ' + asan_dll)
+            endif
+            windows_sanitizer_runtime_dir = fs.parent(asan_dll_path)
+        endif
+    endif
 endif
 
 # --- Build library ---
