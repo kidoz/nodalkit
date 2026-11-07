@@ -4,6 +4,9 @@ if not catch2_test_dep.found()
     catch2_test_dep = catch2_proj.get_variable('catch2_with_main_dep')
 endif
 
+test_python = import('python').find_installation()
+renderer_test_runner = files('../tools/run_renderer_test.py')
+
 # Point LeakSanitizer at our suppressions file for every test run. This is a no-op
 # for non-sanitizer builds (LSAN_OPTIONS is ignored) and, under -Db_sanitize, stops
 # the third-party libdbus/AT-SPI atk-bridge leaks from failing the suite while still
@@ -84,7 +87,8 @@ test_vulkan_renderer = executable('test_vulkan_renderer',
     'vulkan_renderer_test.cpp',
     dependencies : vulkan_test_deps,
 )
-test('vulkan_renderer', test_vulkan_renderer, timeout : 120)
+test('vulkan_renderer', test_python,
+    args : [renderer_test_runner, test_vulkan_renderer], timeout : 120)
 
 if host_system == 'linux' and vulkan_dep.found() and glslang_validator.found()
     vulkan_faults = shared_library('vulkan_test_faults',
@@ -170,7 +174,8 @@ if host_system == 'windows'
         'directx_renderer_test.cpp',
         dependencies : [nk_dep, catch2_test_dep],
     )
-    test('directx_renderer', test_directx_renderer, timeout : 120)
+    test('directx_renderer', test_python,
+        args : [renderer_test_runner, test_directx_renderer], timeout : 120)
     test_win32_native = executable('test_win32_native',
         'win32_native_test.cpp',
         dependencies : [nk_dep, catch2_test_dep],
@@ -274,7 +279,8 @@ if host_system == 'darwin'
         'metal_renderer_test.mm',
         dependencies : [nk_dep, catch2_test_dep, cocoa_dep],
     )
-    test('metal_renderer', test_metal_renderer,
+    test('metal_renderer', test_python,
+        args : [renderer_test_runner, test_metal_renderer],
         env : {'MTL_DEBUG_LAYER': '1'},
         timeout : 60,
     )
