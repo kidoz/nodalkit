@@ -7,6 +7,7 @@
 
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -26,6 +27,8 @@
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/text_field.h>
 #import <objc/runtime.h>
+#include <string>
+#include <vector>
 
 @interface NKSurfaceLifetimeProbe : NSObject {
 @public
@@ -87,6 +90,20 @@ id find_element(NSArray* elements, NSString* role, NSString* label) {
 void settle(nk::Application& app) {
     for (int i = 0; i < 3; ++i) {
         (void)app.event_loop().poll();
+    }
+}
+
+void settle_native(nk::Application& app) {
+    @autoreleasepool {
+        settle(app);
+        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                            untilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]
+                                               inMode:NSDefaultRunLoopMode
+                                              dequeue:YES];
+        if (event != nil) {
+            [NSApp sendEvent:event];
+        }
+        [NSApp updateWindows];
     }
 }
 
@@ -153,15 +170,26 @@ TEST_CASE("macOS view releases replaced tracking areas", "[macos][memory]") {
 
 TEST_CASE("macOS toolbar replacement and removal release objects and disconnect callbacks",
           "[macos][memory][toolbar]") {
+    bool edit_search = false;
+    SECTION("idle toolbar") {}
+    SECTION("search field being edited") {
+        edit_search = true;
+    }
     @autoreleasepool {
         nk::Application app(0, nullptr);
-        auto destructions = std::make_shared<std::size_t>(0);
+
+        struct ObservedObject {
+            std::string label;
+            std::shared_ptr<std::size_t> destructions;
+        };
+
+        std::vector<ObservedObject> observations;
         @autoreleasepool {
             auto window =
                 std::make_unique<nk::Window>(nk::WindowConfig{.title = "Toolbar lifetime"});
             window->set_child(nk::Label::create("Toolbar content"));
             window->present();
-            settle(app);
+            settle_native(app);
             auto* native = (__bridge NSWindow*)window->native_surface()->native_handle();
             const auto config = [](int generation) {
                 nk::NativeToolbarConfig result;
@@ -184,64 +212,98 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
                                  .on_search_submit = {}}};
                 return result;
             };
-            const auto observe_toolbar = [&](bool observe_delegate) -> NSSearchField* {
+            const auto observe_toolbar = [&](int generation,
+                                             bool observe_delegate) -> NSSearchField* {
+                const auto observe = [&](id object) {
+                    auto destructions = std::make_shared<std::size_t>(0);
+                    observe_destruction(object, destructions);
+                    observations.push_back(
+                        {std::to_string(generation) + ": " + object_getClassName(object),
+                         std::move(destructions)});
+                };
                 NSToolbar* toolbar = native.toolbar;
-                observe_destruction(toolbar, destructions);
+                observe(toolbar);
                 if (observe_delegate) {
-                    observe_destruction(toolbar.delegate, destructions);
+                    observe(toolbar.delegate);
                 }
                 NSSearchField* search = nil;
                 REQUIRE(toolbar.items.count == 2);
                 for (NSToolbarItem* item in toolbar.items) {
-                    observe_destruction(item, destructions);
+                    observe(item);
                     if ([item isKindOfClass:[NSSearchToolbarItem class]]) {
-                        search = static_cast<NSSearchToolbarItem*>(item).searchField;
+                        auto* search_item = static_cast<NSSearchToolbarItem*>(item);
+                        if (edit_search) {
+                            [search_item beginSearchInteraction];
+                        }
+                        search = search_item.searchField;
                     }
                 }
-                observe_destruction(search, destructions);
+                observe(search);
+                if (edit_search) {
+                    const auto deadline =
+                        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                    do {
+                        settle_native(app);
+                        [native makeFirstResponder:search];
+                        [search selectText:nil];
+                    } while (search.currentEditor == nil &&
+                             std::chrono::steady_clock::now() < deadline);
+                    INFO("generation="
+                         << generation << " active=" << NSApp.active
+                         << " key=" << native.isKeyWindow << " visible=" << native.visible
+                         << " field window=" << search.window << " field hidden=" << search.hidden
+                         << " first responder=" << object_getClassName(native.firstResponder));
+                    REQUIRE(search.currentEditor != nil);
+                }
                 return [search retain];
             };
             @autoreleasepool {
                 window->set_native_toolbar(config(0));
-                settle(app);
-                NSSearchField* search = observe_toolbar(true);
+                settle_native(app);
+                NSSearchField* search = observe_toolbar(0, true);
                 window->set_native_toolbar(config(1));
-                settle(app);
+                settle_native(app);
                 CHECK(search.delegate == nil);
                 CHECK(search.target == nil);
                 CHECK(search.action == nil);
                 [search release];
             }
-            settle(app);
+            settle_native(app);
             @autoreleasepool {
-                NSSearchField* search = observe_toolbar(false);
+                NSSearchField* search = observe_toolbar(1, false);
                 window->clear_native_toolbar();
-                settle(app);
+                settle_native(app);
                 CHECK(search.delegate == nil);
                 CHECK(search.target == nil);
                 CHECK(search.action == nil);
                 [search release];
             }
-            settle(app);
+            settle_native(app);
             @autoreleasepool {
                 window->set_native_toolbar(config(2));
-                settle(app);
-                [observe_toolbar(true) release];
+                settle_native(app);
+                [observe_toolbar(2, true) release];
                 window.reset();
-                settle(app);
+                settle_native(app);
             }
-            settle(app);
+            settle_native(app);
         }
-        settle(app);
-        // AppKit keeps retired toolbar views alive until their removal animation completes.
+        settle_native(app);
+        REQUIRE(observations.size() == 14);
+        const auto all_destroyed = [&] {
+            return std::ranges::all_of(
+                observations, [](const auto& object) { return *object.destructions == 1; });
+        };
+        // Retired toolbar animations finish through AppKit's event processing,
+        // not just the toolkit poll or a bare NSRunLoop wait.
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-        while (*destructions < 14 && std::chrono::steady_clock::now() < deadline) {
-            @autoreleasepool {
-                settle(app);
-                [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-            }
+        while (!all_destroyed() && std::chrono::steady_clock::now() < deadline) {
+            settle_native(app);
         }
-        CHECK(*destructions == 14);
+        for (const auto& object : observations) {
+            INFO("toolbar generation and object: " << object.label);
+            CHECK(*object.destructions == 1);
+        }
     }
 }
 
