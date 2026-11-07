@@ -27,6 +27,7 @@
 #include <nk/model/tree_model.h>
 #include <nk/platform/events.h>
 #include <nk/render/image_node.h>
+#include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/style/theme.h>
 #include <nk/widgets/box.h>
@@ -87,6 +88,12 @@ void check_foundation() {
 }
 
 void check_layout() {
+    check(nk::renderer_backend_name(nk::RendererBackend::D3D12) == "d3d12", "D3D12 backend name");
+#if defined(_WIN32)
+    auto directx11 = nk::create_renderer(nk::RendererBackend::D3D11);
+    auto directx12 = nk::create_renderer(nk::RendererBackend::D3D12);
+    check(directx11 && directx12, "installed DirectX renderer factories");
+#endif
     const uint32_t pixel = 0xFF000000;
     nk::ImageNode image({0, 0, 1, 1}, &pixel, 1, 1);
     image.set_content_revision(7);

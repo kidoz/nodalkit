@@ -150,7 +150,8 @@ int usage(const char* argv0) {
     std::cerr
         << "usage: " << (argv0 != nullptr ? argv0 : "nk_trace_capture_harness")
         << " <mixed|text-heavy|list-heavy|animation-heavy|localized-redraw> <artifact-out.json>"
-        << " <trace-out.json> [--backend=<software|metal>] [--baseline-artifact=<path>]"
+        << " <trace-out.json> [--backend=<software|d3d11|d3d12|metal|vulkan>] "
+           "[--baseline-artifact=<path>]"
         << " [--baseline-trace=<path>] [--baseline-policy=<timed|counters>]\n";
     return 2;
 }
@@ -631,6 +632,19 @@ bool validate_backend_expectations(nk::RendererBackend backend,
                                   nk::GpuPresentPath::PartialRedrawCopy &&
                               frame.render_hotspot_counters.gpu_present_tradeoff ==
                                   nk::GpuPresentTradeoff::BandwidthFavored;
+                   });
+        }
+        return true;
+    case nk::RendererBackend::D3D12:
+        if (scenario == Scenario::LocalizedRedraw) {
+            return has_localized_replay_reduction() &&
+                   std::any_of(frames.begin(), frames.end(), [](const auto& frame) {
+                       const auto& counters = frame.render_hotspot_counters;
+                       return counters.damage_region_count > 0 &&
+                              counters.gpu_estimated_draw_pixel_count <
+                                  counters.gpu_viewport_pixel_count &&
+                              counters.gpu_swapchain_copy_count == 1 &&
+                              counters.gpu_present_path == nk::GpuPresentPath::FullRedrawCopyBack;
                    });
         }
         return true;

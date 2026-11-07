@@ -109,6 +109,7 @@ def validate_install(prefix: Path, host_system: str) -> Path:
             "-lshcore",
             "-ldwrite",
             "-ld3d11",
+            "-ld3d12",
             "-ld3dcompiler",
             "-ldxgi",
         ]
@@ -127,6 +128,7 @@ def create_pkg_config_shim(shim_dir: Path, pc_path: Path) -> None:
     shim.write_text(
         f"""\
 from pathlib import Path
+import re
 import sys
 
 PC_PATH = Path({str(pc_path)!r})
@@ -186,7 +188,11 @@ if '--libs' in args:
     parts.append(fields.get('Libs', ''))
     if '--static' in args and fields.get('Libs.private'):
         parts.append(fields['Libs.private'])
-print(' '.join(part for part in parts if part))
+flags = ' '.join(part for part in parts if part)
+if sys.platform == 'win32':
+    # Preserve escaped spaces while normalizing SDK directory separators for Meson's shlex parser.
+    flags = re.sub(r'\\\\(?=\\S)', '/', flags)
+print(flags)
 """,
         encoding="utf-8",
     )
