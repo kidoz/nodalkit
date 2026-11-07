@@ -8,6 +8,7 @@
 #include <memory>
 #include <nk/model/abstract_list_model.h>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace nk {
@@ -18,6 +19,13 @@ using ListModelFilter = std::function<bool(const AbstractListModel& model, std::
 /// Comparator used by SortListModel. The row arguments are rows in the source model.
 using ListModelLess =
     std::function<bool(const AbstractListModel& model, std::size_t lhs, std::size_t rhs)>;
+
+/// Extracts a string sort key from a row in the source model.
+using ListModelSortKey =
+    std::function<std::string(const AbstractListModel& model, std::size_t row)>;
+
+/// Direction of lexicographic string-key ordering.
+enum class ListModelSortDirection { Ascending, Descending };
 
 /// Wraps a source list model and exposes only rows accepted by a predicate.
 ///
@@ -58,8 +66,8 @@ private:
 
 /// Wraps a source list model and exposes rows in a stable sorted order.
 ///
-/// Source model changes currently rebuild the sorted mapping and emit a model reset. Without a
-/// comparator, the adapter preserves the source order.
+/// Source model changes rebuild the sorted mapping and emit a model reset. Without a comparator
+/// or key extractor, the adapter preserves the source order. Equal keys retain source order.
 class SortListModel : public AbstractListModel {
 public:
     SortListModel();
@@ -72,8 +80,16 @@ public:
     void set_source_model(std::shared_ptr<AbstractListModel> source);
     [[nodiscard]] AbstractListModel* source_model() const;
 
+    /// Replaces any key extractor. An empty comparator restores source order.
     void set_less(ListModelLess less);
     [[nodiscard]] bool has_less() const;
+
+    /// Replaces any comparator and extracts one key per source row on each rebuild.
+    /// Keys are compared like std::string and released after sorting. An empty extractor
+    /// restores source order. Source mutations must use the model's change notifications.
+    void set_sort_key(ListModelSortKey key,
+                      ListModelSortDirection direction = ListModelSortDirection::Ascending);
+    [[nodiscard]] bool has_sort_key() const;
 
     [[nodiscard]] std::size_t row_count() const override;
     [[nodiscard]] std::any data(std::size_t row) const override;
@@ -89,6 +105,8 @@ private:
 
     std::shared_ptr<AbstractListModel> source_;
     ListModelLess less_;
+    ListModelSortKey sort_key_;
+    ListModelSortDirection sort_direction_ = ListModelSortDirection::Ascending;
     std::vector<std::size_t> rows_;
     std::vector<ScopedConnection> source_connections_;
 };

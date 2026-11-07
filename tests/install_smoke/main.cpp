@@ -146,6 +146,15 @@ void check_model() {
                              }};
     check(sorted.row_count() == 3, "SortListModel row count");
     check(sorted.display_text(0) == "alpha", "SortListModel display text");
+    std::size_t key_calls = 0;
+    sorted.set_sort_key(
+        [&](const nk::AbstractListModel& m, std::size_t row) {
+            ++key_calls;
+            return m.display_text(row);
+        },
+        nk::ListModelSortDirection::Descending);
+    check(sorted.has_sort_key() && !sorted.has_less(), "SortListModel key sorting mode");
+    check(key_calls == 3 && sorted.display_text(0) == "gamma", "SortListModel cached keys");
 
     nk::SelectionModel single{nk::SelectionMode::Single};
     single.select(2);

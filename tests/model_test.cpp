@@ -4,9 +4,135 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nk/model/abstract_table_model.h>
 #include <nk/model/abstract_tree_model.h>
+#include <nk/model/list_model_adapters.h>
 #include <nk/model/tree_model.h>
 #include <utility>
 #include <vector>
+
+TEST_CASE("SortListModel extracts keys once and keeps equal keys in source order", "[model]") {
+    const auto long_key = std::string(200, 'Z');
+    auto source = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"Beta", "Alpha", "Beta", "", "Alpha", long_key, "Ω"});
+    nk::SortListModel sorted{source};
+    std::vector<std::size_t> calls(source->row_count());
+    auto key = [&](const nk::AbstractListModel& model, std::size_t row) {
+        ++calls.at(row);
+        return model.display_text(row);
+    };
+    auto check_order = [&](std::vector<std::size_t> expected) {
+        REQUIRE(sorted.row_count() == expected.size());
+        for (std::size_t row = 0; row < expected.size(); ++row) {
+            REQUIRE(sorted.map_to_source(row) == expected[row]);
+            REQUIRE(sorted.map_from_source(expected[row]) == row);
+            REQUIRE(sorted.display_text(row) == source->display_text(expected[row]));
+            REQUIRE(std::any_cast<std::string>(sorted.data(row)) == source->at(expected[row]));
+        }
+    };
+
+    sorted.set_sort_key(key);
+    REQUIRE(sorted.has_sort_key());
+    REQUIRE_FALSE(sorted.has_less());
+    REQUIRE(calls == std::vector<std::size_t>(7, 1));
+    check_order({3, 1, 4, 0, 2, 5, 6});
+
+    sorted.set_sort_key(key, nk::ListModelSortDirection::Descending);
+    REQUIRE(calls == std::vector<std::size_t>(7, 2));
+    check_order({6, 5, 0, 2, 1, 4, 3});
+
+    sorted.set_less([](const nk::AbstractListModel& model, std::size_t lhs, std::size_t rhs) {
+        return model.display_text(lhs) < model.display_text(rhs);
+    });
+    REQUIRE(sorted.has_less());
+    REQUIRE_FALSE(sorted.has_sort_key());
+    check_order({3, 1, 4, 0, 2, 5, 6});
+    REQUIRE(calls == std::vector<std::size_t>(7, 2));
+
+    sorted.set_sort_key(key);
+    REQUIRE_FALSE(sorted.has_less());
+    REQUIRE(calls == std::vector<std::size_t>(7, 3));
+    sorted.set_sort_key({});
+    REQUIRE_FALSE(sorted.has_sort_key());
+    check_order({0, 1, 2, 3, 4, 5, 6});
+    sorted.set_sort_key(key);
+    sorted.set_less({});
+    REQUIRE_FALSE(sorted.has_sort_key());
+    check_order({0, 1, 2, 3, 4, 5, 6});
+}
+
+TEST_CASE("SortListModel refreshes keys and mappings before notifying observers", "[model]") {
+    class MutableModel final : public nk::StringListModel {
+    public:
+        using nk::StringListModel::StringListModel;
+
+        std::string display_text(std::size_t row) const override {
+            return changed && row == 0 ? "Aardvark" : nk::StringListModel::display_text(row);
+        }
+
+        void rename_first() {
+            changed = true;
+            notify_data_changed(0, 0);
+        }
+
+        bool changed = false;
+    };
+
+    auto source = std::make_shared<MutableModel>(std::vector<std::string>{"Gamma", "Alpha"});
+    nk::SortListModel sorted{source};
+    std::size_t calls = 0;
+    auto key = [&](const nk::AbstractListModel& model, std::size_t row) {
+        ++calls;
+        return model.display_text(row);
+    };
+    sorted.set_sort_key(key);
+    std::size_t resets = 0;
+    auto connection = sorted.on_model_reset().connect([&] {
+        ++resets;
+        const auto* model = sorted.source_model();
+        REQUIRE(sorted.row_count() == (model ? model->row_count() : 0));
+        for (std::size_t row = 1; row < sorted.row_count(); ++row) {
+            REQUIRE(sorted.display_text(row - 1) <= sorted.display_text(row));
+        }
+    });
+    (void)connection;
+
+    calls = 0;
+    source->append("Beta");
+    REQUIRE(calls == 3);
+    REQUIRE(resets == 1);
+    REQUIRE(sorted.map_to_source(2) == 0);
+    calls = 0;
+    source->rename_first();
+    REQUIRE(calls == 3);
+    REQUIRE(resets == 2);
+    REQUIRE(sorted.map_to_source(0) == 0);
+    calls = 0;
+    source->insert(0, "Ignored");
+    REQUIRE(calls == 4);
+    REQUIRE(resets == 3);
+    calls = 0;
+    source->remove(1);
+    REQUIRE(calls == 3);
+    REQUIRE(resets == 4);
+    REQUIRE_FALSE(sorted.map_from_source(3));
+    calls = 0;
+    source->clear();
+    REQUIRE(calls == 0);
+    REQUIRE(resets == 5);
+    REQUIRE(sorted.row_count() == 0);
+
+    auto replacement =
+        std::make_shared<nk::StringListModel>(std::vector<std::string>{"Zulu", "Alpha"});
+    sorted.set_source_model(replacement);
+    REQUIRE(calls == 2);
+    REQUIRE(resets == 6);
+    REQUIRE(sorted.map_to_source(0) == 1);
+    source->append("Detached");
+    REQUIRE(calls == 2);
+    REQUIRE(resets == 6);
+    sorted.set_source_model(nullptr);
+    REQUIRE(sorted.row_count() == 0);
+    REQUIRE(resets == 7);
+}
 
 class ConcreteTableModel : public nk::AbstractTableModel {
 public:

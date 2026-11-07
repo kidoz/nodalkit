@@ -140,6 +140,7 @@ AbstractListModel* SortListModel::source_model() const {
 }
 
 void SortListModel::set_less(ListModelLess less) {
+    sort_key_ = {};
     less_ = std::move(less);
     rebuild();
     notify_model_reset();
@@ -147,6 +148,18 @@ void SortListModel::set_less(ListModelLess less) {
 
 bool SortListModel::has_less() const {
     return static_cast<bool>(less_);
+}
+
+void SortListModel::set_sort_key(ListModelSortKey key, ListModelSortDirection direction) {
+    less_ = {};
+    sort_key_ = std::move(key);
+    sort_direction_ = direction;
+    rebuild();
+    notify_model_reset();
+}
+
+bool SortListModel::has_sort_key() const {
+    return static_cast<bool>(sort_key_);
 }
 
 std::size_t SortListModel::row_count() const {
@@ -184,7 +197,25 @@ void SortListModel::rebuild() {
 
     rows_.resize(source_->row_count());
     std::iota(rows_.begin(), rows_.end(), std::size_t{0});
-    if (less_) {
+    if (sort_key_) {
+        std::vector<std::string> keys;
+        keys.reserve(rows_.size());
+        for (const auto row : rows_) {
+            keys.push_back(sort_key_(*source_, row));
+        }
+        // Source-row tie breaking preserves stable order without a separate merge buffer.
+        if (sort_direction_ == ListModelSortDirection::Ascending) {
+            std::sort(rows_.begin(), rows_.end(), [&](std::size_t lhs, std::size_t rhs) {
+                const auto order = keys[lhs].compare(keys[rhs]);
+                return order != 0 ? order < 0 : lhs < rhs;
+            });
+        } else {
+            std::sort(rows_.begin(), rows_.end(), [&](std::size_t lhs, std::size_t rhs) {
+                const auto order = keys[rhs].compare(keys[lhs]);
+                return order != 0 ? order < 0 : lhs < rhs;
+            });
+        }
+    } else if (less_) {
         std::stable_sort(rows_.begin(), rows_.end(), [this](std::size_t lhs, std::size_t rhs) {
             return less_(*source_, lhs, rhs);
         });

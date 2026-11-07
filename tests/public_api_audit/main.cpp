@@ -370,6 +370,9 @@ void force_symbol_references() {
         &nk::SortListModel::source_model);
     (void)static_cast<void (nk::SortListModel::*)(nk::ListModelLess)>(&nk::SortListModel::set_less);
     (void)static_cast<bool (nk::SortListModel::*)() const>(&nk::SortListModel::has_less);
+    (void)static_cast<void (nk::SortListModel::*)(
+        nk::ListModelSortKey, nk::ListModelSortDirection)>(&nk::SortListModel::set_sort_key);
+    (void)static_cast<bool (nk::SortListModel::*)() const>(&nk::SortListModel::has_sort_key);
     (void)static_cast<std::size_t (nk::SortListModel::*)() const>(&nk::SortListModel::row_count);
     (void)static_cast<std::any (nk::SortListModel::*)(std::size_t) const>(&nk::SortListModel::data);
     (void)static_cast<std::string (nk::SortListModel::*)(std::size_t) const>(
