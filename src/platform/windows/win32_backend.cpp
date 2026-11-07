@@ -1215,6 +1215,7 @@ RendererBackendSupport Win32Surface::renderer_backend_support() const {
     RendererBackendSupport support;
     support.software = true;
     support.d3d11 = true;
+    support.d3d12 = true;
 #if defined(NK_HAVE_VULKAN)
     support.vulkan = true;
 #endif

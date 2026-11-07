@@ -1,3 +1,5 @@
+#include "directx_device.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -42,6 +44,9 @@ struct PrimitiveCommand {
     float radius = 0.0F;
     float thickness = 0.0F;
     uint32_t kind = 0;
+    float blur = 0.0F;
+    std::vector<Point> points;
+    bool closed = false;
     std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
@@ -56,6 +61,7 @@ struct GradientCommand {
 };
 
 struct ImageCommand {
+    float opacity = 1.0F;
     Rect rect{};
     const uint32_t* pixel_data = nullptr;
     int src_width = 0;
@@ -66,6 +72,7 @@ struct ImageCommand {
 };
 
 struct TextCommand {
+    float opacity = 1.0F;
     Rect rect{};
     std::shared_ptr<ShapedText> shaped_text;
     std::array<ClipRegion, kMaxClipDepth> clips{};
@@ -77,15 +84,6 @@ enum class DrawCommandKind : uint8_t {
     Gradient,
     Image,
     Text,
-    PushLayer,
-    PopLayer,
-};
-
-struct LayerCommand {
-    Rect rect{};
-    float opacity = 1.0F;
-    std::array<ClipRegion, kMaxClipDepth> clips{};
-    uint32_t clip_count = 0;
 };
 
 struct DrawCommand {
@@ -100,10 +98,12 @@ struct DrawConstants {
     float clip_radii[kMaxClipDepth]{};
     float params0[4]{};
     float viewport[4]{};
+    float effects[4]{};
+    float points[128 * 4]{};
 };
 
 static_assert(sizeof(DrawConstants) ==
-              16 + 16 + (kMaxClipDepth * 16) + (kMaxClipDepth * 4) + 16 + 16);
+              16 + 16 + (kMaxClipDepth * 16) + (kMaxClipDepth * 4) + 16 + 16 + 16 + 128 * 16);
 static_assert(sizeof(DrawConstants) % 16 == 0,
               "Constant buffer size must be a multiple of 16 bytes");
 
@@ -158,6 +158,7 @@ struct ImageTextureCacheEntry {
     ComPtr<ID3D11Texture2D> texture;
     ComPtr<ID3D11ShaderResourceView> shader_resource_view;
     uint64_t last_used_frame = 0;
+    bool opaque = false;
 };
 
 struct TextKey {
@@ -227,6 +228,8 @@ cbuffer DrawConstantsBuffer : register(b0) {
     float4 clip_radii[2];
     float4 params0;
     float4 viewport;
+    float4 effects;
+    float4 points[128];
 };
 
 struct VertexOutput {
@@ -261,6 +264,8 @@ cbuffer DrawConstantsBuffer : register(b0) {
     float4 clip_radii[2];
     float4 params0;
     float4 viewport;
+    float4 effects;
+    float4 points[128];
 };
 
 struct VertexOutput {
@@ -297,7 +302,7 @@ float4 main(VertexOutput input) : SV_Target {
     uint clip_count = (uint)params0.w;
 
     float coverage = saturate(0.5 - rounded_rect_sd(input.pixel, rect, radius));
-    coverage *= clip_coverage(input.pixel, clip_count);
+
     if (kind == 1u) {
         float inner_radius = max(0.0, radius - thickness);
         float4 inner_rect = float4(rect.x + thickness,
@@ -307,6 +312,26 @@ float4 main(VertexOutput input) : SV_Target {
         coverage = saturate(
             coverage - saturate(0.5 - rounded_rect_sd(input.pixel, inner_rect, inner_radius)));
     }
+    if (kind == 2u || kind == 4u) {
+        uint count = (uint)effects.y;
+        uint segments = count == 1u ? 1u : count - 1u + (uint)effects.z;
+        float distance_to_path = 1e20;
+        for (uint i = 0; i < segments; ++i) {
+            float2 a = points[i % count].xy;
+            float2 b = points[(i + 1u) % count].xy;
+            float2 d = b - a;
+            float t = saturate(dot(input.pixel - a, d) / max(dot(d, d), 1e-20));
+            distance_to_path = min(distance_to_path, length(input.pixel - a - t * d));
+        }
+        coverage = saturate(max(0.5, thickness * 0.5) + 0.5 - distance_to_path);
+    } else if (kind == 3u) {
+        float blur = effects.x;
+        float4 shape = float4(rect.xy + blur, max(0.0, rect.zw - 2.0 * blur));
+        float distance_to_shape = rounded_rect_sd(input.pixel, shape, radius);
+        coverage = blur > 0.0 ? saturate(1.0 - max(0.0, distance_to_shape) / blur)
+                              : (distance_to_shape < 0.0 ? 1.0 : 0.0);
+    }
+    coverage *= clip_coverage(input.pixel, clip_count);
     return float4(color.rgb, color.a * coverage);
 }
 )";
@@ -533,9 +558,10 @@ template <typename T> const IID& type_iid() {
 #pragma clang diagnostic pop
 #endif
 
-class D3D11Renderer final : public Renderer {
+class DirectXRenderer final : public Renderer {
 public:
-    D3D11Renderer();
+    explicit DirectXRenderer(RendererBackend backend);
+    ~DirectXRenderer() override;
 
     [[nodiscard]] RendererBackend backend() const override;
     bool attach_surface(NativeSurface& surface) override;
@@ -546,6 +572,7 @@ public:
     void end_frame() override;
     void present(NativeSurface& surface) override;
     [[nodiscard]] RenderHotspotCounters last_hotspot_counters() const override;
+    [[nodiscard]] std::optional<FramePixels> read_back_frame() override;
 
 private:
     template <typename Map> void trim_texture_cache(Map& cache, std::size_t max_entries);
@@ -567,14 +594,12 @@ private:
     [[nodiscard]] Rect effective_command_bounds(const GradientCommand& command) const;
     [[nodiscard]] Rect effective_command_bounds(const ImageCommand& command) const;
     [[nodiscard]] Rect effective_command_bounds(const TextCommand& command) const;
-    [[nodiscard]] Rect effective_command_bounds(const LayerCommand& command) const;
     [[nodiscard]] bool primitive_covers_damage(const PrimitiveCommand& command, Rect damage) const;
     [[nodiscard]] bool damage_requires_clear(Rect damage) const;
     bool command_intersects_damage(const PrimitiveCommand& command, Rect damage) const;
     bool command_intersects_damage(const GradientCommand& command, Rect damage) const;
     bool command_intersects_damage(const ImageCommand& command, Rect damage) const;
     bool command_intersects_damage(const TextCommand& command, Rect damage) const;
-    bool command_intersects_damage(const LayerCommand& command, Rect damage) const;
     void draw_clear_rect(Rect damage);
     void draw_primitive(const PrimitiveCommand& command,
                         std::optional<Rect> scissor,
@@ -590,12 +615,14 @@ private:
 
     std::unique_ptr<SoftwareRenderer> software_;
     TextShaper* text_shaper_ = nullptr;
+    float active_opacity_ = 1.0F;
     NativeSurface* attached_surface_ = nullptr;
     HWND hwnd_ = nullptr;
-    ComPtr<ID3D11Device> device_;
-    ComPtr<ID3D11DeviceContext> context_;
-    ComPtr<IDXGISwapChain1> swap_chain_;
-    ComPtr<ID3D11Texture2D> back_buffer_;
+    RendererBackend backend_;
+    DirectXDevice gpu_;
+    int target_width_ = 0;
+    int target_height_ = 0;
+    bool presented_software_ = false;
     ComPtr<ID3D11Texture2D> scene_texture_;
     ComPtr<ID3D11RenderTargetView> scene_render_target_;
     ComPtr<ID3D11Texture2D> software_texture_;
@@ -624,7 +651,6 @@ private:
     std::vector<GradientCommand> gradient_commands_;
     std::vector<ImageCommand> image_commands_;
     std::vector<TextCommand> text_commands_;
-    std::vector<LayerCommand> layer_commands_;
     std::vector<ClipRegion> active_clips_;
     std::vector<uint8_t> converted_pixels_;
     std::unordered_map<TextKey, std::shared_ptr<ShapedText>, TextKeyHash> shaped_text_cache_;
@@ -632,12 +658,10 @@ private:
         image_texture_cache_;
     std::unordered_map<TextTextureCacheKey, TextTextureCacheEntry, TextTextureCacheKeyHash>
         text_texture_cache_;
-    std::vector<ComPtr<ID3D11Texture2D>> layer_textures_;
-    std::vector<ComPtr<ID3D11RenderTargetView>> layer_rtvs_;
-    std::vector<ComPtr<ID3D11ShaderResourceView>> layer_srvs_;
     RenderHotspotCounters last_hotspot_counters_{};
     bool full_redraw_ = true;
     bool use_gpu_scene_ = false;
+    bool previous_gpu_scene_ = false;
     bool scene_initialized_ = false;
     bool full_present_ = true;
     bool software_frame_rendered_ = false;
@@ -804,13 +828,18 @@ std::size_t hash_image_content(const uint32_t* pixel_data, int width, int height
     return static_cast<std::size_t>(hash);
 }
 
-D3D11Renderer::D3D11Renderer() : software_(std::make_unique<SoftwareRenderer>()) {}
+DirectXRenderer::DirectXRenderer(RendererBackend backend)
+    : software_(std::make_unique<SoftwareRenderer>()), backend_(backend) {}
 
-RendererBackend D3D11Renderer::backend() const {
-    return RendererBackend::D3D11;
+DirectXRenderer::~DirectXRenderer() {
+    destroy_context();
 }
 
-bool D3D11Renderer::attach_surface(NativeSurface& surface) {
+RendererBackend DirectXRenderer::backend() const {
+    return backend_;
+}
+
+bool DirectXRenderer::attach_surface(NativeSurface& surface) {
     (void)software_->attach_surface(surface);
 
     auto* hwnd = static_cast<HWND>(surface.native_handle());
@@ -821,7 +850,7 @@ bool D3D11Renderer::attach_surface(NativeSurface& surface) {
     }
 
     attached_surface_ = &surface;
-    if (hwnd_ == hwnd && device_ != nullptr && swap_chain_ != nullptr) {
+    if (hwnd_ == hwnd && gpu_.healthy()) {
         return true;
     }
 
@@ -830,12 +859,12 @@ bool D3D11Renderer::attach_surface(NativeSurface& surface) {
     return create_device_objects();
 }
 
-void D3D11Renderer::set_text_shaper(TextShaper* shaper) {
+void DirectXRenderer::set_text_shaper(TextShaper* shaper) {
     text_shaper_ = shaper;
     software_->set_text_shaper(shaper);
 }
 
-void D3D11Renderer::set_damage_regions(std::span<const Rect> regions) {
+void DirectXRenderer::set_damage_regions(std::span<const Rect> regions) {
     logical_damage_regions_.assign(regions.begin(), regions.end());
     pixel_damage_regions_.clear();
     full_redraw_ = true;
@@ -886,7 +915,7 @@ void D3D11Renderer::set_damage_regions(std::span<const Rect> regions) {
     last_hotspot_counters_.damage_region_count = pixel_damage_regions_.size();
 }
 
-void D3D11Renderer::begin_frame(Size viewport, float scale_factor) {
+void DirectXRenderer::begin_frame(Size viewport, float scale_factor) {
     logical_viewport_ = viewport;
     scale_factor_ = normalize_scale_factor(scale_factor);
     if (text_shaper_ != nullptr) {
@@ -912,7 +941,9 @@ void D3D11Renderer::begin_frame(Size viewport, float scale_factor) {
     image_commands_.clear();
     text_commands_.clear();
     active_clips_.clear();
+    active_opacity_ = 1.0F;
     last_root_ = nullptr;
+    previous_gpu_scene_ = use_gpu_scene_;
     use_gpu_scene_ = false;
     software_frame_rendered_ = false;
     software_frame_finalized_ = false;
@@ -922,7 +953,7 @@ void D3D11Renderer::begin_frame(Size viewport, float scale_factor) {
                                                       static_cast<std::size_t>(framebuffer_height_);
 }
 
-void D3D11Renderer::render(const RenderNode& root) {
+void DirectXRenderer::render(const RenderNode& root) {
     last_root_ = &root;
     draw_commands_.clear();
     primitive_commands_.clear();
@@ -930,7 +961,12 @@ void D3D11Renderer::render(const RenderNode& root) {
     image_commands_.clear();
     text_commands_.clear();
     active_clips_.clear();
+    active_opacity_ = 1.0F;
     use_gpu_scene_ = collect_gpu_commands(root);
+    if (use_gpu_scene_ != previous_gpu_scene_) {
+        full_redraw_ = true;
+        scene_initialized_ = false;
+    }
 
     if (use_gpu_scene_) {
         if (full_redraw_ || pixel_damage_regions_.empty() || !scene_initialized_) {
@@ -949,7 +985,7 @@ void D3D11Renderer::render(const RenderNode& root) {
     ensure_software_frame();
 }
 
-void D3D11Renderer::end_frame() {
+void DirectXRenderer::end_frame() {
     if (software_frame_rendered_ && !software_frame_finalized_) {
         software_->end_frame();
         software_frame_finalized_ = true;
@@ -957,7 +993,7 @@ void D3D11Renderer::end_frame() {
 }
 
 template <typename Map>
-void D3D11Renderer::trim_texture_cache(Map& cache, std::size_t max_entries) {
+void DirectXRenderer::trim_texture_cache(Map& cache, std::size_t max_entries) {
     for (auto it = cache.begin(); it != cache.end();) {
         if ((frame_serial_ - it->second.last_used_frame) > kTextureCacheMaxAgeFrames) {
             it = cache.erase(it);
@@ -977,12 +1013,62 @@ void D3D11Renderer::trim_texture_cache(Map& cache, std::size_t max_entries) {
     }
 }
 
-bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
+bool DirectXRenderer::collect_gpu_commands(const RenderNode& node) {
     switch (node.kind()) {
-    case RenderNodeKind::Line:
-    case RenderNodeKind::Path:
     case RenderNodeKind::Transform:
+        return false;
+    case RenderNodeKind::Line: {
+        const auto& line = static_cast<const LineNode&>(node);
+        PrimitiveCommand command;
+        command.rect = node.bounds();
+        command.color = line.color();
+        command.color.a *= active_opacity_;
+        command.thickness = line.thickness();
+        command.kind = 2;
+        command.points = {line.start(), line.end()};
+        command.clip_count = static_cast<uint32_t>(active_clips_.size());
+        std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+        primitive_commands_.push_back(std::move(command));
+        draw_commands_.push_back({DrawCommandKind::Primitive, primitive_commands_.size() - 1});
         return true;
+    }
+    case RenderNodeKind::Path: {
+        const auto& path = static_cast<const PathNode&>(node);
+        if (path.path().points.empty()) {
+            return true;
+        }
+        if (path.path().points.size() > 128) {
+            return false;
+        }
+        PrimitiveCommand command;
+        command.rect = node.bounds();
+        command.color = path.stroke_color();
+        command.color.a *= active_opacity_;
+        command.thickness = path.thickness();
+        command.kind = 4;
+        command.points = path.path().points;
+        command.closed = path.path().closed;
+        command.clip_count = static_cast<uint32_t>(active_clips_.size());
+        std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+        primitive_commands_.push_back(std::move(command));
+        draw_commands_.push_back({DrawCommandKind::Primitive, primitive_commands_.size() - 1});
+        return true;
+    }
+    case RenderNodeKind::Shadow: {
+        const auto& shadow = static_cast<const ShadowNode&>(node);
+        PrimitiveCommand command;
+        command.rect = node.bounds();
+        command.color = shadow.color();
+        command.color.a *= active_opacity_;
+        command.radius = shadow.corner_radius();
+        command.blur = shadow.blur_radius();
+        command.kind = 3;
+        command.clip_count = static_cast<uint32_t>(active_clips_.size());
+        std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+        primitive_commands_.push_back(std::move(command));
+        draw_commands_.push_back({DrawCommandKind::Primitive, primitive_commands_.size() - 1});
+        return true;
+    }
     case RenderNodeKind::Container:
         for (const auto& child : node.children()) {
             if (child != nullptr && !collect_gpu_commands(*child)) {
@@ -990,7 +1076,6 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
                 gradient_commands_.clear();
                 image_commands_.clear();
                 text_commands_.clear();
-                layer_commands_.clear();
                 draw_commands_.clear();
                 return false;
             }
@@ -1001,6 +1086,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         PrimitiveCommand command;
         command.rect = color_node.bounds();
         command.color = color_node.color();
+        command.color.a *= active_opacity_;
         command.clip_count = static_cast<uint32_t>(active_clips_.size());
         std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
         primitive_commands_.push_back(command);
@@ -1013,6 +1099,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         PrimitiveCommand command;
         command.rect = rounded_node.bounds();
         command.color = rounded_node.color();
+        command.color.a *= active_opacity_;
         command.radius =
             effective_corner_radius(rounded_node.bounds(), rounded_node.corner_radius());
         command.clip_count = static_cast<uint32_t>(active_clips_.size());
@@ -1027,6 +1114,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         PrimitiveCommand command;
         command.rect = border_node.bounds();
         command.color = border_node.color();
+        command.color.a *= active_opacity_;
         command.radius = effective_corner_radius(border_node.bounds(), border_node.corner_radius());
         command.thickness = std::max(0.0F, border_node.thickness());
         command.kind = 1;
@@ -1047,12 +1135,17 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         };
         command.clip_count = static_cast<uint32_t>(active_clips_.size());
         std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+        command.start_color.a *= active_opacity_;
+        command.end_color.a *= active_opacity_;
         gradient_commands_.push_back(command);
         draw_commands_.push_back(
             {.kind = DrawCommandKind::Gradient, .command_index = gradient_commands_.size() - 1});
         return true;
     }
     case RenderNodeKind::RoundedClip: {
+        if (rect_is_empty(node.bounds())) {
+            return true;
+        }
         if (active_clips_.size() >= kMaxClipDepth) {
             primitive_commands_.clear();
             gradient_commands_.clear();
@@ -1073,7 +1166,6 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
                 gradient_commands_.clear();
                 image_commands_.clear();
                 text_commands_.clear();
-                layer_commands_.clear();
                 draw_commands_.clear();
                 return false;
             }
@@ -1104,6 +1196,7 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         };
         command.clip_count = static_cast<uint32_t>(active_clips_.size());
         std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+        command.opacity = active_opacity_;
         image_commands_.push_back(command);
         draw_commands_.push_back(
             {.kind = DrawCommandKind::Image, .command_index = image_commands_.size() - 1});
@@ -1111,21 +1204,15 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
     }
     case RenderNodeKind::Opacity: {
         const auto& opacity_node = static_cast<const OpacityNode&>(node);
-        LayerCommand push_cmd;
-        push_cmd.rect = opacity_node.bounds();
-        push_cmd.opacity = opacity_node.opacity();
-        push_cmd.clip_count = static_cast<uint32_t>(active_clips_.size());
-        std::copy(active_clips_.begin(), active_clips_.end(), push_cmd.clips.begin());
-        layer_commands_.push_back(push_cmd);
-        draw_commands_.push_back(
-            {.kind = DrawCommandKind::PushLayer, .command_index = layer_commands_.size() - 1});
+        const float previous_opacity = active_opacity_;
+        active_opacity_ *= std::clamp(opacity_node.opacity(), 0.0F, 1.0F);
         for (const auto& child : node.children()) {
             if (child != nullptr && !collect_gpu_commands(*child)) {
+                active_opacity_ = previous_opacity;
                 return false;
             }
         }
-        draw_commands_.push_back(
-            {.kind = DrawCommandKind::PopLayer, .command_index = layer_commands_.size() - 1});
+        active_opacity_ = previous_opacity;
         return true;
     }
     case RenderNodeKind::Text: {
@@ -1150,20 +1237,12 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
         };
         command.clip_count = static_cast<uint32_t>(active_clips_.size());
         std::copy(active_clips_.begin(), active_clips_.end(), command.clips.begin());
+        command.opacity = active_opacity_;
         text_commands_.push_back(std::move(command));
         draw_commands_.push_back(
             {.kind = DrawCommandKind::Text, .command_index = text_commands_.size() - 1});
         return true;
     }
-    case RenderNodeKind::Shadow:
-        // These nodes carry visual semantics that the D3D11 path does not yet implement.
-        // Falling back preserves correctness until the GPU path supports them explicitly.
-        primitive_commands_.clear();
-        gradient_commands_.clear();
-        image_commands_.clear();
-        text_commands_.clear();
-        draw_commands_.clear();
-        return false;
     default:
         primitive_commands_.clear();
         gradient_commands_.clear();
@@ -1174,13 +1253,14 @@ bool D3D11Renderer::collect_gpu_commands(const RenderNode& node) {
     }
 }
 
-bool D3D11Renderer::ensure_software_frame() {
+bool DirectXRenderer::ensure_software_frame() {
     if (software_frame_rendered_) {
         return true;
     }
 
     software_->begin_frame(logical_viewport_, scale_factor_);
-    software_->set_damage_regions(logical_damage_regions_);
+    software_->set_damage_regions(full_redraw_ ? std::span<const Rect>{}
+                                               : std::span<const Rect>{logical_damage_regions_});
     if (last_root_ != nullptr) {
         software_->render(*last_root_);
     }
@@ -1189,7 +1269,7 @@ bool D3D11Renderer::ensure_software_frame() {
     return true;
 }
 
-std::shared_ptr<ShapedText> D3D11Renderer::shape_text_node(const TextNode& text_node) {
+std::shared_ptr<ShapedText> DirectXRenderer::shape_text_node(const TextNode& text_node) {
     if (text_shaper_ == nullptr || text_node.text().empty()) {
         return nullptr;
     }
@@ -1226,79 +1306,12 @@ std::shared_ptr<ShapedText> D3D11Renderer::shape_text_node(const TextNode& text_
     return shaped;
 }
 
-bool D3D11Renderer::create_device_objects() {
+bool DirectXRenderer::create_device_objects() {
     destroy_device_objects();
-
-    const D3D_FEATURE_LEVEL requested_levels[] = {
-        D3D_FEATURE_LEVEL_11_1,
-        D3D_FEATURE_LEVEL_11_0,
-    };
-    D3D_FEATURE_LEVEL feature_level = D3D_FEATURE_LEVEL_11_0;
-    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#if defined(_DEBUG)
-    flags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
-
-    HRESULT result = D3D11CreateDevice(nullptr,
-                                       D3D_DRIVER_TYPE_HARDWARE,
-                                       nullptr,
-                                       flags,
-                                       requested_levels,
-                                       static_cast<UINT>(std::size(requested_levels)),
-                                       D3D11_SDK_VERSION,
-                                       &device_,
-                                       &feature_level,
-                                       &context_);
-    if (result == E_INVALIDARG) {
-        const D3D_FEATURE_LEVEL fallback_levels[] = {
-            D3D_FEATURE_LEVEL_11_0,
-        };
-        result = D3D11CreateDevice(nullptr,
-                                   D3D_DRIVER_TYPE_HARDWARE,
-                                   nullptr,
-                                   flags,
-                                   fallback_levels,
-                                   static_cast<UINT>(std::size(fallback_levels)),
-                                   D3D11_SDK_VERSION,
-                                   &device_,
-                                   &feature_level,
-                                   &context_);
-    }
-    if (FAILED(result)) {
-        destroy_device_objects();
-        return false;
-    }
-
-    ComPtr<IDXGIDevice> dxgi_device;
-    ComPtr<IDXGIAdapter> adapter;
-    ComPtr<IDXGIFactory2> factory;
-    if (FAILED(device_.As(&dxgi_device)) || FAILED(dxgi_device->GetAdapter(&adapter)) ||
-        FAILED(adapter->GetParent(type_iid<IDXGIFactory2>(),
-                                  reinterpret_cast<void**>(factory.GetAddressOf())))) {
-        destroy_device_objects();
-        return false;
-    }
-
-    DXGI_SWAP_CHAIN_DESC1 swap_chain_desc{};
-    swap_chain_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    swap_chain_desc.SampleDesc.Count = 1;
-    swap_chain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    swap_chain_desc.BufferCount = 2;
-    swap_chain_desc.Scaling = DXGI_SCALING_STRETCH;
-    swap_chain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    swap_chain_desc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
-
-    if (FAILED(factory->CreateSwapChainForHwnd(
-            device_.Get(), hwnd_, &swap_chain_desc, nullptr, nullptr, &swap_chain_))) {
-        destroy_device_objects();
-        return false;
-    }
-
-    (void)factory->MakeWindowAssociation(hwnd_, DXGI_MWA_NO_ALT_ENTER);
-    return create_pipeline_objects();
+    return gpu_.create(hwnd_, backend_ == RendererBackend::D3D12) && create_pipeline_objects();
 }
 
-bool D3D11Renderer::create_pipeline_objects() {
+bool DirectXRenderer::create_pipeline_objects() {
     ComPtr<ID3DBlob> vertex_bytecode;
     ComPtr<ID3DBlob> pixel_bytecode;
     ComPtr<ID3DBlob> gradient_vertex_bytecode;
@@ -1315,30 +1328,30 @@ bool D3D11Renderer::create_pipeline_objects() {
         return false;
     }
 
-    if (FAILED(device_->CreateVertexShader(vertex_bytecode->GetBufferPointer(),
-                                           vertex_bytecode->GetBufferSize(),
-                                           nullptr,
-                                           &vertex_shader_)) ||
-        FAILED(device_->CreatePixelShader(pixel_bytecode->GetBufferPointer(),
-                                          pixel_bytecode->GetBufferSize(),
-                                          nullptr,
-                                          &pixel_shader_)) ||
-        FAILED(device_->CreateVertexShader(gradient_vertex_bytecode->GetBufferPointer(),
-                                           gradient_vertex_bytecode->GetBufferSize(),
-                                           nullptr,
-                                           &gradient_vertex_shader_)) ||
-        FAILED(device_->CreatePixelShader(gradient_pixel_bytecode->GetBufferPointer(),
-                                          gradient_pixel_bytecode->GetBufferSize(),
-                                          nullptr,
-                                          &gradient_pixel_shader_)) ||
-        FAILED(device_->CreateVertexShader(image_vertex_bytecode->GetBufferPointer(),
-                                           image_vertex_bytecode->GetBufferSize(),
-                                           nullptr,
-                                           &image_vertex_shader_)) ||
-        FAILED(device_->CreatePixelShader(image_pixel_bytecode->GetBufferPointer(),
-                                          image_pixel_bytecode->GetBufferSize(),
-                                          nullptr,
-                                          &image_pixel_shader_))) {
+    if (FAILED(gpu_.device->CreateVertexShader(vertex_bytecode->GetBufferPointer(),
+                                               vertex_bytecode->GetBufferSize(),
+                                               nullptr,
+                                               &vertex_shader_)) ||
+        FAILED(gpu_.device->CreatePixelShader(pixel_bytecode->GetBufferPointer(),
+                                              pixel_bytecode->GetBufferSize(),
+                                              nullptr,
+                                              &pixel_shader_)) ||
+        FAILED(gpu_.device->CreateVertexShader(gradient_vertex_bytecode->GetBufferPointer(),
+                                               gradient_vertex_bytecode->GetBufferSize(),
+                                               nullptr,
+                                               &gradient_vertex_shader_)) ||
+        FAILED(gpu_.device->CreatePixelShader(gradient_pixel_bytecode->GetBufferPointer(),
+                                              gradient_pixel_bytecode->GetBufferSize(),
+                                              nullptr,
+                                              &gradient_pixel_shader_)) ||
+        FAILED(gpu_.device->CreateVertexShader(image_vertex_bytecode->GetBufferPointer(),
+                                               image_vertex_bytecode->GetBufferSize(),
+                                               nullptr,
+                                               &image_vertex_shader_)) ||
+        FAILED(gpu_.device->CreatePixelShader(image_pixel_bytecode->GetBufferPointer(),
+                                              image_pixel_bytecode->GetBufferSize(),
+                                              nullptr,
+                                              &image_pixel_shader_))) {
         destroy_device_objects();
         return false;
     }
@@ -1347,7 +1360,7 @@ bool D3D11Renderer::create_pipeline_objects() {
     constant_buffer_desc.ByteWidth = sizeof(DrawConstants);
     constant_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
     constant_buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(device_->CreateBuffer(&constant_buffer_desc, nullptr, &constant_buffer_))) {
+    if (FAILED(gpu_.device->CreateBuffer(&constant_buffer_desc, nullptr, &constant_buffer_))) {
         destroy_device_objects();
         return false;
     }
@@ -1356,7 +1369,7 @@ bool D3D11Renderer::create_pipeline_objects() {
     gradient_constant_buffer_desc.ByteWidth = sizeof(GradientDrawConstants);
     gradient_constant_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
     gradient_constant_buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    if (FAILED(device_->CreateBuffer(
+    if (FAILED(gpu_.device->CreateBuffer(
             &gradient_constant_buffer_desc, nullptr, &gradient_constant_buffer_))) {
         destroy_device_objects();
         return false;
@@ -1371,7 +1384,7 @@ bool D3D11Renderer::create_pipeline_objects() {
     blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
     blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     blend_desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    if (FAILED(device_->CreateBlendState(&blend_desc, &blend_state_))) {
+    if (FAILED(gpu_.device->CreateBlendState(&blend_desc, &blend_state_))) {
         destroy_device_objects();
         return false;
     }
@@ -1381,7 +1394,7 @@ bool D3D11Renderer::create_pipeline_objects() {
     rasterizer_desc.CullMode = D3D11_CULL_NONE;
     rasterizer_desc.ScissorEnable = TRUE;
     rasterizer_desc.DepthClipEnable = TRUE;
-    if (FAILED(device_->CreateRasterizerState(&rasterizer_desc, &rasterizer_state_))) {
+    if (FAILED(gpu_.device->CreateRasterizerState(&rasterizer_desc, &rasterizer_state_))) {
         destroy_device_objects();
         return false;
     }
@@ -1392,13 +1405,13 @@ bool D3D11Renderer::create_pipeline_objects() {
     sampler_desc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
     sampler_desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
     sampler_desc.MaxLOD = D3D11_FLOAT32_MAX;
-    if (FAILED(device_->CreateSamplerState(&sampler_desc, &nearest_sampler_state_))) {
+    if (FAILED(gpu_.device->CreateSamplerState(&sampler_desc, &nearest_sampler_state_))) {
         destroy_device_objects();
         return false;
     }
 
     sampler_desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    if (FAILED(device_->CreateSamplerState(&sampler_desc, &linear_sampler_state_))) {
+    if (FAILED(gpu_.device->CreateSamplerState(&sampler_desc, &linear_sampler_state_))) {
         destroy_device_objects();
         return false;
     }
@@ -1406,41 +1419,36 @@ bool D3D11Renderer::create_pipeline_objects() {
     return true;
 }
 
-bool D3D11Renderer::ensure_render_targets() {
-    if (device_ == nullptr || swap_chain_ == nullptr || attached_surface_ == nullptr) {
+bool DirectXRenderer::ensure_render_targets() {
+    if (gpu_.device == nullptr || gpu_.swap_chain == nullptr || attached_surface_ == nullptr) {
         return false;
     }
 
     const auto framebuffer = attached_surface_->framebuffer_size();
     const int width = std::max(1, static_cast<int>(std::lround(framebuffer.width)));
     const int height = std::max(1, static_cast<int>(std::lround(framebuffer.height)));
-    if (width == framebuffer_width_ && height == framebuffer_height_ && back_buffer_ != nullptr &&
-        scene_texture_ != nullptr) {
+    if (width == target_width_ && height == target_height_ && scene_texture_ != nullptr) {
         return true;
     }
 
     framebuffer_width_ = width;
     framebuffer_height_ = height;
 
-    if (context_ != nullptr) {
+    if (gpu_.context != nullptr) {
         ID3D11RenderTargetView* null_targets[] = {nullptr};
-        context_->OMSetRenderTargets(1, null_targets, nullptr);
+        gpu_.context->OMSetRenderTargets(1, null_targets, nullptr);
     }
 
     scene_render_target_.Reset();
     scene_texture_.Reset();
-    back_buffer_.Reset();
     software_texture_.Reset();
 
-    if (FAILED(swap_chain_->ResizeBuffers(
-            0, static_cast<UINT>(width), static_cast<UINT>(height), DXGI_FORMAT_UNKNOWN, 0))) {
+    if (!gpu_.resize(width, height)) {
         return false;
     }
-    if (FAILED(swap_chain_->GetBuffer(0,
-                                      type_iid<ID3D11Texture2D>(),
-                                      reinterpret_cast<void**>(back_buffer_.GetAddressOf())))) {
-        return false;
-    }
+    target_width_ = width;
+    target_height_ = height;
+    full_redraw_ = true;
 
     D3D11_TEXTURE2D_DESC texture_desc{};
     texture_desc.Width = static_cast<UINT>(width);
@@ -1451,16 +1459,16 @@ bool D3D11Renderer::ensure_render_targets() {
     texture_desc.SampleDesc.Count = 1;
     texture_desc.Usage = D3D11_USAGE_DEFAULT;
     texture_desc.BindFlags = D3D11_BIND_RENDER_TARGET;
-    if (FAILED(device_->CreateTexture2D(&texture_desc, nullptr, &scene_texture_))) {
+    if (FAILED(gpu_.device->CreateTexture2D(&texture_desc, nullptr, &scene_texture_))) {
         return false;
     }
-    if (FAILED(device_->CreateRenderTargetView(
+    if (FAILED(gpu_.device->CreateRenderTargetView(
             scene_texture_.Get(), nullptr, &scene_render_target_))) {
         return false;
     }
 
     texture_desc.BindFlags = 0;
-    if (FAILED(device_->CreateTexture2D(&texture_desc, nullptr, &software_texture_))) {
+    if (FAILED(gpu_.device->CreateTexture2D(&texture_desc, nullptr, &software_texture_))) {
         return false;
     }
 
@@ -1468,7 +1476,7 @@ bool D3D11Renderer::ensure_render_targets() {
     return true;
 }
 
-void D3D11Renderer::destroy_context() {
+void DirectXRenderer::destroy_context() {
     destroy_device_objects();
     hwnd_ = nullptr;
     attached_surface_ = nullptr;
@@ -1477,18 +1485,17 @@ void D3D11Renderer::destroy_context() {
     framebuffer_height_ = 0;
 }
 
-void D3D11Renderer::destroy_device_objects() {
-    if (context_ != nullptr) {
+void DirectXRenderer::destroy_device_objects() {
+    if (gpu_.context != nullptr) {
         ID3D11RenderTargetView* null_targets[] = {nullptr};
-        context_->OMSetRenderTargets(1, null_targets, nullptr);
-        context_->ClearState();
-        context_->Flush();
+        gpu_.context->OMSetRenderTargets(1, null_targets, nullptr);
+        gpu_.context->ClearState();
+        gpu_.context->Flush();
     }
 
     software_texture_.Reset();
     scene_render_target_.Reset();
     scene_texture_.Reset();
-    back_buffer_.Reset();
     constant_buffer_.Reset();
     gradient_constant_buffer_.Reset();
     blend_state_.Reset();
@@ -1504,12 +1511,14 @@ void D3D11Renderer::destroy_device_objects() {
     shaped_text_cache_.clear();
     image_texture_cache_.clear();
     text_texture_cache_.clear();
-    swap_chain_.Reset();
-    context_.Reset();
-    device_.Reset();
+    gpu_.reset();
+    target_width_ = 0;
+    target_height_ = 0;
+    scene_initialized_ = false;
 }
 
-void D3D11Renderer::present(NativeSurface& surface) {
+void DirectXRenderer::present(NativeSurface& surface) {
+    presented_software_ = false;
     if (!attach_surface(surface) || !ensure_render_targets()) {
         present_software_direct(surface);
         return;
@@ -1535,8 +1544,8 @@ void D3D11Renderer::present(NativeSurface& surface) {
     }
 }
 
-ImageTextureCacheEntry* D3D11Renderer::ensure_image_texture(const ImageCommand& command) {
-    if (device_ == nullptr || context_ == nullptr || command.pixel_data == nullptr ||
+ImageTextureCacheEntry* DirectXRenderer::ensure_image_texture(const ImageCommand& command) {
+    if (gpu_.device == nullptr || gpu_.context == nullptr || command.pixel_data == nullptr ||
         command.src_width <= 0 || command.src_height <= 0) {
         return nullptr;
     }
@@ -1570,7 +1579,11 @@ ImageTextureCacheEntry* D3D11Renderer::ensure_image_texture(const ImageCommand& 
     initial_data.SysMemPitch = static_cast<UINT>(command.src_width * 4);
 
     ImageTextureCacheEntry entry;
-    if (FAILED(device_->CreateTexture2D(&texture_desc, &initial_data, &entry.texture))) {
+    const auto pixel_count = static_cast<std::size_t>(command.src_width) * command.src_height;
+    entry.opaque = std::all_of(command.pixel_data,
+                               command.pixel_data + pixel_count,
+                               [](uint32_t pixel) { return (pixel >> 24) == 255; });
+    if (FAILED(gpu_.device->CreateTexture2D(&texture_desc, &initial_data, &entry.texture))) {
         return nullptr;
     }
 
@@ -1578,7 +1591,7 @@ ImageTextureCacheEntry* D3D11Renderer::ensure_image_texture(const ImageCommand& 
     shader_resource_desc.Format = texture_desc.Format;
     shader_resource_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     shader_resource_desc.Texture2D.MipLevels = 1;
-    if (FAILED(device_->CreateShaderResourceView(
+    if (FAILED(gpu_.device->CreateShaderResourceView(
             entry.texture.Get(), &shader_resource_desc, &entry.shader_resource_view))) {
         return nullptr;
     }
@@ -1589,8 +1602,8 @@ ImageTextureCacheEntry* D3D11Renderer::ensure_image_texture(const ImageCommand& 
     return &inserted->second;
 }
 
-TextTextureCacheEntry* D3D11Renderer::ensure_text_texture(const TextCommand& command) {
-    if (device_ == nullptr || context_ == nullptr || command.shaped_text == nullptr ||
+TextTextureCacheEntry* DirectXRenderer::ensure_text_texture(const TextCommand& command) {
+    if (gpu_.device == nullptr || gpu_.context == nullptr || command.shaped_text == nullptr ||
         command.shaped_text->bitmap_data() == nullptr || command.shaped_text->bitmap_width() <= 0 ||
         command.shaped_text->bitmap_height() <= 0) {
         return nullptr;
@@ -1624,7 +1637,7 @@ TextTextureCacheEntry* D3D11Renderer::ensure_text_texture(const TextCommand& com
     initial_data.SysMemPitch = static_cast<UINT>(command.shaped_text->bitmap_width() * 4);
 
     TextTextureCacheEntry entry;
-    if (FAILED(device_->CreateTexture2D(&texture_desc, &initial_data, &entry.texture))) {
+    if (FAILED(gpu_.device->CreateTexture2D(&texture_desc, &initial_data, &entry.texture))) {
         return nullptr;
     }
 
@@ -1632,7 +1645,7 @@ TextTextureCacheEntry* D3D11Renderer::ensure_text_texture(const TextCommand& com
     shader_resource_desc.Format = texture_desc.Format;
     shader_resource_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
     shader_resource_desc.Texture2D.MipLevels = 1;
-    if (FAILED(device_->CreateShaderResourceView(
+    if (FAILED(gpu_.device->CreateShaderResourceView(
             entry.texture.Get(), &shader_resource_desc, &entry.shader_resource_view))) {
         return nullptr;
     }
@@ -1643,8 +1656,8 @@ TextTextureCacheEntry* D3D11Renderer::ensure_text_texture(const TextCommand& com
     return &inserted->second;
 }
 
-bool D3D11Renderer::draw_gpu_scene() {
-    if (!ensure_render_targets() || context_ == nullptr || scene_render_target_ == nullptr) {
+bool DirectXRenderer::draw_gpu_scene() {
+    if (!ensure_render_targets() || gpu_.context == nullptr || scene_render_target_ == nullptr) {
         return false;
     }
 
@@ -1653,130 +1666,32 @@ bool D3D11Renderer::draw_gpu_scene() {
     full_present_ = full_scene_redraw;
     const float white[4] = {1.0F, 1.0F, 1.0F, 1.0F};
     ID3D11RenderTargetView* render_targets[] = {scene_render_target_.Get()};
-    context_->OMSetRenderTargets(1, render_targets, nullptr);
-    context_->IASetInputLayout(nullptr);
-    context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
-    context_->PSSetShader(pixel_shader_.Get(), nullptr, 0);
-    context_->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    context_->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    context_->RSSetState(rasterizer_state_.Get());
+    gpu_.context->OMSetRenderTargets(1, render_targets, nullptr);
+    gpu_.context->IASetInputLayout(nullptr);
+    gpu_.context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    gpu_.context->VSSetShader(vertex_shader_.Get(), nullptr, 0);
+    gpu_.context->PSSetShader(pixel_shader_.Get(), nullptr, 0);
+    gpu_.context->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->RSSetState(rasterizer_state_.Get());
     constexpr float blend_factor[4] = {0.0F, 0.0F, 0.0F, 0.0F};
-    context_->OMSetBlendState(blend_state_.Get(), blend_factor, 0xFFFFFFFFU);
+    gpu_.context->OMSetBlendState(blend_state_.Get(), blend_factor, 0xFFFFFFFFU);
 
     D3D11_VIEWPORT viewport{};
     viewport.Width = static_cast<float>(framebuffer_width_);
     viewport.Height = static_cast<float>(framebuffer_height_);
     viewport.MinDepth = 0.0F;
     viewport.MaxDepth = 1.0F;
-    context_->RSSetViewports(1, &viewport);
+    gpu_.context->RSSetViewports(1, &viewport);
 
     last_hotspot_counters_.gpu_draw_call_count = 0;
     last_hotspot_counters_.gpu_replayed_command_count = 0;
     last_hotspot_counters_.gpu_skipped_command_count = 0;
-    std::size_t layer_depth = 0;
-    auto push_layer = [&]() {
-        if (layer_depth >= layer_textures_.size()) {
-            ComPtr<ID3D11Texture2D> tex;
-            ComPtr<ID3D11RenderTargetView> rtv;
-            ComPtr<ID3D11ShaderResourceView> srv;
-
-            D3D11_TEXTURE2D_DESC texture_desc{};
-            texture_desc.Width = static_cast<UINT>(framebuffer_width_);
-            texture_desc.Height = static_cast<UINT>(framebuffer_height_);
-            texture_desc.MipLevels = 1;
-            texture_desc.ArraySize = 1;
-            texture_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-            texture_desc.SampleDesc.Count = 1;
-            texture_desc.Usage = D3D11_USAGE_DEFAULT;
-            texture_desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-            if (FAILED(device_->CreateTexture2D(&texture_desc, nullptr, &tex))) {
-                return false;
-            }
-            if (FAILED(device_->CreateRenderTargetView(tex.Get(), nullptr, &rtv))) {
-                return false;
-            }
-
-            D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc{};
-            srv_desc.Format = texture_desc.Format;
-            srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-            srv_desc.Texture2D.MipLevels = 1;
-            if (FAILED(device_->CreateShaderResourceView(tex.Get(), &srv_desc, &srv))) {
-                return false;
-            }
-
-            layer_textures_.push_back(tex);
-            layer_rtvs_.push_back(rtv);
-            layer_srvs_.push_back(srv);
-        }
-        ID3D11RenderTargetView* rtv = layer_rtvs_[layer_depth].Get();
-        context_->OMSetRenderTargets(1, &rtv, nullptr);
-        const float transparent[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-        context_->ClearRenderTargetView(rtv, transparent);
-        layer_depth++;
-        return true;
-    };
-    auto pop_layer = [&]() {
-        layer_depth--;
-        ID3D11RenderTargetView* rtv =
-            layer_depth == 0 ? scene_render_target_.Get() : layer_rtvs_[layer_depth - 1].Get();
-        context_->OMSetRenderTargets(1, &rtv, nullptr);
-    };
     if (full_scene_redraw) {
-        context_->ClearRenderTargetView(scene_render_target_.Get(), white);
+        gpu_.context->ClearRenderTargetView(scene_render_target_.Get(), white);
         last_hotspot_counters_.gpu_replayed_command_count = draw_commands_.size();
         for (const auto& draw_command : draw_commands_) {
 
-            if (draw_command.kind == DrawCommandKind::PushLayer) {
-                if (!push_layer()) {
-                    return false;
-                }
-                continue;
-            }
-            if (draw_command.kind == DrawCommandKind::PopLayer) {
-                pop_layer();
-                const auto& cmd = layer_commands_[draw_command.command_index];
-                ImageCommand fake_img;
-                fake_img.rect = {0,
-                                 0,
-                                 (float)framebuffer_width_ / scale_factor_,
-                                 (float)framebuffer_height_ / scale_factor_};
-                fake_img.clips = cmd.clips;
-                fake_img.clip_count = cmd.clip_count;
-                fake_img.scale_mode = ScaleMode::NearestNeighbor;
-                draw_image(fake_img, *layer_srvs_[layer_depth].Get(), std::nullopt, cmd.opacity);
-                continue;
-            }
-
-            if (draw_command.kind == DrawCommandKind::PushLayer) {
-                if (!push_layer()) {
-                    return false;
-                }
-                continue;
-            }
-            if (draw_command.kind == DrawCommandKind::PopLayer) {
-                pop_layer();
-                const auto& cmd = layer_commands_[draw_command.command_index];
-                ImageCommand fake_img;
-                fake_img.rect = {0,
-                                 0,
-                                 (float)framebuffer_width_ / scale_factor_,
-                                 (float)framebuffer_height_ / scale_factor_};
-                fake_img.clips = cmd.clips;
-                fake_img.clip_count = cmd.clip_count;
-                fake_img.scale_mode = ScaleMode::NearestNeighbor;
-
-                // Draw the layer SRV onto the main RT, intersecting with damage
-                for (const auto& damage : pixel_damage_regions_) {
-                    Rect command_bounds = clip_rect_to_viewport(
-                        effective_command_bounds(cmd), framebuffer_width_, framebuffer_height_);
-                    Rect slice = intersect_rect(command_bounds, damage);
-                    if (!rect_is_empty(slice)) {
-                        draw_image(fake_img, *layer_srvs_[layer_depth].Get(), slice, cmd.opacity);
-                    }
-                }
-                continue;
-            }
             if (draw_command.kind == DrawCommandKind::Primitive) {
                 draw_primitive(primitive_commands_[draw_command.command_index], std::nullopt);
                 continue;
@@ -1856,7 +1771,14 @@ bool D3D11Renderer::draw_gpu_scene() {
                     }
 
                     const auto union_area = pixel_area(union_slice);
-                    if (union_area <= ((total_area * 5U) / 4U)) {
+                    bool can_redraw_gap = false;
+                    if constexpr (requires { texture->opaque; }) {
+                        can_redraw_gap =
+                            texture->opaque && command.opacity >= 1.0F && command.clip_count == 0;
+                    }
+                    // Replaying alpha into an untouched gap blends it a second time.
+                    if (union_area <= total_area ||
+                        (can_redraw_gap && union_area <= ((total_area * 5U) / 4U))) {
                         ++last_hotspot_counters_.gpu_replayed_command_count;
                         last_hotspot_counters_.gpu_skipped_command_count += slices.size() - 1U;
                         draw_fn(command, *texture->shader_resource_view.Get(), union_slice);
@@ -1941,31 +1863,33 @@ bool D3D11Renderer::draw_gpu_scene() {
     return true;
 }
 
-bool D3D11Renderer::present_scene() {
-    if (context_ == nullptr || scene_texture_ == nullptr || back_buffer_ == nullptr) {
+bool DirectXRenderer::present_scene() {
+    auto* back_buffer = gpu_.acquire_back_buffer();
+    if (gpu_.context == nullptr || scene_texture_ == nullptr || back_buffer == nullptr) {
         return false;
     }
 
-    const bool full_scene_redraw = full_present_ || pixel_damage_regions_.empty();
+    const bool full_scene_redraw =
+        backend_ == RendererBackend::D3D12 || full_present_ || pixel_damage_regions_.empty();
     std::vector<RECT> dirty_rects;
     if (!full_scene_redraw) {
         dirty_rects.reserve(pixel_damage_regions_.size());
         for (const auto& region : pixel_damage_regions_) {
             const auto box = to_d3d_box(region);
             dirty_rects.push_back(to_win32_rect(region));
-            context_->CopySubresourceRegion(back_buffer_.Get(),
-                                            0,
-                                            static_cast<UINT>(std::floor(region.x)),
-                                            static_cast<UINT>(std::floor(region.y)),
-                                            0,
-                                            scene_texture_.Get(),
-                                            0,
-                                            &box);
+            gpu_.context->CopySubresourceRegion(back_buffer,
+                                                0,
+                                                static_cast<UINT>(std::floor(region.x)),
+                                                static_cast<UINT>(std::floor(region.y)),
+                                                0,
+                                                scene_texture_.Get(),
+                                                0,
+                                                &box);
         }
     }
 
     if (full_scene_redraw || dirty_rects.empty()) {
-        context_->CopyResource(back_buffer_.Get(), scene_texture_.Get());
+        gpu_.context->CopyResource(back_buffer, scene_texture_.Get());
         last_hotspot_counters_.gpu_swapchain_copy_count = 1;
         last_hotspot_counters_.gpu_present_region_count = 0;
         last_hotspot_counters_.gpu_present_path = GpuPresentPath::FullRedrawCopyBack;
@@ -1977,14 +1901,16 @@ bool D3D11Renderer::present_scene() {
         last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::BandwidthFavored;
     }
 
-    DXGI_PRESENT_PARAMETERS present_parameters{};
-    present_parameters.DirtyRectsCount = static_cast<UINT>(dirty_rects.size());
-    present_parameters.pDirtyRects = dirty_rects.data();
-    return SUCCEEDED(swap_chain_->Present1(1, 0, &present_parameters));
+    const bool presented = gpu_.present(dirty_rects);
+    if (!presented) {
+        destroy_device_objects();
+    }
+    return presented;
 }
 
-bool D3D11Renderer::present_uploaded_software_frame() {
-    if (context_ == nullptr || software_texture_ == nullptr || back_buffer_ == nullptr) {
+bool DirectXRenderer::present_uploaded_software_frame() {
+    auto* back_buffer = gpu_.acquire_back_buffer();
+    if (gpu_.context == nullptr || software_texture_ == nullptr || back_buffer == nullptr) {
         return false;
     }
 
@@ -2004,33 +1930,34 @@ bool D3D11Renderer::present_uploaded_software_frame() {
         converted_pixels_[index * 4 + 3] = rgba[index * 4 + 3];
     }
 
-    context_->UpdateSubresource(software_texture_.Get(),
-                                0,
-                                nullptr,
-                                converted_pixels_.data(),
-                                static_cast<UINT>(width * 4),
-                                0);
+    gpu_.context->UpdateSubresource(software_texture_.Get(),
+                                    0,
+                                    nullptr,
+                                    converted_pixels_.data(),
+                                    static_cast<UINT>(width * 4),
+                                    0);
 
-    const bool full_scene_redraw = full_redraw_ || pixel_damage_regions_.empty();
+    const bool full_scene_redraw =
+        backend_ == RendererBackend::D3D12 || full_redraw_ || pixel_damage_regions_.empty();
     std::vector<RECT> dirty_rects;
     if (!full_scene_redraw) {
         dirty_rects.reserve(pixel_damage_regions_.size());
         for (const auto& region : pixel_damage_regions_) {
             const auto box = to_d3d_box(region);
             dirty_rects.push_back(to_win32_rect(region));
-            context_->CopySubresourceRegion(back_buffer_.Get(),
-                                            0,
-                                            static_cast<UINT>(std::floor(region.x)),
-                                            static_cast<UINT>(std::floor(region.y)),
-                                            0,
-                                            software_texture_.Get(),
-                                            0,
-                                            &box);
+            gpu_.context->CopySubresourceRegion(back_buffer,
+                                                0,
+                                                static_cast<UINT>(std::floor(region.x)),
+                                                static_cast<UINT>(std::floor(region.y)),
+                                                0,
+                                                software_texture_.Get(),
+                                                0,
+                                                &box);
         }
     }
 
     if (full_scene_redraw || dirty_rects.empty()) {
-        context_->CopyResource(back_buffer_.Get(), software_texture_.Get());
+        gpu_.context->CopyResource(back_buffer, software_texture_.Get());
         last_hotspot_counters_.gpu_swapchain_copy_count = 1;
         last_hotspot_counters_.gpu_present_region_count = 0;
         last_hotspot_counters_.gpu_present_path = GpuPresentPath::SoftwareUpload;
@@ -2042,13 +1969,17 @@ bool D3D11Renderer::present_uploaded_software_frame() {
         last_hotspot_counters_.gpu_present_tradeoff = GpuPresentTradeoff::BandwidthFavored;
     }
 
-    DXGI_PRESENT_PARAMETERS present_parameters{};
-    present_parameters.DirtyRectsCount = static_cast<UINT>(dirty_rects.size());
-    present_parameters.pDirtyRects = dirty_rects.data();
-    return SUCCEEDED(swap_chain_->Present1(1, 0, &present_parameters));
+    const bool presented = gpu_.present(dirty_rects);
+    if (!presented) {
+        destroy_device_objects();
+    }
+    return presented;
 }
 
-void D3D11Renderer::present_software_direct(NativeSurface& surface) {
+void DirectXRenderer::present_software_direct(NativeSurface& surface) {
+    presented_software_ = true;
+    scene_initialized_ = false;
+    full_redraw_ = true;
     if (!ensure_software_frame()) {
         return;
     }
@@ -2062,7 +1993,7 @@ void D3D11Renderer::present_software_direct(NativeSurface& surface) {
     software_->present(surface);
 }
 
-Rect D3D11Renderer::effective_command_bounds(const PrimitiveCommand& command) const {
+Rect DirectXRenderer::effective_command_bounds(const PrimitiveCommand& command) const {
     Rect bounds = scale_rect(command.rect, scale_factor_);
     for (uint32_t index = 0; index < command.clip_count && index < kMaxClipDepth; ++index) {
         bounds = intersect_rect(bounds, scale_rect(command.clips[index].rect, scale_factor_));
@@ -2073,7 +2004,7 @@ Rect D3D11Renderer::effective_command_bounds(const PrimitiveCommand& command) co
     return bounds;
 }
 
-Rect D3D11Renderer::effective_command_bounds(const GradientCommand& command) const {
+Rect DirectXRenderer::effective_command_bounds(const GradientCommand& command) const {
     Rect bounds = scale_rect(command.rect, scale_factor_);
     for (uint32_t index = 0; index < command.clip_count && index < kMaxClipDepth; ++index) {
         bounds = intersect_rect(bounds, scale_rect(command.clips[index].rect, scale_factor_));
@@ -2084,7 +2015,7 @@ Rect D3D11Renderer::effective_command_bounds(const GradientCommand& command) con
     return bounds;
 }
 
-Rect D3D11Renderer::effective_command_bounds(const ImageCommand& command) const {
+Rect DirectXRenderer::effective_command_bounds(const ImageCommand& command) const {
     Rect bounds = scale_rect(command.rect, scale_factor_);
     for (uint32_t index = 0; index < command.clip_count && index < kMaxClipDepth; ++index) {
         bounds = intersect_rect(bounds, scale_rect(command.clips[index].rect, scale_factor_));
@@ -2095,11 +2026,7 @@ Rect D3D11Renderer::effective_command_bounds(const ImageCommand& command) const 
     return bounds;
 }
 
-Rect D3D11Renderer::effective_command_bounds(const LayerCommand& command) const {
-    return scale_rect(command.rect, scale_factor_);
-}
-
-Rect D3D11Renderer::effective_command_bounds(const TextCommand& command) const {
+Rect DirectXRenderer::effective_command_bounds(const TextCommand& command) const {
     Rect bounds = scale_rect(command.rect, scale_factor_);
     for (uint32_t index = 0; index < command.clip_count && index < kMaxClipDepth; ++index) {
         bounds = intersect_rect(bounds, scale_rect(command.clips[index].rect, scale_factor_));
@@ -2110,7 +2037,7 @@ Rect D3D11Renderer::effective_command_bounds(const TextCommand& command) const {
     return bounds;
 }
 
-bool D3D11Renderer::primitive_covers_damage(const PrimitiveCommand& command, Rect damage) const {
+bool DirectXRenderer::primitive_covers_damage(const PrimitiveCommand& command, Rect damage) const {
     if (command.kind != 0U || command.color.a < 0.999F || command.clip_count != 0U) {
         return false;
     }
@@ -2141,7 +2068,7 @@ bool D3D11Renderer::primitive_covers_damage(const PrimitiveCommand& command, Rec
     });
 }
 
-bool D3D11Renderer::damage_requires_clear(Rect damage) const {
+bool DirectXRenderer::damage_requires_clear(Rect damage) const {
     for (const auto& draw_command : draw_commands_) {
         if (draw_command.kind != DrawCommandKind::Primitive) {
             continue;
@@ -2155,44 +2082,41 @@ bool D3D11Renderer::damage_requires_clear(Rect damage) const {
     return true;
 }
 
-bool D3D11Renderer::command_intersects_damage(const PrimitiveCommand& command, Rect damage) const {
+bool DirectXRenderer::command_intersects_damage(const PrimitiveCommand& command,
+                                                Rect damage) const {
     const auto scaled_bounds = clip_rect_to_viewport(
         effective_command_bounds(command), framebuffer_width_, framebuffer_height_);
     return !rect_is_empty(scaled_bounds) && rects_overlap_or_touch(scaled_bounds, damage);
 }
 
-bool D3D11Renderer::command_intersects_damage(const GradientCommand& command, Rect damage) const {
+bool DirectXRenderer::command_intersects_damage(const GradientCommand& command, Rect damage) const {
     const auto scaled_bounds = clip_rect_to_viewport(
         effective_command_bounds(command), framebuffer_width_, framebuffer_height_);
     return !rect_is_empty(scaled_bounds) && rects_overlap_or_touch(scaled_bounds, damage);
 }
 
-bool D3D11Renderer::command_intersects_damage(const ImageCommand& command, Rect damage) const {
+bool DirectXRenderer::command_intersects_damage(const ImageCommand& command, Rect damage) const {
     const auto scaled_bounds = clip_rect_to_viewport(
         effective_command_bounds(command), framebuffer_width_, framebuffer_height_);
     return !rect_is_empty(scaled_bounds) && rects_overlap_or_touch(scaled_bounds, damage);
 }
 
-bool D3D11Renderer::command_intersects_damage(const LayerCommand& command, Rect damage) const {
-    return rects_overlap_or_touch(scale_rect(command.rect, scale_factor_), damage);
-}
-
-bool D3D11Renderer::command_intersects_damage(const TextCommand& command, Rect damage) const {
+bool DirectXRenderer::command_intersects_damage(const TextCommand& command, Rect damage) const {
     const auto scaled_bounds = clip_rect_to_viewport(
         effective_command_bounds(command), framebuffer_width_, framebuffer_height_);
     return !rect_is_empty(scaled_bounds) && rects_overlap_or_touch(scaled_bounds, damage);
 }
 
-void D3D11Renderer::draw_clear_rect(Rect damage) {
+void DirectXRenderer::draw_clear_rect(Rect damage) {
     PrimitiveCommand clear_command;
     clear_command.rect = damage;
     clear_command.color = Color::from_rgb(255, 255, 255);
     draw_primitive(clear_command, damage, true);
 }
 
-void D3D11Renderer::draw_primitive(const PrimitiveCommand& command,
-                                   std::optional<Rect> scissor,
-                                   bool already_scaled) {
+void DirectXRenderer::draw_primitive(const PrimitiveCommand& command,
+                                     std::optional<Rect> scissor,
+                                     bool already_scaled) {
     DrawConstants constants{};
     const Rect draw_rect = already_scaled ? command.rect : scale_rect(command.rect, scale_factor_);
     constants.rect[0] = draw_rect.x;
@@ -2217,29 +2141,36 @@ void D3D11Renderer::draw_primitive(const PrimitiveCommand& command,
     }
     constants.params0[0] = already_scaled ? command.radius : (command.radius * scale_factor_);
     constants.params0[1] = already_scaled ? command.thickness : (command.thickness * scale_factor_);
+    constants.effects[0] = command.blur * scale_factor_;
+    constants.effects[1] = static_cast<float>(command.points.size());
+    constants.effects[2] = command.closed ? 1.0F : 0.0F;
+    for (std::size_t i = 0; i < command.points.size(); ++i) {
+        constants.points[i * 4] = command.points[i].x * scale_factor_;
+        constants.points[i * 4 + 1] = command.points[i].y * scale_factor_;
+    }
     constants.params0[2] = static_cast<float>(command.kind);
     constants.params0[3] = static_cast<float>(command.clip_count);
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
-    context_->VSSetShader(vertex_shader_.Get(), nullptr, 0);
-    context_->PSSetShader(pixel_shader_.Get(), nullptr, 0);
-    context_->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    context_->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    context_->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
+    gpu_.context->VSSetShader(vertex_shader_.Get(), nullptr, 0);
+    gpu_.context->PSSetShader(pixel_shader_.Get(), nullptr, 0);
+    gpu_.context->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
         scissor.has_value()
             ? clip_rect_to_viewport(*scissor, framebuffer_width_, framebuffer_height_)
             : clip_rect_to_viewport(draw_rect, framebuffer_width_, framebuffer_height_);
     const auto d3d_scissor = to_d3d_rect(scissor_rect);
-    context_->RSSetScissorRects(1, &d3d_scissor);
+    gpu_.context->RSSetScissorRects(1, &d3d_scissor);
     ID3D11ShaderResourceView* null_views[] = {nullptr};
-    context_->PSSetShaderResources(0, 1, null_views);
-    context_->Draw(4, 0);
+    gpu_.context->PSSetShaderResources(0, 1, null_views);
+    gpu_.context->Draw(4, 0);
     ++last_hotspot_counters_.gpu_draw_call_count;
 }
 
-void D3D11Renderer::draw_gradient(const GradientCommand& command, std::optional<Rect> scissor) {
+void DirectXRenderer::draw_gradient(const GradientCommand& command, std::optional<Rect> scissor) {
     GradientDrawConstants constants{};
     const Rect draw_rect = scale_rect(command.rect, scale_factor_);
     constants.rect[0] = draw_rect.x;
@@ -2266,28 +2197,28 @@ void D3D11Renderer::draw_gradient(const GradientCommand& command, std::optional<
     constants.params0[3] = static_cast<float>(command.clip_count);
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
-    context_->VSSetShader(gradient_vertex_shader_.Get(), nullptr, 0);
-    context_->PSSetShader(gradient_pixel_shader_.Get(), nullptr, 0);
-    context_->VSSetConstantBuffers(0, 1, gradient_constant_buffer_.GetAddressOf());
-    context_->PSSetConstantBuffers(0, 1, gradient_constant_buffer_.GetAddressOf());
-    context_->UpdateSubresource(gradient_constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
+    gpu_.context->VSSetShader(gradient_vertex_shader_.Get(), nullptr, 0);
+    gpu_.context->PSSetShader(gradient_pixel_shader_.Get(), nullptr, 0);
+    gpu_.context->VSSetConstantBuffers(0, 1, gradient_constant_buffer_.GetAddressOf());
+    gpu_.context->PSSetConstantBuffers(0, 1, gradient_constant_buffer_.GetAddressOf());
+    gpu_.context->UpdateSubresource(gradient_constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
         scissor.has_value()
             ? clip_rect_to_viewport(*scissor, framebuffer_width_, framebuffer_height_)
             : clip_rect_to_viewport(draw_rect, framebuffer_width_, framebuffer_height_);
     const auto d3d_scissor = to_d3d_rect(scissor_rect);
-    context_->RSSetScissorRects(1, &d3d_scissor);
+    gpu_.context->RSSetScissorRects(1, &d3d_scissor);
     ID3D11ShaderResourceView* null_views[] = {nullptr};
-    context_->PSSetShaderResources(0, 1, null_views);
-    context_->Draw(4, 0);
+    gpu_.context->PSSetShaderResources(0, 1, null_views);
+    gpu_.context->Draw(4, 0);
     ++last_hotspot_counters_.gpu_draw_call_count;
 }
 
-void D3D11Renderer::draw_image(const ImageCommand& command,
-                               ID3D11ShaderResourceView& shader_resource_view,
-                               std::optional<Rect> scissor,
-                               float opacity) {
+void DirectXRenderer::draw_image(const ImageCommand& command,
+                                 ID3D11ShaderResourceView& shader_resource_view,
+                                 std::optional<Rect> scissor,
+                                 float opacity) {
     ImageDrawConstants constants{};
     const Rect draw_rect = scale_rect(command.rect, scale_factor_);
     constants.rect[0] = draw_rect.x;
@@ -2304,35 +2235,35 @@ void D3D11Renderer::draw_image(const ImageCommand& command,
     }
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
-    constants.params0[0] = opacity;
-    context_->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
+    constants.params0[0] = opacity * command.opacity;
+    gpu_.context->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
         scissor.has_value()
             ? clip_rect_to_viewport(*scissor, framebuffer_width_, framebuffer_height_)
             : clip_rect_to_viewport(draw_rect, framebuffer_width_, framebuffer_height_);
     const auto d3d_scissor = to_d3d_rect(scissor_rect);
-    context_->RSSetScissorRects(1, &d3d_scissor);
-    context_->VSSetShader(image_vertex_shader_.Get(), nullptr, 0);
-    context_->PSSetShader(image_pixel_shader_.Get(), nullptr, 0);
-    context_->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    context_->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->RSSetScissorRects(1, &d3d_scissor);
+    gpu_.context->VSSetShader(image_vertex_shader_.Get(), nullptr, 0);
+    gpu_.context->PSSetShader(image_pixel_shader_.Get(), nullptr, 0);
+    gpu_.context->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
     ID3D11ShaderResourceView* views[] = {&shader_resource_view};
     ID3D11SamplerState* samplers[] = {
         command.scale_mode == ScaleMode::Bilinear ? linear_sampler_state_.Get()
                                                   : nearest_sampler_state_.Get(),
     };
-    context_->PSSetShaderResources(0, 1, views);
-    context_->PSSetSamplers(0, 1, samplers);
-    context_->Draw(4, 0);
+    gpu_.context->PSSetShaderResources(0, 1, views);
+    gpu_.context->PSSetSamplers(0, 1, samplers);
+    gpu_.context->Draw(4, 0);
     ID3D11ShaderResourceView* null_views[] = {nullptr};
-    context_->PSSetShaderResources(0, 1, null_views);
+    gpu_.context->PSSetShaderResources(0, 1, null_views);
     ++last_hotspot_counters_.gpu_draw_call_count;
 }
 
-void D3D11Renderer::draw_text(const TextCommand& command,
-                              ID3D11ShaderResourceView& shader_resource_view,
-                              std::optional<Rect> scissor) {
+void DirectXRenderer::draw_text(const TextCommand& command,
+                                ID3D11ShaderResourceView& shader_resource_view,
+                                std::optional<Rect> scissor) {
     ImageDrawConstants constants{};
     const Rect draw_rect = scale_rect(command.rect, scale_factor_);
     constants.rect[0] = draw_rect.x;
@@ -2349,37 +2280,83 @@ void D3D11Renderer::draw_text(const TextCommand& command,
     }
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
-    constants.params0[0] = 1.0F;
-    context_->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
+    constants.params0[0] = command.opacity;
+    gpu_.context->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
         scissor.has_value()
             ? clip_rect_to_viewport(*scissor, framebuffer_width_, framebuffer_height_)
             : clip_rect_to_viewport(draw_rect, framebuffer_width_, framebuffer_height_);
     const auto d3d_scissor = to_d3d_rect(scissor_rect);
-    context_->RSSetScissorRects(1, &d3d_scissor);
-    context_->VSSetShader(image_vertex_shader_.Get(), nullptr, 0);
-    context_->PSSetShader(image_pixel_shader_.Get(), nullptr, 0);
-    context_->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    context_->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->RSSetScissorRects(1, &d3d_scissor);
+    gpu_.context->VSSetShader(image_vertex_shader_.Get(), nullptr, 0);
+    gpu_.context->PSSetShader(image_pixel_shader_.Get(), nullptr, 0);
+    gpu_.context->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
     ID3D11ShaderResourceView* views[] = {&shader_resource_view};
     ID3D11SamplerState* samplers[] = {nearest_sampler_state_.Get()};
-    context_->PSSetShaderResources(0, 1, views);
-    context_->PSSetSamplers(0, 1, samplers);
-    context_->Draw(4, 0);
+    gpu_.context->PSSetShaderResources(0, 1, views);
+    gpu_.context->PSSetSamplers(0, 1, samplers);
+    gpu_.context->Draw(4, 0);
     ID3D11ShaderResourceView* null_views[] = {nullptr};
-    context_->PSSetShaderResources(0, 1, null_views);
+    gpu_.context->PSSetShaderResources(0, 1, null_views);
     ++last_hotspot_counters_.gpu_draw_call_count;
 }
 
-RenderHotspotCounters D3D11Renderer::last_hotspot_counters() const {
+std::optional<FramePixels> DirectXRenderer::read_back_frame() {
+    if (presented_software_) {
+        return software_->read_back_frame();
+    }
+    auto* source = use_gpu_scene_ ? scene_texture_.Get() : software_texture_.Get();
+    if (source == nullptr || !gpu_.healthy()) {
+        return std::nullopt;
+    }
+    D3D11_TEXTURE2D_DESC desc{};
+    source->GetDesc(&desc);
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    desc.MiscFlags = 0;
+    ComPtr<ID3D11Texture2D> staging;
+    if (FAILED(gpu_.device->CreateTexture2D(&desc, nullptr, &staging))) {
+        return std::nullopt;
+    }
+    gpu_.context->CopyResource(staging.Get(), source);
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(gpu_.context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+        return std::nullopt;
+    }
+    FramePixels result;
+    result.width = static_cast<int>(desc.Width);
+    result.height = static_cast<int>(desc.Height);
+    result.rgba.resize(static_cast<std::size_t>(desc.Width) * desc.Height * 4);
+    for (UINT y = 0; y < desc.Height; ++y) {
+        const auto* row = static_cast<const uint8_t*>(mapped.pData) +
+                          static_cast<std::size_t>(y) * mapped.RowPitch;
+        auto* output = result.rgba.data() + static_cast<std::size_t>(y) * desc.Width * 4;
+        for (UINT x = 0; x < desc.Width; ++x) {
+            output[x * 4] = row[x * 4 + 2];
+            output[x * 4 + 1] = row[x * 4 + 1];
+            output[x * 4 + 2] = row[x * 4];
+            output[x * 4 + 3] = row[x * 4 + 3];
+        }
+    }
+    gpu_.context->Unmap(staging.Get(), 0);
+    return result;
+}
+
+RenderHotspotCounters DirectXRenderer::last_hotspot_counters() const {
     return last_hotspot_counters_;
 }
 
 } // namespace
 
 std::unique_ptr<Renderer> create_d3d11_renderer() {
-    return std::make_unique<D3D11Renderer>();
+    return std::make_unique<DirectXRenderer>(RendererBackend::D3D11);
+}
+
+std::unique_ptr<Renderer> create_d3d12_renderer() {
+    return std::make_unique<DirectXRenderer>(RendererBackend::D3D12);
 }
 
 } // namespace nk

@@ -15,6 +15,8 @@
 #include <vector>
 
 #if defined(_WIN32)
+#include "directx_device.h"
+
 #include <d3d11.h>
 #endif
 
@@ -26,6 +28,7 @@ std::unique_ptr<Renderer> create_metal_renderer();
 
 #if defined(_WIN32)
 std::unique_ptr<Renderer> create_d3d11_renderer();
+std::unique_ptr<Renderer> create_d3d12_renderer();
 #endif
 
 #if defined(NK_HAVE_VULKAN) && (defined(__linux__) || defined(_WIN32))
@@ -352,6 +355,8 @@ std::string_view renderer_backend_name(RendererBackend backend) noexcept {
         return "software";
     case RendererBackend::D3D11:
         return "d3d11";
+    case RendererBackend::D3D12:
+        return "d3d12";
     case RendererBackend::Metal:
         return "metal";
     case RendererBackend::OpenGL:
@@ -372,6 +377,8 @@ bool renderer_backend_supported(RendererBackendSupport support, RendererBackend 
         return support.software;
     case RendererBackend::D3D11:
         return support.d3d11;
+    case RendererBackend::D3D12:
+        return support.d3d12;
     case RendererBackend::Metal:
         return support.metal;
     case RendererBackend::OpenGL:
@@ -389,6 +396,12 @@ bool renderer_backend_available(RendererBackend backend) noexcept {
     case RendererBackend::D3D11:
 #if defined(_WIN32)
         return d3d11_hardware_available();
+#else
+        return false;
+#endif
+    case RendererBackend::D3D12:
+#if defined(_WIN32)
+        return directx12_available();
 #else
         return false;
 #endif
@@ -1222,6 +1235,12 @@ std::unique_ptr<Renderer> create_renderer(RendererBackend backend) {
     case RendererBackend::D3D11:
 #if defined(_WIN32)
         return create_d3d11_renderer();
+#else
+        return nullptr;
+#endif
+    case RendererBackend::D3D12:
+#if defined(_WIN32)
+        return create_d3d12_renderer();
 #else
         return nullptr;
 #endif

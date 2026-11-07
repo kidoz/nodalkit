@@ -137,6 +137,9 @@ std::optional<RendererBackend> parse_renderer_backend_override(std::string_view 
     if (value == "d3d11" || value == "direct3d11" || value == "dx11") {
         return RendererBackend::D3D11;
     }
+    if (value == "d3d12" || value == "direct3d12" || value == "dx12") {
+        return RendererBackend::D3D12;
+    }
     if (value == "metal") {
         return RendererBackend::Metal;
     }
@@ -157,9 +160,10 @@ std::optional<RendererBackend> renderer_backend_override_from_environment() {
 
     const auto requested = parse_renderer_backend_override(env);
     if (!requested.has_value()) {
-        NK_LOG_WARN("Window",
-                    "Ignoring unknown NK_RENDERER_BACKEND override; expected software, d3d11, "
-                    "metal, opengl, or vulkan");
+        NK_LOG_WARN(
+            "Window",
+            "Ignoring unknown NK_RENDERER_BACKEND override; expected software, d3d11, d3d12, "
+            "metal, opengl, or vulkan");
         return std::nullopt;
     }
 
@@ -385,6 +389,7 @@ RendererBackend select_renderer_backend(const NativeSurface* surface) {
     constexpr RendererBackend preferred_backends[] = {
 #if defined(_WIN32)
         RendererBackend::D3D11,
+        RendererBackend::D3D12,
 #endif
         RendererBackend::Metal,
         RendererBackend::Vulkan,

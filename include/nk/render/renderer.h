@@ -23,6 +23,7 @@ enum class RendererBackend {
     Metal,
     OpenGL,
     Vulkan,
+    D3D12, ///< Direct3D 12 execution through the Windows D3D11-on-12 runtime.
 };
 
 struct RendererBackendSupport {
@@ -31,6 +32,7 @@ struct RendererBackendSupport {
     bool metal = false;
     bool open_gl = false;
     bool vulkan = false;
+    bool d3d12 = false;
 };
 
 [[nodiscard]] std::string_view renderer_backend_name(RendererBackend backend) noexcept;
@@ -48,7 +50,7 @@ struct FramePixels {
 };
 
 /// Abstract renderer backend. Software rendering rasterizes render nodes to
-/// a pixel buffer. D3D11, Vulkan, and Metal availability depends on the
+/// a pixel buffer. D3D11, D3D12, Vulkan, and Metal availability depends on the
 /// platform and build configuration; query renderer_backend_available().
 class Renderer {
 public:
