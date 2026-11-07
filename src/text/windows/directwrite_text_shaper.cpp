@@ -108,7 +108,7 @@ public:
         safe_release(target_);
     }
 
-    IFACEMETHODIMP QueryInterface(REFIID iid, void** object) noexcept {
+    IFACEMETHODIMP QueryInterface(REFIID iid, void** object) noexcept override {
         if (object == nullptr) {
             return E_POINTER;
         }
@@ -124,11 +124,11 @@ public:
         return E_NOINTERFACE;
     }
 
-    IFACEMETHODIMP_(ULONG) AddRef() noexcept {
+    IFACEMETHODIMP_(ULONG) AddRef() noexcept override {
         return static_cast<ULONG>(InterlockedIncrement(&ref_count_));
     }
 
-    IFACEMETHODIMP_(ULONG) Release() noexcept {
+    IFACEMETHODIMP_(ULONG) Release() noexcept override {
         const auto count = static_cast<ULONG>(InterlockedDecrement(&ref_count_));
         if (count == 0) {
             delete this;
@@ -136,7 +136,7 @@ public:
         return count;
     }
 
-    IFACEMETHODIMP IsPixelSnappingDisabled(void*, BOOL* is_disabled) noexcept {
+    IFACEMETHODIMP IsPixelSnappingDisabled(void*, BOOL* is_disabled) noexcept override {
         if (is_disabled == nullptr) {
             return E_POINTER;
         }
@@ -144,7 +144,7 @@ public:
         return S_OK;
     }
 
-    IFACEMETHODIMP GetCurrentTransform(void*, DWRITE_MATRIX* transform) noexcept {
+    IFACEMETHODIMP GetCurrentTransform(void*, DWRITE_MATRIX* transform) noexcept override {
         if (transform == nullptr) {
             return E_POINTER;
         }
@@ -152,7 +152,7 @@ public:
         return S_OK;
     }
 
-    IFACEMETHODIMP GetPixelsPerDip(void*, FLOAT* pixels_per_dip) noexcept {
+    IFACEMETHODIMP GetPixelsPerDip(void*, FLOAT* pixels_per_dip) noexcept override {
         if (pixels_per_dip == nullptr) {
             return E_POINTER;
         }
@@ -166,7 +166,7 @@ public:
                                 DWRITE_MEASURING_MODE measuring_mode,
                                 DWRITE_GLYPH_RUN const* glyph_run,
                                 DWRITE_GLYPH_RUN_DESCRIPTION const*,
-                                IUnknown*) noexcept {
+                                IUnknown*) noexcept override {
         if (target_ == nullptr || rendering_params_ == nullptr || glyph_run == nullptr) {
             return E_INVALIDARG;
         }
@@ -181,17 +181,20 @@ public:
                                      &black_box);
     }
 
-    IFACEMETHODIMP DrawUnderline(void*, FLOAT, FLOAT, DWRITE_UNDERLINE const*, IUnknown*) noexcept {
+    IFACEMETHODIMP
+    DrawUnderline(void*, FLOAT, FLOAT, DWRITE_UNDERLINE const*, IUnknown*) noexcept override {
         return S_OK;
     }
 
     IFACEMETHODIMP
-    DrawStrikethrough(void*, FLOAT, FLOAT, DWRITE_STRIKETHROUGH const*, IUnknown*) noexcept {
+    DrawStrikethrough(
+        void*, FLOAT, FLOAT, DWRITE_STRIKETHROUGH const*, IUnknown*) noexcept override {
         return S_OK;
     }
 
     IFACEMETHODIMP
-    DrawInlineObject(void*, FLOAT, FLOAT, IDWriteInlineObject*, BOOL, BOOL, IUnknown*) noexcept {
+    DrawInlineObject(
+        void*, FLOAT, FLOAT, IDWriteInlineObject*, BOOL, BOOL, IUnknown*) noexcept override {
         return S_OK;
     }
 
