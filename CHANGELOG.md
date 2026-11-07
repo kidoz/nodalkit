@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-07
+
+The fifth normal release of the NodalKit framework. 0.5.0 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.4.1 and adds a D3D12 rendering backend to the experimental
+Windows target. D3D12 drives its own device, direct command queue, fence, and
+flip-model swap chain through Microsoft's D3D11-on-12 runtime, while D3D11
+keeps partial swap-chain copies; both share one device and presentation layer.
+Windows gains hardware pixel-parity tests across both backends and multiple
+scales, Clang AddressSanitizer and UndefinedBehaviorSanitizer builds, SDK smoke
+checks for the new link surface, and renderer suites that report an unavailable
+native GPU as a skip instead of a failure.
+
+### Support Matrix for 0.5.0
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
+### Added
+*   **D3D12 Renderer:** `RendererBackend::D3D12` and `NK_RENDERER_BACKEND=d3d12` run Windows rendering on a D3D12 device, direct command queue, fence, and flip-model swap chain, submitting the shared drawing pipeline through Microsoft's D3D11-on-12 runtime. Wrapped swap-chain resources are acquired before copying and released and flushed before presentation, and resize and teardown drain the queue before releasing native buffers. Windows still prefers D3D11 automatically.
+*   **DirectX Drawing:** both DirectX backends draw rectangles, rounded rectangles, borders, linear gradients, text, images, round-capped lines, distance-based shadows, paths of up to 128 points, and per-draw opacity on the GPU, with rounded clips up to eight levels. Affine transforms, larger paths, and deeper clipping rasterize the frame in software and upload it for presentation, and device loss recreates the device on a later frame or falls back to direct software presentation.
+*   **Damage-Aware Presentation:** D3D11 copies partial swap-chain regions from dirty rectangles; D3D12 copies the complete retained scene into the current flip buffer so rotated buffers do not show stale pixels while scene drawing still respects damage. Frame diagnostics distinguish GPU draws, software uploads, and direct software presentation, and debug screenshots read back the rendered GPU texture, including uploaded fallback frames.
+*   **DirectX Tests:** a Windows `directx_renderer` suite compares both backends with software at multiple scales across effects, paths, opacity, clipping, texture caches, fallback transitions, resize, and scale changes. `NK_REQUIRE_DIRECTX=1` requires hardware, and `NK_DIRECTX_DEBUG=1` enables the DirectX debug layers.
+*   **Windows Sanitizers:** Clang builds accept `-Db_sanitize=address,undefined` on Windows through `ci/windows-asan-clang.ini`; Meson links the sanitizer runtime, rejects the debug CRT for AddressSanitizer, and adds the runtime directory to the test `PATH`.
+*   **Renderer Skips:** `tools/run_renderer_test.py` maps a fully skipped Catch2 renderer suite to a Meson skip, so Vulkan, DirectX, and Metal suites report an unavailable native backend as skipped rather than failed. `NK_REQUIRE_VULKAN` and `NK_REQUIRE_DIRECTX` turn a missing backend into a failure.
+
+### Changed
+*   **Windows Backend Selection:** `RendererBackend` gains `D3D12`, `RendererBackendSupport` gains `d3d12`, and `NK_RENDERER_BACKEND` accepts `d3d12`, `dx12`, and `direct3d12`. `nodalkit.pc` publishes `d3d12`, the Windows SDK smoke check creates both DirectX renderers, and the trace-capture harness validates D3D12 output.
+*   **DirectX Device Layer:** the D3D11 renderer moves from `d3d11_renderer.cpp` to `directx_renderer.cpp` and shares device creation and presentation with D3D12 through `directx_device.{h,cpp}`.
+*   **Theme Changes:** windows relayout when the application theme selection changes, so density and font changes update geometry as well as pixels.
+*   **Vulkan Validation on Windows:** `tools/run_vulkan_validation.py` loads `vulkan-1.dll`, locates SDK validation layers through `VULKAN_SDK` when `VK_LAYER_PATH` is unset, and joins layer names with the platform path separator.
+*   **Documentation:** the platform support reference documents DirectX rendering, backend selection, GPU coverage, fallback limits, debug layers, and validation commands, and the Windows support matrix adds local verification and sanitizer instructions.
+*   **Test Coverage:** the tooltip traversal test starts from an explicit control instead of relying on native activation focus.
+
+### Fixed
+*   **DirectX Image Draws:** image and text draws use a constant buffer sized for `ImageDrawConstants` instead of the larger path buffer, so `UpdateSubresource` copies the correct payload.
+*   **Message Catalog Wide Paths:** catalog errors and load failures format `std::filesystem::path` through `path.string()`, so message catalogs compile and report wide native paths on Windows.
+*   **DirectWrite Callbacks:** the DirectWrite text layout callbacks are marked `override` explicitly.
+
 ## [0.4.1] - 2026-11-07
 
 The fifth patch release of the NodalKit framework. 0.4.1 keeps the widget
