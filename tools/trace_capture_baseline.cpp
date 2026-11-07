@@ -184,6 +184,47 @@ bool has_work_counter_regression(std::string_view scenario_label,
     return failed;
 }
 
+bool has_metal_counter_regression(std::string_view scenario_label,
+                                  const nk::FrameDiagnosticsArtifact& baseline,
+                                  const nk::FrameDiagnosticsArtifact& candidate) {
+    const auto sum = [](const auto& artifact, auto counter) {
+        std::size_t total = 0;
+        for (const auto& frame : artifact.frames) {
+            total += counter(frame.render_hotspot_counters);
+        }
+        return total;
+    };
+    const auto compare = [&](std::string_view label, auto counter) {
+        return check_regression(
+            label, sum(baseline, counter), sum(candidate, counter), std::size_t{1}, scenario_label);
+    };
+    bool failed = false;
+    failed |= compare("total Metal text uploads",
+                      [](const auto& c) { return c.text_texture_upload_count; });
+    failed |= compare("total Metal image uploads",
+                      [](const auto& c) { return c.image_texture_upload_count; });
+    failed |=
+        compare("total Metal draw calls", [](const auto& c) { return c.gpu_draw_call_count; });
+    const auto hits = [](const auto& c) { return c.text_shape_cache_hit_count; };
+    const auto before_hits = sum(baseline, hits);
+    const auto after_hits = sum(candidate, hits);
+    const auto lost_hits = before_hits > after_hits ? before_hits - after_hits : 0;
+    failed |= check_regression(
+        "lost Metal shape cache hits", std::size_t{0}, lost_hits, std::size_t{1}, scenario_label);
+    for (const auto& frame : candidate.frames) {
+        const auto& counters = frame.render_hotspot_counters;
+        if (counters.gpu_draw_call_count == 0 ||
+            (counters.gpu_present_path != nk::GpuPresentPath::FullRedrawCopyBack &&
+             counters.gpu_present_path != nk::GpuPresentPath::FullRedrawDirect &&
+             counters.gpu_present_path != nk::GpuPresentPath::PartialRedrawCopy)) {
+            std::cerr << "stable scenario regression [" << scenario_label
+                      << "]: expected native Metal drawing and presentation in every frame\n";
+            failed = true;
+        }
+    }
+    return failed;
+}
+
 } // namespace
 
 bool validate_capture_baseline(std::string_view scenario_label,
@@ -333,6 +374,10 @@ bool validate_capture_baseline(std::string_view scenario_label,
                   << " ms candidate busy=" << candidate_artifact_summary.busy_ms << " ms\n";
         failed |=
             has_work_counter_regression(scenario_label, baseline_artifact, candidate_artifact);
+        if (backend == nk::RendererBackend::Metal) {
+            failed |=
+                has_metal_counter_regression(scenario_label, baseline_artifact, candidate_artifact);
+        }
     } else {
         failed |= timing_failed;
     }

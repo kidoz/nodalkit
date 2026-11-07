@@ -34,17 +34,73 @@ Capture reference_capture() {
     return result;
 }
 
-bool compare(const Capture& before, const Capture& after, nk::tools::BaselinePolicy policy) {
-    return nk::tools::validate_capture_baseline("text-heavy",
-                                                nk::RendererBackend::Software,
-                                                before.artifact,
-                                                before.trace,
-                                                after.artifact,
-                                                after.trace,
-                                                policy);
+bool compare(const Capture& before,
+             const Capture& after,
+             nk::tools::BaselinePolicy policy,
+             nk::RendererBackend backend = nk::RendererBackend::Software) {
+    return nk::tools::validate_capture_baseline(
+        "text-heavy", backend, before.artifact, before.trace, after.artifact, after.trace, policy);
 }
 
 } // namespace
+
+TEST_CASE("Metal counter baselines gate GPU uploads drawing and cache reuse", "[tools][baseline]") {
+    auto reference = reference_capture();
+    for (auto& frame : reference.artifact.frames) {
+        auto& c = frame.render_hotspot_counters;
+        c.gpu_draw_call_count = 10;
+        c.gpu_present_path = nk::GpuPresentPath::FullRedrawCopyBack;
+        c.text_texture_upload_count = 5;
+        c.image_texture_upload_count = 2;
+        c.text_shape_cache_hit_count = 3;
+    }
+    auto candidate = reference;
+    bool expected = false;
+    SECTION("matching GPU work") {
+        expected = true;
+    }
+    SECTION("direct GPU presentation") {
+        expected = true;
+        candidate.artifact.frames[0].render_hotspot_counters.gpu_present_path =
+            nk::GpuPresentPath::FullRedrawDirect;
+    }
+    SECTION("partial GPU presentation") {
+        expected = true;
+        candidate.artifact.frames[0].render_hotspot_counters.gpu_present_path =
+            nk::GpuPresentPath::PartialRedrawCopy;
+    }
+    SECTION("work at documented tolerance") {
+        expected = true;
+        auto& counters = candidate.artifact.frames[0].render_hotspot_counters;
+        ++counters.text_texture_upload_count;
+        ++counters.image_texture_upload_count;
+        ++counters.gpu_draw_call_count;
+        --counters.text_shape_cache_hit_count;
+    }
+    SECTION("extra text uploads") {
+        candidate.artifact.frames[0].render_hotspot_counters.text_texture_upload_count += 2;
+    }
+    SECTION("extra image uploads across frames") {
+        reference.artifact.frames[1].render_hotspot_counters.image_texture_upload_count = 0;
+    }
+    SECTION("extra draw calls") {
+        candidate.artifact.frames[0].render_hotspot_counters.gpu_draw_call_count += 2;
+    }
+    SECTION("lost shape cache reuse") {
+        candidate.artifact.frames[0].render_hotspot_counters.text_shape_cache_hit_count -= 2;
+    }
+    SECTION("software fallback") {
+        candidate.artifact.frames[0].render_hotspot_counters.gpu_present_path =
+            nk::GpuPresentPath::SoftwareUpload;
+    }
+    SECTION("missing GPU work") {
+        candidate.artifact.frames[0].render_hotspot_counters.gpu_draw_call_count = 0;
+    }
+    CHECK(compare(reference,
+                  candidate,
+                  nk::tools::BaselinePolicy::Counters,
+                  nk::RendererBackend::Metal) == expected);
+}
 
 TEST_CASE("Capture baselines accept matching work in both policies", "[tools][baseline]") {
     const auto reference = reference_capture();

@@ -338,6 +338,24 @@ test('trace_capture_harness_localized_redraw',
 )
 
 if host_machine.system() == 'darwin'
+    foreach scenario : ['text-heavy', 'list-heavy', 'animation-heavy']
+        fixture_name = scenario.replace('-', '_')
+        test('trace_capture_harness_metal_' + fixture_name,
+            trace_capture_harness,
+            args : [
+                scenario,
+                meson.project_build_root() / ('trace_capture_harness_metal_' + fixture_name + '_artifact.json'),
+                meson.project_build_root() / ('trace_capture_harness_metal_' + fixture_name + '_trace.json'),
+                '--backend=metal',
+            ] + (sanitizers_enabled ? [] : [
+                '--baseline-artifact=' + meson.project_source_root() / 'tests' / 'fixtures' / ('stable_metal_' + fixture_name + '_frame_diagnostics.json'),
+                '--baseline-trace=' + meson.project_source_root() / 'tests' / 'fixtures' / ('stable_metal_' + fixture_name + '_trace.json'),
+                '--baseline-policy=counters',
+            ]),
+            is_parallel : false,
+        )
+    endforeach
+
     test('trace_capture_harness_metal_localized_redraw',
         trace_capture_harness,
         args : [

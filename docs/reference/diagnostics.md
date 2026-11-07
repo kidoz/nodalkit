@@ -54,7 +54,8 @@ The showcase example exports a bundle from a menu action; see
 `meson test -C buildDir` compares the `text-heavy`, `list-heavy`, and
 `animation-heavy` harness captures against platform-specific fixtures in
 `tests/fixtures/`. Linux and Windows retain the timed comparison policy.
-macOS uses `--baseline-policy=counters`: frame counts, rendering/model maxima,
+macOS runs both software and Metal fixtures with `--baseline-policy=counters`:
+frame counts, rendering/model maxima,
 runtime events, and total layout/text work are blocking; wall-clock comparisons
 are printed as advisory. Sanitizer builds exercise the scenarios without
 baseline comparisons. Native resource cleanup is checked separately by the
@@ -62,7 +63,7 @@ macOS bridge and Metal renderer lifetime tests.
 
 The macOS fixtures were captured on 7 November 2026 with macOS 27.2, an Apple
 M4 Max, a 2x display, and Apple Clang 21.0.0. Ten debug and ten release captures
-per scenario produced identical checked work counters. Each committed fixture
+per scenario and backend produced identical checked work counters. Each committed fixture
 pair is one release capture near the median total layout/snapshot/render cost,
 so the artifact and trace come from the same run. Wall-clock times varied
 between build types and are not hardware-independent budgets. Physical
@@ -86,6 +87,21 @@ The diagnostics tooling owns these fixtures; comparison logic and tolerances
 live in `tools/trace_capture_baseline.cpp`.
 `trace_capture_baseline` tests matching captures, improvements, timing-only
 drift, and deliberate counter/structure failures for the policies.
+
+The three `trace_capture_harness_metal_*_heavy` tests additionally gate total
+text uploads, image uploads, and GPU draw calls (one extra permitted), and lost
+text-shape cache hits (one permitted). Every frame must draw and present through
+a native Metal path; software fallback fails the comparison. The Metal fixture
+totals for text/list/animation are respectively 43/21/9 text uploads,
+0/0/5 image uploads, 76/100/67 draw calls, and 21/19/5 shape-cache hits.
+To reproduce a Metal comparison, use `--backend=metal` and the corresponding
+`stable_metal_*` fixture pair in the command above.
+
+`metal_renderer` also reads actual GPU scene textures for representative text,
+list, and image content at 1x and 2x scale. It compares RGBA output against the
+software renderer within two channel levels and checks that a repeated full
+redraw requires no text or image uploads. This verifies GPU output directly;
+the inspector's software-rendered snapshot is not a GPU pixel check.
 
 To refresh fixtures, first run each scenario repeatedly in both build types
 without baseline arguments. Review frame counts and counters across all runs,
