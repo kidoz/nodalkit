@@ -353,9 +353,17 @@ TEST_CASE("macOS view releases replaced tracking areas", "[macos][memory]") {
 TEST_CASE("macOS toolbar replacement and removal release objects and disconnect callbacks",
           "[macos][memory][toolbar]") {
     bool edit_search = false;
+    bool occlude = false;
     SECTION("idle toolbar") {}
     SECTION("search field being edited") {
         edit_search = true;
+    }
+    SECTION("occluded idle toolbar") {
+        occlude = true;
+    }
+    SECTION("occluded search field being edited") {
+        edit_search = true;
+        occlude = true;
     }
     @autoreleasepool {
         nk::Application app(0, nullptr);
@@ -373,6 +381,16 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
             window->present();
             settle_native(app);
             auto* native = (__bridge NSWindow*)window->native_surface()->native_handle();
+            NSWindow* cover = nil;
+            if (occlude) {
+                cover = [[[NSWindow alloc] initWithContentRect:native.frame
+                                                     styleMask:NSWindowStyleMaskBorderless
+                                                       backing:NSBackingStoreBuffered
+                                                         defer:NO] autorelease];
+                cover.releasedWhenClosed = NO;
+                cover.opaque = YES;
+                cover.backgroundColor = NSColor.windowBackgroundColor;
+            }
             const auto config = [](int generation) {
                 nk::NativeToolbarConfig result;
                 result.identifier =
@@ -437,6 +455,17 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
                          << " first responder=" << object_getClassName(native.firstResponder));
                     REQUIRE(search.currentEditor != nil);
                 }
+                if (cover) {
+                    [cover setFrame:native.frame display:YES];
+                    [cover orderWindow:NSWindowAbove relativeTo:native.windowNumber];
+                    const auto deadline =
+                        std::chrono::steady_clock::now() + std::chrono::seconds(1);
+                    while ((native.occlusionState & NSWindowOcclusionStateVisible) != 0 &&
+                           std::chrono::steady_clock::now() < deadline) {
+                        settle_native(app);
+                    }
+                    REQUIRE((native.occlusionState & NSWindowOcclusionStateVisible) == 0);
+                }
                 return [search retain];
             };
             @autoreleasepool {
@@ -448,6 +477,7 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
                 CHECK(search.delegate == nil);
                 CHECK(search.target == nil);
                 CHECK(search.action == nil);
+                CHECK(search.currentEditor == nil);
                 [search release];
             }
             settle_native(app);
@@ -458,6 +488,7 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
                 CHECK(search.delegate == nil);
                 CHECK(search.target == nil);
                 CHECK(search.action == nil);
+                CHECK(search.currentEditor == nil);
                 [search release];
             }
             settle_native(app);
@@ -469,6 +500,7 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
                 settle_native(app);
             }
             settle_native(app);
+            [cover close];
         }
         settle_native(app);
         REQUIRE(observations.size() == 14);
