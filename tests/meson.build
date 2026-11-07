@@ -161,6 +161,11 @@ test_drag_drop = executable('test_drag_drop',
 test('drag_drop', test_drag_drop)
 
 if host_system == 'windows'
+    test_directx_renderer = executable('test_directx_renderer',
+        'directx_renderer_test.cpp',
+        dependencies : [nk_dep, catch2_test_dep],
+    )
+    test('directx_renderer', test_directx_renderer, timeout : 120)
     test_win32_native = executable('test_win32_native',
         'win32_native_test.cpp',
         dependencies : [nk_dep, catch2_test_dep],

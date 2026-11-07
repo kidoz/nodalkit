@@ -3,6 +3,7 @@
 
 #include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -384,9 +385,10 @@ TEST_CASE("SoftwareRenderer forwards logical font sizes to text shaping on Windo
 }
 
 #if defined(_WIN32)
-TEST_CASE("D3D11Renderer shapes wrapped text with logical width in the text cache",
-          "[renderer][d3d11][text]") {
-    auto renderer = nk::create_renderer(nk::RendererBackend::D3D11);
+TEST_CASE("DirectX shapes wrapped text with logical width in the text cache",
+          "[renderer][directx][text]") {
+    const auto backend = GENERATE(nk::RendererBackend::D3D11, nk::RendererBackend::D3D12);
+    auto renderer = nk::create_renderer(backend);
     REQUIRE(renderer != nullptr);
 
     RecordingTextShaper text_shaper;

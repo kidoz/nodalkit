@@ -6,6 +6,7 @@
 #include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -570,11 +571,10 @@ private:
     float height_ = 0.0F;
 };
 
-class UnsupportedSemanticGpuWidget : public nk::Widget {
+class AffineFallbackGpuWidget : public nk::Widget {
 public:
-    static std::shared_ptr<UnsupportedSemanticGpuWidget> create(float width, float height) {
-        return std::shared_ptr<UnsupportedSemanticGpuWidget>(
-            new UnsupportedSemanticGpuWidget(width, height));
+    static std::shared_ptr<AffineFallbackGpuWidget> create(float width, float height) {
+        return std::shared_ptr<AffineFallbackGpuWidget>(new AffineFallbackGpuWidget(width, height));
     }
 
     void set_accent(nk::Color color) {
@@ -589,6 +589,7 @@ public:
 protected:
     void snapshot(nk::SnapshotContext& ctx) const override {
         const auto rect = allocation();
+        ctx.push_transform({.m31 = 1.0F});
         ctx.add_color_rect(rect, nk::Color::from_rgb(246, 248, 251));
         ctx.add_shadow({rect.x + 18.0F, rect.y + 18.0F, rect.width - 36.0F, rect.height - 36.0F},
                        nk::Color{0.0F, 0.0F, 0.0F, 0.22F},
@@ -600,10 +601,11 @@ protected:
         ctx.push_opacity({rect.x + 24.0F, rect.y + 74.0F, rect.width - 48.0F, 36.0F}, 0.65F);
         ctx.add_color_rect({rect.x + 24.0F, rect.y + 74.0F, rect.width - 48.0F, 36.0F}, accent_);
         ctx.pop_container();
+        ctx.pop_transform();
     }
 
 private:
-    UnsupportedSemanticGpuWidget(float width, float height) : width_(width), height_(height) {}
+    AffineFallbackGpuWidget(float width, float height) : width_(width), height_(height) {}
 
     float width_ = 0.0F;
     float height_ = 0.0F;
@@ -942,6 +944,28 @@ TEST_CASE("Window honors a D3D11 renderer backend override from the environment"
     window.present();
     REQUIRE(app.event_loop().poll());
     REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D11);
+}
+
+TEST_CASE("Window honors D3D12 backend aliases and captures GPU pixels", "[app][render][windows]") {
+    if (!nk::renderer_backend_available(nk::RendererBackend::D3D12)) {
+        SKIP("Requires D3D12 hardware and the D3D11-on-12 runtime");
+    }
+    const auto* alias = GENERATE("d3d12", "direct3d12", "dx12");
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set(alias) == 0);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "D3D12 renderer override", .width = 320, .height = 240});
+    window.set_child(nk::Label::create("D3D12 renderer override"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.renderer_backend() == nk::RendererBackend::D3D12);
+    REQUIRE(window.native_surface()->renderer_backend_support().d3d12);
+    REQUIRE(
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_draw_call_count >
+        0);
+    const auto screenshot = window.inspector().capture_debug_screenshot();
+    REQUIRE(screenshot);
+    REQUIRE(screenshot->source_backend == nk::RendererBackend::D3D12);
 }
 
 TEST_CASE("Win32 D3D11 renders clipped image content on the GPU and reuses image textures",
@@ -2020,15 +2044,14 @@ TEST_CASE("Win32 D3D11 renders linear gradients on the GPU scene", "[app][render
             nk::GpuPresentTradeoff::BandwidthFavored);
 }
 
-TEST_CASE("Win32 D3D11 falls back to software upload for unsupported semantic nodes",
-          "[app][render][windows]") {
+TEST_CASE("Win32 D3D11 preserves affine nodes through software upload", "[app][render][windows]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("d3d11") == 0);
 
     nk::Application app(0, nullptr);
     nk::Window window({.title = "D3D11 semantic fallback", .width = 340, .height = 180});
 
-    auto fallback_widget = UnsupportedSemanticGpuWidget::create(180.0F, 120.0F);
+    auto fallback_widget = AffineFallbackGpuWidget::create(180.0F, 120.0F);
     window.set_child(fallback_widget);
     window.present();
     REQUIRE(app.event_loop().poll());
