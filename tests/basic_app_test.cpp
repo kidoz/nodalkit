@@ -4967,6 +4967,143 @@ TEST_CASE("DataTable keyboard navigation and activation use source rows", "[app]
     REQUIRE(activated == 0);
 }
 
+TEST_CASE("DataTable caches column sort keys and preserves selection and ties", "[app][table]") {
+    auto source = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"Gamma", "Alpha", "Beta", "Alpha"});
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    std::size_t calls = 0;
+    table->set_columns({{.id = "name",
+                         .title = "Name",
+                         .width = 220.0F,
+                         .text = [&](const nk::AbstractListModel& model, std::size_t row) {
+                             ++calls;
+                             return model.display_text(row).substr(1);
+                         }}});
+    table->allocate({0.0F, 0.0F, 260.0F, 200.0F});
+    auto click_row = [&](std::size_t row) {
+        REQUIRE(table->handle_mouse_event({.type = nk::MouseEvent::Type::Press,
+                                           .x = 12.0F,
+                                           .y = 38.0F + 28.0F * static_cast<float>(row),
+                                           .button = 1}));
+    };
+
+    table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
+    REQUIRE(calls == 4);
+    REQUIRE_FALSE(table->debug_pending_layout());
+    table->set_selection_model(selection);
+    click_row(0);
+    REQUIRE(selection->current_row() == 0);
+    click_row(1);
+    REQUIRE(selection->current_row() == 2);
+    click_row(2);
+    REQUIRE(selection->current_row() == 1);
+
+    table->sort_by_column(0, nk::DataTableSortDirection::Descending);
+    REQUIRE_FALSE(table->debug_pending_layout());
+    REQUIRE(selection->current_row() == 1);
+    REQUIRE(selection->is_selected(1));
+    click_row(0);
+    REQUIRE(selection->current_row() == 1);
+    click_row(1);
+    REQUIRE(selection->current_row() == 3);
+    click_row(2);
+    REQUIRE(selection->current_row() == 2);
+
+    table->clear_sort();
+    REQUIRE_FALSE(table->debug_pending_layout());
+    REQUIRE(selection->current_row() == 2);
+    click_row(1);
+    REQUIRE(selection->current_row() == 1);
+    REQUIRE_FALSE(table->sort_column());
+}
+
+TEST_CASE("DataTable rebuilds sort keys once per model or column update", "[app][table]") {
+    class MutableModel final : public nk::StringListModel {
+    public:
+        using nk::StringListModel::StringListModel;
+
+        std::string display_text(std::size_t row) const override {
+            return renamed && row == 0 ? "Aardvark" : nk::StringListModel::display_text(row);
+        }
+
+        void rename_first() {
+            renamed = true;
+            notify_data_changed(0, 0);
+        }
+
+        bool renamed = false;
+    };
+
+    auto source = std::make_shared<MutableModel>(std::vector<std::string>{"Gamma", "Alpha"});
+    auto table = nk::DataTable::create();
+    table->set_model(source);
+    std::size_t calls = 0;
+    table->set_columns({{.id = "name",
+                         .title = "Name",
+                         .text = [&](const nk::AbstractListModel& model, std::size_t row) {
+                             ++calls;
+                             return model.display_text(row);
+                         }}});
+    table->allocate({0.0F, 0.0F, 260.0F, 200.0F});
+    table->sort_by_column(0, nk::DataTableSortDirection::Ascending);
+    REQUIRE(calls == 2);
+    calls = 0;
+    source->append("Beta");
+    REQUIRE(calls == 3);
+    REQUIRE(table->debug_pending_layout());
+    table->allocate({0.0F, 0.0F, 260.0F, 200.0F});
+    calls = 0;
+    source->rename_first();
+    REQUIRE(calls == 3);
+    REQUIRE_FALSE(table->debug_pending_layout());
+    auto selection = std::make_shared<nk::SelectionModel>();
+    table->set_selection_model(selection);
+    REQUIRE(table->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    REQUIRE(selection->current_row() == 0);
+    table->set_selection_model(nullptr);
+    calls = 0;
+    source->insert(0, "Delta");
+    REQUIRE(calls == 4);
+    calls = 0;
+    source->remove(1);
+    REQUIRE(calls == 3);
+
+    calls = 0;
+    auto replacement = std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"Zulu", "Alpha", "Beta", "Gamma", "Delta"});
+    table->set_model(replacement);
+    REQUIRE(calls == 5);
+    source->append("Detached");
+    REQUIRE(calls == 5);
+    calls = 0;
+    table->set_columns({{.id = "last",
+                         .title = "Last letter",
+                         .text = [&](const nk::AbstractListModel& model, std::size_t row) {
+                             ++calls;
+                             return model.display_text(row).substr(model.display_text(row).size() -
+                                                                   1);
+                         }}});
+    REQUIRE(calls == 5);
+    selection->set_current_row(static_cast<std::size_t>(-1));
+    table->set_selection_model(selection);
+    REQUIRE(table->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::End}));
+    REQUIRE(selection->current_row() == 0);
+    table->set_selection_model(nullptr);
+    calls = 0;
+    replacement->clear();
+    REQUIRE(calls == 0);
+    replacement->append("Fresh");
+    REQUIRE(calls == 1);
+    table->set_columns({});
+    REQUIRE_FALSE(table->sort_column());
+    calls = 0;
+    replacement->append("Unsorted");
+    REQUIRE(calls == 0);
+    table->set_model(nullptr);
+}
+
 TEST_CASE("DataTable resizes columns with a minimum width", "[app][table]") {
     auto source =
         std::make_shared<nk::StringListModel>(std::vector<std::string>{"Gamma", "Alpha", "Beta"});

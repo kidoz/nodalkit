@@ -229,6 +229,7 @@ std::string table_accessible_description(const AbstractListModel* model,
 struct DataTable::Impl {
     std::shared_ptr<AbstractListModel> model;
     std::shared_ptr<SortListModel> display_model = std::make_shared<SortListModel>();
+    std::size_t display_row_count = 0;
     std::shared_ptr<SelectionModel> selection;
     std::vector<DataTableColumn> columns;
     float row_height = 28.0F;
@@ -243,9 +244,6 @@ struct DataTable::Impl {
     std::optional<std::size_t> sort_column;
     DataTableSortDirection sort_direction = DataTableSortDirection::None;
     Signal<std::size_t> row_activated;
-    ScopedConnection rows_inserted;
-    ScopedConnection rows_removed;
-    ScopedConnection data_changed;
     ScopedConnection model_reset;
     ScopedConnection selection_changed;
     ScopedConnection current_changed;
@@ -276,7 +274,6 @@ void DataTable::set_model(std::shared_ptr<AbstractListModel> model) {
     impl_->model = std::move(model);
     impl_->display_model->set_source_model(impl_->model);
     reconnect_model();
-    rebuild_sort();
     clamp_scroll_offset(
         impl_->scroll_offset,
         impl_->display_model.get(),
@@ -758,33 +755,25 @@ void DataTable::snapshot(SnapshotContext& ctx) const {
 }
 
 void DataTable::reconnect_model() {
-    impl_->rows_inserted.disconnect();
-    impl_->rows_removed.disconnect();
-    impl_->data_changed.disconnect();
     impl_->model_reset.disconnect();
-    if (!impl_->model) {
-        return;
-    }
+    impl_->display_row_count = impl_->display_model->row_count();
 
     auto refresh = [this] {
-        rebuild_sort();
         clamp_scroll_offset(
             impl_->scroll_offset,
             impl_->display_model.get(),
             impl_->row_height,
             table_rows_viewport_rect(*this, impl_->header_height, impl_->columns).height);
         sync_accessible_summary();
-        queue_layout();
+        const auto row_count = impl_->display_model->row_count();
+        if (impl_->display_row_count != row_count) {
+            impl_->display_row_count = row_count;
+            queue_layout();
+        }
         queue_redraw();
     };
-    impl_->rows_inserted = ScopedConnection(impl_->model->on_rows_inserted().connect(
-        [refresh](std::size_t, std::size_t) { refresh(); }));
-    impl_->rows_removed = ScopedConnection(impl_->model->on_rows_removed().connect(
-        [refresh](std::size_t, std::size_t) { refresh(); }));
-    impl_->data_changed = ScopedConnection(impl_->model->on_data_changed().connect(
-        [refresh](std::size_t, std::size_t) { refresh(); }));
     impl_->model_reset =
-        ScopedConnection(impl_->model->on_model_reset().connect([refresh] { refresh(); }));
+        ScopedConnection(impl_->display_model->on_model_reset().connect(std::move(refresh)));
 }
 
 void DataTable::rebuild_sort() {
@@ -799,17 +788,14 @@ void DataTable::rebuild_sort() {
     }
 
     const auto column_index = *impl_->sort_column;
-    const auto direction = impl_->sort_direction;
-    impl_->display_model->set_less([this, column_index, direction](const AbstractListModel& model,
-                                                                   std::size_t lhs,
-                                                                   std::size_t rhs) {
-        const auto lhs_text = cell_text(impl_->columns[column_index], model, lhs);
-        const auto rhs_text = cell_text(impl_->columns[column_index], model, rhs);
-        if (direction == DataTableSortDirection::Ascending) {
-            return lhs_text < rhs_text;
-        }
-        return rhs_text < lhs_text;
-    });
+    const auto direction = impl_->sort_direction == DataTableSortDirection::Ascending
+                               ? ListModelSortDirection::Ascending
+                               : ListModelSortDirection::Descending;
+    impl_->display_model->set_sort_key(
+        [this, column_index](const AbstractListModel& model, std::size_t row) {
+            return cell_text(impl_->columns[column_index], model, row);
+        },
+        direction);
 }
 
 void DataTable::queue_selection_redraw() {
