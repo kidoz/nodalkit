@@ -1,12 +1,26 @@
 #include "examples/trading_terminal/candlestick_chart.h"
+#include "examples/trading_terminal/order_ticket.h"
+#include "examples/trading_terminal/orders_view.h"
 #include "examples/trading_terminal/trading_model.h"
+#include "examples/trading_terminal/watchlist_view.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <nk/accessibility/accessible.h>
+#include <nk/foundation/signal.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
+#include <nk/ui_core/widget.h>
+#include <nk/widgets/button.h>
+#include <nk/widgets/data_table.h>
+#include <nk/widgets/label.h>
+#include <nk/widgets/spin_button.h>
+#include <optional>
 #include <string>
+#include <vector>
 
 TEST_CASE("Trading model seeds deterministic instruments and advances candles",
           "[trading_terminal]") {
@@ -151,4 +165,125 @@ TEST_CASE("Candlestick chart supports zoom and pointer or keyboard inspection",
 
     chart->reset_view();
     REQUIRE(chart->visible_candle_count() == 48);
+}
+
+namespace {
+
+template <typename T>
+T* find_widget(
+    nk::Widget& root, std::function<bool(const T&)> matches = [](const T&) { return true; }) {
+    if (auto* widget = dynamic_cast<T*>(&root); widget != nullptr && matches(*widget)) {
+        return widget;
+    }
+    for (const auto& child : root.children()) {
+        if (auto* found = find_widget<T>(*child, matches)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+TEST_CASE("Order ticket preserves edits across quotes and emits requests without submitting",
+          "[trading_terminal]") {
+    trading::TradingModel model;
+    trading::OrderTicket ticket;
+    ticket.set_instrument(*model.selected_instrument(), true);
+    ticket.set_side(trading::OrderSide::Sell);
+    ticket.set_order_type(trading::OrderType::Limit);
+    ticket.set_quantity(17);
+    ticket.set_limit_price(12345);
+
+    model.advance_market();
+    ticket.set_instrument(*model.selected_instrument(), false);
+    const auto request = ticket.request();
+    REQUIRE(request.symbol == "NODA");
+    REQUIRE(request.side == trading::OrderSide::Sell);
+    REQUIRE(request.type == trading::OrderType::Limit);
+    REQUIRE(request.quantity == 17);
+    REQUIRE(request.limit_price == 12345);
+
+    auto* price = find_widget<nk::SpinButton>(
+        *ticket.widget(), [](const auto& input) { return input.precision() == 2; });
+    REQUIRE(price != nullptr);
+    REQUIRE(price->is_sensitive());
+    auto* notional = find_widget<nk::Label>(*ticket.widget(), [](const auto& label) {
+        return label.text().starts_with("Estimated notional:");
+    });
+    REQUIRE(notional != nullptr);
+    REQUIRE(notional->text() == "Estimated notional: $2098.65");
+
+    std::optional<trading::OrderRequest> emitted;
+    nk::ScopedConnection connection(ticket.on_submit_requested().connect(
+        [&](const trading::OrderRequest& value) { emitted = value; }));
+    auto* submit = find_widget<nk::Button>(
+        *ticket.widget(), [](const auto& button) { return button.label().ends_with("Simulated"); });
+    REQUIRE(submit != nullptr);
+    REQUIRE(
+        submit->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(emitted.has_value());
+    REQUIRE(emitted->limit_price == request.limit_price);
+    REQUIRE(emitted->symbol == request.symbol);
+    REQUIRE(model.orders().empty());
+
+    REQUIRE(model.select_instrument(2));
+    ticket.set_instrument(*model.selected_instrument(), true);
+    REQUIRE(ticket.request().symbol == "LUMN");
+    REQUIRE(ticket.request().limit_price == model.selected_instrument()->ask);
+    REQUIRE(ticket.request().quantity == 17);
+    ticket.set_order_type(trading::OrderType::Market);
+    REQUIRE_FALSE(price->is_sensitive());
+}
+
+TEST_CASE("Orders view retains source order identity across sorting and refresh",
+          "[trading_terminal]") {
+    auto model = std::make_shared<trading::TradingModel>();
+    const auto first =
+        model->submit_order({"NODA", trading::OrderSide::Buy, trading::OrderType::Limit, 10, 1});
+    const auto second = model->submit_order(
+        {"NODA", trading::OrderSide::Sell, trading::OrderType::Limit, 10, 1000000});
+    REQUIRE(first);
+    REQUIRE(second);
+    trading::OrdersView orders(model);
+    REQUIRE_FALSE(orders.selected_order_id().has_value());
+    auto* table = find_widget<nk::DataTable>(*orders.widget());
+    REQUIRE(table != nullptr);
+    table->sort_by_column(0, nk::DataTableSortDirection::Descending);
+    REQUIRE(table->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Home}));
+    REQUIRE(orders.selected_order_id() == second.value());
+
+    std::optional<std::uint64_t> requested_id;
+    nk::ScopedConnection connection(
+        orders.on_cancel_requested().connect([&] { requested_id = orders.selected_order_id(); }));
+    auto* cancel = find_widget<nk::Button>(*orders.widget());
+    REQUIRE(cancel != nullptr);
+    REQUIRE(
+        cancel->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
+    REQUIRE(requested_id == second.value());
+    REQUIRE(model->orders()[1].status == trading::OrderStatus::Working);
+    REQUIRE(model->cancel_order(*requested_id));
+    orders.refresh();
+    REQUIRE(orders.selected_order_id() == second.value());
+    REQUIRE(table->columns().back().text(*table->model(), 1) == "Cancelled");
+}
+
+TEST_CASE("Watchlist selection synchronization does not emit recursive requests",
+          "[trading_terminal]") {
+    auto model = std::make_shared<trading::TradingModel>();
+    trading::WatchlistView watchlist(model);
+    std::vector<std::size_t> requested;
+    nk::ScopedConnection connection(watchlist.on_instrument_selected().connect(
+        [&](std::size_t index) { requested.push_back(index); }));
+    watchlist.set_selected_instrument(2);
+    REQUIRE(requested.empty());
+    auto* table = find_widget<nk::DataTable>(*watchlist.widget());
+    REQUIRE(table != nullptr);
+    table->selection_model()->set_current_row(1);
+    REQUIRE(requested == std::vector<std::size_t>{1});
+    REQUIRE(model->selected_index() == 0);
+    model->advance_market();
+    watchlist.refresh();
+    REQUIRE(table->selection_model()->current_row() == 1);
+    REQUIRE(requested.size() == 1);
 }

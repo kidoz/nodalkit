@@ -108,6 +108,8 @@ private:
     std::uint64_t position_revision_ = 0;
 };
 
+[[nodiscard]] std::string format_percent(Price current, Price previous);
+[[nodiscard]] std::string format_volume(std::uint64_t volume);
 [[nodiscard]] std::string format_price(Price price);
 [[nodiscard]] std::string format_signed_price(Price price);
 [[nodiscard]] std::string_view order_side_name(OrderSide side);

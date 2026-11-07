@@ -245,6 +245,30 @@ void TradingModel::fill_order(Order& order, Price execution_price) {
     ++position_revision_;
 }
 
+std::string format_percent(Price current, Price previous) {
+    if (previous == 0) {
+        return "0.00%";
+    }
+    const double change =
+        (static_cast<double>(current - previous) * 100.0) / static_cast<double>(previous);
+    std::ostringstream stream;
+    stream << (change >= 0.0 ? "+" : "") << std::fixed << std::setprecision(2) << change << '%';
+    return stream.str();
+}
+
+std::string format_volume(std::uint64_t volume) {
+    std::ostringstream stream;
+    if (volume >= 1000000) {
+        stream << std::fixed << std::setprecision(2) << static_cast<double>(volume) / 1000000.0
+               << "M";
+    } else if (volume >= 1000) {
+        stream << std::fixed << std::setprecision(1) << static_cast<double>(volume) / 1000.0 << "K";
+    } else {
+        stream << volume;
+    }
+    return stream.str();
+}
+
 std::string format_price(Price price) {
     const auto magnitude = price_magnitude(price);
     std::ostringstream stream;
