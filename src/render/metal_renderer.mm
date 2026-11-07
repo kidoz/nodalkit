@@ -709,7 +709,7 @@ public:
         image_descriptor.colorAttachments[0].rgbBlendOperation = MTLBlendOperationAdd;
         image_descriptor.colorAttachments[0].alphaBlendOperation = MTLBlendOperationAdd;
         image_descriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
-        image_descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+        image_descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
         image_descriptor.colorAttachments[0].destinationRGBBlendFactor =
             MTLBlendFactorOneMinusSourceAlpha;
         image_descriptor.colorAttachments[0].destinationAlphaBlendFactor =
@@ -736,7 +736,7 @@ public:
         primitive_descriptor.colorAttachments[0].rgbBlendOperation = MTLBlendOperationAdd;
         primitive_descriptor.colorAttachments[0].alphaBlendOperation = MTLBlendOperationAdd;
         primitive_descriptor.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
-        primitive_descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorSourceAlpha;
+        primitive_descriptor.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
         primitive_descriptor.colorAttachments[0].destinationRGBBlendFactor =
             MTLBlendFactorOneMinusSourceAlpha;
         primitive_descriptor.colorAttachments[0].destinationAlphaBlendFactor =

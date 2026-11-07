@@ -250,11 +250,9 @@ void frame(nk::MetalRendererUnderTest& renderer,
     renderer.present(surface);
 }
 
-std::array<int, 4>
-read_pixel(nk::MetalRendererUnderTest& renderer, id<MTLTexture> texture, int x, int y) {
-    if (texture == nil) {
-        return {-1, -1, -1, -1};
-    }
+std::vector<uint8_t> read_texture_rgba(nk::MetalRendererUnderTest& renderer,
+                                       id<MTLTexture> texture) {
+    REQUIRE(texture != nil);
     const NSUInteger stride = ((texture.width * 4 + 255) / 256) * 256;
     id<MTLBuffer> buffer = [renderer.device_ newBufferWithLength:stride * texture.height
                                                          options:MTLResourceStorageModeShared];
@@ -276,15 +274,32 @@ read_pixel(nk::MetalRendererUnderTest& renderer, id<MTLTexture> texture, int x, 
     [command_buffer commit];
     [command_buffer waitUntilCompleted];
     REQUIRE(command_buffer.status == MTLCommandBufferStatusCompleted);
-    const NSUInteger texture_x = static_cast<NSUInteger>(x) * texture.width / 64;
-    const NSUInteger texture_y = static_cast<NSUInteger>(y) * texture.height / 64;
-    const auto* pixels =
-        static_cast<const uint8_t*>(buffer.contents) + texture_y * stride + texture_x * 4;
+    std::vector<uint8_t> result(texture.width * texture.height * 4);
     const bool bgra = texture.pixelFormat == MTLPixelFormatBGRA8Unorm;
-    const std::array<int, 4> result{
-        pixels[bgra ? 2 : 0], pixels[1], pixels[bgra ? 0 : 2], pixels[3]};
+    for (NSUInteger y = 0; y < texture.height; ++y) {
+        const auto* row = static_cast<const uint8_t*>(buffer.contents) + y * stride;
+        for (NSUInteger x = 0; x < texture.width; ++x) {
+            const auto to = (y * texture.width + x) * 4;
+            result[to] = row[x * 4 + (bgra ? 2 : 0)];
+            result[to + 1] = row[x * 4 + 1];
+            result[to + 2] = row[x * 4 + (bgra ? 0 : 2)];
+            result[to + 3] = row[x * 4 + 3];
+        }
+    }
     [buffer release];
     return result;
+}
+
+std::array<int, 4>
+read_pixel(nk::MetalRendererUnderTest& renderer, id<MTLTexture> texture, int x, int y) {
+    if (texture == nil) {
+        return {-1, -1, -1, -1};
+    }
+    const auto pixels = read_texture_rgba(renderer, texture);
+    const auto index = (static_cast<NSUInteger>(y) * texture.height / 64 * texture.width +
+                        static_cast<NSUInteger>(x) * texture.width / 64) *
+                       4;
+    return {pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]};
 }
 
 void check_pixel(nk::MetalRendererUnderTest& renderer,
@@ -303,6 +318,76 @@ id<MTLTexture> last_drawable_texture(NKMetalTestCaptureLayer* layer) {
 }
 
 } // namespace
+
+TEST_CASE("Metal heavy content matches software pixels and reuses warm textures",
+          "[metal][render][cache]") {
+    for (const auto* scenario : {"text", "list", "animation"}) {
+        for (const float scale : {1.0F, 2.0F}) {
+            DYNAMIC_SECTION(scenario << " scale=" << scale) {
+                @autoreleasepool {
+                    MetalFixture fixture;
+                    auto shaper = nk::TextShaper::create();
+                    REQUIRE(shaper != nullptr);
+                    fixture.renderer.set_text_shaper(shaper.get());
+                    constexpr nk::Size viewport{320, 300};
+                    const bool list = std::string_view(scenario) == "list";
+                    const bool animation = std::string_view(scenario) == "animation";
+                    const std::size_t rows = animation ? 3 : (list ? 10 : 16);
+                    nk::SnapshotContext snapshot(shaper.get());
+                    snapshot.add_color_rect({0, 0, 320, 300}, {1, 1, 1, 1});
+                    snapshot.add_color_rect({220, 275, 80, 20}, {0, 0, 1, 0.5F});
+                    for (std::size_t row = 0; row < rows; ++row) {
+                        const float y = 8.0F + static_cast<float>(row) * 17.0F;
+                        if (list && row % 2 == 0) {
+                            snapshot.add_color_rect({4, y, 312, 17}, {0.8F, 0.9F, 1, 1});
+                        }
+                        snapshot.add_text(
+                            {8, y}, "Performance row " + std::to_string(row), {0, 0, 0, 1});
+                    }
+                    const std::vector<uint32_t> image_a(16, 0xFF209040U);
+                    const std::vector<uint32_t> image_b(16, 0x808030C0U);
+                    if (animation) {
+                        snapshot.add_image({8, 90, 80, 60}, image_a.data(), 4, 4);
+                        snapshot.add_image({100, 90, 80, 60}, image_b.data(), 4, 4);
+                    }
+                    auto root = snapshot.take_root();
+                    nk::SoftwareRenderer reference;
+                    reference.set_text_shaper(shaper.get());
+                    reference.begin_frame(viewport, scale);
+                    reference.render(*root);
+                    reference.end_frame();
+                    for (int pass = 0; pass < 2; ++pass) {
+                        fixture.renderer.begin_frame(viewport, scale);
+                        fixture.renderer.render(*root);
+                        fixture.renderer.end_frame();
+                        fixture.renderer.present(fixture.surface);
+                        const auto counters = fixture.renderer.last_hotspot_counters();
+                        CHECK(fixture.surface.cpu_presents == 0);
+                        CHECK(counters.gpu_present_path == nk::GpuPresentPath::FullRedrawCopyBack);
+                        CHECK(counters.gpu_draw_call_count > 0);
+                        CHECK(counters.text_shape_count == (pass == 0 ? rows : 0));
+                        CHECK(counters.text_shape_cache_hit_count == (pass == 0 ? 0 : rows));
+                        CHECK(counters.text_texture_upload_count == (pass == 0 ? rows : 0));
+                        CHECK(counters.image_texture_upload_count ==
+                              (animation && pass == 0 ? 2 : 0));
+                        const auto pixels =
+                            read_texture_rgba(fixture.renderer, fixture.renderer.scene_texture_);
+                        REQUIRE(pixels.size() == static_cast<std::size_t>(reference.pixel_width()) *
+                                                     reference.pixel_height() * 4);
+                        int max_error = 0;
+                        for (std::size_t i = 0; i < pixels.size(); ++i) {
+                            max_error = std::max(
+                                max_error,
+                                std::abs(static_cast<int>(pixels[i]) - reference.pixel_data()[i]));
+                        }
+                        INFO("pass=" << pass << " maximum RGBA channel error=" << max_error);
+                        CHECK(max_error <= 2);
+                    }
+                }
+            }
+        }
+    }
+}
 
 TEST_CASE("Metal software fallback preserves unsupported node semantics", "[metal][render]") {
     SECTION("opacity zero") {
