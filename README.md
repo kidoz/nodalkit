@@ -35,7 +35,7 @@ The current 0.x support policy is:
 
 - Linux Wayland is the primary release target.
 - macOS is a secondary target while CI stays green.
-- Windows is experimental (Win32, D3D11, DirectWrite/GDI) — actively developed, not a release gate.
+- Windows is experimental (Win32, D3D11/D3D12, DirectWrite/GDI) — actively developed, not a release gate.
 - X11 is not a release target yet.
 
 ## Quick Start
@@ -107,7 +107,7 @@ framework:
 | **l10n** | UTF-8 message catalogs and named placeholders |
 | **runtime** | Event loop, timers, task posting |
 | **platform** | Application, Window, input events |
-| **render** | Render node tree, software renderer, D3D11 on Windows, Metal on macOS, experimental Vulkan on Linux and Windows |
+| **render** | Render node tree, software renderer, D3D11 and D3D12 on Windows, Metal on macOS, experimental Vulkan on Linux and Windows |
 | **ui_core** | Widget base, tree, focus, state flags |
 | **controllers** | Pointer, Keyboard, Focus controllers |
 | **layout** | Measure/allocate pipeline, BoxLayout |

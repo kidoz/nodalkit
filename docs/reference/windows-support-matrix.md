@@ -29,8 +29,12 @@ lightly tested · ❌ not implemented.
 | Backend | Status | Notes |
 | ------- | ------ | ----- |
 | Software | ✅ | Always available; GDI blit path. |
-| D3D11 | 🧪 | `src/render/d3d11_renderer.cpp`. |
+| D3D11 | 🧪 | Hardware GPU rendering, damage-aware redraw, native readback; `src/render/directx_renderer.cpp`. |
+| D3D12 | 🧪 | D3D12 device, queue and swap chain; D3D11-on-12 drawing, fence synchronization, native readback. |
 | Vulkan | 🧪 | Optional; requires the Vulkan SDK and `glslangValidator` at build time. |
+
+See [DirectX rendering](platform-support.md#directx-rendering) for selection,
+GPU coverage, software fallback limits, and validation commands.
 
 ## Native integrations
 
@@ -56,7 +60,7 @@ rows as "works in our testing, please file issues," not "guaranteed."
 ## Packaging
 
 - On Windows, NodalKit builds as a static library. `nodalkit.pc` publishes
-  the transitive Win32 import libraries (`user32`, `gdi32`, `d3d11`,
+  the transitive Win32 import libraries (`user32`, `gdi32`, `d3d11`, `d3d12`,
   `dwrite`, …) on its link line, so a `pkg-config` consumer links cleanly
   with no manual `-l` flags. See
   [Integrate NodalKit into a Meson build](../how-to/integrate-with-meson.md).

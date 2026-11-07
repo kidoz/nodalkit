@@ -13,13 +13,13 @@ package config module in 0.x. If you need CMake integration, invoke
 - Meson 1.11 or newer.
 - A C++23 compiler.
 - `pkg-config` or `pkgconf` for downstream SDK consumption.
-- On Windows: a Windows SDK with Win32, DWM, Shell, DirectWrite, D3D11,
+- On Windows: a Windows SDK with Win32, DWM, Shell, DirectWrite, D3D11, D3D12,
   D3DCompiler, DXGI, and COM development libraries. The current Windows
   development host uses `clang++` with `lld-link`, but consumers should rely
   on the compiler and linker flags exported by `nodalkit.pc`.
 - Optional Vulkan support requires a Vulkan SDK or system package discoverable
   by Meson plus `glslangValidator` at NodalKit build time. If either is
-  missing, the Windows build still installs the Win32, DirectWrite, and D3D11
+  missing, the Windows build still installs the Win32, DirectWrite, D3D11, and D3D12
   SDK surface.
 
 Per-platform library names and transitive link requirements are listed in
