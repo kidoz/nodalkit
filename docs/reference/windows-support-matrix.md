@@ -57,6 +57,44 @@ Windows is not a release gate today: CI builds and tests it, but a Windows
 regression does not block a release the way a Linux one does. Treat the 🧪
 rows as "works in our testing, please file issues," not "guaranteed."
 
+## Local verification
+
+Run the Windows host checks from a terminal with Clang and the Windows SDK
+available:
+
+```powershell
+$env:CC = "clang"
+$env:CXX = "clang++"
+meson setup build-windows --buildtype=debug
+meson compile -C build-windows
+meson test -C build-windows --print-errorlogs --num-processes 1
+```
+
+For AddressSanitizer and UndefinedBehaviorSanitizer, use the supplied native
+file. It keeps debug symbols and selects the release CRT to avoid debug-heap
+startup failures with the Clang runtime:
+
+```powershell
+meson setup build-windows-asan --native-file ci/windows-asan-clang.ini
+meson compile -C build-windows-asan
+meson test -C build-windows-asan --print-errorlogs --num-processes 1
+```
+
+Meson adds Clang's sanitizer DLL directory to the test environment. Running an
+instrumented executable directly also requires that directory on `PATH`.
+Renderer suites report a skip when every case lacks the required native GPU
+backend. Set `NK_REQUIRE_DIRECTX=1` or `NK_REQUIRE_VULKAN=1` to require that
+backend and treat its absence as a failure.
+
+With the Vulkan SDK and its validation layer installed, run:
+
+```powershell
+python tools/run_vulkan_validation.py meson test -C build-windows -v vulkan_renderer
+```
+
+The script locates SDK layers through `VULKAN_SDK` when `VK_LAYER_PATH` is not
+already set. It fails on validation warnings or errors.
+
 ## Packaging
 
 - On Windows, NodalKit builds as a static library. `nodalkit.pc` publishes
