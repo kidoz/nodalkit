@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-07
+
+The fifth patch release of the NodalKit framework. 0.4.1 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.4.0 and paces macOS redraws through a per-window display
+clock. Redraws follow the window's display refresh rate, pause when the window
+stops requesting frames, and resume on the next invalidation, while timers and
+posted tasks keep their independent runtime pump. Metal presentation joins the
+native layer transaction while the clock is active, window teardown cancels the
+clock and queued frames, and the diagnostics reference documents the resulting
+timing behavior.
+
+### Support Matrix for 0.4.1
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
+### Changed
+*   **macOS Frame Pacing:** On macOS 14 and later, redraws coalesce through a display clock attached to each window. The clock follows the display's refresh rate, pauses after the window goes idle, resumes on the next invalidation, and falls back to the posted-frame path when a display link is unavailable or stalled. Window teardown cancels its clock and queued frames.
+*   **Metal Presentation:** While a display clock is active, Metal commits its command buffer, waits until it is scheduled, presents the drawable, and flushes the Core Animation transaction so layer updates join the same frame. The command-buffer presentation path is unchanged for windows without a clock.
+*   **Diagnostics:** `FrameDiagnostics::queue_delay_ms` includes display-clock waiting, and the diagnostics reference documents the clock, fallback, and presentation contract.
+*   **Test Coverage:** macOS tests cover display-clock lifecycle under active, paused, unavailable, teardown, and idle-resume conditions, Metal presentation with and without transaction mode, and toolbar lifetime in occluded windows.
+
 ## [0.4.0] - 2026-11-07
 
 The fourth normal release of the NodalKit framework. 0.4.0 keeps the widget

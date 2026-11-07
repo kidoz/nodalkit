@@ -23,7 +23,7 @@ modern C++23 API. No meta-object compiler, no code generation, no build magic.
 
 ## Status
 
-**0.4.0** — Early, but real. NodalKit already ships a working widget tree,
+**0.4.1** — Early, but real. NodalKit already ships a working widget tree,
 layout system, signals and properties, menus, dialogs, model/view primitives,
 text shaping, examples, tests, and a built-in diagnostics/inspector stack. The
 API and platform behavior are still unstable, and 0.x should be treated as a
