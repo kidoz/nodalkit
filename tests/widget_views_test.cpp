@@ -1765,9 +1765,14 @@ TEST_CASE("Widget tooltip describes the control and follows hover and keyboard f
     CHECK(button->ensure_accessible().description() == "Save document");
     auto root = nk::Box::create(nk::Orientation::Vertical, 8.0F);
     root->append(button);
-    root->append(nk::Button::create("Other"));
+    auto other = nk::Button::create("Other");
+    root->append(other);
     window.set_child(root);
     window.present();
+    REQUIRE(app.event_loop().poll());
+    // Native activation may already focus the first control. Start traversal
+    // from Other explicitly so the first Tab always reaches Save.
+    other->grab_focus();
     REQUIRE(app.event_loop().poll());
     CHECK_FALSE(frame_contains(window, "Save document"));
 
