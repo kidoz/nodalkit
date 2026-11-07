@@ -423,8 +423,10 @@ bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
             next_v -= event.scroll_dy * scroll_step;
         }
 
+        const float previous_h = impl_->h_offset;
+        const float previous_v = impl_->v_offset;
         scroll_to(next_h, next_v);
-        return true;
+        return impl_->h_offset != previous_h || impl_->v_offset != previous_v;
     }
     case MouseEvent::Type::Press: {
         if (event.button != 1) {

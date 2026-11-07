@@ -6577,3 +6577,61 @@ TEST_CASE("Vulkan preserves chevron strokes instead of silently omitting them",
     SKIP("Requires Linux Wayland and Vulkan");
 #endif
 }
+
+TEST_CASE("Nested list passes boundary scrolling to its viewport", "[app][scroll]") {
+    nk::Window window({.title = "Scroll chaining", .width = 200, .height = 100});
+    auto scroll = nk::ScrollArea::create();
+    scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+    auto box = nk::Box::create(nk::Orientation::Vertical);
+    auto list = nk::ListView::create();
+    list->set_model(std::make_shared<nk::StringListModel>(std::vector<std::string>{"one"}));
+    box->append(list);
+    box->append(FixedWidget::create(200.0F, 300.0F));
+    scroll->set_content(box);
+    window.set_child(scroll);
+    scroll->allocate({0.0F, 0.0F, 200.0F, 100.0F});
+    const auto bounds = list->allocation();
+    window.dispatch_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                 .x = bounds.x + 10.0F,
+                                 .y = bounds.y + 10.0F,
+                                 .scroll_dy = -8.0F,
+                                 .precise_scrolling = true});
+    CHECK(scroll->v_offset() == Catch::Approx(8.0F));
+}
+
+TEST_CASE("ScrollArea releases input at its boundaries", "[app][scroll]") {
+    auto scroll = nk::ScrollArea::create();
+    scroll->set_content(FixedWidget::create(120.0F, 300.0F));
+    scroll->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+    nk::MouseEvent event{.type = nk::MouseEvent::Type::Scroll,
+                         .x = 20.0F,
+                         .y = 20.0F,
+                         .scroll_dy = 8.0F,
+                         .precise_scrolling = true};
+    CHECK_FALSE(scroll->handle_mouse_event(event));
+    event.scroll_dy = -8.0F;
+    CHECK(scroll->handle_mouse_event(event));
+    scroll->scroll_to(0.0F, 1000.0F);
+    CHECK_FALSE(scroll->handle_mouse_event(event));
+}
+
+TEST_CASE("ListView preserves precise scrolling in logical pixels", "[app][scroll]") {
+    auto list = nk::ListView::create();
+    list->set_model(std::make_shared<nk::StringListModel>(
+        std::vector<std::string>{"one", "two", "three", "four", "five"}));
+    list->set_row_height(30.0F);
+    list->set_item_factory([](std::size_t) { return FixedWidget::create(180.0F, 30.0F); });
+    list->allocate({0.0F, 0.0F, 200.0F, 100.0F});
+    REQUIRE(list->children().size() >= 2);
+    const auto row = list->children()[1];
+    const float initial_y = row->allocation().y;
+    REQUIRE(list->handle_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                      .x = 20.0F,
+                                      .y = 20.0F,
+                                      .scroll_dy = -3.0F,
+                                      .precise_scrolling = true}));
+    CHECK(row->allocation().y == Catch::Approx(initial_y - 3.0F));
+    REQUIRE(list->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Scroll, .x = 20.0F, .y = 20.0F, .scroll_dy = -1.0F}));
+    CHECK(row->allocation().y == Catch::Approx(initial_y - 33.0F));
+}
