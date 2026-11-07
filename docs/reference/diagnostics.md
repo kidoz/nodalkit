@@ -51,6 +51,18 @@ The showcase example exports a bundle from a menu action; see
 
 ## Performance regression baselines
 
+Frame diagnostics measure CPU work through presentation submission, including
+any wait to acquire a drawable. They do not measure on-screen presentation time.
+For sustained scrolling on macOS, pair native-handler input timestamps with
+Metal drawable `addPresentedHandler` / `presentedTime` feedback, and report both
+input-to-display latency and presentation intervals. A smaller drawable pool can
+reduce latency while making low-rate wheel cadence less even, so check precise
+scrolling, wheel input, and idle animation together before changing buffering.
+Exclude zero `presentedTime` values from latency statistics and report skipped
+presentations separately.
+Synthetic native events validate toolkit delta handling; physical trackpad
+acceleration, momentum, and OS event delivery need real-device validation.
+
 `meson test -C buildDir` compares the `text-heavy`, `list-heavy`, and
 `animation-heavy` harness captures against platform-specific fixtures in
 `tests/fixtures/`. Linux and Windows retain the timed comparison policy.
