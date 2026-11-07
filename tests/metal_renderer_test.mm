@@ -44,6 +44,10 @@
 }
 
 - (id<CAMetalDrawable>)nextDrawable {
+    // Release retired captures before acquiring from a bounded drawable pool.
+    while (_captured.count >= self.maximumDrawableCount) {
+        [_captured removeObjectAtIndex:0];
+    }
     id<CAMetalDrawable> drawable = [super nextDrawable];
     if (drawable != nil) {
         [_captured addObject:drawable];
@@ -243,11 +247,13 @@ void frame(nk::MetalRendererUnderTest& renderer,
            TestSurface& surface,
            const nk::RenderNode& root,
            std::span<const nk::Rect> damage = {}) {
-    renderer.begin_frame({64, 64}, 1.0F);
-    renderer.set_damage_regions(damage);
-    renderer.render(root);
-    renderer.end_frame();
-    renderer.present(surface);
+    @autoreleasepool {
+        renderer.begin_frame({64, 64}, 1.0F);
+        renderer.set_damage_regions(damage);
+        renderer.render(root);
+        renderer.end_frame();
+        renderer.present(surface);
+    }
 }
 
 std::vector<uint8_t> read_texture_rgba(nk::MetalRendererUnderTest& renderer,
@@ -318,6 +324,25 @@ id<MTLTexture> last_drawable_texture(NKMetalTestCaptureLayer* layer) {
 }
 
 } // namespace
+
+TEST_CASE("Metal reuses a constrained drawable pool across sustained frames", "[metal][render]") {
+    MetalFixture fixture;
+    fixture.layer.maximumDrawableCount = 2;
+    for (int index = 0; index < 12; ++index) {
+        const bool red = index % 2 == 0;
+        auto root = solid(red ? nk::Color{1, 0, 0, 1} : nk::Color{0, 0, 1, 1});
+        frame(fixture.renderer, fixture.surface, *root);
+        CHECK(fixture.layer.maximumDrawableCount == 2);
+        CHECK(fixture.surface.cpu_presents == 0);
+        CHECK(fixture.renderer.last_hotspot_counters().gpu_present_path ==
+              nk::GpuPresentPath::FullRedrawCopyBack);
+        check_pixel(fixture.renderer,
+                    last_drawable_texture(fixture.layer),
+                    32,
+                    32,
+                    red ? std::array<int, 4>{255, 0, 0, 255} : std::array<int, 4>{0, 0, 255, 255});
+    }
+}
 
 TEST_CASE("Metal heavy content matches software pixels and reuses warm textures",
           "[metal][render][cache]") {
