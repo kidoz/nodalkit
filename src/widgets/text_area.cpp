@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <nk/platform/application.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
@@ -102,7 +104,90 @@ struct TextArea::Impl {
     std::string display_text;
     std::optional<float> preferred_x;
     bool focused_state = false;
+    std::vector<float> display_line_widths{0.0F};
+    bool metrics_valid = false;
+    bool metrics_dirty = true;
+    const Window* metrics_window = nullptr;
+    float metrics_text_scale = 1.0F;
+    std::optional<std::string> metrics_system_font;
+
+    void refresh_content_metrics(const TextArea& owner);
 };
+
+void TextArea::Impl::refresh_content_metrics(const TextArea& owner) {
+    const auto* window = owner.host_window();
+    const auto* app = Application::instance();
+    const auto system_font = window != nullptr && app != nullptr
+                                 ? app->system_preferences().system_font_name
+                                 : std::optional<std::string>{};
+    const float scale = detail::text_scale();
+    const bool reuse_widths = metrics_valid && metrics_window == window &&
+                              metrics_text_scale == scale && metrics_system_font == system_font;
+    if (!metrics_dirty && reuse_widths) {
+        return;
+    }
+
+    const auto composition = edit.has_preedit() ? std::optional(edit.display_text()) : std::nullopt;
+    const std::string_view next_text = composition ? *composition : std::string_view(edit.text);
+    const auto next_lines = split_lines(next_text);
+    std::size_t prefix = 0;
+    std::size_t suffix = 0;
+    if (reuse_widths) {
+        const auto previous_lines = split_lines(display_text);
+        const auto common = std::min(previous_lines.size(), next_lines.size());
+        while (prefix < common && previous_lines[prefix] == next_lines[prefix]) {
+            ++prefix;
+        }
+        while (suffix < common - prefix && previous_lines[previous_lines.size() - suffix - 1] ==
+                                               next_lines[next_lines.size() - suffix - 1]) {
+            ++suffix;
+        }
+    }
+
+    // Reuse both ends of the document across edits, undo and composition changes.
+    // Only the changed line range needs shaping; line offsets remain byte-based.
+    const auto first = display_line_widths.begin() + static_cast<std::ptrdiff_t>(prefix);
+    const auto last = display_line_widths.end() - static_cast<std::ptrdiff_t>(suffix);
+    const bool removed_widest = !reuse_widths || std::find(first, last, content_width) != last;
+    std::vector<float> changed_widths;
+    changed_widths.reserve(next_lines.size() - prefix - suffix);
+    float next_width = content_width;
+    for (std::size_t row = prefix; row < next_lines.size() - suffix; ++row) {
+        const float width = owner.measure_text(next_lines[row], text_area_font()).width;
+        changed_widths.push_back(width);
+        next_width = std::max(next_width, width);
+    }
+    const auto insertion = display_line_widths.erase(first, last);
+    display_line_widths.insert(insertion, changed_widths.begin(), changed_widths.end());
+    // A maximum scan reads cached floats, including when the widest line shrinks.
+    content_width = removed_widest
+                        ? *std::max_element(display_line_widths.begin(), display_line_widths.end())
+                        : next_width;
+
+    display_line_starts.clear();
+    display_line_starts.reserve(next_lines.size());
+    std::size_t start = 0;
+    for (const auto line : next_lines) {
+        display_line_starts.push_back(start);
+        start += line.size() + 1;
+    }
+    display_text = next_text;
+    if (!composition) {
+        line_starts = display_line_starts;
+    } else {
+        line_starts.clear();
+        start = 0;
+        for (const auto line : split_lines(edit.text)) {
+            line_starts.push_back(start);
+            start += line.size() + 1;
+        }
+    }
+    metrics_window = window;
+    metrics_text_scale = scale;
+    metrics_system_font = system_font;
+    metrics_valid = true;
+    metrics_dirty = false;
+}
 
 std::shared_ptr<TextArea> TextArea::create() {
     return std::shared_ptr<TextArea>(new TextArea());
@@ -124,6 +209,7 @@ std::string_view TextArea::text() const {
 
 void TextArea::set_text(std::string text) {
     if (impl_->edit.text != text) {
+        impl_->metrics_valid = false;
         impl_->edit.text = std::move(text);
         impl_->edit.cursor = impl_->edit.text.size();
         impl_->edit.selection_anchor = impl_->edit.cursor;
@@ -257,6 +343,7 @@ std::size_t TextArea::cursor_line() const {
 }
 
 Rect TextArea::text_input_caret_rect() const {
+    impl_->refresh_content_metrics(*this);
     const auto viewport = text_rect();
     const auto position = impl_->edit.display_caret_position();
     const auto line = line_at(impl_->display_text, position);
@@ -284,28 +371,14 @@ std::optional<WidgetTextInputState> TextArea::text_input_state() const {
 }
 
 void TextArea::refresh_content_metrics() {
-    impl_->line_starts.clear();
-    std::size_t start = 0;
-    for (const auto line : split_lines(impl_->edit.text)) {
-        impl_->line_starts.push_back(start);
-        start += line.size() + 1;
-    }
-    impl_->display_text = impl_->edit.display_text();
-    impl_->display_line_starts.clear();
-    impl_->content_width = 0.0F;
-    start = 0;
-    for (const auto line : split_lines(impl_->display_text)) {
-        impl_->display_line_starts.push_back(start);
-        impl_->content_width =
-            std::max(impl_->content_width, measure_text(line, text_area_font()).width);
-        start += line.size() + 1;
-    }
+    impl_->refresh_content_metrics(*this);
 }
 
 bool TextArea::clear_preedit() {
     if (!impl_->edit.clear_preedit()) {
         return false;
     }
+    impl_->metrics_dirty = true;
     refresh_content_metrics();
     ensure_caret_visible();
     queue_redraw();
@@ -313,6 +386,7 @@ bool TextArea::clear_preedit() {
 }
 
 void TextArea::clamp_scroll() {
+    refresh_content_metrics();
     const auto viewport = text_rect();
     const float width = impl_->content_width + 2.0F;
     const float height = static_cast<float>(impl_->display_line_starts.size()) * line_height();
@@ -341,6 +415,7 @@ void TextArea::ensure_caret_visible() {
 }
 
 void TextArea::did_edit() {
+    impl_->metrics_dirty = true;
     impl_->selecting = false;
     impl_->preferred_x.reset();
     refresh_content_metrics();
@@ -645,6 +720,7 @@ bool TextArea::handle_text_input_event(const TextInputEvent& event) {
             impl_->preferred_x.reset();
         }
         impl_->edit.set_preedit(event.text, event.selection_start, event.selection_end);
+        impl_->metrics_dirty = true;
         refresh_content_metrics();
         ensure_caret_visible();
         queue_redraw();
@@ -732,6 +808,7 @@ void TextArea::on_focus_changed(bool focused) {
 }
 
 void TextArea::snapshot(SnapshotContext& ctx) const {
+    impl_->refresh_content_metrics(*this);
     const auto a = allocation();
     const float corner_radius = theme_number("corner-radius", 8.0F);
     const auto font = text_area_font();

@@ -11,6 +11,7 @@
 #include <nk/render/render_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/style/theme.h>
 #include <nk/widgets/search_field.h>
 #include <nk/widgets/text_area.h>
 #include <nk/widgets/text_field.h>
@@ -865,4 +866,163 @@ TEST_CASE("Native input documents place composition over the selection", "[text]
     CHECK(document.committed_replacement({0, 1}) == nk::TextInputRange{0, 1});
     CHECK(document.committed_replacement({0, 3}) == nk::TextInputRange{0, 2});
     CHECK(document.committed_replacement({3, 1}) == nk::TextInputRange{2, 3});
+}
+
+TEST_CASE("TextArea measures only changed lines in a large document",
+          "[text_area][metrics][performance]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 400, 120});
+    std::string document;
+    for (int line = 0; line < 10000; ++line) {
+        document += "Line " + std::to_string(line) + " unchanged content\n";
+    }
+    area->set_text(document);
+    const auto before = area->debug_hotspot_counters().text_measure_count;
+    REQUIRE(commit(*area, "x"));
+    CHECK(area->debug_hotspot_counters().text_measure_count - before <= 4);
+    CHECK(area->text() == document + "x");
+    const auto after = area->debug_hotspot_counters().text_measure_count;
+    area->allocate({10, 20, 500, 160});
+    CHECK(area->debug_hotspot_counters().text_measure_count - after <= 2);
+    CHECK(area->text_input_caret_rect().y >= 20);
+    CHECK(area->text_input_caret_rect().bottom() <= 180);
+}
+
+TEST_CASE("TextArea reuses unchanged widths across multiline editing and composition",
+          "[text_area][metrics][ime]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 400, 120});
+    std::string document;
+    for (int line = 0; line < 1000; ++line) {
+        document += "Line " + std::to_string(line) + "\n";
+    }
+    area->set_text(document);
+    const auto check_measurements = [&](auto operation) {
+        const auto before = area->debug_hotspot_counters().text_measure_count;
+        CHECK(operation());
+        CHECK(area->debug_hotspot_counters().text_measure_count - before <= 8);
+    };
+    check_measurements([&] { return commit(*area, "a\nb"); });
+    CHECK(area->text() == document + "a\nb");
+    check_measurements([&] { return key(*area, nk::KeyCode::Backspace); });
+    check_measurements([&] { return key(*area, nk::KeyCode::Backspace); });
+    CHECK(area->text() == document + "a");
+    check_measurements([&] { return key(*area, nk::KeyCode::Z, nk::Modifiers::Ctrl); });
+    CHECK(area->text() == document + "a\nb");
+    check_measurements([&] { return key(*area, nk::KeyCode::Y, nk::Modifiers::Ctrl); });
+    CHECK(area->text() == document + "a");
+    check_measurements([&] {
+        return area->handle_text_input_event({.type = nk::TextInputEvent::Type::Preedit,
+                                              .text = "\u754C\npreview",
+                                              .selection_end = 11});
+    });
+    CHECK(area->text() == document + "a");
+    check_measurements([&] { return key(*area, nk::KeyCode::Escape); });
+    CHECK(area->text() == document + "a");
+}
+
+TEST_CASE("TextArea preserves cached suffix widths after a middle replacement",
+          "[text_area][metrics]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 400, 120});
+    std::string document;
+    for (int line = 0; line < 1000; ++line) {
+        document += "Line " + std::to_string(line) + "\n";
+    }
+    area->set_text(document);
+    const auto start = document.find("Line 500\n");
+    const auto end = document.find("Line 503\n");
+    auto expected = document;
+    expected.replace(start, end - start, "replacement\nsecond\n");
+    const auto before = area->debug_hotspot_counters().text_measure_count;
+    REQUIRE(area->handle_text_input_event({.type = nk::TextInputEvent::Type::Commit,
+                                           .text = "replacement\nsecond\n",
+                                           .replacement_range = nk::TextInputRange{start, end}}));
+    CHECK(area->text() == expected);
+    CHECK(area->debug_hotspot_counters().text_measure_count - before <= 6);
+    REQUIRE(key(*area, nk::KeyCode::Z, nk::Modifiers::Ctrl));
+    CHECK(area->text() == document);
+    REQUIRE(key(*area, nk::KeyCode::Y, nk::Modifiers::Ctrl));
+    CHECK(area->text() == expected);
+    REQUIRE(key(*area, nk::KeyCode::End, nk::Modifiers::Ctrl));
+    CHECK(area->text_input_caret_rect().bottom() <= 120);
+    REQUIRE(key(*area, nk::KeyCode::Up));
+    const auto tail = painted_text(*area);
+    CHECK(std::find(tail.begin(), tail.end(), "Line 999") != tail.end());
+}
+
+TEST_CASE("TextArea shrinks horizontal bounds after deleting its widest lines",
+          "[text_area][metrics][scroll]") {
+    auto area = nk::TextArea::create();
+    area->allocate({0, 0, 160, 100});
+    const auto wide = std::string(60, 'w');
+    area->set_text(wide + "\n" + wide + "\ns");
+    const nk::MouseEvent scroll{.type = nk::MouseEvent::Type::Scroll,
+                                .x = 20,
+                                .y = 20,
+                                .scroll_dx = -10000,
+                                .precise_scrolling = true};
+    REQUIRE(area->handle_mouse_event(scroll));
+    REQUIRE(key(*area, nk::KeyCode::Home, nk::Modifiers::Ctrl));
+    REQUIRE(key(*area, nk::KeyCode::End, nk::Modifiers::Shift));
+    REQUIRE(key(*area, nk::KeyCode::Delete));
+    CHECK(area->text() == "\n" + wide + "\ns");
+    CHECK(area->handle_mouse_event(scroll));
+    REQUIRE(key(*area, nk::KeyCode::Home, nk::Modifiers::Ctrl));
+    REQUIRE(key(*area, nk::KeyCode::Down));
+    REQUIRE(key(*area, nk::KeyCode::End, nk::Modifiers::Shift));
+    REQUIRE(key(*area, nk::KeyCode::Delete));
+    CHECK(area->text() == "\n\ns");
+    CHECK_FALSE(area->handle_mouse_event(scroll));
+    CHECK(area->text_input_caret_rect().x >= 0);
+    REQUIRE(commit(*area, wide));
+    CHECK(area->handle_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                    .x = 20,
+                                    .y = 20,
+                                    .scroll_dx = 10000,
+                                    .precise_scrolling = true}));
+}
+
+TEST_CASE("TextArea invalidates widths for text scale and host attachment",
+          "[text_area][metrics][scale]") {
+    const auto previous_theme = nk::Theme::active();
+
+    struct RestoreTheme {
+        std::shared_ptr<nk::Theme> theme;
+
+        ~RestoreTheme() { nk::Theme::set_active(theme); }
+    } restore{previous_theme};
+
+    auto theme = std::make_shared<nk::Theme>("TextArea metric scale");
+    theme->set_token("text-scale", 1.0F);
+    nk::Theme::set_active(theme);
+    auto area = nk::TextArea::create();
+    std::string document;
+    for (int line = 0; line < 100; ++line) {
+        document += "Line " + std::to_string(line) + "\n";
+    }
+    area->set_text(document + "caret");
+    area->allocate({0, 0, 300, 120});
+    const float initial_height = area->text_input_caret_rect().height;
+    const auto before_scale = area->debug_hotspot_counters().text_measure_count;
+    theme->set_token("text-scale", 2.0F);
+    area->allocate({0, 0, 300, 120});
+    CHECK(area->debug_hotspot_counters().text_measure_count - before_scale >= 101);
+    CHECK(area->text_input_caret_rect().height == 2.0F * initial_height);
+    const auto before_edit = area->debug_hotspot_counters().text_measure_count;
+    REQUIRE(commit(*area, "!"));
+    CHECK(area->debug_hotspot_counters().text_measure_count - before_edit <= 4);
+
+    nk::Window window({.title = "TextArea attachment", .width = 300, .height = 120});
+    const auto before_attach = area->debug_hotspot_counters().text_measure_count;
+    window.set_child(area);
+    area->allocate({0, 0, 300, 120});
+    CHECK(area->debug_hotspot_counters().text_measure_count - before_attach >= 101);
+    const auto attached = area->debug_hotspot_counters().text_measure_count;
+    area->allocate({0, 0, 320, 140});
+    CHECK(area->debug_hotspot_counters().text_measure_count - attached <= 2);
+    window.set_child(nullptr);
+    const auto before_detach = area->debug_hotspot_counters().text_measure_count;
+    area->allocate({0, 0, 320, 140});
+    CHECK(area->debug_hotspot_counters().text_measure_count - before_detach >= 101);
 }
