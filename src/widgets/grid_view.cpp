@@ -619,11 +619,14 @@ void GridView::snapshot(SnapshotContext& ctx) const {
                                 std::max(0.0F, cell.width - 18.0F),
                                 std::max(0.0F, cell.height - 16.0F)};
         const auto measured = measure_text_wrapped(text, font, text_rect.width);
+        const float text_x =
+            text_rect.x +
+            std::max(0.0F, (text_rect.width - std::min(measured.width, text_rect.width)) * 0.5F);
         const float text_y =
             text_rect.y +
             std::max(0.0F, (text_rect.height - std::min(measured.height, text_rect.height)) * 0.5F);
         ctx.push_rounded_clip(text_rect, 4.0F);
-        ctx.add_wrapped_text({text_rect.x, text_y},
+        ctx.add_wrapped_text({text_x, text_y},
                              std::string(text),
                              selected ? selected_text : text_color,
                              font,
