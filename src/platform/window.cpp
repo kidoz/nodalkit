@@ -1,5 +1,8 @@
 #include "../accessibility/accessibility_tree.h"
 #include "../ui_core/widget_type_name.h"
+#ifdef __APPLE__
+#include "macos/macos_backend.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -1682,6 +1685,14 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
 Window::~Window() {
     if (impl_) {
         *impl_->alive = false;
+#ifdef __APPLE__
+        if (auto* app = Application::instance(); app != nullptr && app->has_platform_backend()) {
+            if (auto* backend = dynamic_cast<MacosBackend*>(&app->platform_backend());
+                backend != nullptr && impl_->surface != nullptr) {
+                backend->cancel_frames(*impl_->surface);
+            }
+        }
+#endif
         // Tear the widget tree and overlays down here, while impl_ is still
         // alive: widget destructors purge dirty-list bookkeeping through this
         // Window. Once the impl_ member's own destruction starts, unique_ptr
@@ -2479,7 +2490,19 @@ void Window::request_frame(FrameRequestReason reason) {
         return;
     }
 
-    app->event_loop().post(
+    const auto post_frame = [app](std::function<void()> callback, NativeSurface* surface) {
+        (void)surface;
+#ifdef __APPLE__
+        if (surface != nullptr && app->has_platform_backend()) {
+            if (auto* backend = dynamic_cast<MacosBackend*>(&app->platform_backend());
+                backend != nullptr && backend->schedule_frame(*surface, callback)) {
+                return;
+            }
+        }
+#endif
+        (void)app->event_loop().post(std::move(callback), "window.request-frame");
+    };
+    post_frame(
         [this, alive = impl_->alive] {
             // The Window may have been destroyed between posting and running this
             // task; bail before touching the freed Impl.
@@ -2660,7 +2683,7 @@ void Window::request_frame(FrameRequestReason reason) {
             impl_->redraw_request_count = 0;
             impl_->layout_request_count = 0;
         },
-        "window.request-frame");
+        impl_->surface.get());
 }
 
 void Window::invalidate_layout() {

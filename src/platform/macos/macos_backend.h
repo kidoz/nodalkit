@@ -3,6 +3,7 @@
 /// @file macos_backend.h
 /// @brief macOS Cocoa platform backend (private header).
 
+#include <functional>
 #include <memory>
 #include <nk/platform/platform_backend.h>
 #include <string>
@@ -25,6 +26,10 @@ public:
     int run_event_loop(EventLoop& loop) override;
     void wake_event_loop() override;
     void request_quit(int exit_code) override;
+
+    // UI-thread only. False leaves the caller responsible for posting the frame.
+    bool schedule_frame(NativeSurface& surface, std::function<void()> frame);
+    void cancel_frames(NativeSurface& surface);
 
     [[nodiscard]] SpellChecker* spell_checker() override;
 

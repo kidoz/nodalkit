@@ -536,6 +536,10 @@ TEST_CASE("Metal invalidates its preserved scene after software fallback", "[met
 
 TEST_CASE("Metal keeps fallback uploads independent until GPU completion", "[metal][render]") {
     MetalFixture fixture;
+    SECTION("command-buffer presentation") {}
+    SECTION("display-clock transaction presentation") {
+        fixture.layer.presentsWithTransaction = YES;
+    }
     id<MTLSharedEvent> event = [fixture.renderer.device_ newSharedEvent];
     id<MTLCommandBuffer> wait = [fixture.renderer.command_queue_ commandBuffer];
     [wait encodeWaitForEvent:event value:1];

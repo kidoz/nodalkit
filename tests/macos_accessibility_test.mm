@@ -7,6 +7,8 @@
 
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/CADisplayLink.h>
+#import <QuartzCore/CAMetalLayer.h>
 #include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +21,7 @@
 #include <nk/platform/native_toolbar.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
+#include <nk/platform/window_inspector.h>
 #include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
@@ -116,7 +119,186 @@ void observe_destruction(id object, const std::shared_ptr<std::size_t>& counter)
     [probe release];
 }
 
+class ScopedMethodOverride {
+public:
+    ScopedMethodOverride(Method method, IMP replacement)
+        : method_(method)
+        , original_(method_setImplementation(method, replacement))
+        , replacement_(replacement) {}
+
+    ~ScopedMethodOverride() {
+        method_setImplementation(method_, original_);
+        imp_removeBlock(replacement_);
+    }
+
+    ScopedMethodOverride(const ScopedMethodOverride&) = delete;
+    ScopedMethodOverride& operator=(const ScopedMethodOverride&) = delete;
+
+private:
+    Method method_;
+    IMP original_;
+    IMP replacement_;
+};
+
 } // namespace
+
+TEST_CASE("macOS frame clocks preserve runtime progress and release queued work",
+          "[macos][runtime][memory]") {
+    if (@available(macOS 14.0, *)) {
+        bool paused = false;
+        bool unavailable = false;
+        bool close_queued = false;
+        bool resume_idle = false;
+        SECTION("display callbacks") {}
+        SECTION("paused display callbacks") {
+            paused = true;
+        }
+        SECTION("unavailable display clock") {
+            unavailable = true;
+        }
+        SECTION("destroy window with queued frame") {
+            close_queued = true;
+        }
+        SECTION("idle clock pauses and resumes") {
+            resume_idle = true;
+        }
+        @autoreleasepool {
+            nk::Application app(0, nullptr);
+            auto window = std::make_unique<nk::Window>(nk::WindowConfig{.title = "Frame clock"});
+            window->set_child(nk::Label::create("Frame clock lifecycle"));
+            window->present();
+            settle(app);
+            if (window->renderer_backend() != nk::RendererBackend::Metal) {
+                SKIP("Frame-clock integration requires the Metal backend");
+            }
+            CHECK_FALSE(
+                static_cast<CAMetalLayer*>(root_element(*window).layer).presentsWithTransaction);
+            const auto first_frame = window->inspector().last_frame_diagnostics().frame_id;
+
+            struct Probe {
+                int factories = 0;
+                bool task = false;
+                bool timer = false;
+                bool frame = false;
+                bool main_thread = true;
+                bool presentation_matches_clock = true;
+                CADisplayLink* observed_link = nil;
+                bool saw_idle_pause = false;
+                uint64_t idle_frame = 0;
+                std::shared_ptr<std::size_t> targets = std::make_shared<std::size_t>(0);
+                std::shared_ptr<std::size_t> links = std::make_shared<std::size_t>(0);
+            };
+
+            auto probe = std::make_shared<Probe>();
+            SEL factory_selector = @selector(displayLinkWithTarget:selector:);
+            Method method = class_getInstanceMethod([NSWindow class], factory_selector);
+            REQUIRE(method != nullptr);
+            using Factory = CADisplayLink* (*)(id, SEL, id, SEL);
+            auto original = reinterpret_cast<Factory>(method_getImplementation(method));
+            IMP replacement = imp_implementationWithBlock(
+                ^CADisplayLink*(NSWindow* receiver, id target, SEL selector) {
+                  auto* link = original(receiver, factory_selector, target, selector);
+                  if (![target isKindOfClass:NSClassFromString(@"NKDisplayPollTarget")]) {
+                      return link;
+                  }
+                  ++probe->factories;
+                  probe->observed_link = link;
+                  observe_destruction(target, probe->targets);
+                  observe_destruction(link, probe->links);
+                  if (unavailable) {
+                      [link invalidate];
+                      return nil;
+                  }
+                  link.paused = paused;
+                  return link;
+                });
+            ScopedMethodOverride factory_override(method, replacement);
+            auto* application = &app;
+            auto* window_slot = &window;
+            NSTimer* trigger = [NSTimer
+                scheduledTimerWithTimeInterval:0.001
+                                       repeats:NO
+                                         block:^(NSTimer*) {
+                                           (*window_slot)->request_frame();
+                                           if (paused) {
+                                               probe->observed_link.paused = YES;
+                                           }
+                                           if (close_queued) {
+                                               window_slot->reset();
+                                               application->quit(0);
+                                               return;
+                                           }
+                                           (void)application->event_loop().post(
+                                               [probe] {
+                                                   probe->task = true;
+                                                   probe->main_thread &= NSThread.isMainThread;
+                                               },
+                                               "test.macos.frame-clock.post");
+                                         }];
+            const auto interval = app.event_loop().set_interval(
+                std::chrono::milliseconds(10),
+                [&] {
+                    probe->timer = true;
+                    probe->main_thread &= NSThread.isMainThread;
+                    if (window && probe->factories > 0) {
+                        probe->presentation_matches_clock &=
+                            static_cast<CAMetalLayer*>(root_element(*window).layer)
+                                .presentsWithTransaction == !unavailable;
+                    }
+                    probe->frame = window && window->inspector().last_frame_diagnostics().frame_id >
+                                                 first_frame;
+                    if (probe->task && probe->frame) {
+                        if (resume_idle) {
+                            if (!probe->saw_idle_pause) {
+                                if (probe->observed_link.paused) {
+                                    probe->saw_idle_pause = true;
+                                    probe->idle_frame =
+                                        window->inspector().last_frame_diagnostics().frame_id;
+                                    window->request_frame();
+                                }
+                                return;
+                            }
+                            if (window->inspector().last_frame_diagnostics().frame_id <=
+                                probe->idle_frame) {
+                                return;
+                            }
+                        }
+                        app.quit(0);
+                    }
+                },
+                "test.macos.frame-clock.timer");
+            const auto guard = app.event_loop().set_timeout(
+                std::chrono::seconds(2), [&] { app.quit(1); }, "test.macos.frame-clock.guard");
+            const int result = app.run();
+            [trigger invalidate];
+            app.event_loop().cancel(interval);
+            app.event_loop().cancel(guard);
+            settle_native(app);
+            CHECK(result == 0);
+            CHECK(probe->factories == 1);
+            CHECK(*probe->targets == 1);
+            CHECK(*probe->links == 1);
+            CHECK(probe->main_thread);
+            CHECK(probe->presentation_matches_clock);
+            if (resume_idle) {
+                CHECK(probe->saw_idle_pause);
+            }
+            if (!close_queued) {
+                CHECK_FALSE(static_cast<CAMetalLayer*>(root_element(*window).layer)
+                                .presentsWithTransaction);
+                CHECK(probe->task);
+                CHECK(probe->timer);
+                CHECK(probe->frame);
+                const auto before = window->inspector().last_frame_diagnostics().frame_id;
+                window->request_frame();
+                settle(app);
+                CHECK(window->inspector().last_frame_diagnostics().frame_id > before);
+            }
+        }
+    } else {
+        SKIP("Display links require macOS 14 or later");
+    }
+}
 
 TEST_CASE("macOS surface releases native objects after window teardown", "[macos][memory]") {
     @autoreleasepool {

@@ -5,6 +5,7 @@
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/CATransaction.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -1046,8 +1047,7 @@ public:
             [command_buffer addCompletedHandler:^(id<MTLCommandBuffer>) {
               [(id<MTLTexture>)staging_context release];
             }];
-            [command_buffer presentDrawable:drawable];
-            [command_buffer commit];
+            submit_present(command_buffer, drawable);
             return;
         }
 
@@ -1142,8 +1142,7 @@ public:
         last_hotspot_counters_.gpu_viewport_pixel_count =
             static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
 
-        [command_buffer presentDrawable:drawable];
-        [command_buffer commit];
+        submit_present(command_buffer, drawable);
     }
 
     [[nodiscard]] RenderHotspotCounters last_hotspot_counters() const override {
@@ -1151,6 +1150,19 @@ public:
     }
 
 private:
+    void submit_present(id<MTLCommandBuffer> command_buffer, id<CAMetalDrawable> drawable) {
+        if (layer_.presentsWithTransaction) {
+            // Join native layer updates only after the GPU work is scheduled.
+            [command_buffer commit];
+            [command_buffer waitUntilScheduled];
+            [drawable present];
+            [CATransaction flush];
+        } else {
+            [command_buffer presentDrawable:drawable];
+            [command_buffer commit];
+        }
+    }
+
     [[nodiscard]] bool has_valid_framebuffer() const {
         return software_->pixel_width() > 0 && software_->pixel_height() > 0 &&
                software_->pixel_data() != nullptr;

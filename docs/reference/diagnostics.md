@@ -51,6 +51,21 @@ The showcase example exports a bundle from a menu action; see
 
 ## Performance regression baselines
 
+On macOS 14 and later, `Application::run()` coalesces redraws through a display
+clock attached to each window. The clock follows the window's display, pauses
+when the window stops requesting frames, and resumes on the next invalidation.
+Timers and posted tasks retain their independent runtime pump. If a display
+clock is unavailable or paused, redraws can fall back to that pump. Window
+teardown cancels its clock and queued redraws. Manual polling before or after
+`Application::run()` keeps the regular posted-frame path.
+
+While a window's display clock is active, Metal presentation joins the native
+layer transaction after its command buffer is scheduled, following the
+[Core Animation presentation contract](https://developer.apple.com/documentation/quartzcore/cametallayer/presentswithtransaction).
+`FrameDiagnostics::queue_delay_ms` includes time waiting for the window's display
+clock; the runtime task's queue time starts when the callback is posted for
+execution, so it does not include the earlier display-clock wait.
+
 Frame diagnostics measure CPU work through presentation submission, including
 any wait to acquire a drawable. They do not measure on-screen presentation time.
 For sustained scrolling on macOS, pair native-handler input timestamps with

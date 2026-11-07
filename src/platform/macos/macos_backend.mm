@@ -7,7 +7,11 @@
 #include "macos_window.h"
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/CADisplayLink.h>
+#import <QuartzCore/CAMediaTiming.h>
+#import <QuartzCore/CAMetalLayer.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include <map>
 #include <nk/runtime/event_loop.h>
 #include <optional>
 #include <utility>
@@ -40,6 +44,61 @@
                                            data1:0
                                            data2:0];
     [NSApp postEvent:dummy atStart:YES];
+}
+
+@end
+
+API_AVAILABLE(macos(14.0))
+@interface NKDisplayPollTarget : NSObject {
+@public
+    nk::EventLoop* loop;
+    NSWindow* window;
+    CFTimeInterval last_tick;
+    CFTimeInterval interval;
+    CFTimeInterval last_request;
+    bool polling;
+    std::vector<std::function<void()>> frames;
+    std::vector<std::function<void()>> dispatching;
+}
+- (void)displayTick:(CADisplayLink*)sender;
+- (void)flushFrames;
+@end
+
+@implementation NKDisplayPollTarget
+
+- (void)displayTick:(CADisplayLink*)sender {
+    @autoreleasepool {
+        [[self retain] autorelease];
+        if (loop == nullptr) {
+            return;
+        }
+        const float rate = static_cast<float>(window.screen.maximumFramesPerSecond);
+        if (rate > 0 && sender.preferredFrameRateRange.maximum != rate) {
+            sender.preferredFrameRateRange = CAFrameRateRangeMake(rate, rate, rate);
+        }
+        last_tick = CACurrentMediaTime();
+        interval = sender.duration > 0 ? sender.duration : 1.0 / 120.0;
+        [self flushFrames];
+        // Do not keep a display clock active for an otherwise static window.
+        if (frames.empty() && CACurrentMediaTime() - last_request > 0.1) {
+            sender.paused = YES;
+        }
+    }
+}
+
+- (void)flushFrames {
+    if (loop == nullptr || polling || frames.empty()) {
+        return;
+    }
+    [[self retain] autorelease];
+    polling = true;
+    dispatching.swap(frames);
+    for (auto& frame : dispatching) {
+        (void)loop->post(std::move(frame), "window.request-frame");
+    }
+    dispatching.clear();
+    loop->poll();
+    polling = false;
 }
 
 @end
@@ -100,9 +159,42 @@ struct NativeMenuActionTargetState {
 
 namespace nk {
 
+struct NativeFrameClock {
+    // UI-thread ownership: stop the link before its borrowed window/surface dies.
+    CADisplayLink* link = nil;
+    NKDisplayPollTarget* target = nil;
+    NativeFrameClock() = default;
+    NativeFrameClock(const NativeFrameClock&) = delete;
+    NativeFrameClock& operator=(const NativeFrameClock&) = delete;
+    NativeFrameClock(NativeFrameClock&&) = delete;
+    NativeFrameClock& operator=(NativeFrameClock&&) = delete;
+
+    ~NativeFrameClock() { stop(); }
+
+    void stop() {
+        if (@available(macOS 14.0, *)) {
+            if (target) {
+                // Manual polling resumes the renderer's ordinary presentation path.
+                CALayer* layer = target->window.contentView.layer;
+                if ([layer isKindOfClass:[CAMetalLayer class]]) {
+                    static_cast<CAMetalLayer*>(layer).presentsWithTransaction = NO;
+                }
+                target->loop = nullptr;
+                target->window = nil;
+            }
+            [link invalidate];
+            [link release];
+            [target release];
+            link = nil;
+            target = nil;
+        }
+    }
+};
+
 struct MacosBackend::Impl {
     NKAppDelegate* delegate = nil;
     CFRunLoopTimerRef poll_timer = nullptr;
+    std::map<NativeSurface*, std::shared_ptr<NativeFrameClock>> frame_clocks;
     EventLoop* current_loop = nullptr;
     int exit_code = 0;
     bool quit_requested = false;
@@ -360,6 +452,7 @@ Result<void> MacosBackend::initialize() {
 
 void MacosBackend::shutdown() {
     @autoreleasepool {
+        impl_->frame_clocks.clear();
         [NSApp setMainMenu:nil];
         impl_->native_main_menu = nil;
         impl_->native_menu_targets = nil;
@@ -391,7 +484,8 @@ int MacosBackend::run_event_loop(EventLoop& loop) {
     impl_->quit_requested = false;
     impl_->exit_code = 0;
 
-    // Create a repeating timer at ~120 Hz to drive the NK event loop.
+    // Timers and posted tasks remain independent of display cadence. Stalled
+    // display clocks also use this pump so a hidden window cannot starve work.
     CFTimeInterval interval = 1.0 / 120.0;
     CFRunLoopTimerContext ctx{};
     ctx.info = impl_.get();
@@ -404,8 +498,33 @@ int MacosBackend::run_event_loop(EventLoop& loop) {
         0, // order
         [](CFRunLoopTimerRef /*timer*/, void* info) {
             auto* impl = static_cast<MacosBackend::Impl*>(info);
-            if (impl->current_loop) {
+            bool display_polling = false;
+            std::vector<std::shared_ptr<NativeFrameClock>> stalled;
+            if (@available(macOS 14.0, *)) {
+                for (const auto& [surface, clock] : impl->frame_clocks) {
+                    (void)surface;
+                    const auto* target = clock->target;
+                    if (target == nil) {
+                        continue;
+                    }
+                    display_polling |= target->polling;
+                    if (CACurrentMediaTime() - target->last_tick > 2 * target->interval) {
+                        stalled.push_back(clock);
+                    }
+                }
+            }
+            if (impl->current_loop && !display_polling) {
                 impl->current_loop->poll();
+            }
+            if (@available(macOS 14.0, *)) {
+                for (const auto& clock : stalled) {
+                    [clock->target flushFrames];
+                    auto* target = clock->target;
+                    if (target && target->frames.empty() &&
+                        CACurrentMediaTime() - target->last_request > 0.1) {
+                        clock->link.paused = YES;
+                    }
+                }
             }
             if (impl->quit_requested) {
                 CFRunLoopStop(CFRunLoopGetMain());
@@ -430,6 +549,15 @@ int MacosBackend::run_event_loop(EventLoop& loop) {
     }
 
     // Clean up the timer.
+    if (@available(macOS 14.0, *)) {
+        for (const auto& [surface, clock] : impl_->frame_clocks) {
+            (void)surface;
+            for (auto& frame : clock->target->frames) {
+                (void)loop.post(std::move(frame), "window.request-frame");
+            }
+        }
+    }
+    impl_->frame_clocks.clear();
     if (impl_->poll_timer) {
         CFRunLoopTimerInvalidate(impl_->poll_timer);
         CFRelease(impl_->poll_timer);
@@ -439,6 +567,54 @@ int MacosBackend::run_event_loop(EventLoop& loop) {
     loop.set_wake_handler({});
     impl_->current_loop = nullptr;
     return impl_->exit_code;
+}
+
+bool MacosBackend::schedule_frame(NativeSurface& surface, std::function<void()> frame) {
+    if (@available(macOS 14.0, *)) {
+        if (impl_->current_loop == nullptr) {
+            return false;
+        }
+        auto it = impl_->frame_clocks.find(&surface);
+        if (it == impl_->frame_clocks.end()) {
+            auto* window = static_cast<NSWindow*>(surface.native_handle());
+            if (window == nil) {
+                return false;
+            }
+            auto clock = std::make_shared<NativeFrameClock>();
+            clock->target = [[NKDisplayPollTarget alloc] init];
+            clock->target->loop = impl_->current_loop;
+            clock->target->window = window;
+            clock->target->interval = 1.0 / 120.0;
+            clock->link = [[window displayLinkWithTarget:clock->target
+                                                selector:@selector(displayTick:)] retain];
+            if (clock->link == nil) {
+                return false;
+            }
+            const float rate = static_cast<float>(window.screen.maximumFramesPerSecond);
+            if (rate > 0) {
+                clock->link.preferredFrameRateRange = CAFrameRateRangeMake(rate, rate, rate);
+            }
+            [clock->link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+            CALayer* layer = window.contentView.layer;
+            if ([layer isKindOfClass:[CAMetalLayer class]]) {
+                static_cast<CAMetalLayer*>(layer).presentsWithTransaction = YES;
+            }
+            it = impl_->frame_clocks.emplace(&surface, std::move(clock)).first;
+        }
+        it->second->target->frames.push_back(std::move(frame));
+        it->second->target->last_request = CACurrentMediaTime();
+        it->second->link.paused = NO;
+        return true;
+    }
+    return false;
+}
+
+void MacosBackend::cancel_frames(NativeSurface& surface) {
+    auto it = impl_->frame_clocks.find(&surface);
+    if (it != impl_->frame_clocks.end()) {
+        it->second->stop();
+        impl_->frame_clocks.erase(it);
+    }
 }
 
 void MacosBackend::wake_event_loop() {
