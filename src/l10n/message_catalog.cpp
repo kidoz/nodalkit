@@ -131,7 +131,7 @@ std::optional<std::string> decode_escapes(std::string_view text, char& invalid_e
 
 Result<void>
 parse_error(const std::filesystem::path& path, std::size_t line_number, std::string_view detail) {
-    return Unexpected(std::string(path) + ":" + std::to_string(line_number) + ": " +
+    return Unexpected(path.string() + ":" + std::to_string(line_number) + ": " +
                       std::string(detail));
 }
 
@@ -142,7 +142,7 @@ parse_catalog(std::string_view contents, const std::filesystem::path& path, Mess
         contents.remove_prefix(kBom.size());
     }
     if (!is_valid_utf8(contents)) {
-        return Unexpected(std::string(path) + ": input is not valid UTF-8");
+        return Unexpected(path.string() + ": input is not valid UTF-8");
     }
 
     std::size_t line_number = 1;
@@ -211,12 +211,12 @@ bool valid_argument_name(std::string_view name) {
 Result<void> MessageCatalog::load(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {
-        return Unexpected(std::string(path) + ": unable to open catalog");
+        return Unexpected(path.string() + ": unable to open catalog");
     }
     const std::string contents{std::istreambuf_iterator<char>(input),
                                std::istreambuf_iterator<char>()};
     if (input.bad()) {
-        return Unexpected(std::string(path) + ": unable to read catalog");
+        return Unexpected(path.string() + ": unable to read catalog");
     }
 
     Messages loaded;
