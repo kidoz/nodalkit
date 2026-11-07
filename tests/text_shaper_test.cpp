@@ -2,6 +2,7 @@
 /// @brief Regression tests for platform text shaping output.
 
 #include <algorithm>
+#include <array>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
@@ -9,6 +10,7 @@
 #include <cstdlib>
 #include <nk/text/text_shaper.h>
 #include <optional>
+#include <string>
 
 namespace {
 
@@ -145,6 +147,101 @@ TEST_CASE("Shaper measurement is stable under repeated identical calls", "[text]
     REQUIRE(first.height == Catch::Approx(second.height));
     REQUIRE(first.width == Catch::Approx(third.width));
 }
+
+#ifdef __APPLE__
+TEST_CASE("CoreText cached metrics distinguish text fonts and wrapping", "[text][macos][cache]") {
+    auto shaper = nk::TextShaper::create();
+    const std::array<nk::FontDescriptor, 5> fonts{{
+        {.family = "Helvetica", .size = 18.0F},
+        {.family = "Menlo", .size = 18.0F},
+        {.family = "Helvetica", .size = 27.0F},
+        {.family = "Helvetica", .size = 18.0F, .weight = nk::FontWeight::Bold},
+        {.family = "Helvetica", .size = 18.0F, .style = nk::FontStyle::Italic},
+    }};
+    const std::array<std::string, 8> texts{{
+        "iiii",
+        "WWWW",
+        "",
+        "Wrapping text with several words and punctuation.",
+        "Привет 世界 مرحبا 👩‍💻 é",
+        std::string("Left\0Right", 10),
+        "Text after the embedded NUL case",
+        std::string("Invalid UTF-8: \xFF"),
+    }};
+    for (int pass = 0; pass < 2; ++pass) {
+        for (const auto& font : fonts) {
+            for (const auto& text : texts) {
+                INFO("pass=" << pass << " family=" << font.family << " size=" << font.size);
+                auto fresh = nk::TextShaper::create();
+                const auto expected = fresh->measure(text, font);
+                const auto actual = shaper->measure(text, font);
+                REQUIRE(actual.width == expected.width);
+                REQUIRE(actual.height == expected.height);
+                for (const auto width : {70.0F, 180.0F, 70.25F}) {
+                    const auto expected_wrapped = fresh->measure_wrapped(text, font, width);
+                    const auto actual_wrapped = shaper->measure_wrapped(text, font, width);
+                    REQUIRE(actual_wrapped.width == expected_wrapped.width);
+                    REQUIRE(actual_wrapped.height == expected_wrapped.height);
+                }
+            }
+            auto fresh = nk::TextShaper::create();
+            const auto expected = fresh->shape("Italic fj WWW", font, {0.2F, 0.4F, 0.6F, 1.0F});
+            const auto actual = shaper->shape("Italic fj WWW", font, {0.2F, 0.4F, 0.6F, 1.0F});
+            REQUIRE(actual.bitmap_width() == expected.bitmap_width());
+            REQUIRE(actual.bitmap_height() == expected.bitmap_height());
+            REQUIRE(actual.baseline() == expected.baseline());
+            const auto bytes = static_cast<std::size_t>(actual.bitmap_width()) *
+                               static_cast<std::size_t>(actual.bitmap_height()) * 4;
+            REQUIRE(std::equal(
+                actual.bitmap_data(), actual.bitmap_data() + bytes, expected.bitmap_data()));
+        }
+    }
+}
+
+TEST_CASE("CoreText metric caches remain correct after eviction and scale changes",
+          "[text][macos][cache]") {
+    auto shaper = nk::TextShaper::create();
+    const nk::FontDescriptor font{.family = "Helvetica", .size = 15.0F};
+    const std::string text = "Revisit stable text after many unique measurements.";
+    const auto original = shaper->measure(text, font);
+    const auto wrapped = shaper->measure_wrapped(text, font, 100.0F);
+    for (int row = 0; row < 3000; ++row) {
+        (void)shaper->measure("Unique row " + std::to_string(row), font);
+    }
+    for (int row = 0; row < 180; ++row) {
+        (void)shaper->measure(std::string(4000, 'x') + std::to_string(row), font);
+    }
+    for (int size = 10; size < 50; ++size) {
+        (void)shaper->measure("Font eviction",
+                              {.family = "Menlo", .size = static_cast<float>(size)});
+    }
+    const auto check = [&] {
+        REQUIRE(shaper->measure(text, font).width == original.width);
+        REQUIRE(shaper->measure(text, font).height == original.height);
+        const auto actual_wrapped = shaper->measure_wrapped(text, font, 100.0F);
+        REQUIRE(actual_wrapped.width == wrapped.width);
+        REQUIRE(actual_wrapped.height == wrapped.height);
+    };
+    check();
+    for (const auto scale : {2.0F, 2.0F, 1.0F}) {
+        shaper->set_scale_factor(scale);
+        check();
+    }
+    shaper->set_system_default_family("Helvetica");
+    check();
+    shaper->set_system_default_family("Menlo", true);
+    check();
+    shaper->set_system_document_family("Times");
+    check();
+    const auto larger = shaper->measure(text, {.family = "Helvetica", .size = 30.0F});
+    REQUIRE(larger.width > original.width);
+    REQUIRE(larger.height > original.height);
+    const std::string large_text(6000, 'M');
+    const auto uncached = nk::TextShaper::create()->measure(large_text, font);
+    REQUIRE(shaper->measure(large_text, font).width == uncached.width);
+    REQUIRE(shaper->measure(large_text, font).height == uncached.height);
+}
+#endif
 
 TEST_CASE("Shaping an empty string returns an empty but valid bitmap", "[text]") {
     auto shaper = nk::TextShaper::create();

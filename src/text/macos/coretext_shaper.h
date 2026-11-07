@@ -26,6 +26,14 @@ public:
                                            const FontDescriptor& font,
                                            Color color,
                                            float max_width) const override;
+
+    void set_scale_factor(float scale_factor) override;
+    void set_system_default_family(std::string_view family, bool monospace = false) override;
+    void set_system_document_family(std::string_view family) override;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace nk
