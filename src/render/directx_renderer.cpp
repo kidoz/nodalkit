@@ -633,6 +633,7 @@ private:
     ComPtr<ID3D11VertexShader> image_vertex_shader_;
     ComPtr<ID3D11PixelShader> image_pixel_shader_;
     ComPtr<ID3D11Buffer> constant_buffer_;
+    ComPtr<ID3D11Buffer> image_constant_buffer_;
     ComPtr<ID3D11Buffer> gradient_constant_buffer_;
     ComPtr<ID3D11BlendState> blend_state_;
     ComPtr<ID3D11RasterizerState> rasterizer_state_;
@@ -1365,6 +1366,16 @@ bool DirectXRenderer::create_pipeline_objects() {
         return false;
     }
 
+    // UpdateSubresource copies the entire buffer. Image/text uploads must use
+    // a buffer matching ImageDrawConstants rather than the larger path data.
+    D3D11_BUFFER_DESC image_constant_buffer_desc = constant_buffer_desc;
+    image_constant_buffer_desc.ByteWidth = sizeof(ImageDrawConstants);
+    if (FAILED(gpu_.device->CreateBuffer(
+            &image_constant_buffer_desc, nullptr, &image_constant_buffer_))) {
+        destroy_device_objects();
+        return false;
+    }
+
     D3D11_BUFFER_DESC gradient_constant_buffer_desc{};
     gradient_constant_buffer_desc.ByteWidth = sizeof(GradientDrawConstants);
     gradient_constant_buffer_desc.Usage = D3D11_USAGE_DEFAULT;
@@ -1497,6 +1508,7 @@ void DirectXRenderer::destroy_device_objects() {
     scene_render_target_.Reset();
     scene_texture_.Reset();
     constant_buffer_.Reset();
+    image_constant_buffer_.Reset();
     gradient_constant_buffer_.Reset();
     blend_state_.Reset();
     rasterizer_state_.Reset();
@@ -2236,7 +2248,7 @@ void DirectXRenderer::draw_image(const ImageCommand& command,
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
     constants.params0[0] = opacity * command.opacity;
-    gpu_.context->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
+    gpu_.context->UpdateSubresource(image_constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
         scissor.has_value()
@@ -2246,8 +2258,8 @@ void DirectXRenderer::draw_image(const ImageCommand& command,
     gpu_.context->RSSetScissorRects(1, &d3d_scissor);
     gpu_.context->VSSetShader(image_vertex_shader_.Get(), nullptr, 0);
     gpu_.context->PSSetShader(image_pixel_shader_.Get(), nullptr, 0);
-    gpu_.context->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    gpu_.context->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->VSSetConstantBuffers(0, 1, image_constant_buffer_.GetAddressOf());
+    gpu_.context->PSSetConstantBuffers(0, 1, image_constant_buffer_.GetAddressOf());
     ID3D11ShaderResourceView* views[] = {&shader_resource_view};
     ID3D11SamplerState* samplers[] = {
         command.scale_mode == ScaleMode::Bilinear ? linear_sampler_state_.Get()
@@ -2281,7 +2293,7 @@ void DirectXRenderer::draw_text(const TextCommand& command,
     constants.viewport[0] = static_cast<float>(framebuffer_width_);
     constants.viewport[1] = static_cast<float>(framebuffer_height_);
     constants.params0[0] = command.opacity;
-    gpu_.context->UpdateSubresource(constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
+    gpu_.context->UpdateSubresource(image_constant_buffer_.Get(), 0, nullptr, &constants, 0, 0);
 
     const auto scissor_rect =
         scissor.has_value()
@@ -2291,8 +2303,8 @@ void DirectXRenderer::draw_text(const TextCommand& command,
     gpu_.context->RSSetScissorRects(1, &d3d_scissor);
     gpu_.context->VSSetShader(image_vertex_shader_.Get(), nullptr, 0);
     gpu_.context->PSSetShader(image_pixel_shader_.Get(), nullptr, 0);
-    gpu_.context->VSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
-    gpu_.context->PSSetConstantBuffers(0, 1, constant_buffer_.GetAddressOf());
+    gpu_.context->VSSetConstantBuffers(0, 1, image_constant_buffer_.GetAddressOf());
+    gpu_.context->PSSetConstantBuffers(0, 1, image_constant_buffer_.GetAddressOf());
     ID3D11ShaderResourceView* views[] = {&shader_resource_view};
     ID3D11SamplerState* samplers[] = {nearest_sampler_state_.Get()};
     gpu_.context->PSSetShaderResources(0, 1, views);
