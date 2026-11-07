@@ -40,6 +40,7 @@ trace_view = executable('nk_trace_view',
 
 trace_capture_harness = executable('nk_trace_capture_harness',
     'trace_capture_harness.cpp',
+    'trace_capture_baseline.cpp',
     dependencies : nk_dep,
 )
 
@@ -83,6 +84,12 @@ stable_win32_list_artifact = meson.project_source_root() / 'tests' / 'fixtures' 
 stable_win32_list_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_list_heavy_trace.json'
 stable_win32_animation_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_animation_heavy_frame_diagnostics.json'
 stable_win32_animation_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_win32_animation_heavy_trace.json'
+stable_macos_text_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_macos_text_heavy_frame_diagnostics.json'
+stable_macos_text_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_macos_text_heavy_trace.json'
+stable_macos_list_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_macos_list_heavy_frame_diagnostics.json'
+stable_macos_list_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_macos_list_heavy_trace.json'
+stable_macos_animation_artifact = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_macos_animation_heavy_frame_diagnostics.json'
+stable_macos_animation_trace = meson.project_source_root() / 'tests' / 'fixtures' / 'stable_macos_animation_heavy_trace.json'
 trace_capture_harness_mixed_artifact = meson.project_build_root() / 'trace_capture_harness_mixed_artifact.json'
 trace_capture_harness_mixed_trace = meson.project_build_root() / 'trace_capture_harness_mixed_trace.json'
 trace_capture_harness_text_artifact = meson.project_build_root() / 'trace_capture_harness_text_artifact.json'
@@ -245,9 +252,10 @@ test('trace_capture_harness',
 # text shaping with a stub surface present, Windows uses DirectWrite + Win32 GDI
 # BitBlt, and macOS uses CoreText + AppKit. Different glyph metrics and per-frame
 # present costs mean a single fixture set isn't portable, so each supported host
-# pins its own baseline. Hosts without a captured baseline (currently macOS) and
-# sanitizer builds run the harness for code-path coverage but skip the comparison.
+# pins its own baseline. macOS gates measured work counters while reporting timing
+# as advisory. Sanitizers run code-path coverage without baseline comparisons.
 host_system = host_machine.system()
+heavy_baseline_args = []
 if not sanitizers_enabled and host_system == 'linux'
     heavy_text_baseline_artifact = stable_text_artifact
     heavy_text_baseline_trace = stable_text_trace
@@ -264,6 +272,15 @@ elif not sanitizers_enabled and host_system == 'windows'
     heavy_animation_baseline_artifact = stable_win32_animation_artifact
     heavy_animation_baseline_trace = stable_win32_animation_trace
     heavy_baselines_supported = true
+elif not sanitizers_enabled and host_system == 'darwin'
+    heavy_text_baseline_artifact = stable_macos_text_artifact
+    heavy_text_baseline_trace = stable_macos_text_trace
+    heavy_list_baseline_artifact = stable_macos_list_artifact
+    heavy_list_baseline_trace = stable_macos_list_trace
+    heavy_animation_baseline_artifact = stable_macos_animation_artifact
+    heavy_animation_baseline_trace = stable_macos_animation_trace
+    heavy_baseline_args = ['--baseline-policy=counters']
+    heavy_baselines_supported = true
 else
     heavy_baselines_supported = false
 endif
@@ -277,7 +294,7 @@ test('trace_capture_harness_text_heavy',
     ] + (heavy_baselines_supported ? [
         '--baseline-artifact=' + heavy_text_baseline_artifact,
         '--baseline-trace=' + heavy_text_baseline_trace,
-    ] : []),
+    ] + heavy_baseline_args : []),
     is_parallel : false,
 )
 
@@ -290,7 +307,7 @@ test('trace_capture_harness_list_heavy',
     ] + (heavy_baselines_supported ? [
         '--baseline-artifact=' + heavy_list_baseline_artifact,
         '--baseline-trace=' + heavy_list_baseline_trace,
-    ] : []),
+    ] + heavy_baseline_args : []),
     is_parallel : false,
 )
 
@@ -303,7 +320,7 @@ test('trace_capture_harness_animation_heavy',
     ] + (heavy_baselines_supported ? [
         '--baseline-artifact=' + heavy_animation_baseline_artifact,
         '--baseline-trace=' + heavy_animation_baseline_trace,
-    ] : []),
+    ] + heavy_baseline_args : []),
     is_parallel : false,
 )
 

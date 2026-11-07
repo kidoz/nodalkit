@@ -129,6 +129,13 @@ test_model = executable('test_model',
 )
 test('model', test_model)
 
+test_trace_capture_baseline = executable('test_trace_capture_baseline',
+    'trace_capture_baseline_test.cpp',
+    '../tools/trace_capture_baseline.cpp',
+    dependencies : [nk_dep, catch2_test_dep],
+)
+test('trace_capture_baseline', test_trace_capture_baseline)
+
 test_settings = executable('test_settings',
     'settings_test.cpp',
     dependencies : [nk_dep, catch2_test_dep],
