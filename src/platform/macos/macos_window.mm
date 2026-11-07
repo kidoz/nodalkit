@@ -475,6 +475,11 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self disableSecureInput];
     [self releaseAccessibilityElements];
+    if (tracking_area_) {
+        [self removeTrackingArea:tracking_area_];
+        [tracking_area_ release];
+        tracking_area_ = nil;
+    }
     [super dealloc];
 }
 
@@ -693,6 +698,7 @@ static nk::detail::Utf16Range utf16_range(NSRange range) {
 - (void)updateTrackingAreas {
     if (tracking_area_) {
         [self removeTrackingArea:tracking_area_];
+        [tracking_area_ release];
         tracking_area_ = nil;
     }
 
@@ -1862,12 +1868,12 @@ static std::optional<double> accessibility_number(const std::string& text) {
     case nk::NativeToolbarItem::Kind::Space: {
         NSToolbarItem* item = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
         [item setLabel:label];
-        return item;
+        return [item autorelease];
     }
     case nk::NativeToolbarItem::Kind::FlexibleSpace: {
         NSToolbarItem* item = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
         [item setLabel:label];
-        return item;
+        return [item autorelease];
     }
     case nk::NativeToolbarItem::Kind::SearchField: {
         if (@available(macOS 11.0, *)) {
@@ -1879,7 +1885,7 @@ static std::optional<double> accessibility_number(const std::string& text) {
             [[search searchField] setDelegate:self];
             [[search searchField] setTarget:self];
             [[search searchField] setAction:@selector(searchFieldSubmit:)];
-            return search;
+            return [search autorelease];
         }
         NSToolbarItem* fallback = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
         NSSearchField* field = [[NSSearchField alloc] initWithFrame:NSMakeRect(0, 0, 180, 22)];
@@ -1887,9 +1893,10 @@ static std::optional<double> accessibility_number(const std::string& text) {
         [field setTarget:self];
         [field setAction:@selector(searchFieldSubmit:)];
         [fallback setView:field];
+        [field release];
         [fallback setLabel:label];
         [fallback setToolTip:tooltip];
-        return fallback;
+        return [fallback autorelease];
     }
     case nk::NativeToolbarItem::Kind::Button: {
         NSToolbarItem* item = [[NSToolbarItem alloc] initWithItemIdentifier:itemIdentifier];
@@ -1910,7 +1917,7 @@ static std::optional<double> accessibility_number(const std::string& text) {
         if (image != nil) {
             [item setImage:image];
         }
-        return item;
+        return [item autorelease];
     }
     }
     return nil;
@@ -1957,6 +1964,26 @@ static std::optional<double> accessibility_number(const std::string& text) {
 namespace nk {
 
 namespace {
+
+void disconnect_toolbar_callbacks(NSToolbar* toolbar) {
+    [toolbar setDelegate:nil];
+    for (NSToolbarItem* item in toolbar.items) {
+        [item setTarget:nil];
+        [item setAction:nil];
+        NSSearchField* search = nil;
+        if (@available(macOS 11.0, *)) {
+            if ([item isKindOfClass:[NSSearchToolbarItem class]]) {
+                search = static_cast<NSSearchToolbarItem*>(item).searchField;
+            }
+        }
+        if ([item.view isKindOfClass:[NSSearchField class]]) {
+            search = static_cast<NSSearchField*>(item.view);
+        }
+        [search setDelegate:nil];
+        [search setTarget:nil];
+        [search setAction:nil];
+    }
+}
 
 void apply_titlebar_style(NSWindow* window, TitlebarStyle style) {
     NSWindowStyleMask mask = [window styleMask];
@@ -2023,27 +2050,18 @@ MacosSurface::~MacosSurface() {
         if (view_) {
             static_cast<NKView*>(view_).surface = nullptr;
         }
-        if (toolbar_delegate_) {
-            toolbar_delegate_.config = nullptr;
-        }
-        if (toolbar_) {
-            [toolbar_ setDelegate:nil];
-            if (window_) {
-                [window_ setToolbar:nil];
-            }
-            toolbar_ = nil;
-        }
-        if (toolbar_delegate_) {
-            toolbar_delegate_ = nil;
-        }
+        set_native_toolbar(nullptr);
         if (window_) {
             [window_ close];
+            [window_ release];
             window_ = nil;
         }
         if (view_) {
+            [view_ release];
             view_ = nil;
         }
         if (window_delegate_) {
+            [window_delegate_ release];
             window_delegate_ = nil;
         }
     }
@@ -2253,13 +2271,18 @@ void MacosSurface::set_titlebar_style(TitlebarStyle style) {
 void MacosSurface::set_native_toolbar(const NativeToolbarConfig* config) {
     @autoreleasepool {
         if (config == nullptr) {
+            if (toolbar_delegate_) {
+                toolbar_delegate_.config = nullptr;
+            }
+            disconnect_toolbar_callbacks(toolbar_);
             if (toolbar_ && window_) {
                 [window_ setToolbar:nil];
             }
             if (toolbar_) {
-                [toolbar_ setDelegate:nil];
+                [toolbar_ release];
                 toolbar_ = nil;
             }
+            [toolbar_delegate_ release];
             toolbar_delegate_ = nil;
             toolbar_config_.reset();
             return;
@@ -2285,10 +2308,13 @@ void MacosSurface::set_native_toolbar(const NativeToolbarConfig* config) {
         // available through tooltips and the customization palette.
         [new_toolbar setDisplayMode:NSToolbarDisplayModeIconOnly];
 
+        NSToolbar* previous_toolbar = toolbar_;
+        disconnect_toolbar_callbacks(previous_toolbar);
         toolbar_ = new_toolbar;
         if (window_) {
             [window_ setToolbar:toolbar_];
         }
+        [previous_toolbar release];
         set_native_toolbar_blocked(native_toolbar_blocked_);
     }
 }

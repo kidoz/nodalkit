@@ -7,6 +7,7 @@
 
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <memory>
@@ -24,6 +25,22 @@
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/text_field.h>
+#import <objc/runtime.h>
+
+@interface NKSurfaceLifetimeProbe : NSObject {
+@public
+    std::shared_ptr<std::size_t> destructions;
+}
+@end
+
+@implementation NKSurfaceLifetimeProbe
+
+- (void)dealloc {
+    ++*destructions;
+    [super dealloc];
+}
+
+@end
 
 namespace {
 
@@ -73,7 +90,160 @@ void settle(nk::Application& app) {
     }
 }
 
+void observe_destruction(id object, const std::shared_ptr<std::size_t>& counter) {
+    REQUIRE(object != nil);
+    auto* probe = [[NKSurfaceLifetimeProbe alloc] init];
+    probe->destructions = counter;
+    static char association_key;
+    objc_setAssociatedObject(object, &association_key, probe, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [probe release];
+}
+
 } // namespace
+
+TEST_CASE("macOS surface releases native objects after window teardown", "[macos][memory]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        std::array<std::shared_ptr<std::size_t>, 4> counters;
+        for (auto& counter : counters) {
+            counter = std::make_shared<std::size_t>(0);
+        }
+        @autoreleasepool {
+            auto window =
+                std::make_unique<nk::Window>(nk::WindowConfig{.title = "Surface lifetime"});
+            window->set_child(nk::Label::create("Window lifetime"));
+            window->present();
+            settle(app);
+            auto* native = (__bridge NSWindow*)window->native_surface()->native_handle();
+            observe_destruction(native, counters[0]);
+            observe_destruction(native.contentView, counters[1]);
+            observe_destruction(native.delegate, counters[2]);
+            REQUIRE(native.contentView.trackingAreas.count > 0);
+            observe_destruction(native.contentView.trackingAreas[0], counters[3]);
+            window.reset();
+            settle(app);
+        }
+        settle(app);
+        for (const auto& counter : counters) {
+            CHECK(*counter == 1);
+        }
+    }
+}
+
+TEST_CASE("macOS view releases replaced tracking areas", "[macos][memory]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        nk::Window window({.title = "Tracking lifetime"});
+        window.set_child(nk::Label::create("Tracking"));
+        window.present();
+        settle(app);
+        auto* native = (__bridge NSWindow*)window.native_surface()->native_handle();
+        auto destructions = std::make_shared<std::size_t>(0);
+        for (std::size_t iteration = 0; iteration < 5; ++iteration) {
+            @autoreleasepool {
+                REQUIRE(native.contentView.trackingAreas.count > 0);
+                observe_destruction(native.contentView.trackingAreas[0], destructions);
+                [native.contentView updateTrackingAreas];
+                settle(app);
+            }
+            CHECK(*destructions == iteration + 1);
+        }
+    }
+}
+
+TEST_CASE("macOS toolbar replacement and removal release objects and disconnect callbacks",
+          "[macos][memory][toolbar]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        auto destructions = std::make_shared<std::size_t>(0);
+        @autoreleasepool {
+            auto window =
+                std::make_unique<nk::Window>(nk::WindowConfig{.title = "Toolbar lifetime"});
+            window->set_child(nk::Label::create("Toolbar content"));
+            window->present();
+            settle(app);
+            auto* native = (__bridge NSWindow*)window->native_surface()->native_handle();
+            const auto config = [](int generation) {
+                nk::NativeToolbarConfig result;
+                result.identifier =
+                    "org.nodalkit.test.toolbar-lifetime." + std::to_string(generation);
+                result.allows_user_customization = false;
+                result.items = {{.kind = nk::NativeToolbarItem::Kind::Button,
+                                 .identifier = "button",
+                                 .label = "Button",
+                                 .tooltip = {},
+                                 .symbol_name = {},
+                                 .on_activate = {},
+                                 .on_search_submit = {}},
+                                {.kind = nk::NativeToolbarItem::Kind::SearchField,
+                                 .identifier = "search",
+                                 .label = "Search",
+                                 .tooltip = {},
+                                 .symbol_name = {},
+                                 .on_activate = {},
+                                 .on_search_submit = {}}};
+                return result;
+            };
+            const auto observe_toolbar = [&](bool observe_delegate) -> NSSearchField* {
+                NSToolbar* toolbar = native.toolbar;
+                observe_destruction(toolbar, destructions);
+                if (observe_delegate) {
+                    observe_destruction(toolbar.delegate, destructions);
+                }
+                NSSearchField* search = nil;
+                REQUIRE(toolbar.items.count == 2);
+                for (NSToolbarItem* item in toolbar.items) {
+                    observe_destruction(item, destructions);
+                    if ([item isKindOfClass:[NSSearchToolbarItem class]]) {
+                        search = static_cast<NSSearchToolbarItem*>(item).searchField;
+                    }
+                }
+                observe_destruction(search, destructions);
+                return [search retain];
+            };
+            @autoreleasepool {
+                window->set_native_toolbar(config(0));
+                settle(app);
+                NSSearchField* search = observe_toolbar(true);
+                window->set_native_toolbar(config(1));
+                settle(app);
+                CHECK(search.delegate == nil);
+                CHECK(search.target == nil);
+                CHECK(search.action == nil);
+                [search release];
+            }
+            settle(app);
+            @autoreleasepool {
+                NSSearchField* search = observe_toolbar(false);
+                window->clear_native_toolbar();
+                settle(app);
+                CHECK(search.delegate == nil);
+                CHECK(search.target == nil);
+                CHECK(search.action == nil);
+                [search release];
+            }
+            settle(app);
+            @autoreleasepool {
+                window->set_native_toolbar(config(2));
+                settle(app);
+                [observe_toolbar(true) release];
+                window.reset();
+                settle(app);
+            }
+            settle(app);
+        }
+        settle(app);
+        // AppKit keeps retired toolbar views alive until their removal animation completes.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (*destructions < 14 && std::chrono::steady_clock::now() < deadline) {
+            @autoreleasepool {
+                settle(app);
+                [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+            }
+        }
+        CHECK(*destructions == 14);
+    }
+}
 
 TEST_CASE("macOS secure input follows focus, field mode, hiding, and teardown", "[macos][secure]") {
     @autoreleasepool {
