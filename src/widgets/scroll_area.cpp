@@ -4,39 +4,38 @@
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/widgets/scroll_area.h>
+#include <optional>
 
 namespace nk {
 
 namespace {
 
 Constraints content_constraints(Rect viewport, ScrollPolicy h_policy, ScrollPolicy v_policy);
-SizeRequest
-content_request(const Widget* content, Rect viewport, ScrollPolicy h_policy, ScrollPolicy v_policy);
-float max_h_offset(const Widget* content,
+float max_h_offset(const SizeRequest* request,
                    Rect viewport,
                    ScrollPolicy h_policy,
                    ScrollPolicy v_policy);
-float max_v_offset(const Widget* content,
+float max_v_offset(const SizeRequest* request,
                    Rect viewport,
                    ScrollPolicy h_policy,
                    ScrollPolicy v_policy);
 bool rect_is_empty(Rect rect);
-bool should_show_v_scrollbar(ScrollPolicy h_policy,
+bool should_show_v_scrollbar(ScrollPolicy /*h_policy*/,
                              ScrollPolicy v_policy,
-                             const Widget* content,
+                             const SizeRequest* request,
                              Rect viewport);
 bool should_show_h_scrollbar(ScrollPolicy h_policy,
-                             ScrollPolicy v_policy,
-                             const Widget* content,
+                             ScrollPolicy /*v_policy*/,
+                             const SizeRequest* request,
                              Rect viewport);
 Rect v_thumb_rect(ScrollPolicy h_policy,
                   ScrollPolicy v_policy,
-                  const Widget* content,
+                  const SizeRequest* request,
                   Rect viewport,
                   float v_offset);
 Rect h_thumb_rect(ScrollPolicy h_policy,
                   ScrollPolicy v_policy,
-                  const Widget* content,
+                  const SizeRequest* request,
                   Rect viewport,
                   float h_offset);
 
@@ -55,6 +54,32 @@ struct ScrollArea::Impl {
     float drag_start_h_offset = 0;
     float drag_start_v_offset = 0;
     Signal<float, float> scroll_changed;
+    std::optional<SizeRequest> request;
+
+    const SizeRequest* request_for(Rect viewport) {
+        if (!content) {
+            return nullptr;
+        }
+        if (!request) {
+            request =
+                content->measure_for_diagnostics(content_constraints(viewport, h_policy, v_policy));
+        }
+        return &*request;
+    }
+
+    void allocate_content(Rect viewport) {
+        const auto* req = request_for(viewport);
+        if (req == nullptr) {
+            return;
+        }
+        const float width = h_policy == ScrollPolicy::Never
+                                ? viewport.width
+                                : std::max(viewport.width, req->natural_width);
+        const float height = v_policy == ScrollPolicy::Never
+                                 ? viewport.height
+                                 : std::max(viewport.height, req->natural_height);
+        content->allocate({viewport.x - h_offset, viewport.y - v_offset, width, height});
+    }
 };
 
 std::shared_ptr<ScrollArea> ScrollArea::create() {
@@ -71,6 +96,7 @@ void ScrollArea::set_content(std::shared_ptr<Widget> content) {
     if (impl_->content) {
         remove_child(*impl_->content);
     }
+    impl_->request.reset();
     impl_->content = std::move(content);
     if (impl_->content) {
         append_child(impl_->content);
@@ -83,11 +109,23 @@ Widget* ScrollArea::content() const {
 }
 
 void ScrollArea::set_h_scroll_policy(ScrollPolicy policy) {
+    if (impl_->h_policy == policy) {
+        return;
+    }
     impl_->h_policy = policy;
+    impl_->request.reset();
+    queue_layout();
+    queue_redraw();
 }
 
 void ScrollArea::set_v_scroll_policy(ScrollPolicy policy) {
+    if (impl_->v_policy == policy) {
+        return;
+    }
     impl_->v_policy = policy;
+    impl_->request.reset();
+    queue_layout();
+    queue_redraw();
 }
 
 float ScrollArea::h_offset() const {
@@ -101,17 +139,23 @@ float ScrollArea::v_offset() const {
 void ScrollArea::scroll_to(float h, float v) {
     const auto viewport = allocation();
     const float next_h = std::clamp(
-        h, 0.0F, max_h_offset(impl_->content.get(), viewport, impl_->h_policy, impl_->v_policy));
+        h,
+        0.0F,
+        max_h_offset(impl_->request_for(viewport), viewport, impl_->h_policy, impl_->v_policy));
     const float next_v = std::clamp(
-        v, 0.0F, max_v_offset(impl_->content.get(), viewport, impl_->h_policy, impl_->v_policy));
+        v,
+        0.0F,
+        max_v_offset(impl_->request_for(viewport), viewport, impl_->h_policy, impl_->v_policy));
     if (impl_->h_offset == next_h && impl_->v_offset == next_v) {
         return;
     }
     impl_->h_offset = next_h;
     impl_->v_offset = next_v;
-    impl_->scroll_changed.emit(next_h, next_v);
-    queue_layout();
+    // Scrolling changes child positions, not the size requested from our parent.
+    // Reallocate only this subtree and damage the viewport, preserving hit testing.
+    impl_->allocate_content(viewport);
     queue_redraw();
+    impl_->scroll_changed.emit(next_h, next_v);
 }
 
 Signal<float, float>& ScrollArea::on_scroll_changed() {
@@ -191,41 +235,31 @@ Constraints content_constraints(Rect viewport, ScrollPolicy h_policy, ScrollPoli
     return constraints;
 }
 
-SizeRequest content_request(const Widget* content,
-                            Rect viewport,
-                            ScrollPolicy h_policy,
-                            ScrollPolicy v_policy) {
-    if (content == nullptr) {
-        return {};
-    }
-    return content->measure_for_diagnostics(content_constraints(viewport, h_policy, v_policy));
-}
-
-float max_h_offset(const Widget* content,
+float max_h_offset(const SizeRequest* request,
                    Rect viewport,
                    ScrollPolicy h_policy,
-                   ScrollPolicy v_policy) {
+                   ScrollPolicy /*v_policy*/) {
     if (h_policy == ScrollPolicy::Never) {
         return 0.0F;
     }
-    if (content == nullptr) {
+    if (request == nullptr) {
         return 0.0F;
     }
-    const auto req = content_request(content, viewport, h_policy, v_policy);
+    const auto& req = *request;
     return std::max(0.0F, req.natural_width - viewport.width);
 }
 
-float max_v_offset(const Widget* content,
+float max_v_offset(const SizeRequest* request,
                    Rect viewport,
-                   ScrollPolicy h_policy,
+                   ScrollPolicy /*h_policy*/,
                    ScrollPolicy v_policy) {
     if (v_policy == ScrollPolicy::Never) {
         return 0.0F;
     }
-    if (content == nullptr) {
+    if (request == nullptr) {
         return 0.0F;
     }
-    const auto req = content_request(content, viewport, h_policy, v_policy);
+    const auto& req = *request;
     return std::max(0.0F, req.natural_height - viewport.height);
 }
 
@@ -248,11 +282,11 @@ Rect scrollbar_track(Rect viewport, bool vertical) {
             thickness};
 }
 
-bool should_show_v_scrollbar(ScrollPolicy h_policy,
+bool should_show_v_scrollbar(ScrollPolicy /*h_policy*/,
                              ScrollPolicy v_policy,
-                             const Widget* content,
+                             const SizeRequest* request,
                              Rect viewport) {
-    if (content == nullptr) {
+    if (request == nullptr) {
         return false;
     }
     if (v_policy == ScrollPolicy::Always) {
@@ -261,15 +295,15 @@ bool should_show_v_scrollbar(ScrollPolicy h_policy,
     if (v_policy == ScrollPolicy::Never) {
         return false;
     }
-    const auto req = content_request(content, viewport, h_policy, v_policy);
+    const auto& req = *request;
     return req.natural_height > viewport.height;
 }
 
 bool should_show_h_scrollbar(ScrollPolicy h_policy,
-                             ScrollPolicy v_policy,
-                             const Widget* content,
+                             ScrollPolicy /*v_policy*/,
+                             const SizeRequest* request,
                              Rect viewport) {
-    if (content == nullptr) {
+    if (request == nullptr) {
         return false;
     }
     if (h_policy == ScrollPolicy::Always) {
@@ -278,19 +312,19 @@ bool should_show_h_scrollbar(ScrollPolicy h_policy,
     if (h_policy == ScrollPolicy::Never) {
         return false;
     }
-    const auto req = content_request(content, viewport, h_policy, v_policy);
+    const auto& req = *request;
     return req.natural_width > viewport.width;
 }
 
 Rect v_thumb_rect(ScrollPolicy h_policy,
                   ScrollPolicy v_policy,
-                  const Widget* content,
+                  const SizeRequest* request,
                   Rect viewport,
                   float v_offset) {
-    if (!should_show_v_scrollbar(h_policy, v_policy, content, viewport)) {
+    if (!should_show_v_scrollbar(h_policy, v_policy, request, viewport)) {
         return {};
     }
-    const auto req = content_request(content, viewport, h_policy, v_policy);
+    const auto& req = *request;
     const auto track = scrollbar_track(viewport, true);
     const float max_offset = std::max(1.0F, req.natural_height - viewport.height);
     const float thumb_height =
@@ -302,13 +336,13 @@ Rect v_thumb_rect(ScrollPolicy h_policy,
 
 Rect h_thumb_rect(ScrollPolicy h_policy,
                   ScrollPolicy v_policy,
-                  const Widget* content,
+                  const SizeRequest* request,
                   Rect viewport,
                   float h_offset) {
-    if (!should_show_h_scrollbar(h_policy, v_policy, content, viewport)) {
+    if (!should_show_h_scrollbar(h_policy, v_policy, request, viewport)) {
         return {};
     }
-    const auto req = content_request(content, viewport, h_policy, v_policy);
+    const auto& req = *request;
     const auto track = scrollbar_track(viewport, false);
     const float max_offset = std::max(1.0F, req.natural_width - viewport.width);
     const float thumb_width = std::max(28.0F, (viewport.width / req.natural_width) * track.width);
@@ -362,31 +396,19 @@ void ScrollArea::reveal_child(const Widget& child, float margin) {
         impl_->v_policy == ScrollPolicy::Never
             ? impl_->v_offset
             : offset(impl_->v_offset, target.y, target.bottom(), viewport.y, viewport.bottom()));
-    allocate(viewport);
 }
 
 void ScrollArea::allocate(const Rect& allocation) {
     Widget::allocate(allocation);
+    // Content, constraints, or theme may have changed since the previous layout.
+    // Input and snapshots reuse this extent until the next allocation.
+    impl_->request.reset();
+    const auto* request = impl_->request_for(allocation);
     impl_->h_offset = std::clamp(
-        impl_->h_offset,
-        0.0F,
-        max_h_offset(impl_->content.get(), allocation, impl_->h_policy, impl_->v_policy));
+        impl_->h_offset, 0.0F, max_h_offset(request, allocation, impl_->h_policy, impl_->v_policy));
     impl_->v_offset = std::clamp(
-        impl_->v_offset,
-        0.0F,
-        max_v_offset(impl_->content.get(), allocation, impl_->h_policy, impl_->v_policy));
-    if (impl_->content) {
-        const auto req =
-            content_request(impl_->content.get(), allocation, impl_->h_policy, impl_->v_policy);
-        const float cw = impl_->h_policy == ScrollPolicy::Never
-                             ? allocation.width
-                             : std::max(allocation.width, req.natural_width);
-        const float ch = impl_->v_policy == ScrollPolicy::Never
-                             ? allocation.height
-                             : std::max(allocation.height, req.natural_height);
-        impl_->content->allocate(
-            {allocation.x - impl_->h_offset, allocation.y - impl_->v_offset, cw, ch});
-    }
+        impl_->v_offset, 0.0F, max_v_offset(request, allocation, impl_->h_policy, impl_->v_policy));
+    impl_->allocate_content(allocation);
 }
 
 bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
@@ -403,9 +425,9 @@ bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
     const auto v_track = scrollbar_track(viewport, true);
     const auto h_track = scrollbar_track(viewport, false);
     const auto v_thumb = v_thumb_rect(
-        impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport, impl_->v_offset);
+        impl_->h_policy, impl_->v_policy, impl_->request_for(viewport), viewport, impl_->v_offset);
     const auto h_thumb = h_thumb_rect(
-        impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport, impl_->h_offset);
+        impl_->h_policy, impl_->v_policy, impl_->request_for(viewport), viewport, impl_->h_offset);
 
     switch (event.type) {
     case MouseEvent::Type::Scroll:
@@ -445,8 +467,7 @@ bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
             return true;
         }
         if (v_track.contains(point) && !rect_is_empty(v_thumb)) {
-            const auto req =
-                content_request(impl_->content.get(), viewport, impl_->h_policy, impl_->v_policy);
+            const auto& req = *impl_->request_for(viewport);
             const float max_offset = std::max(1.0F, req.natural_height - viewport.height);
             const float travel = std::max(1.0F, v_track.height - v_thumb.height);
             const float thumb_top = std::clamp(
@@ -459,8 +480,7 @@ bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
             return true;
         }
         if (h_track.contains(point) && !rect_is_empty(h_thumb)) {
-            const auto req =
-                content_request(impl_->content.get(), viewport, impl_->h_policy, impl_->v_policy);
+            const auto& req = *impl_->request_for(viewport);
             const float max_offset = std::max(1.0F, req.natural_width - viewport.width);
             const float travel = std::max(1.0F, h_track.width - h_thumb.width);
             const float thumb_left = std::clamp(
@@ -476,8 +496,7 @@ bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
     }
     case MouseEvent::Type::Move: {
         if (impl_->dragging_v_thumb && !rect_is_empty(v_thumb)) {
-            const auto req =
-                content_request(impl_->content.get(), viewport, impl_->h_policy, impl_->v_policy);
+            const auto& req = *impl_->request_for(viewport);
             const float max_offset = std::max(1.0F, req.natural_height - viewport.height);
             const float travel = std::max(1.0F, v_track.height - v_thumb.height);
             const float delta = point.y - impl_->drag_origin_y;
@@ -486,8 +505,7 @@ bool ScrollArea::handle_mouse_event(const MouseEvent& event) {
             return true;
         }
         if (impl_->dragging_h_thumb && !rect_is_empty(h_thumb)) {
-            const auto req =
-                content_request(impl_->content.get(), viewport, impl_->h_policy, impl_->v_policy);
+            const auto& req = *impl_->request_for(viewport);
             const float max_offset = std::max(1.0F, req.natural_width - viewport.width);
             const float travel = std::max(1.0F, h_track.width - h_thumb.width);
             const float delta = point.x - impl_->drag_origin_x;
@@ -524,10 +542,10 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
         return;
     }
 
-    const bool show_v_scrollbar =
-        should_show_v_scrollbar(impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport);
-    const bool show_h_scrollbar =
-        should_show_h_scrollbar(impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport);
+    const bool show_v_scrollbar = should_show_v_scrollbar(
+        impl_->h_policy, impl_->v_policy, impl_->request_for(viewport), viewport);
+    const bool show_h_scrollbar = should_show_h_scrollbar(
+        impl_->h_policy, impl_->v_policy, impl_->request_for(viewport), viewport);
 
     // Overlay mode (macOS/GNOME) floats a translucent thumb over the content
     // with no persistent track; persistent mode (Windows) keeps track+thumb.
@@ -539,8 +557,11 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
 
     if (show_v_scrollbar) {
         const auto track = scrollbar_track(viewport, true);
-        const auto thumb = v_thumb_rect(
-            impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport, impl_->v_offset);
+        const auto thumb = v_thumb_rect(impl_->h_policy,
+                                        impl_->v_policy,
+                                        impl_->request_for(viewport),
+                                        viewport,
+                                        impl_->v_offset);
         if (!overlay) {
             ctx.add_rounded_rect(track, track_color, track.width * 0.5F);
         }
@@ -549,8 +570,11 @@ void ScrollArea::snapshot(SnapshotContext& ctx) const {
 
     if (show_h_scrollbar) {
         const auto track = scrollbar_track(viewport, false);
-        const auto thumb = h_thumb_rect(
-            impl_->h_policy, impl_->v_policy, impl_->content.get(), viewport, impl_->h_offset);
+        const auto thumb = h_thumb_rect(impl_->h_policy,
+                                        impl_->v_policy,
+                                        impl_->request_for(viewport),
+                                        viewport,
+                                        impl_->h_offset);
         if (!overlay) {
             ctx.add_rounded_rect(track, track_color, track.height * 0.5F);
         }

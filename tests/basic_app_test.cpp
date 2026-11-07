@@ -2341,7 +2341,7 @@ TEST_CASE("ScrollArea positions content relative to its viewport origin", "[app]
     REQUIRE(content->allocation() == nk::Rect{6.0F, -4.0F, 200.0F, 300.0F});
 }
 
-TEST_CASE("ScrollArea queues layout when the scroll offset changes", "[app][scroll]") {
+TEST_CASE("ScrollArea updates content without requesting window layout", "[app][scroll]") {
     nk::Window window({.title = "Scroll layout test", .width = 120, .height = 80});
     auto scroll_area = nk::ScrollArea::create();
     auto content = FixedWidget::create(200.0F, 300.0F);
@@ -2358,7 +2358,7 @@ TEST_CASE("ScrollArea queues layout when the scroll offset changes", "[app][scro
     });
 
     REQUIRE(scroll_area->v_offset() > 0.0F);
-    scroll_area->allocate({0.0F, 0.0F, 120.0F, 80.0F});
+    CHECK_FALSE(scroll_area->debug_pending_layout());
     REQUIRE(content->allocation().y < 0.0F);
 }
 
@@ -6634,4 +6634,22 @@ TEST_CASE("ListView preserves precise scrolling in logical pixels", "[app][scrol
     REQUIRE(list->handle_mouse_event(
         {.type = nk::MouseEvent::Type::Scroll, .x = 20.0F, .y = 20.0F, .scroll_dy = -1.0F}));
     CHECK(row->allocation().y == Catch::Approx(initial_y - 33.0F));
+}
+
+TEST_CASE("Scrolling renders without a window layout pass", "[app][scroll]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Scroll redraw", .width = 200, .height = 100});
+    auto scroll = nk::ScrollArea::create();
+    auto content = FixedWidget::create(200.0F, 500.0F);
+    scroll->set_content(content);
+    window.set_child(scroll);
+    window.present();
+    (void)app.event_loop().poll();
+    (void)app.event_loop().poll();
+    scroll->scroll_to(0.0F, 24.0F);
+    REQUIRE(app.event_loop().poll());
+    const auto& frame = window.inspector().last_frame_diagnostics();
+    CHECK_FALSE(frame.had_layout);
+    CHECK(frame.layout_request_count == 0);
+    CHECK(content->allocation().y == Catch::Approx(scroll->allocation().y - 24.0F));
 }

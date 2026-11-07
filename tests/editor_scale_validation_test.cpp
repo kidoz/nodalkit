@@ -117,6 +117,12 @@ public:
 
     void queue_cell_damage(nk::Rect damage) { queue_redraw(damage); }
 
+    void set_extent(float width, float height) {
+        width_ = width;
+        height_ = height;
+        queue_layout();
+    }
+
     [[nodiscard]] std::size_t measure_queries() const { return measure_queries_; }
 
     [[nodiscard]] std::size_t snapshot_calls() const { return snapshot_calls_; }
@@ -296,7 +302,7 @@ TEST_CASE("ScrollArea composes a stable editor surface with localized content da
     scroll_area->snapshot_for_test(ctx);
 
     REQUIRE(surface->snapshot_calls() == 1);
-    REQUIRE(surface->measure_queries() <= 8);
+    REQUIRE(surface->measure_queries() == 0);
 
     surface->queue_cell_damage({1032.0F, 64012.0F, 16.0F, 12.0F});
     const auto damage = surface->debug_damage_regions();
@@ -305,4 +311,52 @@ TEST_CASE("ScrollArea composes a stable editor surface with localized content da
     REQUIRE(damage.front().y == 12.0F);
     REQUIRE(damage.front().width == 16.0F);
     REQUIRE(damage.front().height == 12.0F);
+}
+
+TEST_CASE("ScrollArea reuses layout extents while scrolling", "[editor-scale][scroll]") {
+    auto scroll = SnapshotScrollArea::create();
+    auto surface = EditorSurfaceWidget::create(4096.0F, 120000.0F);
+    scroll->set_content(surface);
+    scroll->allocate({24.0F, 36.0F, 320.0F, 180.0F});
+    surface->reset_counters();
+
+    for (int step = 0; step < 20; ++step) {
+        REQUIRE(scroll->handle_mouse_event({.type = nk::MouseEvent::Type::Scroll,
+                                            .x = 40.0F,
+                                            .y = 50.0F,
+                                            .scroll_dy = -8.0F,
+                                            .precise_scrolling = true}));
+        nk::SnapshotContext ctx;
+        scroll->snapshot_for_test(ctx);
+    }
+    CHECK(surface->measure_queries() == 0);
+    CHECK_FALSE(scroll->debug_pending_layout());
+    CHECK(scroll->v_offset() == 160.0F);
+    CHECK(surface->allocation().y == -124.0F);
+}
+
+TEST_CASE("ScrollArea refreshes extents when content or constraints change",
+          "[editor-scale][scroll]") {
+    auto scroll = SnapshotScrollArea::create();
+    auto surface = EditorSurfaceWidget::create(400.0F, 500.0F);
+    scroll->set_content(surface);
+    scroll->allocate({0.0F, 0.0F, 100.0F, 100.0F});
+    scroll->scroll_to(1000.0F, 1000.0F);
+    CHECK(scroll->h_offset() == 300.0F);
+    CHECK(scroll->v_offset() == 400.0F);
+    surface->set_extent(200.0F, 250.0F);
+    scroll->allocate({0.0F, 0.0F, 150.0F, 200.0F});
+    CHECK(scroll->h_offset() == 50.0F);
+    CHECK(scroll->v_offset() == 50.0F);
+    CHECK(surface->allocation() == nk::Rect{-50.0F, -50.0F, 200.0F, 250.0F});
+    scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+    scroll->set_v_scroll_policy(nk::ScrollPolicy::Never);
+    scroll->allocate({0.0F, 0.0F, 150.0F, 200.0F});
+    CHECK(scroll->h_offset() == 0.0F);
+    CHECK(scroll->v_offset() == 0.0F);
+    CHECK(surface->allocation() == nk::Rect{0.0F, 0.0F, 150.0F, 200.0F});
+    scroll->set_content(nullptr);
+    scroll->scroll_to(1000.0F, 1000.0F);
+    CHECK(scroll->h_offset() == 0.0F);
+    CHECK(scroll->v_offset() == 0.0F);
 }
