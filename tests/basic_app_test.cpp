@@ -1633,6 +1633,50 @@ std::optional<PpmHeader> read_ppm_header(const std::filesystem::path& path) {
 
 } // namespace
 
+TEST_CASE("Theme selection redraws every open window", "[app][theme][render]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
+    nk::Application app(0, nullptr);
+    app.set_system_preferences_observation_enabled(false);
+    nk::ThemeSelection selection;
+    selection.family = nk::ThemeFamily::Windows11;
+    selection.color_scheme_override = nk::ColorScheme::Light;
+    app.set_theme_selection(selection);
+
+    nk::Window first({.title = "Theme first", .width = 240, .height = 120});
+    nk::Window second({.title = "Theme second", .width = 240, .height = 120});
+    first.set_child(nk::Button::create("Save"));
+    second.set_child(nk::Button::create("Other"));
+    first.present();
+    second.present();
+    REQUIRE(app.event_loop().poll());
+    (void)app.event_loop().poll();
+    const auto first_frame = first.inspector().last_frame_diagnostics().frame_id;
+    const auto second_frame = second.inspector().last_frame_diagnostics().frame_id;
+    const auto light = first.inspector().capture_debug_screenshot();
+    REQUIRE(light);
+
+    selection.color_scheme_override = nk::ColorScheme::Dark;
+    app.set_theme_selection(selection);
+    REQUIRE(app.event_loop().poll());
+    CHECK(first.inspector().last_frame_diagnostics().frame_id > first_frame);
+    CHECK(second.inspector().last_frame_diagnostics().frame_id > second_frame);
+    CHECK(first.inspector().last_frame_diagnostics().had_layout);
+    CHECK(second.inspector().last_frame_diagnostics().had_layout);
+    const auto dark = first.inspector().capture_debug_screenshot();
+    REQUIRE(dark);
+    CHECK(dark->rgba != light->rgba);
+
+    // Disconnecting a destroyed window must also leave later theme changes safe.
+    { nk::Window temporary({.title = "Temporary theme subscriber"}); }
+    selection.color_scheme_override = nk::ColorScheme::Light;
+    app.set_theme_selection(selection);
+    REQUIRE(app.event_loop().poll());
+    const auto restored = first.inspector().capture_debug_screenshot();
+    REQUIRE(restored);
+    CHECK(restored->rgba == light->rgba);
+}
+
 TEST_CASE("Debug screenshot capture reads the software renderer frame", "[app][render][debug]") {
     ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
     REQUIRE(renderer_backend_override.set("software") == 0);

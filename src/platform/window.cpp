@@ -125,6 +125,7 @@ struct Window::Impl {
     Signal<float> scale_factor_signal;
     Signal<> window_state_changed_signal;
     ScopedConnection system_preferences_subscription;
+    ScopedConnection theme_selection_subscription;
     SystemPreferences system_preferences;
 };
 
@@ -1682,6 +1683,12 @@ Window::Window(WindowConfig config) : impl_(std::make_unique<Impl>()) {
                 apply_system_font_preferences_to_shaper(prefs);
                 impl_->needs_layout = true;
                 request_frame(FrameRequestReason::SystemPreferencesChanged);
+            }));
+        impl_->theme_selection_subscription = ScopedConnection(
+            app->on_theme_selection_changed().connect([this](const ThemeSelection&) {
+                // Density and font changes affect geometry as well as pixels.
+                // A layout frame also invalidates cached snapshots and damage.
+                invalidate_layout();
             }));
     }
     NK_LOG_DEBUG("Window", "Window created");
