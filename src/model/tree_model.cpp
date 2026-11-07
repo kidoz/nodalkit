@@ -1,11 +1,19 @@
-#include <algorithm>
 #include <cassert>
+#include <memory>
 #include <nk/model/tree_model.h>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace nk {
 
-TreeModel::TreeModel() = default;
+struct TreeModel::VisibleIndex {
+    std::vector<TreeNodeId> nodes;
+    std::vector<std::size_t> rows;
+    bool dirty = true;
+};
+
+TreeModel::TreeModel() : visible_index_(std::make_unique<VisibleIndex>()) {}
 
 TreeModel::~TreeModel() = default;
 
@@ -18,6 +26,7 @@ TreeNodeId TreeModel::add_root(std::string text) {
         .children = {},
     });
     roots_.push_back(id);
+    visible_index_->dirty = true;
     model_reset_.emit();
     return id;
 }
@@ -32,6 +41,7 @@ TreeNodeId TreeModel::append_child(TreeNodeId parent, std::string text) {
         .children = {},
     });
     node(parent).children.push_back(id);
+    visible_index_->dirty = true;
     model_reset_.emit();
     return id;
 }
@@ -42,6 +52,7 @@ void TreeModel::clear() {
     }
     nodes_.clear();
     roots_.clear();
+    *visible_index_ = VisibleIndex{};
     model_reset_.emit();
 }
 
@@ -90,6 +101,7 @@ void TreeModel::set_expanded(TreeNodeId node_id, bool expanded) {
         return;
     }
     item.expanded = expanded;
+    visible_index_->dirty = true;
     model_reset_.emit();
 }
 
@@ -102,22 +114,21 @@ bool TreeModel::is_expanded(TreeNodeId node_id) const {
 }
 
 std::size_t TreeModel::visible_row_count() const {
-    return visible_nodes().size();
+    return visible_index().nodes.size();
 }
 
 TreeNodeId TreeModel::visible_node_at(std::size_t row) const {
-    const auto visible = visible_nodes();
+    const auto& visible = visible_index().nodes;
     assert(row < visible.size());
     return visible[row];
 }
 
 std::optional<std::size_t> TreeModel::visible_row_for_node(TreeNodeId node_id) const {
-    const auto visible = visible_nodes();
-    const auto iter = std::find(visible.begin(), visible.end(), node_id);
-    if (iter == visible.end()) {
+    if (!contains(node_id)) {
         return std::nullopt;
     }
-    return static_cast<std::size_t>(std::distance(visible.begin(), iter));
+    const auto row = visible_index().rows[node_id];
+    return row == InvalidTreeNodeId ? std::nullopt : std::optional(row);
 }
 
 Signal<>& TreeModel::on_model_reset() {
@@ -134,24 +145,38 @@ TreeModel::Node& TreeModel::node(TreeNodeId id) {
     return nodes_[id];
 }
 
-void TreeModel::append_visible_nodes(TreeNodeId node_id, std::vector<TreeNodeId>& visible) const {
-    visible.push_back(node_id);
-    const auto& item = node(node_id);
-    if (!item.expanded) {
-        return;
+const TreeModel::VisibleIndex& TreeModel::visible_index() const {
+    auto& index = *visible_index_;
+    if (!index.dirty) {
+        return index;
     }
-    for (const auto child : item.children) {
-        append_visible_nodes(child, visible);
-    }
-}
+    index.nodes.clear();
+    index.nodes.reserve(nodes_.size());
+    index.rows.assign(nodes_.size(), InvalidTreeNodeId);
 
-std::vector<TreeNodeId> TreeModel::visible_nodes() const {
-    std::vector<TreeNodeId> visible;
-    visible.reserve(nodes_.size());
-    for (const auto root : roots_) {
-        append_visible_nodes(root, visible);
+    // Keep traversal storage proportional to depth, without recursive stack growth.
+    struct Level {
+        std::span<const TreeNodeId> siblings;
+        std::size_t next = 0;
+    };
+
+    std::vector<Level> levels{{roots_}};
+    while (!levels.empty()) {
+        auto& level = levels.back();
+        if (level.next == level.siblings.size()) {
+            levels.pop_back();
+            continue;
+        }
+        const auto id = level.siblings[level.next++];
+        index.rows[id] = index.nodes.size();
+        index.nodes.push_back(id);
+        const auto& item = node(id);
+        if (item.expanded && !item.children.empty()) {
+            levels.push_back({item.children});
+        }
     }
-    return visible;
+    index.dirty = false;
+    return index;
 }
 
 } // namespace nk

@@ -1,9 +1,12 @@
 /// @file model_test.cpp
-/// @brief Tests for AbstractTableModel and AbstractTreeModel base capabilities.
+/// @brief Tests for concrete and abstract tree and table model contracts.
 
 #include <catch2/catch_test_macros.hpp>
 #include <nk/model/abstract_table_model.h>
 #include <nk/model/abstract_tree_model.h>
+#include <nk/model/tree_model.h>
+#include <utility>
+#include <vector>
 
 class ConcreteTableModel : public nk::AbstractTableModel {
 public:
@@ -298,4 +301,94 @@ TEST_CASE("AbstractTreeModel emits data change and reset signals", "[model]") {
     tree.trigger_reset();
 
     REQUIRE(reset_count == 1);
+}
+
+TEST_CASE("TreeModel keeps both visible mappings coherent across mutations", "[model][tree]") {
+    nk::TreeModel model;
+    const auto check_rows = [&](std::vector<nk::TreeNodeId> expected) {
+        REQUIRE(model.visible_row_count() == expected.size());
+        for (std::size_t row = 0; row < expected.size(); ++row) {
+            CHECK(model.visible_node_at(row) == expected[row]);
+            CHECK(model.visible_row_for_node(expected[row]) == row);
+        }
+        CHECK_FALSE(model.visible_row_for_node(nk::InvalidTreeNodeId));
+        CHECK_FALSE(model.visible_row_for_node(1000000));
+    };
+    check_rows({});
+    const auto first = model.add_root("first");
+    const auto child = model.append_child(first, "child");
+    const auto grandchild = model.append_child(child, "grandchild");
+    const auto last = model.add_root("last");
+    check_rows({first, child, grandchild, last});
+    model.set_expanded(first, false);
+    check_rows({first, last});
+    CHECK_FALSE(model.visible_row_for_node(child));
+    CHECK_FALSE(model.visible_row_for_node(grandchild));
+    const auto hidden_child = model.append_child(child, "hidden child");
+    check_rows({first, last});
+    CHECK_FALSE(model.visible_row_for_node(hidden_child));
+    model.set_expanded(child, false);
+    model.set_expanded(first, true);
+    check_rows({first, child, last});
+    model.toggle_expanded(child);
+    check_rows({first, child, grandchild, hidden_child, last});
+    const auto sibling = model.append_child(first, "sibling");
+    check_rows({first, child, grandchild, hidden_child, sibling, last});
+    model.set_display_text(child, "renamed");
+    check_rows({first, child, grandchild, hidden_child, sibling, last});
+    CHECK(model.display_text(child) == "renamed");
+    model.clear();
+    check_rows({});
+    CHECK_FALSE(model.visible_row_for_node(child));
+    const auto reused = model.add_root("reused");
+    CHECK(reused == 0);
+    check_rows({reused});
+    CHECK_FALSE(model.visible_row_for_node(child));
+}
+
+TEST_CASE("TreeModel reset observers see the updated visible index", "[model][tree][signal]") {
+    nk::TreeModel model;
+    std::vector<std::vector<nk::TreeNodeId>> snapshots;
+    auto connection = model.on_model_reset().connect([&] {
+        std::vector<nk::TreeNodeId> rows;
+        for (std::size_t row = 0; row < model.visible_row_count(); ++row) {
+            const auto id = model.visible_node_at(row);
+            CHECK(model.visible_row_for_node(id) == row);
+            rows.push_back(id);
+        }
+        snapshots.push_back(std::move(rows));
+    });
+    const auto root = model.add_root("root");
+    const auto child = model.append_child(root, "child");
+    model.set_expanded(root, false);
+    const auto hidden = model.append_child(root, "hidden");
+    model.set_expanded(root, true);
+    model.set_display_text(child, "renamed");
+    model.clear();
+    CHECK(snapshots == std::vector<std::vector<nk::TreeNodeId>>{{root},
+                                                                {root, child},
+                                                                {root},
+                                                                {root},
+                                                                {root, child, hidden},
+                                                                {root, child, hidden},
+                                                                {}});
+    CHECK(connection.connected());
+}
+
+TEST_CASE("TreeModel indexes deeply nested expanded nodes", "[model][tree]") {
+    nk::TreeModel model;
+    const auto root = model.add_root("root");
+    auto leaf = root;
+    constexpr std::size_t depth = 20000;
+    for (std::size_t level = 1; level < depth; ++level) {
+        leaf = model.append_child(leaf, "child");
+    }
+    CHECK(model.visible_row_count() == depth);
+    CHECK(model.visible_node_at(depth - 1) == leaf);
+    CHECK(model.visible_row_for_node(leaf) == depth - 1);
+    model.set_expanded(root, false);
+    CHECK(model.visible_row_count() == 1);
+    CHECK_FALSE(model.visible_row_for_node(leaf));
+    model.set_expanded(root, true);
+    CHECK(model.visible_node_at(depth - 1) == leaf);
 }

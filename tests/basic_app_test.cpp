@@ -6653,3 +6653,32 @@ TEST_CASE("Scrolling renders without a window layout pass", "[app][scroll]") {
     CHECK(frame.layout_request_count == 0);
     CHECK(content->allocation().y == Catch::Approx(scroll->allocation().y - 24.0F));
 }
+
+TEST_CASE("TreeView navigates updated rows while preserving node selection", "[app][tree]") {
+    auto model = std::make_shared<nk::TreeModel>();
+    const auto root = model->add_root("root");
+    const auto branch = model->append_child(root, "branch");
+    const auto child = model->append_child(branch, "child");
+    const auto sibling = model->append_child(root, "sibling");
+    auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
+    selection->select(branch);
+    selection->set_current_row(branch);
+    auto tree = nk::TreeView::create();
+    tree->set_model(model);
+    tree->set_selection_model(selection);
+    tree->allocate({0, 0, 240, 160});
+    model->set_expanded(branch, false);
+    CHECK(selection->is_selected(branch));
+    CHECK(selection->current_row() == branch);
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(selection->current_row() == sibling);
+    model->set_expanded(branch, true);
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Up}));
+    CHECK(selection->current_row() == child);
+    const auto inserted = model->append_child(branch, "inserted");
+    REQUIRE(tree->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Down}));
+    CHECK(selection->current_row() == inserted);
+    model->set_display_text(inserted, "renamed");
+    CHECK(tree->accessible()->value().find("renamed") != std::string_view::npos);
+    CHECK(model->visible_row_for_node(inserted) == 3);
+}

@@ -4,6 +4,7 @@
 /// @brief Simple hierarchical model with stable node IDs and expansion state.
 
 #include <cstddef>
+#include <memory>
 #include <nk/foundation/signal.h>
 #include <optional>
 #include <span>
@@ -66,6 +67,7 @@ public:
     [[nodiscard]] bool is_expanded(TreeNodeId node) const;
 
     /// Returns the number of currently visible flattened rows.
+    /// Visible-row queries reuse a lazy index, rebuilt after structure or expansion changes.
     [[nodiscard]] std::size_t visible_row_count() const;
     /// Returns the node shown at a visible row.
     [[nodiscard]] TreeNodeId visible_node_at(std::size_t row) const;
@@ -86,11 +88,12 @@ private:
 
     [[nodiscard]] const Node& node(TreeNodeId id) const;
     [[nodiscard]] Node& node(TreeNodeId id);
-    void append_visible_nodes(TreeNodeId node, std::vector<TreeNodeId>& visible) const;
-    [[nodiscard]] std::vector<TreeNodeId> visible_nodes() const;
+    struct VisibleIndex;
+    [[nodiscard]] const VisibleIndex& visible_index() const;
 
     std::vector<Node> nodes_;
     std::vector<TreeNodeId> roots_;
+    std::unique_ptr<VisibleIndex> visible_index_;
     Signal<> model_reset_;
 };
 
