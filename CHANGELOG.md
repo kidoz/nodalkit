@@ -4,6 +4,78 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
+The fourth normal release of the NodalKit framework. 0.4.0 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.3.4 and rounds out application chrome and navigation: window
+titles, navigation and view stacks, search bars, revealers, popovers, tooltips,
+overflowing toolbars and header bars, richer tabs, breadcrumbs, menus,
+preference rows, status bars, feedback widgets, and keyboard scrolling. Model
+and text paths cache visible rows, sort keys, line widths, content extents, and
+CoreText metrics, while scrolling honors precise deltas and chains at viewport
+boundaries. macOS and Metal object lifetimes are hardened, performance captures
+are gated on reproducible work counters, and a simulated trading-terminal
+example joins the tree.
+
+### Support Matrix for 0.4.0
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Support exists but is highly experimental. It must not be
+    considered a parity or release-supported target.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Production-grade IME & Accessibility:** The macOS and Linux
+    accessibility bridges now ship, but real-user validation for those and
+    native IME paths is still ongoing.
+
+### Added
+*   **Window and Headerbar Chrome:** `WindowTitle` renders a title with an optional subtitle, and headerbars can show a title widget, center titles with `HeaderbarCenteringPolicy::Loose` or `Strict`, show a contextual back button, and move trailing actions that do not fit into an overflow popover.
+*   **Navigation Stack:** `NavigationStack` pushes and pops titled pages, reports depth changes, and binds a headerbar so its back button follows the stack.
+*   **View Stack:** `ViewStack` switches peer pages and binds a `SegmentedControl` as its switcher, keeping segments and selection synchronized in both directions.
+*   **Search Bar:** `SearchBar` starts as a button, reveals a `SearchField` on activation, and reports text changes, submissions, and revealed state; Escape or the cancel control collapses it and restores focus.
+*   **Revealer and Banners:** `Revealer` animates a child's height with reduced-motion support, and `Banner` now collapses and expands through it.
+*   **Anchored Popovers:** `Popover` anchors to a widget, flips above when the window lacks room, draws an arrow back to its anchor, takes focus while open, and dismisses on Escape or an outside press while returning focus.
+*   **Tooltips:** widgets show a tooltip after a hover delay and immediately on keyboard focus, and store the text as the accessible description.
+*   **Toolbar and Tab Overflow:** `Toolbar` moves items that do not fit into an overflow popover and moves focus with arrow, Home, and End keys; `TabBar` tabs accept symbolic icons, close buttons, and page widgets, and overflow into a menu.
+*   **Breadcrumbs:** breadcrumbs support keyboard navigation, overflow for long paths, and `on_navigate()` with the chosen depth.
+*   **Menus and Split Buttons:** `MenuButton` and `SplitButton` combine a primary action with a context menu; context menus accept native menu items with separators, one level of submenu, and shared action groups with checked and disabled state; `ShortcutLabel` draws accelerator text in menus.
+*   **Button Content:** `ButtonContent` composes a label, symbolic icon, and chevron for buttons, and menu and split buttons reuse it.
+*   **Preferences Rows:** `ActionRow` and `ExpanderRow` join `SwitchRow`, `ComboRow`, and `EntryRow`, and new `PasswordRow` and `SpinRow` cover secret and numeric settings.
+*   **Status Bar Widgets:** status bar segments can hold widgets, trailing text is supported, and a resize grip resizes the bottom-trailing corner of resizable windows with client-side decorations.
+*   **Feedback Widgets:** `LevelBar` reports a meter value with a meter accessibility role; `Badge` gains count, capped-count, dot, and status modes; `InfoBar` gains severity levels and a status role; `Avatar` draws a person mark and presence status; toasts carry an action label and pause their timeout while hovered.
+*   **Busy Overlay:** `BusyOverlay` keeps a page visible under a scrim with a spinner and message while blocking its pointer and keyboard input.
+*   **Link Button and About Logo:** `LinkButton` reports a target string on click, Return, or Space with a link role and cursor, and `AboutInfo::logo` centers a mark above the application identity.
+*   **Dialog Buttons:** dialogs add custom response buttons and paint buttons as destructive actions.
+*   **Keyboard Scrolling:** focused scroll areas scroll with arrow, Page Up, Page Down, Home, and End keys.
+*   **Self-Driven Indeterminate Motion:** progress bars and spinners advance their indeterminate animation from internal timers while shown in a visible window, holding still under reduced motion, when hidden, or when detached.
+*   **Sort Key Mode:** `SortListModel::set_sort_key()` sorts by a string extracted once per source row in ascending or descending order and preserves source order for equal keys.
+*   **Trading Terminal Example:** a simulated market example with a candlestick chart, watchlist, order ticket, orders and positions tables, and a `just trading-terminal` recipe.
+
+### Changed
+*   **Scrolling:** `ScrollArea`, `ListView`, `DataTable`, `GridView`, and `TreeView` honor precise trackpad deltas in logical pixels, release unchanged scrolls so a nested viewport continues them, and cache measured content extents so scrolling skips layout.
+*   **Model Refresh:** `TreeModel` caches visible rows with a reverse node-to-row index, and `DataTable` sorts from cached keys and requests layout only when the row count changes.
+*   **Text Caches:** macOS `CoreTextShaper` caches font handles and measurements in bounded caches that clear on scale-factor or system-font changes, `TextArea` reuses line widths across edits and composition, and the showcase reuses wrapped text layouts.
+*   **Backdrops:** `VisualEffectView` forces an opaque backdrop when the theme requests reduced transparency.
+*   **Logging:** log messages record the source location of the call that produced them.
+*   **Event Loop:** `EventLoop::post()` returns false when the loop no longer accepts tasks.
+*   **Service Locator:** `ServiceLocator::get()` returns an empty pointer for a missing or mismatched service instead of throwing.
+*   **Result Misuse:** `Result::value()` and `Result::error()` abort in debug and release builds when the wrong state is accessed.
+*   **Desktop Palettes:** `GtkPalette` is renamed to `DesktopPalette` and loads `@define-color` entries from desktop theme stylesheets; theme names must be one path segment and combined stylesheets are limited to 1 MiB.
+*   **Settings:** stores reject files larger than 1 MiB, require the application name to be one path segment, and write owner-only files that are flushed before the atomic replace.
+*   **Performance Baselines:** baseline comparison lives in `tools/trace_capture_baseline.{h,cpp}` with selectable `timed` and `counters` policies; macOS runs text-, list-, and animation-heavy captures against software and Metal fixtures, gating frame counts, work counters, GPU uploads, draw calls, and shape-cache reuse while reporting wall-clock comparisons as advisory.
+*   **Test Coverage:** the public API audit covers the new symbols, and macOS tests cover surface and toolbar lifetimes, Metal output against the software renderer, warm texture reuse, and a constrained drawable pool.
+
+### Fixed
+*   **macOS Window Lifetime:** surface teardown now releases the window, content view, delegate, tracking areas, and toolbar, including its delegate and search field, and toolbar replacement or removal detaches callbacks before releasing the previous toolbar.
+*   **Metal Alpha Blending:** Metal now uses the software renderer's premultiplied-alpha blend factors, so translucent content matches CPU output.
+*   **Secure Text Entry:** password fields mark their input state as secure, enable macOS secure event input while focused in the active key window, bypass IME composition for secure keyboard entry on macOS, and send Wayland sensitive-data hints with surrounding text bounded to 4000 bytes.
+*   **AT-SPI Replies:** AT-SPI actions reply on the UI thread with the action result, and each request produces one exception-safe reply even when the task cannot be posted.
+*   **Timed Animation:** stopping an animation freezes it at its current value, and sampling at or past the duration latches completion for later `value()` calls.
+*   **Grid Captions:** grid view captions center horizontally within their tiles.
+
 ## [0.3.4] - 2026-11-06
 
 The fourth patch release of the NodalKit framework. 0.3.4 keeps the widget
