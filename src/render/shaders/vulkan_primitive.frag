@@ -18,8 +18,17 @@ struct Affine {
 layout(std140, set = 1, binding = 0) uniform DrawUniform {
     Affine world;
     Affine clips[4];
-    uvec4 path; // first segment, segment count, padding
+    uvec4 ranges; // first/count for path segments and buffered clips
 } draw;
+
+struct ClipRegion {
+    vec4 rect;
+    vec4 metrics;
+    Affine inverse;
+};
+layout(std430, set = 1, binding = 2) readonly buffer BufferedClips {
+    ClipRegion regions[];
+} clip_data;
 
 layout(std430, set = 1, binding = 1) readonly buffer PathSegments {
     vec4 segments[];
@@ -45,6 +54,13 @@ float rounded_rect_sd(vec2 pixel, vec4 rect, float radius) {
     return outside + inside - clamped_radius;
 }
 
+float rounded_clip_coverage(vec2 pixel, vec4 rect, float radius) {
+    if (rect.z <= 0.0 || rect.w <= 0.0) {
+        return 0.0;
+    }
+    return clamp(0.5 - rounded_rect_sd(pixel, rect, radius), 0.0, 1.0);
+}
+
 void main() {
     float radius = uintBitsToFloat(pc.params.x);
     float thickness = uintBitsToFloat(pc.params.y);
@@ -67,8 +83,8 @@ void main() {
         // Union round-capped segments before blending. Separate line draws
         // would darken translucent joins, repeated points and crossings.
         float distance_squared = 3.402823466e+38;
-        for (uint index = 0; index < draw.path.y; ++index) {
-            vec4 segment = paths.segments[draw.path.x + index];
+        for (uint index = 0; index < draw.ranges.y; ++index) {
+            vec4 segment = paths.segments[draw.ranges.x + index];
             vec2 delta = segment.zw - segment.xy;
             vec2 local = v_pixel_position - segment.xy;
             float length_squared = dot(delta, delta);
@@ -92,15 +108,6 @@ void main() {
         color = mix(pc.color, pc.clip_rects[3], span > 0.0 ? clamp(position / span, 0.0, 1.0) : 0.0);
         coverage = 1.0;
     }
-    for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {
-        float clip_radius = pc.clip_radii[clip_index];
-        vec2 clip_pixel = map_affine(draw.clips[clip_index], gl_FragCoord.xy);
-        float clip_coverage =
-            clamp(0.5 - rounded_rect_sd(clip_pixel, pc.clip_rects[clip_index], clip_radius),
-                  0.0,
-                  1.0);
-        coverage *= clip_coverage;
-    }
 
     if (kind == 1u) {
         float inner_radius = max(0.0, radius - thickness);
@@ -113,5 +120,20 @@ void main() {
         coverage = clamp(coverage - inner_coverage, 0.0, 1.0);
     }
 
+    float clip_mask = 1.0;
+    for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {
+        float clip_radius = pc.clip_radii[clip_index];
+        vec2 clip_pixel = map_affine(draw.clips[clip_index], gl_FragCoord.xy);
+        float clip_coverage =
+            rounded_clip_coverage(clip_pixel, pc.clip_rects[clip_index], clip_radius);
+        clip_mask = min(clip_mask, clip_coverage);
+    }
+    for (uint index = 0; index < draw.ranges.w; ++index) {
+        ClipRegion clip = clip_data.regions[draw.ranges.z + index];
+        vec2 pixel = map_affine(clip.inverse, gl_FragCoord.xy);
+        clip_mask = min(clip_mask, rounded_clip_coverage(pixel, clip.rect, clip.metrics.x));
+    }
+
+    coverage *= clip_mask;
     out_color = vec4(color.rgb, color.a * coverage);
 }

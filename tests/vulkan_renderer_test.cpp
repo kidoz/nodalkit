@@ -85,11 +85,11 @@ void check_rgb(const nk::DebugScreenshot& shot,
     }
 }
 
-void check_path_reference(const nk::DebugScreenshot& shot,
-                          const nk::SoftwareRenderer& reference,
-                          nk::Rect region,
-                          float scale,
-                          int edge_margin = 0) {
+void check_reference_pixels(const nk::DebugScreenshot& shot,
+                            const nk::SoftwareRenderer& reference,
+                            nk::Rect region,
+                            float scale,
+                            int edge_margin = 0) {
     REQUIRE(reference.pixel_width() == shot.width);
     REQUIRE(reference.pixel_height() == shot.height);
     const auto* pixels = reference.pixel_data();
@@ -281,14 +281,15 @@ TEST_CASE("Vulkan path strokes match software coverage including translucent cro
     reference.end_frame();
     // No edge exclusion: this compares every canvas pixel, including AA edges.
     CAPTURE(thickness, closed);
-    check_path_reference(*shot, reference, a, scale);
+    check_reference_pixels(*shot, reference, a, scale);
     if (thickness == 7.0F) {
         check_rgb(*shot, {a.x + 60, a.y + 60}, scale, {191, 191, 191});
     }
     CHECK(connection.connected());
 }
 
-TEST_CASE("Vulkan paths retain affine clips and localized damage", "[vulkan][render][path]") {
+TEST_CASE("Vulkan paths retain affine clips and localized damage",
+          "[vulkan][render][path][deep-clip]") {
     if (!native_vulkan_available()) {
         SKIP("Requires a native Vulkan surface");
     }
@@ -308,9 +309,13 @@ TEST_CASE("Vulkan paths retain affine clips and localized damage", "[vulkan][ren
         ctx.push_rounded_clip({a.x + 15, a.y + 15, 230, 140}, 12);
         ctx.push_transform({.m31 = a.x + 110, .m32 = a.y + 30});
         ctx.push_transform(matrix);
-        ctx.push_rounded_clip({-65, -5, 100, 60}, 8);
+        for (int index = 0; index < 8; ++index) {
+            ctx.push_rounded_clip({-65, -5, 100, 60}, 8);
+        }
         ctx.add_path({.points = {{-60, 0}, {-20, 40}, {20, 0}}}, color, 8);
-        ctx.pop_container();
+        for (int index = 0; index < 8; ++index) {
+            ctx.pop_container();
+        }
         ctx.pop_transform();
         ctx.pop_transform();
         ctx.pop_container();
@@ -350,7 +355,7 @@ TEST_CASE("Vulkan paths retain affine clips and localized damage", "[vulkan][ren
     reference.end_frame();
     // Software transforms resample raster layers; compare constant regions
     // three device pixels away from their AA edges for affine parity.
-    check_path_reference(*full_shot, reference, a, scale, 3);
+    check_reference_pixels(*full_shot, reference, a, scale, 3);
     const nk::Point local{-40, 20};
     check_rgb(*shot,
               {a.x + 110 + local.x * matrix.m11 + local.y * matrix.m21 + matrix.m31,
@@ -412,8 +417,270 @@ TEST_CASE("Vulkan grows path segment storage and resets offsets each frame",
     CHECK(connection.connected());
 }
 
+TEST_CASE("Vulkan deep clip masks match software for primitives and textures",
+          "[vulkan][render][deep-clip]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    const int depth = GENERATE(3, 4, 5, 16, 64);
+    const int primitive = GENERATE(0, 1, 2, 3, 4, 5, 6, 7, 8);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan deep clip parity", .width = 320, .height = 240});
+    const std::array<uint32_t, 4> pixels{0xFFFF0000, 0x8000FF00, 0xFF0000FF, 0xFF000000};
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        const auto black = nk::Color::from_rgb(0, 0, 0);
+        const auto white = nk::Color::from_rgb(255, 255, 255);
+        ctx.add_color_rect(a, white);
+        for (int index = 0; index < depth; ++index) {
+            ctx.push_rounded_clip({a.x + 20 + 1.0F / 3, a.y + 20, 240, 160}, 20);
+        }
+        ctx.push_opacity(a, 0.75F);
+        switch (primitive) {
+        case 0:
+            ctx.add_color_rect(a, black);
+            break;
+        case 1:
+            ctx.add_rounded_rect({a.x + 10, a.y + 15, 260, 170}, black, 25);
+            break;
+        case 2:
+            ctx.add_border({a.x + 10 + 1.0F / 3, a.y + 24, 250, 130}, black, 10, 12);
+            break;
+        case 3:
+            ctx.add_linear_gradient(a, black, black);
+            break;
+        case 4:
+            ctx.add_line({a.x, a.y + 40}, {a.x + 280, a.y + 40}, black, 6);
+            break;
+        case 5:
+            ctx.add_path(
+                {.points = {{a.x, a.y + 40}, {a.x + 140, a.y + 100}, {a.x + 280, a.y + 40}}},
+                black,
+                5);
+            break;
+        case 6:
+            ctx.add_image(a, pixels.data(), 2, 2);
+            break;
+        case 7:
+            ctx.add_text(
+                {a.x + 16, a.y + 24}, "Deep clips", black, {.family = "DejaVu Sans", .size = 36});
+            break;
+        case 8:
+            ctx.add_shadow({a.x + 15, a.y + 15, 250, 160}, black, 0, 0, 0);
+            break;
+        }
+        ctx.pop_container();
+        for (int index = 0; index < depth; ++index) {
+            ctx.pop_container();
+        }
+        // Pop must restore an unclipped sibling after the buffered stack.
+        ctx.add_color_rect({a.x + 280, a.y + 30, 20, 20}, black);
+    };
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto path =
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+    REQUIRE(path != nk::GpuPresentPath::None);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+    const auto shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(shot);
+    REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper);
+    nk::SnapshotContext context(shaper.get());
+    const auto a = canvas->allocation();
+    draw(context, a);
+    const auto root = context.take_root();
+    nk::SoftwareRenderer reference;
+    reference.set_text_shaper(shaper.get());
+    const float scale = window.scale_factor();
+    reference.begin_frame(
+        {static_cast<float>(shot->width) / scale, static_cast<float>(shot->height) / scale}, scale);
+    reference.render(*root);
+    reference.end_frame();
+    CAPTURE(depth, primitive);
+    check_reference_pixels(*shot, reference, {a.x, a.y, 270, 210}, scale);
+    check_rgb(*shot, {a.x + 290, a.y + 40}, scale, {0, 0, 0});
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan preserves fractional rectangular clip intersections and empty masks",
+          "[vulkan][render][deep-clip]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    const bool empty = GENERATE(false, true);
+    nk::Application app(0, nullptr);
+    nk::Window window(
+        {.title = "Vulkan fractional clip intersections", .width = 240, .height = 180});
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        for (int index = 0; index < 8; ++index) {
+            ctx.push_rounded_clip(a, 10);
+        }
+        ctx.push_rounded_clip({a.x + 20.4F, a.y + 10, 120, 80}, 0);
+        ctx.push_rounded_clip({a.x + 10, a.y + 20.4F, 80, 120}, 0);
+        if (empty) {
+            ctx.push_rounded_clip({a.x + 40, a.y + 40, 0, 0}, 0);
+        }
+        ctx.add_color_rect(a, nk::Color::from_rgb(0, 0, 0));
+        if (empty) {
+            ctx.pop_container();
+        }
+        ctx.pop_container();
+        ctx.pop_container();
+        for (int index = 0; index < 8; ++index) {
+            ctx.pop_container();
+        }
+        ctx.add_color_rect({a.x + 170, a.y + 30, 20, 20}, nk::Color::from_rgb(0, 0, 0));
+    };
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto path =
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+    REQUIRE(path != nk::GpuPresentPath::None);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+    const auto shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(shot);
+    REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+    nk::SnapshotContext context;
+    const auto a = canvas->allocation();
+    draw(context, a);
+    const auto root = context.take_root();
+    nk::SoftwareRenderer reference;
+    const float scale = window.scale_factor();
+    reference.begin_frame(
+        {static_cast<float>(shot->width) / scale, static_cast<float>(shot->height) / scale}, scale);
+    reference.render(*root);
+    reference.end_frame();
+    check_reference_pixels(*shot, reference, a, scale);
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan clips the completed border stroke before blending",
+          "[vulkan][render][deep-clip]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    const int depth = GENERATE(1, 5);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan border clip coverage", .width = 240, .height = 180});
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        for (int index = 0; index < depth; ++index) {
+            ctx.push_rounded_clip({a.x + 20 + 1.0F / 3, a.y + 5, 100, 120}, 8);
+        }
+        ctx.add_border({a.x + 10 + 1.0F / 3, a.y + 20, 100, 80}, nk::Color::from_rgb(0, 0, 0), 10);
+        for (int index = 0; index < depth; ++index) {
+            ctx.pop_container();
+        }
+    };
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto path =
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+    REQUIRE(path != nk::GpuPresentPath::None);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+    const auto shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(shot);
+    REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+    nk::SnapshotContext context;
+    const auto a = canvas->allocation();
+    draw(context, a);
+    const auto root = context.take_root();
+    nk::SoftwareRenderer reference;
+    const float scale = window.scale_factor();
+    reference.begin_frame(
+        {static_cast<float>(shot->width) / scale, static_cast<float>(shot->height) / scale}, scale);
+    reference.render(*root);
+    reference.end_frame();
+    check_reference_pixels(*shot, reference, a, scale);
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan grows buffered clip storage and restores prior clip states",
+          "[vulkan][render][deep-clip]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan clip storage growth", .width = 280, .height = 200});
+    int groups = 1;
+    const int depth = 16;
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        for (int group = 0; group < groups; ++group) {
+            for (int index = 0; index < depth; ++index) {
+                ctx.push_rounded_clip({a.x + 20, a.y + 20, 160, 120}, 10);
+            }
+            ctx.add_color_rect({a.x + 30, a.y + 30, 20, 20}, nk::Color::from_rgb(0, 0, 0));
+            // Repeated draws use the same buffered range until the stack changes.
+            ctx.add_color_rect({a.x + 60, a.y + 30, 20, 20}, nk::Color::from_rgb(255, 0, 0));
+            for (int index = 0; index < depth; ++index) {
+                ctx.pop_container();
+            }
+        }
+        ctx.push_rounded_clip({a.x + 120, a.y + 20, 40, 40}, 0);
+        for (int index = 0; index < depth; ++index) {
+            ctx.push_rounded_clip({a.x + 120, a.y + 20, 40, 40}, 8);
+        }
+        ctx.add_color_rect(a, nk::Color::from_rgb(0, 0, 255));
+        for (int index = 0; index < depth; ++index) {
+            ctx.pop_container();
+        }
+        // The shallow parent must be restored and cover the bottom-right corner.
+        ctx.add_color_rect({a.x + 140, a.y + 40, 40, 40}, nk::Color::from_rgb(0, 255, 0));
+        ctx.pop_container();
+    });
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    for (int next : {100, 220, 0, 1, 1}) {
+        groups = next;
+        canvas->queue_redraw();
+        REQUIRE(app.event_loop().poll());
+        const auto path =
+            window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+        REQUIRE(path != nk::GpuPresentPath::None);
+        REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+        REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+        const auto shot = window.inspector().capture_debug_screenshot();
+        REQUIRE(shot);
+        REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+        const auto a = canvas->allocation();
+        check_rgb(*shot,
+                  {a.x + 40, a.y + 40},
+                  window.scale_factor(),
+                  groups == 0 ? std::array{255, 255, 255} : std::array{0, 0, 0});
+        check_rgb(*shot,
+                  {a.x + 70, a.y + 40},
+                  window.scale_factor(),
+                  groups == 0 ? std::array{255, 255, 255} : std::array{255, 0, 0});
+        check_rgb(*shot, {a.x + 130, a.y + 30}, window.scale_factor(), {0, 0, 255});
+        check_rgb(*shot, {a.x + 158, a.y + 58}, window.scale_factor(), {0, 255, 0});
+        check_rgb(*shot, {a.x + 165, a.y + 65}, window.scale_factor(), {255, 255, 255});
+    }
+    CHECK(connection.connected());
+}
+
 TEST_CASE("Vulkan draws affine content and independent clip spaces on the GPU",
-          "[vulkan][render][affine]") {
+          "[vulkan][render][affine][deep-clip]") {
     if (!native_vulkan_available()) {
         SKIP("Requires a native Vulkan surface");
     }
@@ -435,13 +702,17 @@ TEST_CASE("Vulkan draws affine content and independent clip spaces on the GPU",
         ctx.push_rounded_clip({a.x + 25, a.y + 25, 160, 150}, 12);
         ctx.push_transform({.m31 = a.x + 40, .m32 = a.y + 40});
         ctx.push_transform(matrix);
-        ctx.push_rounded_clip({0, 0, 100, 100}, 10);
+        for (int index = 0; index < 8; ++index) {
+            ctx.push_rounded_clip({0, 0, 100, 100}, 10);
+        }
         ctx.add_color_rect({-20, -20, 140, 140}, black);
         ctx.add_image({10, 10, 80, 80}, pixels.data(), 2, 2);
         ctx.push_opacity({20, 20, 20, 20}, 0.5F);
         ctx.add_rounded_rect({20, 20, 20, 20}, black, 4);
         ctx.pop_container();
-        ctx.pop_container();
+        for (int index = 0; index < 8; ++index) {
+            ctx.pop_container();
+        }
         ctx.pop_transform();
         ctx.pop_transform();
         ctx.pop_container();
@@ -592,13 +863,13 @@ TEST_CASE("Vulkan reuses affine textures and redraws transformed damage",
     CHECK(connection.connected());
 }
 
-TEST_CASE("Vulkan preserves clip capacity across affine coordinate spaces",
+TEST_CASE("Vulkan accelerates deep clips across affine coordinate spaces",
           "[vulkan][render][affine]") {
     if (!native_vulkan_available()) {
         SKIP("Requires a native Vulkan surface");
     }
     VulkanEnvironment environment;
-    const int depth = GENERATE(4, 5);
+    const int depth = GENERATE(4, 5, 8, 32);
     nk::Application app(0, nullptr);
     nk::Window window({.title = "Vulkan affine clip capacity", .width = 240, .height = 200});
     auto canvas = nk::CanvasWidget::create();
@@ -628,13 +899,9 @@ TEST_CASE("Vulkan preserves clip capacity across affine coordinate spaces",
     REQUIRE(app.event_loop().poll());
     const auto path =
         window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
-    if (depth == 4) {
-        CHECK(path != nk::GpuPresentPath::None);
-        CHECK(path != nk::GpuPresentPath::SoftwareDirect);
-        CHECK(path != nk::GpuPresentPath::SoftwareUpload);
-    } else {
-        CHECK(path == nk::GpuPresentPath::SoftwareUpload);
-    }
+    CHECK(path != nk::GpuPresentPath::None);
+    CHECK(path != nk::GpuPresentPath::SoftwareDirect);
+    CHECK(path != nk::GpuPresentPath::SoftwareUpload);
     const auto shot = window.inspector().capture_debug_screenshot();
     REQUIRE(shot);
     REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
@@ -778,10 +1045,18 @@ TEST_CASE("Vulkan recovers after a failed frame", "[vulkan][render][recovery]") 
         ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
         ctx.add_color_rect({a.x + 20, a.y + 20, 40, 40}, nk::Color::from_rgb(0, 0, 0));
         ctx.add_image({a.x + 80, a.y + 20, 40, 40}, pixels.data(), 4, 4);
+        for (int index = 0; index < 8; ++index) {
+            ctx.push_rounded_clip(a, 8);
+        }
         ctx.add_path(
             {.points = {{a.x + 20, a.y + 90}, {a.x + 60, a.y + 110}, {a.x + 100, a.y + 90}}},
             nk::Color::from_rgb(0, 0, 0),
             4);
+        ctx.add_line(
+            {a.x + 20, a.y + 130}, {a.x + 100, a.y + 130}, nk::Color::from_rgb(0, 0, 0), 4);
+        for (int index = 0; index < 8; ++index) {
+            ctx.pop_container();
+        }
     });
     window.set_child(canvas);
     window.present();

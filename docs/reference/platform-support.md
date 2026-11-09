@@ -100,18 +100,22 @@ Vulkan uses a Vulkan 1.0 API baseline and negotiates a renderable BGRA8 or
 RGBA8 UNORM surface with nonlinear sRGB presentation. Other surface formats
 use software presentation. Its GPU draw path handles solid and
 rounded rectangles, borders, text, images, round-capped lines, stroked paths,
-linear gradients, distance-based box shadows, per-draw opacity, and nested affine transforms
-(translation, scaling, rotation, reflection, and shear). Clips retain the
-coordinate space where they were defined. Rounded clips support four active
-regions after same-space flattening; lines and gradients support three. Deeper
-clipping renders the frame in software and uploads it for Vulkan
-presentation. Singular and nonfinite transforms draw no pixels.
+linear gradients, distance-based box shadows, per-draw opacity, and nested
+affine transforms (translation, scaling, rotation, reflection, and shear). Clips
+retain the coordinate space where they were defined. Shallow clipping uses up to four
+inline regions (three for lines and gradients); deeper stacks use buffered
+regions to calculate an analytic coverage mask on the GPU. Clip depth alone
+does not force software rasterization. Nested clip coverage uses the minimum
+coverage of its regions, preserving antialiased edges when a clip is repeated.
+Singular and nonfinite transforms draw no pixels.
 
 Paths are open or closed polylines with round caps and joins, matching `Path2D`.
 Their segment coverage is combined before blending, so translucent joins and
-self-intersections do not darken. Paths support all four clip regions. Segment
-data shares a reusable frame buffer with draw uniforms; frames exceeding the
-device's storage-buffer range or available allocation fall back to software.
+self-intersections do not darken. Paths, primitives, images, and text support
+buffered clip stacks. Path and clip data share a reusable frame buffer with draw
+uniforms; frames exceeding a storage-buffer range or available allocation fall
+back to software. Clip intersections retain fractional rectangle edges; border
+strokes apply the clip mask after subtracting their inner coverage.
 
 GPU transforms rasterize primitives directly and sample image/text textures;
 software transforms use nearest sampling of bounded transparent layers. Edge

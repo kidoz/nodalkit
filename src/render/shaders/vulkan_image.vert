@@ -18,7 +18,7 @@ struct Affine {
 layout(std140, set = 1, binding = 0) uniform DrawUniform {
     Affine world;
     Affine clips[4];
-    uvec4 path; // first segment, segment count, padding
+    uvec4 ranges; // first/count for path segments and buffered clips
 } draw;
 
 vec2 map_affine(Affine matrix, vec2 point) {

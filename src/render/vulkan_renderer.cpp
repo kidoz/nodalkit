@@ -115,6 +115,11 @@ bool finite_rect(Rect rect) {
            std::isfinite(rect.bottom());
 }
 
+bool rect_contains(Rect outer, Rect inner) {
+    return inner.x >= outer.x && inner.y >= outer.y && inner.right() <= outer.right() &&
+           inner.bottom() <= outer.bottom();
+}
+
 struct AffineClip {
     ClipRegion region;
     Matrix3x2 transform;
@@ -125,7 +130,7 @@ struct AffineClip {
 class AffineClipStack {
 public:
     bool push(ClipRegion region, const Matrix3x2& transform) {
-        for (std::size_t index = 0; index < count_; ++index) {
+        for (std::size_t index = 0; index < regions_.size(); ++index) {
             if (regions_[index].transform != transform) {
                 continue;
             }
@@ -133,45 +138,63 @@ public:
             (void)merger_.push(regions_[index].region);
             (void)merger_.push(region);
             if (merger_.active().size() == 1) {
-                frames_.push_back({regions_, count_});
+                // Intersecting crossing rectangles changes their fractional
+                // corner distance. Keep both masks unless one contains the other.
+                const auto& previous = regions_[index].region;
+                if (previous.radius <= 0 && region.radius <= 0 &&
+                    !rect_contains(previous.rect, region.rect) &&
+                    !rect_contains(region.rect, previous.rect)) {
+                    continue;
+                }
+                frames_.push_back({.slot = index, .previous = regions_[index]});
                 regions_[index].region = merger_.active()[0];
+                ++revision_;
                 return true;
             }
         }
-        if (count_ == kMaxClipDepth) {
+        if (regions_.size() == std::numeric_limits<uint32_t>::max()) {
             return false;
         }
-        frames_.push_back({regions_, count_});
-        regions_[count_++] = {region, transform};
+        frames_.push_back({.slot = regions_.size(), .previous = std::nullopt});
+        regions_.push_back({region, transform});
+        ++revision_;
         return true;
     }
 
     void pop() {
-        regions_ = frames_.back().regions;
-        count_ = frames_.back().count;
+        const auto& frame = frames_.back();
+        if (frame.previous) {
+            regions_[frame.slot] = *frame.previous;
+        } else {
+            regions_.pop_back();
+        }
         frames_.pop_back();
+        ++revision_;
     }
 
-    std::span<const AffineClip> active() const { return {regions_.data(), count_}; }
+    std::span<const AffineClip> active() const { return regions_; }
+
+    uint64_t revision() const { return revision_; }
 
     void clear() {
-        count_ = 0;
+        regions_.clear();
         frames_.clear();
+        ++revision_;
     }
 
 private:
     struct Frame {
-        std::array<AffineClip, kMaxClipDepth> regions;
-        std::size_t count;
+        std::size_t slot;
+        std::optional<AffineClip> previous;
     };
 
-    std::array<AffineClip, kMaxClipDepth> regions_{};
-    std::size_t count_ = 0;
+    std::vector<AffineClip> regions_;
     std::vector<Frame> frames_;
     ClipStack merger_{2};
+    uint64_t revision_ = 0;
 };
 
-// std140: affine rows, four inverse clip matrices and a padded path range.
+// std140: affine rows, four inverse clip matrices and path/clip ranges.
 // This leaves the Vulkan 1.0 minimum push-constant budget unchanged.
 struct GpuAffine {
     std::array<float, 4> x{1, 0, 0, 0};
@@ -186,12 +209,22 @@ GpuAffine gpu_affine(const Matrix3x2& matrix, float scale) {
 struct DrawUniform {
     GpuAffine world;
     std::array<GpuAffine, kMaxClipDepth> clips;
-    std::array<uint32_t, 4> path{}; // first segment, segment count, padding
+    std::array<uint32_t, 4> ranges{}; // first/count for path segments and buffered clips
 };
 
 static_assert(sizeof(DrawUniform) == 176);
 static_assert(offsetof(DrawUniform, clips) == 32);
-static_assert(offsetof(DrawUniform, path) == 160);
+static_assert(offsetof(DrawUniform, ranges) == 160);
+
+// std430: shape and radius followed by an inverse affine in two vec4 rows.
+struct GpuClip {
+    std::array<float, 4> rect{};
+    std::array<float, 4> metrics{};
+    GpuAffine inverse;
+};
+
+static_assert(sizeof(GpuClip) == 64);
+static_assert(offsetof(GpuClip, inverse) == 32);
 
 struct PrimitiveCommand {
     Rect rect{};
@@ -237,6 +270,8 @@ struct DrawCommand {
     std::size_t command_index = 0;
     Matrix3x2 transform;
     Rect device_bounds{};
+    uint32_t first_clip = 0;
+    uint32_t clip_count = 0;
     std::array<Matrix3x2, kMaxClipDepth> clip_transforms{};
 };
 
@@ -838,6 +873,8 @@ public:
         draw_commands_.clear();
         primitive_commands_.clear();
         path_segments_.clear();
+        buffered_clips_.clear();
+        last_clip_revision_ = 0;
         image_commands_.clear();
         text_commands_.clear();
         draw_textures_.clear();
@@ -857,6 +894,8 @@ public:
         draw_commands_.clear();
         primitive_commands_.clear();
         path_segments_.clear();
+        buffered_clips_.clear();
+        last_clip_revision_ = 0;
         image_commands_.clear();
         text_commands_.clear();
         draw_textures_.clear();
@@ -1376,8 +1415,14 @@ private:
 
     [[nodiscard]] Rect draw_local_bounds(const DrawCommand& draw_command) const {
         switch (draw_command.kind) {
-        case DrawCommandKind::Primitive:
-            return primitive_commands_[draw_command.command_index].rect;
+        case DrawCommandKind::Primitive: {
+            const auto& command = primitive_commands_[draw_command.command_index];
+            const float padding = command.kind == 1 ? 0.5F / scale_factor_ : 0.0F;
+            return {command.rect.x - padding,
+                    command.rect.y - padding,
+                    command.rect.width + 2 * padding,
+                    command.rect.height + 2 * padding};
+        }
         case DrawCommandKind::Image:
             return image_commands_[draw_command.command_index].rect;
         case DrawCommandKind::Text:
@@ -1863,13 +1908,18 @@ private:
             return false;
         }
 
-        const std::array<VkDescriptorSetLayoutBinding, 2> draw_bindings{{
+        const std::array<VkDescriptorSetLayoutBinding, 3> draw_bindings{{
             {.binding = 0,
              .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
              .descriptorCount = 1,
              .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
              .pImmutableSamplers = nullptr},
             {.binding = 1,
+             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+             .descriptorCount = 1,
+             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+             .pImmutableSamplers = nullptr},
+            {.binding = 2,
              .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
              .descriptorCount = 1,
              .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -1886,7 +1936,7 @@ private:
         const std::array<VkDescriptorPoolSize, 3> pool_sizes{{
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
         }};
         const VkDescriptorPoolCreateInfo descriptor_pool_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -2906,6 +2956,8 @@ private:
         draw_uniform_capacity_ = 0;
         path_descriptor_offset_ = 0;
         path_descriptor_range_ = 0;
+        clip_descriptor_offset_ = 0;
+        clip_descriptor_range_ = 0;
     }
 
     [[nodiscard]] bool prepare_draw_uniforms() {
@@ -2920,7 +2972,9 @@ private:
             return true;
         }
         if (path_segments_.size() >
-            device_properties_.limits.maxStorageBufferRange / sizeof(path_segments_[0])) {
+                device_properties_.limits.maxStorageBufferRange / sizeof(path_segments_[0]) ||
+            buffered_clips_.size() >
+                device_properties_.limits.maxStorageBufferRange / sizeof(GpuClip)) {
             return false;
         }
         const VkDeviceSize path_alignment =
@@ -2931,7 +2985,11 @@ private:
         // primitive shader statically uses the storage-buffer binding.
         const VkDeviceSize path_bytes =
             std::max<VkDeviceSize>(16, path_segments_.size() * sizeof(path_segments_[0]));
-        const VkDeviceSize bytes = path_offset + path_bytes;
+        const VkDeviceSize clip_offset =
+            ((path_offset + path_bytes + path_alignment - 1) / path_alignment) * path_alignment;
+        const VkDeviceSize clip_bytes =
+            std::max<VkDeviceSize>(sizeof(GpuClip), buffered_clips_.size() * sizeof(GpuClip));
+        const VkDeviceSize bytes = clip_offset + clip_bytes;
         const bool recreate_buffer = bytes > draw_uniform_capacity_;
         if (recreate_buffer) {
             destroy_draw_uniform_buffer();
@@ -2982,12 +3040,14 @@ private:
             draw_uniform_capacity_ = capacity;
         }
         if (recreate_buffer || path_descriptor_offset_ != path_offset ||
-            path_descriptor_range_ != path_bytes) {
-            const std::array<VkDescriptorBufferInfo, 2> descriptors{{
+            path_descriptor_range_ != path_bytes || clip_descriptor_offset_ != clip_offset ||
+            clip_descriptor_range_ != clip_bytes) {
+            const std::array<VkDescriptorBufferInfo, 3> descriptors{{
                 {draw_uniform_buffer_, 0, sizeof(DrawUniform)},
                 {draw_uniform_buffer_, path_offset, path_bytes},
+                {draw_uniform_buffer_, clip_offset, clip_bytes},
             }};
-            const std::array<VkWriteDescriptorSet, 2> writes{{
+            const std::array<VkWriteDescriptorSet, 3> writes{{
                 {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
                  .pNext = nullptr,
                  .dstSet = draw_uniform_set_,
@@ -3008,11 +3068,23 @@ private:
                  .pImageInfo = nullptr,
                  .pBufferInfo = &descriptors[1],
                  .pTexelBufferView = nullptr},
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                 .pNext = nullptr,
+                 .dstSet = draw_uniform_set_,
+                 .dstBinding = 2,
+                 .dstArrayElement = 0,
+                 .descriptorCount = 1,
+                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                 .pImageInfo = nullptr,
+                 .pBufferInfo = &descriptors[2],
+                 .pTexelBufferView = nullptr},
             }};
             vkUpdateDescriptorSets(
                 device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
             path_descriptor_offset_ = path_offset;
             path_descriptor_range_ = path_bytes;
+            clip_descriptor_offset_ = clip_offset;
+            clip_descriptor_range_ = clip_bytes;
         }
         if (path_segments_.empty()) {
             std::memset(
@@ -3022,14 +3094,24 @@ private:
                         path_segments_.data(),
                         static_cast<std::size_t>(path_bytes));
         }
+        if (buffered_clips_.empty()) {
+            std::memset(
+                draw_uniform_mapped_ + clip_offset, 0, static_cast<std::size_t>(clip_bytes));
+        } else {
+            std::memcpy(draw_uniform_mapped_ + clip_offset,
+                        buffered_clips_.data(),
+                        static_cast<std::size_t>(clip_bytes));
+        }
         for (std::size_t index = 0; index < draw_commands_.size(); ++index) {
             const auto& command = draw_commands_[index];
             DrawUniform uniform{.world = gpu_affine(command.transform, scale_factor_), .clips = {}};
             if (command.kind == DrawCommandKind::Primitive) {
                 const auto& primitive = primitive_commands_[command.command_index];
-                uniform.path[0] = primitive.first_segment;
-                uniform.path[1] = primitive.segment_count;
+                uniform.ranges[0] = primitive.first_segment;
+                uniform.ranges[1] = primitive.segment_count;
             }
+            uniform.ranges[2] = command.first_clip;
+            uniform.ranges[3] = command.clip_count;
             for (std::size_t clip = 0; clip < kMaxClipDepth; ++clip) {
                 const auto inverse = inverse_affine(command.clip_transforms[clip]);
                 if (!valid_affine(inverse) || !std::isfinite(inverse.m31 * scale_factor_) ||
@@ -4140,7 +4222,10 @@ private:
         software_->present(surface);
     }
 
-    bool append_draw(DrawCommandKind kind, std::size_t index, const Matrix3x2& transform) {
+    bool append_draw(DrawCommandKind kind,
+                     std::size_t index,
+                     const Matrix3x2& transform,
+                     std::size_t inline_capacity = kMaxClipDepth) {
         DrawCommand draw{.kind = kind, .command_index = index, .transform = transform};
         const auto local_bounds = draw_local_bounds(draw);
         draw.device_bounds = scale_rect(affine_bounds(local_bounds, transform), scale_factor_);
@@ -4149,31 +4234,64 @@ private:
             return false;
         }
         const auto clips = active_clips_.active();
-        for (std::size_t clip = 0; clip < clips.size(); ++clip) {
-            draw.clip_transforms[clip] = clips[clip].transform;
+        if (clips.size() <= inline_capacity) {
+            for (std::size_t clip = 0; clip < clips.size(); ++clip) {
+                draw.clip_transforms[clip] = clips[clip].transform;
+            }
+        } else {
+            if (last_clip_revision_ != active_clips_.revision()) {
+                constexpr auto max_clips = std::numeric_limits<uint32_t>::max() / sizeof(GpuClip);
+                if (clips.size() > max_clips || buffered_clips_.size() > max_clips - clips.size()) {
+                    return false;
+                }
+                last_clip_first_ = static_cast<uint32_t>(buffered_clips_.size());
+                last_clip_count_ = static_cast<uint32_t>(clips.size());
+                for (const auto& clip : clips) {
+                    const auto inverse = inverse_affine(clip.transform);
+                    const auto rect = scale_rect(clip.region.rect, scale_factor_);
+                    const float radius = clip.region.radius * scale_factor_;
+                    if (!valid_affine(inverse) || !finite_rect(rect) || !std::isfinite(radius) ||
+                        !std::isfinite(inverse.m31 * scale_factor_) ||
+                        !std::isfinite(inverse.m32 * scale_factor_)) {
+                        return false;
+                    }
+                    buffered_clips_.push_back({.rect = {rect.x, rect.y, rect.width, rect.height},
+                                               .metrics = {radius, 0, 0, 0},
+                                               .inverse = gpu_affine(inverse, scale_factor_)});
+                }
+                last_clip_revision_ = active_clips_.revision();
+            }
+            draw.first_clip = last_clip_first_;
+            draw.clip_count = last_clip_count_;
         }
         draw_commands_.push_back(draw);
         return true;
     }
 
-    bool append_primitive(PrimitiveCommand command, float opacity, const Matrix3x2& transform) {
-        command.color.a *= opacity;
+    template <typename Command>
+    void capture_inline_clips(Command& command, std::size_t capacity = kMaxClipDepth) const {
         const auto clips = active_clips_.active();
-        command.clip_count = static_cast<uint32_t>(clips.size());
-        for (std::size_t clip = 0; clip < clips.size(); ++clip) {
+        command.clip_count = clips.size() <= capacity ? static_cast<uint32_t>(clips.size()) : 0;
+        for (std::size_t clip = 0; clip < command.clip_count; ++clip) {
             command.clips[clip] = clips[clip].region;
         }
+    }
+
+    bool append_primitive(PrimitiveCommand command, float opacity, const Matrix3x2& transform) {
+        command.color.a *= opacity;
+        const std::size_t capacity = command.kind == 2 || command.kind == 4 || command.kind == 5
+                                         ? kMaxClipDepth - 1
+                                         : kMaxClipDepth;
+        capture_inline_clips(command, capacity);
         primitive_commands_.push_back(command);
-        return append_draw(DrawCommandKind::Primitive, primitive_commands_.size() - 1, transform);
+        return append_draw(
+            DrawCommandKind::Primitive, primitive_commands_.size() - 1, transform, capacity);
     }
 
     bool
     collect_draw_commands(const RenderNode& node, float opacity = 1.0F, Matrix3x2 transform = {}) {
         switch (node.kind()) {
         case RenderNodeKind::Line: {
-            if (active_clips_.active().size() >= kMaxClipDepth) {
-                return false;
-            }
             const auto& line = static_cast<const LineNode&>(node);
             const float radius = std::max(0.5F / scale_factor_, line.thickness() * 0.5F);
             const float padding = radius + 0.5F / scale_factor_;
@@ -4334,13 +4452,6 @@ private:
                 },
                 transform);
             if (!pushed) {
-                if (!clip_depth_warning_logged_) {
-                    clip_depth_warning_logged_ = true;
-                    NK_LOG_WARN("VulkanRenderer",
-                                "Render tree nests more rounded clips than the GPU draw path "
-                                "supports; falling back to software rasterization for these "
-                                "frames");
-                }
                 return false;
             }
             for (const auto& child : node.children()) {
@@ -4375,11 +4486,7 @@ private:
                 .opacity = opacity,
                 .revision = image_node.content_revision(),
             };
-            const auto active_clips = active_clips_.active();
-            command.clip_count = static_cast<uint32_t>(active_clips.size());
-            for (std::size_t clip = 0; clip < active_clips.size(); ++clip) {
-                command.clips[clip] = active_clips[clip].region;
-            }
+            capture_inline_clips(command);
             image_commands_.push_back(command);
             return append_draw(DrawCommandKind::Image, image_commands_.size() - 1, transform);
         }
@@ -4404,11 +4511,7 @@ private:
                 .shaped_text = std::move(shaped_text),
                 .opacity = opacity,
             };
-            const auto active_clips = active_clips_.active();
-            command.clip_count = static_cast<uint32_t>(active_clips.size());
-            for (std::size_t clip = 0; clip < active_clips.size(); ++clip) {
-                command.clips[clip] = active_clips[clip].region;
-            }
+            capture_inline_clips(command);
             text_commands_.push_back(std::move(command));
             return append_draw(DrawCommandKind::Text, text_commands_.size() - 1, transform);
         }
@@ -4421,9 +4524,6 @@ private:
             }
             return true;
         case RenderNodeKind::LinearGradient: {
-            if (active_clips_.active().size() >= kMaxClipDepth) {
-                return false;
-            }
             const auto& gradient = static_cast<const LinearGradientNode&>(node);
             auto end = gradient.end_color();
             end.a *= opacity;
@@ -4467,6 +4567,8 @@ private:
         draw_commands_.clear();
         primitive_commands_.clear();
         path_segments_.clear();
+        buffered_clips_.clear();
+        last_clip_revision_ = 0;
         image_commands_.clear();
         text_commands_.clear();
         active_clips_.clear();
@@ -4609,7 +4711,12 @@ private:
     VkDeviceSize path_descriptor_range_ = 0;
     std::vector<std::array<float, 4>> path_segments_;
     uint8_t* draw_uniform_mapped_ = nullptr;
-    bool clip_depth_warning_logged_ = false;
+    VkDeviceSize clip_descriptor_offset_ = 0;
+    VkDeviceSize clip_descriptor_range_ = 0;
+    std::vector<GpuClip> buffered_clips_;
+    uint64_t last_clip_revision_ = 0;
+    uint32_t last_clip_first_ = 0;
+    uint32_t last_clip_count_ = 0;
     std::vector<Rect> damage_regions_;
     std::vector<VkRectLayerKHR> present_regions_;
     uint32_t queue_family_index_ = std::numeric_limits<uint32_t>::max();
