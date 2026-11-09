@@ -171,7 +171,7 @@ private:
     ClipStack merger_{2};
 };
 
-// std140: two vec4 rows per affine, followed by four inverse clip matrices.
+// std140: affine rows, four inverse clip matrices and a padded path range.
 // This leaves the Vulkan 1.0 minimum push-constant budget unchanged.
 struct GpuAffine {
     std::array<float, 4> x{1, 0, 0, 0};
@@ -186,10 +186,12 @@ GpuAffine gpu_affine(const Matrix3x2& matrix, float scale) {
 struct DrawUniform {
     GpuAffine world;
     std::array<GpuAffine, kMaxClipDepth> clips;
+    std::array<uint32_t, 4> path{}; // first segment, segment count, padding
 };
 
-static_assert(sizeof(DrawUniform) == 160);
+static_assert(sizeof(DrawUniform) == 176);
 static_assert(offsetof(DrawUniform, clips) == 32);
+static_assert(offsetof(DrawUniform, path) == 160);
 
 struct PrimitiveCommand {
     Rect rect{};
@@ -198,6 +200,8 @@ struct PrimitiveCommand {
     float thickness = 0.0F;
     uint32_t kind = 0;
     std::array<float, 4> auxiliary{};
+    uint32_t first_segment = 0;
+    uint32_t segment_count = 0;
     std::array<ClipRegion, kMaxClipDepth> clips{};
     uint32_t clip_count = 0;
 };
@@ -833,6 +837,7 @@ public:
         trim_texture_cache(text_texture_cache_, kTextTextureCacheMaxEntries);
         draw_commands_.clear();
         primitive_commands_.clear();
+        path_segments_.clear();
         image_commands_.clear();
         text_commands_.clear();
         draw_textures_.clear();
@@ -851,6 +856,7 @@ public:
     void render(const RenderNode& root) override {
         draw_commands_.clear();
         primitive_commands_.clear();
+        path_segments_.clear();
         image_commands_.clear();
         text_commands_.clear();
         draw_textures_.clear();
@@ -1857,23 +1863,30 @@ private:
             return false;
         }
 
-        const VkDescriptorSetLayoutBinding uniform_binding{
-            .binding = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-            .pImmutableSamplers = nullptr,
-        };
+        const std::array<VkDescriptorSetLayoutBinding, 2> draw_bindings{{
+            {.binding = 0,
+             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+             .descriptorCount = 1,
+             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+             .pImmutableSamplers = nullptr},
+            {.binding = 1,
+             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+             .descriptorCount = 1,
+             .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+             .pImmutableSamplers = nullptr},
+        }};
         auto uniform_layout_info = descriptor_set_layout_info;
-        uniform_layout_info.pBindings = &uniform_binding;
+        uniform_layout_info.bindingCount = static_cast<uint32_t>(draw_bindings.size());
+        uniform_layout_info.pBindings = draw_bindings.data();
         if (!vk_ok(vkCreateDescriptorSetLayout(
                        device_, &uniform_layout_info, nullptr, &draw_uniform_layout_),
                    "vkCreateDescriptorSetLayout(affine)")) {
             return false;
         }
-        const std::array<VkDescriptorPoolSize, 2> pool_sizes{{
+        const std::array<VkDescriptorPoolSize, 3> pool_sizes{{
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
         }};
         const VkDescriptorPoolCreateInfo descriptor_pool_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
@@ -2891,6 +2904,8 @@ private:
         draw_uniform_buffer_ = VK_NULL_HANDLE;
         draw_uniform_memory_ = VK_NULL_HANDLE;
         draw_uniform_capacity_ = 0;
+        path_descriptor_offset_ = 0;
+        path_descriptor_range_ = 0;
     }
 
     [[nodiscard]] bool prepare_draw_uniforms() {
@@ -2900,11 +2915,25 @@ private:
         if (draw_commands_.size() > std::numeric_limits<uint32_t>::max() / draw_uniform_stride_) {
             return false;
         }
-        const VkDeviceSize bytes = draw_commands_.size() * draw_uniform_stride_;
-        if (bytes == 0) {
+        const VkDeviceSize uniform_bytes = draw_commands_.size() * draw_uniform_stride_;
+        if (uniform_bytes == 0) {
             return true;
         }
-        if (bytes > draw_uniform_capacity_) {
+        if (path_segments_.size() >
+            device_properties_.limits.maxStorageBufferRange / sizeof(path_segments_[0])) {
+            return false;
+        }
+        const VkDeviceSize path_alignment =
+            std::max<VkDeviceSize>(16, device_properties_.limits.minStorageBufferOffsetAlignment);
+        const VkDeviceSize path_offset =
+            ((uniform_bytes + path_alignment - 1) / path_alignment) * path_alignment;
+        // A valid dummy range is needed even when no path is drawn: the
+        // primitive shader statically uses the storage-buffer binding.
+        const VkDeviceSize path_bytes =
+            std::max<VkDeviceSize>(16, path_segments_.size() * sizeof(path_segments_[0]));
+        const VkDeviceSize bytes = path_offset + path_bytes;
+        const bool recreate_buffer = bytes > draw_uniform_capacity_;
+        if (recreate_buffer) {
             destroy_draw_uniform_buffer();
             const VkDeviceSize capacity = std::max<VkDeviceSize>(65536, std::bit_ceil(bytes));
             const VkBufferCreateInfo buffer_info{
@@ -2912,7 +2941,7 @@ private:
                 .pNext = nullptr,
                 .flags = 0,
                 .size = capacity,
-                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
                 .queueFamilyIndexCount = 0,
                 .pQueueFamilyIndices = nullptr,
@@ -2951,25 +2980,56 @@ private:
             }
             draw_uniform_mapped_ = static_cast<uint8_t*>(mapped);
             draw_uniform_capacity_ = capacity;
-            const VkDescriptorBufferInfo buffer_descriptor{
-                draw_uniform_buffer_, 0, sizeof(DrawUniform)};
-            const VkWriteDescriptorSet write{
-                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .pNext = nullptr,
-                .dstSet = draw_uniform_set_,
-                .dstBinding = 0,
-                .dstArrayElement = 0,
-                .descriptorCount = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-                .pImageInfo = nullptr,
-                .pBufferInfo = &buffer_descriptor,
-                .pTexelBufferView = nullptr,
-            };
-            vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+        }
+        if (recreate_buffer || path_descriptor_offset_ != path_offset ||
+            path_descriptor_range_ != path_bytes) {
+            const std::array<VkDescriptorBufferInfo, 2> descriptors{{
+                {draw_uniform_buffer_, 0, sizeof(DrawUniform)},
+                {draw_uniform_buffer_, path_offset, path_bytes},
+            }};
+            const std::array<VkWriteDescriptorSet, 2> writes{{
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                 .pNext = nullptr,
+                 .dstSet = draw_uniform_set_,
+                 .dstBinding = 0,
+                 .dstArrayElement = 0,
+                 .descriptorCount = 1,
+                 .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                 .pImageInfo = nullptr,
+                 .pBufferInfo = &descriptors[0],
+                 .pTexelBufferView = nullptr},
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                 .pNext = nullptr,
+                 .dstSet = draw_uniform_set_,
+                 .dstBinding = 1,
+                 .dstArrayElement = 0,
+                 .descriptorCount = 1,
+                 .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                 .pImageInfo = nullptr,
+                 .pBufferInfo = &descriptors[1],
+                 .pTexelBufferView = nullptr},
+            }};
+            vkUpdateDescriptorSets(
+                device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+            path_descriptor_offset_ = path_offset;
+            path_descriptor_range_ = path_bytes;
+        }
+        if (path_segments_.empty()) {
+            std::memset(
+                draw_uniform_mapped_ + path_offset, 0, static_cast<std::size_t>(path_bytes));
+        } else {
+            std::memcpy(draw_uniform_mapped_ + path_offset,
+                        path_segments_.data(),
+                        static_cast<std::size_t>(path_bytes));
         }
         for (std::size_t index = 0; index < draw_commands_.size(); ++index) {
             const auto& command = draw_commands_[index];
             DrawUniform uniform{.world = gpu_affine(command.transform, scale_factor_), .clips = {}};
+            if (command.kind == DrawCommandKind::Primitive) {
+                const auto& primitive = primitive_commands_[command.command_index];
+                uniform.path[0] = primitive.first_segment;
+                uniform.path[1] = primitive.segment_count;
+            }
             for (std::size_t clip = 0; clip < kMaxClipDepth; ++clip) {
                 const auto inverse = inverse_affine(command.clip_transforms[clip]);
                 if (!valid_affine(inverse) || !std::isfinite(inverse.m31 * scale_factor_) ||
@@ -4134,9 +4194,77 @@ private:
             };
             return append_primitive(command, opacity, transform);
         }
-        case RenderNodeKind::Path:
-            // Paths retain the software fallback until GPU tessellation is available.
-            return false;
+        case RenderNodeKind::Path: {
+            const auto& path = static_cast<const PathNode&>(node);
+            const auto& points = path.path().points;
+            if (points.empty()) {
+                return true;
+            }
+            const std::size_t count =
+                points.size() == 1 ? 1 : points.size() - 1 + (path.path().closed ? 1 : 0);
+            // Byte offsets and shader indices must stay representable. The
+            // actual device storage range is checked before allocating/uploading.
+            constexpr auto max_segments =
+                std::numeric_limits<uint32_t>::max() / sizeof(std::array<float, 4>);
+            if (count > max_segments || path_segments_.size() > max_segments - count) {
+                return false;
+            }
+            const float radius = std::max(0.5F / scale_factor_, path.thickness() * 0.5F);
+            const float padding = radius + 0.5F / scale_factor_;
+            float left = points[0].x, top = points[0].y;
+            float right = left, bottom = top;
+            const auto first = static_cast<uint32_t>(path_segments_.size());
+            for (std::size_t index = 0; index < count; ++index) {
+                const auto start = points[index % points.size()];
+                const auto end = points[(index + 1) % points.size()];
+                const float dx = (end.x - start.x) * scale_factor_;
+                const float dy = (end.y - start.y) * scale_factor_;
+                if (!std::isfinite(start.x * scale_factor_) ||
+                    !std::isfinite(start.y * scale_factor_) ||
+                    !std::isfinite(end.x * scale_factor_) ||
+                    !std::isfinite(end.y * scale_factor_) || !std::isfinite(dx * dx + dy * dy)) {
+                    return false;
+                }
+                left = std::min({left, start.x, end.x});
+                top = std::min({top, start.y, end.y});
+                right = std::max({right, start.x, end.x});
+                bottom = std::max({bottom, start.y, end.y});
+                path_segments_.push_back({start.x * scale_factor_,
+                                          start.y * scale_factor_,
+                                          end.x * scale_factor_,
+                                          end.y * scale_factor_});
+            }
+            Rect stroke_bounds{left - padding,
+                               top - padding,
+                               right - left + 2 * padding,
+                               bottom - top + 2 * padding};
+            // Software traversal crops nonempty node bounds to whole device
+            // pixels. Keep the same extent, including for minimum-width strokes.
+            const Rect bounds = scale_rect(path.bounds(), scale_factor_);
+            if (!rect_is_empty(bounds)) {
+                if (!finite_rect(bounds)) {
+                    return false;
+                }
+                const float x0 = std::max(stroke_bounds.x, std::floor(bounds.x) / scale_factor_);
+                const float y0 = std::max(stroke_bounds.y, std::floor(bounds.y) / scale_factor_);
+                const float x1 =
+                    std::min(stroke_bounds.right(), std::ceil(bounds.right()) / scale_factor_);
+                const float y1 =
+                    std::min(stroke_bounds.bottom(), std::ceil(bounds.bottom()) / scale_factor_);
+                stroke_bounds = {x0, y0, std::max(0.0F, x1 - x0), std::max(0.0F, y1 - y0)};
+            }
+            PrimitiveCommand command{
+                .rect = stroke_bounds,
+                .color = path.stroke_color(),
+                .radius = radius,
+                .kind = 6,
+                .first_segment = first,
+                .segment_count = static_cast<uint32_t>(count),
+            };
+            // One union coverage calculation per pixel preserves translucent
+            // joins and self-intersections without blending segments repeatedly.
+            return append_primitive(command, opacity, transform);
+        }
         case RenderNodeKind::Transform: {
             const auto& local = static_cast<const TransformNode&>(node).transform();
             if (!valid_affine(local)) {
@@ -4338,6 +4466,7 @@ private:
         last_root_ = nullptr;
         draw_commands_.clear();
         primitive_commands_.clear();
+        path_segments_.clear();
         image_commands_.clear();
         text_commands_.clear();
         active_clips_.clear();
@@ -4476,6 +4605,9 @@ private:
     VkDeviceMemory draw_uniform_memory_ = VK_NULL_HANDLE;
     VkDeviceSize draw_uniform_capacity_ = 0;
     VkDeviceSize draw_uniform_stride_ = 0;
+    VkDeviceSize path_descriptor_offset_ = 0;
+    VkDeviceSize path_descriptor_range_ = 0;
+    std::vector<std::array<float, 4>> path_segments_;
     uint8_t* draw_uniform_mapped_ = nullptr;
     bool clip_depth_warning_logged_ = false;
     std::vector<Rect> damage_regions_;

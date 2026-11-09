@@ -85,6 +85,59 @@ void check_rgb(const nk::DebugScreenshot& shot,
     }
 }
 
+void check_path_reference(const nk::DebugScreenshot& shot,
+                          const nk::SoftwareRenderer& reference,
+                          nk::Rect region,
+                          float scale,
+                          int edge_margin = 0) {
+    REQUIRE(reference.pixel_width() == shot.width);
+    REQUIRE(reference.pixel_height() == shot.height);
+    const auto* pixels = reference.pixel_data();
+    std::size_t mismatches = 0, colored_samples = 0, first_mismatch = 0;
+    const int left = std::max(edge_margin, static_cast<int>(std::ceil(region.x * scale)));
+    const int top = std::max(edge_margin, static_cast<int>(std::ceil(region.y * scale)));
+    const int right = std::min(shot.width - edge_margin, static_cast<int>(region.right() * scale));
+    const int bottom =
+        std::min(shot.height - edge_margin, static_cast<int>(region.bottom() * scale));
+    for (int y = top; y < bottom; ++y) {
+        for (int x = left; x < right; ++x) {
+            const auto offset = (static_cast<std::size_t>(y) * shot.width + x) * 4;
+            bool flat = true;
+            for (int dy = -edge_margin; dy <= edge_margin && flat; ++dy) {
+                for (int dx = -edge_margin; dx <= edge_margin && flat; ++dx) {
+                    const auto neighbor =
+                        (static_cast<std::size_t>(y + dy) * shot.width + x + dx) * 4;
+                    for (std::size_t channel = 0; channel < 3; ++channel) {
+                        flat = flat && pixels[offset + channel] == pixels[neighbor + channel];
+                    }
+                }
+            }
+            if (!flat) {
+                continue;
+            }
+            colored_samples +=
+                pixels[offset] != 255 || pixels[offset + 1] != 255 || pixels[offset + 2] != 255;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                if (std::abs(static_cast<int>(shot.rgba[offset + channel]) -
+                             pixels[offset + channel]) > 2) {
+                    if (mismatches == 0) {
+                        first_mismatch = offset + channel;
+                    }
+                    ++mismatches;
+                }
+            }
+        }
+    }
+    CAPTURE(shot.width,
+            shot.height,
+            scale,
+            first_mismatch,
+            static_cast<int>(shot.rgba[first_mismatch]),
+            static_cast<int>(pixels[first_mismatch]));
+    CHECK(colored_samples > 30);
+    CHECK(mismatches == 0);
+}
+
 } // namespace
 
 TEST_CASE("Vulkan paints effects and strokes without software rasterization", "[vulkan][render]") {
@@ -128,13 +181,13 @@ TEST_CASE("Vulkan paints effects and strokes without software rasterization", "[
     CHECK(connection.connected());
 }
 
-TEST_CASE("Vulkan preserves transformed and path content through fallback", "[vulkan][render]") {
+TEST_CASE("Vulkan accelerates transformed and path content together", "[vulkan][render]") {
     if (!native_vulkan_available()) {
         SKIP("Requires a native Vulkan surface");
     }
     VulkanEnvironment environment;
     nk::Application app(0, nullptr);
-    nk::Window window({.title = "Vulkan affine fallback regression", .width = 240, .height = 180});
+    nk::Window window({.title = "Vulkan affine path regression", .width = 240, .height = 180});
     auto canvas = nk::CanvasWidget::create();
     auto connection = canvas->on_draw().connect([](nk::SnapshotContext& ctx, nk::Rect a) {
         auto black = nk::Color::from_rgb(0, 0, 0);
@@ -147,12 +200,215 @@ TEST_CASE("Vulkan preserves transformed and path content through fallback", "[vu
     window.set_child(canvas);
     window.present();
     REQUIRE(app.event_loop().poll());
+    const auto path =
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+    REQUIRE(path != nk::GpuPresentPath::None);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
     const auto shot = window.inspector().capture_debug_screenshot();
     REQUIRE(shot);
     REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
     const auto a = canvas->allocation();
     check_rgb(*shot, {a.x + 40, a.y + 40}, window.scale_factor(), {0, 0, 0});
     check_rgb(*shot, {a.x + 120, a.y + 40}, window.scale_factor(), {0, 0, 0});
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan path strokes match software coverage including translucent crossings",
+          "[vulkan][render][path]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    const float thickness = GENERATE(0.0F, 1.0F, 7.0F);
+    const bool closed = GENERATE(false, true);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan path coverage", .width = 320, .height = 220});
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        const auto black = nk::Color::from_rgb(0, 0, 0);
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        auto translucent = black;
+        translucent.a = 0.5F;
+        ctx.push_opacity(a, 0.5F);
+        for (int index = 0; index < 4; ++index) {
+            ctx.push_rounded_clip({a.x + 10 + index, a.y + 10, 135, 100}, 8);
+        }
+        ctx.add_path({.points = {{a.x + 20, a.y + 20},
+                                 {a.x + 100, a.y + 100},
+                                 {a.x + 20, a.y + 100},
+                                 {a.x + 100, a.y + 20},
+                                 {a.x + 100, a.y + 20},
+                                 {a.x + 140, a.y + 60}},
+                      .closed = closed},
+                     translucent,
+                     thickness);
+        for (int index = 0; index < 4; ++index) {
+            ctx.pop_container();
+        }
+        ctx.pop_container();
+        ctx.add_path(
+            {.points = {{a.x + 180, a.y + 20}, {a.x + 230, a.y + 80}, {a.x + 170, a.y + 80}},
+             .closed = closed},
+            black,
+            thickness);
+        ctx.add_path({.points = {{a.x + 230, a.y + 120}}}, black, thickness);
+        ctx.add_path(
+            {.points = {{a.x + 260, a.y + 120}, {a.x + 260, a.y + 120}}}, black, thickness);
+        ctx.add_path({}, black, thickness);
+    };
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto path =
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+    REQUIRE(path != nk::GpuPresentPath::None);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+    const auto shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(shot);
+    REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+    const float scale = window.scale_factor();
+    nk::SnapshotContext context;
+    const auto a = canvas->allocation();
+    draw(context, a);
+    const auto root = context.take_root();
+    nk::SoftwareRenderer reference;
+    reference.begin_frame(
+        {static_cast<float>(shot->width) / scale, static_cast<float>(shot->height) / scale}, scale);
+    reference.render(*root);
+    reference.end_frame();
+    // No edge exclusion: this compares every canvas pixel, including AA edges.
+    CAPTURE(thickness, closed);
+    check_path_reference(*shot, reference, a, scale);
+    if (thickness == 7.0F) {
+        check_rgb(*shot, {a.x + 60, a.y + 60}, scale, {191, 191, 191});
+    }
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan paths retain affine clips and localized damage", "[vulkan][render][path]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    const auto matrix = GENERATE(
+        nk::Matrix3x2{},
+        nk::Matrix3x2{.m11 = 1.5F, .m22 = 0.75F},
+        nk::Matrix3x2{.m11 = 0, .m12 = 1, .m21 = -1, .m22 = 0, .m31 = 60, .m32 = 60},
+        nk::Matrix3x2{.m11 = -1},
+        nk::Matrix3x2{
+            .m11 = 0.8660254F, .m12 = 0.5F, .m21 = -0.5F, .m22 = 0.8660254F, .m31 = 30, .m32 = 40});
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan transformed paths", .width = 340, .height = 240});
+    auto color = nk::Color::from_rgb(0, 0, 0);
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        ctx.push_rounded_clip({a.x + 15, a.y + 15, 230, 140}, 12);
+        ctx.push_transform({.m31 = a.x + 110, .m32 = a.y + 30});
+        ctx.push_transform(matrix);
+        ctx.push_rounded_clip({-65, -5, 100, 60}, 8);
+        ctx.add_path({.points = {{-60, 0}, {-20, 40}, {20, 0}}}, color, 8);
+        ctx.pop_container();
+        ctx.pop_transform();
+        ctx.pop_transform();
+        ctx.pop_container();
+        ctx.add_path({.points = {{a.x + 270, a.y + 160}, {a.x + 300, a.y + 160}}}, color, 4);
+    };
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    color = nk::Color::from_rgb(255, 0, 0);
+    canvas->queue_redraw({15, 15, 230, 140});
+    REQUIRE(app.event_loop().poll());
+    const auto counters = window.inspector().last_frame_diagnostics().render_hotspot_counters;
+    REQUIRE(counters.gpu_present_path == nk::GpuPresentPath::PartialRedrawCopy);
+    CHECK(counters.gpu_skipped_command_count > 0);
+    const auto shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(shot);
+    REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+    const auto a = canvas->allocation();
+    // The remote path is outside the damage and must keep its previous color.
+    check_rgb(*shot, {a.x + 285, a.y + 160}, window.scale_factor(), {0, 0, 0});
+    color = nk::Color::from_rgb(0, 0, 0);
+    canvas->queue_redraw();
+    REQUIRE(app.event_loop().poll());
+    const auto full_shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(full_shot);
+    REQUIRE(full_shot->source_backend == nk::RendererBackend::Vulkan);
+    nk::SnapshotContext context;
+    draw(context, a);
+    const auto root = context.take_root();
+    const float scale = window.scale_factor();
+    nk::SoftwareRenderer reference;
+    reference.begin_frame(
+        {static_cast<float>(shot->width) / scale, static_cast<float>(shot->height) / scale}, scale);
+    reference.render(*root);
+    reference.end_frame();
+    // Software transforms resample raster layers; compare constant regions
+    // three device pixels away from their AA edges for affine parity.
+    check_path_reference(*full_shot, reference, a, scale, 3);
+    const nk::Point local{-40, 20};
+    check_rgb(*shot,
+              {a.x + 110 + local.x * matrix.m11 + local.y * matrix.m21 + matrix.m31,
+               a.y + 30 + local.x * matrix.m12 + local.y * matrix.m22 + matrix.m32},
+              scale,
+              {255, 0, 0});
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan grows path segment storage and resets offsets each frame",
+          "[vulkan][render][path]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan path storage growth", .width = 260, .height = 180});
+    std::size_t count = 16;
+    int extra_rects = 0;
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect a) {
+        const auto black = nk::Color::from_rgb(0, 0, 0);
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        nk::Path2D path;
+        for (std::size_t index = 0; index < count; ++index) {
+            path.points.push_back({a.x + 20 + (index % 2) * 20, a.y + 30});
+        }
+        ctx.add_path(std::move(path), black, 4);
+        ctx.add_path({.points = {{a.x + 80, a.y + 30}, {a.x + 120, a.y + 30}}},
+                     nk::Color::from_rgb(255, 0, 0),
+                     4);
+        for (int index = 0; index < extra_rects; ++index) {
+            ctx.add_color_rect({a.x + 180, a.y + 30, 4, 4}, black);
+        }
+    });
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    for (std::size_t next_count : {5000U, 12000U, 0U, 32U, 32U}) {
+        count = next_count;
+        extra_rects = extra_rects == 600 ? 0 : 600;
+        canvas->queue_redraw();
+        REQUIRE(app.event_loop().poll());
+        const auto path =
+            window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+        REQUIRE(path != nk::GpuPresentPath::None);
+        REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+        REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+        const auto shot = window.inspector().capture_debug_screenshot();
+        REQUIRE(shot);
+        REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+        const auto a = canvas->allocation();
+        check_rgb(*shot,
+                  {a.x + 30, a.y + 30},
+                  window.scale_factor(),
+                  count == 0 ? std::array{255, 255, 255} : std::array{0, 0, 0});
+        check_rgb(*shot, {a.x + 100, a.y + 30}, window.scale_factor(), {255, 0, 0});
+    }
     CHECK(connection.connected());
 }
 
@@ -522,6 +778,10 @@ TEST_CASE("Vulkan recovers after a failed frame", "[vulkan][render][recovery]") 
         ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
         ctx.add_color_rect({a.x + 20, a.y + 20, 40, 40}, nk::Color::from_rgb(0, 0, 0));
         ctx.add_image({a.x + 80, a.y + 20, 40, 40}, pixels.data(), 4, 4);
+        ctx.add_path(
+            {.points = {{a.x + 20, a.y + 90}, {a.x + 60, a.y + 110}, {a.x + 100, a.y + 90}}},
+            nk::Color::from_rgb(0, 0, 0),
+            4);
     });
     window.set_child(canvas);
     window.present();

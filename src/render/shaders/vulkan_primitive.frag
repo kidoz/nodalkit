@@ -18,7 +18,12 @@ struct Affine {
 layout(std140, set = 1, binding = 0) uniform DrawUniform {
     Affine world;
     Affine clips[4];
+    uvec4 path; // first segment, segment count, padding
 } draw;
+
+layout(std430, set = 1, binding = 1) readonly buffer PathSegments {
+    vec4 segments[];
+} paths;
 
 vec2 map_affine(Affine matrix, vec2 point) {
     return vec2(dot(matrix.x.xyz, vec3(point, 1.0)),
@@ -58,6 +63,22 @@ void main() {
             ? clamp(dot(v_pixel_position - start, delta) / length_squared, 0.0, 1.0)
             : 0.0;
         coverage = clamp(radius + 0.5 - length(v_pixel_position - start - t * delta), 0.0, 1.0);
+    } else if (kind == 6u) {
+        // Union round-capped segments before blending. Separate line draws
+        // would darken translucent joins, repeated points and crossings.
+        float distance_squared = 3.402823466e+38;
+        for (uint index = 0; index < draw.path.y; ++index) {
+            vec4 segment = paths.segments[draw.path.x + index];
+            vec2 delta = segment.zw - segment.xy;
+            vec2 local = v_pixel_position - segment.xy;
+            float length_squared = dot(delta, delta);
+            float t = length_squared > 0.0
+                ? clamp(dot(local, delta) / length_squared, 0.0, 1.0)
+                : 0.0;
+            vec2 offset = local - t * delta;
+            distance_squared = min(distance_squared, dot(offset, offset));
+        }
+        coverage = clamp(radius + 0.5 - sqrt(distance_squared), 0.0, 1.0);
     } else if (kind == 3u) {
         vec4 shadow_rect = vec4(pc.rect.xy + vec2(thickness),
                                 max(pc.rect.zw - vec2(2.0 * thickness), vec2(0.0)));
