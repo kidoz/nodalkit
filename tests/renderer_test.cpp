@@ -1,6 +1,7 @@
 /// @file renderer_test.cpp
 /// @brief Renderer regression coverage for logical-to-device scaling.
 
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -278,6 +279,78 @@ TEST_CASE("NativeSurface derives framebuffer size from logical size and scale fa
     const auto framebuffer = surface.framebuffer_size();
     REQUIRE(framebuffer.width == 185.0F);
     REQUIRE(framebuffer.height == 68.0F);
+}
+
+TEST_CASE("Opaque rounded spans preserve clipped antialiased edges", "[renderer][clip]") {
+    const float scale = GENERATE(1.0F, 1.5F, 2.0F);
+    const float radius = GENERATE(0.0F, 0.3F, 4.7F, 40.0F);
+    const auto draw = [&](float opacity) {
+        nk::SnapshotContext snapshot;
+        snapshot.add_color_rect({0, 0, 64, 48}, nk::Color::from_rgb(255, 255, 255));
+        snapshot.push_rounded_clip({2.3F, 1.7F, 58.1F, 43.2F}, radius);
+        snapshot.push_rounded_clip({4.7F, 3.2F, 55.3F, 40.1F}, radius * 0.8F);
+        snapshot.add_color_rect({0, 0, 64, 48}, {0.2F, 0.4F, 0.6F, opacity});
+        snapshot.add_rounded_rect({6.3F, 5.7F, 51.2F, 36.4F}, {0.7F, 0.3F, 0.2F, opacity}, radius);
+        snapshot.add_border({8.7F, 7.2F, 47.3F, 32.1F}, {0.1F, 0.4F, 0.8F, opacity}, 1.3F, radius);
+        snapshot.add_rounded_rect({55.7F, 1.2F, 5.1F, 5.8F}, {0.8F, 0.1F, 0.3F, opacity}, radius);
+        snapshot.pop_container();
+        snapshot.pop_container();
+        auto root = snapshot.take_root();
+        nk::SoftwareRenderer renderer;
+        renderer.begin_frame({64, 48}, scale);
+        renderer.render(*root);
+        renderer.end_frame();
+        const auto bytes = renderer.pixel_width() * renderer.pixel_height() * 4;
+        return std::vector<uint8_t>(renderer.pixel_data(), renderer.pixel_data() + bytes);
+    };
+    const auto opaque = draw(1.0F);
+    // This opacity forces scalar blending. Its tiny contribution difference
+    // allows comparing the complete coverage mask without duplicating the
+    // renderer's rounded-distance implementation in the test.
+    const auto blended = draw(0.998F);
+    REQUIRE(opaque.size() == blended.size());
+    int max_difference = 0;
+    for (std::size_t i = 0; i < opaque.size(); ++i) {
+        max_difference = std::max(
+            max_difference, std::abs(static_cast<int>(opaque[i]) - static_cast<int>(blended[i])));
+    }
+    CHECK(max_difference <= 3);
+}
+
+TEST_CASE("Software border damage outside the inner span retains its edge pixels",
+          "[renderer][clip]") {
+    const auto scale = GENERATE(1.0F, 1.5F, 2.0F);
+    const auto make_scene = [](nk::Color color) {
+        nk::SnapshotContext snapshot;
+        snapshot.add_color_rect({0, 0, 32, 24}, nk::Color::from_rgb(255, 255, 255));
+        snapshot.add_border({2, 2, 20, 16}, color, 2, 5);
+        return snapshot.take_root();
+    };
+    const auto first = make_scene(nk::Color::from_rgb(255, 0, 0));
+    const auto second = make_scene(nk::Color::from_rgb(0, 0, 255));
+    nk::SoftwareRenderer partial;
+    partial.begin_frame({32, 24}, scale);
+    partial.render(*first);
+    partial.end_frame();
+    partial.begin_frame({32, 24}, scale);
+    const std::array<nk::Rect, 1> damage{nk::Rect{20, 9, 2, 2}};
+    partial.set_damage_regions(damage);
+    partial.render(*second);
+    partial.end_frame();
+
+    nk::SoftwareRenderer reference;
+    reference.begin_frame({32, 24}, scale);
+    reference.render(*second);
+    reference.end_frame();
+    for (int y = static_cast<int>(9 * scale); y < static_cast<int>(11 * scale); ++y) {
+        for (int x = static_cast<int>(20 * scale); x < static_cast<int>(22 * scale); ++x) {
+            const auto actual = pixel_at(partial, x, y);
+            const auto expected = pixel_at(reference, x, y);
+            CHECK(actual.r == expected.r);
+            CHECK(actual.g == expected.g);
+            CHECK(actual.b == expected.b);
+        }
+    }
 }
 
 TEST_CASE("SoftwareRenderer preserves undamaged pixels across partial redraws", "[renderer]") {

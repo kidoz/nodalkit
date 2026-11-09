@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <nk/foundation/types.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/render/image_node.h>
 #include <nk/render/render_node.h>
@@ -224,6 +226,66 @@ float clip_coverage(int x, int y, const std::vector<ClipRegion>& clips) {
         }
     }
     return coverage;
+}
+
+// Intersect a pixel span with the fully covered interior of a rounded rect.
+// Keep a small margin beyond the antialias ramp so edge pixels still use the
+// scalar coverage calculation, including at fractional device coordinates.
+void intersect_opaque_span(Rect rect, float corner_radius, int y, int& x0, int& x1) {
+    constexpr float kOpaqueInset = 0.501F;
+    if (x0 >= x1) {
+        return;
+    }
+    const float sample_y = static_cast<float>(y) + 0.5F;
+    if (sample_y < rect.y + kOpaqueInset || sample_y > rect.bottom() - kOpaqueInset) {
+        x1 = x0;
+        return;
+    }
+    const float radius = effective_corner_radius(rect, corner_radius);
+    float horizontal_inset = kOpaqueInset;
+    if (radius > kOpaqueInset) {
+        const float dy = std::max(0.0F,
+                                  std::abs(sample_y - (rect.y + (rect.height * 0.5F))) -
+                                      (rect.height * 0.5F) + radius);
+        const float inner_radius = radius - kOpaqueInset;
+        if (dy > inner_radius) {
+            x1 = x0;
+            return;
+        }
+        horizontal_inset = radius - std::sqrt((inner_radius * inner_radius) - (dy * dy));
+    }
+    const float left = std::max(rect.x + horizontal_inset - 0.5F, static_cast<float>(x0));
+    const float right =
+        std::min(rect.right() - horizontal_inset - 0.5F, static_cast<float>(x1 - 1));
+    if (left > right) {
+        x1 = x0;
+        return;
+    }
+    x0 = static_cast<int>(std::ceil(left));
+    x1 = static_cast<int>(std::floor(right)) + 1;
+    x1 = std::max(x0, x1);
+}
+
+std::array<uint8_t, 4> opaque_pixel(Color color) {
+    return {static_cast<uint8_t>(std::clamp(color.r * 255.0F, 0.0F, 255.0F)),
+            static_cast<uint8_t>(std::clamp(color.g * 255.0F, 0.0F, 255.0F)),
+            static_cast<uint8_t>(std::clamp(color.b * 255.0F, 0.0F, 255.0F)),
+            255};
+}
+
+void fill_opaque_span(std::vector<uint8_t>& pixels,
+                      int width,
+                      int y,
+                      int x0,
+                      int x1,
+                      const std::array<uint8_t, 4>& pixel) {
+    auto* dest = pixels.data() + (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                  static_cast<std::size_t>(x0)) *
+                                     4U;
+    for (int x = x0; x < x1; ++x) {
+        std::memcpy(dest, pixel.data(), pixel.size());
+        dest += pixel.size();
+    }
 }
 
 void blend_pixel(std::vector<uint8_t>& pixels,
@@ -930,8 +992,19 @@ void SoftwareRenderer::render(const RenderNode& root) {
             const int x1 = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
             const int y1 = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
 
-            for (int y = y0; y < y1; ++y) {
+            const auto pixel = c.a >= 0.999F ? opaque_pixel(c) : std::array<uint8_t, 4>{};
+            for (int y = y0; y < y1 && c.a > 0.0F; ++y) {
+                int fill_x0 = x0;
+                int fill_x1 = c.a >= 0.999F ? x1 : x0;
+                for (const auto& clip : clips) {
+                    intersect_opaque_span(clip.bounds, clip.corner_radius, y, fill_x0, fill_x1);
+                }
                 for (int x = x0; x < x1; ++x) {
+                    if (x == fill_x0 && fill_x1 > fill_x0) {
+                        fill_opaque_span(impl_->pixels, impl_->width, y, fill_x0, fill_x1, pixel);
+                        x = fill_x1 - 1;
+                        continue;
+                    }
                     const float coverage = clip_coverage(x, y, clips);
                     if (coverage > 0.0F) {
                         blend_pixel(impl_->pixels, impl_->width, x, y, c, coverage);
@@ -952,8 +1025,25 @@ void SoftwareRenderer::render(const RenderNode& root) {
             const int x1 = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
             const int y1 = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
 
-            for (int y = y0; y < y1; ++y) {
+            const auto pixel = c.a >= 0.999F ? opaque_pixel(c) : std::array<uint8_t, 4>{};
+
+            for (int y = y0; y < y1 && c.a > 0.0F; ++y) {
+                int fill_x0 = x0;
+                int fill_x1 = x1;
+                if (c.a >= 0.999F) {
+                    intersect_opaque_span(b, radius, y, fill_x0, fill_x1);
+                    for (const auto& clip : clips) {
+                        intersect_opaque_span(clip.bounds, clip.corner_radius, y, fill_x0, fill_x1);
+                    }
+                } else {
+                    fill_x1 = fill_x0;
+                }
                 for (int x = x0; x < x1; ++x) {
+                    if (x == fill_x0 && fill_x1 > fill_x0) {
+                        fill_opaque_span(impl_->pixels, impl_->width, y, fill_x0, fill_x1, pixel);
+                        x = fill_x1 - 1;
+                        continue;
+                    }
                     const float coverage = rounded_rect_coverage(
                         static_cast<float>(x) + 0.5F, static_cast<float>(y) + 0.5F, b, radius);
                     const float clipped = coverage * clip_coverage(x, y, clips);
@@ -985,8 +1075,17 @@ void SoftwareRenderer::render(const RenderNode& root) {
                 const int x1 = std::min(c_x1, static_cast<int>(std::ceil(b.right())));
                 const int y1 = std::min(c_y1, static_cast<int>(std::ceil(b.bottom())));
 
-                for (int y = y0; y < y1; ++y) {
+                for (int y = y0; y < y1 && c.a > 0.0F; ++y) {
+                    int skip_x0 = x0;
+                    int skip_x1 = x1;
+                    intersect_opaque_span(inner, inner_radius, y, skip_x0, skip_x1);
                     for (int x = x0; x < x1; ++x) {
+                        // Outer coverage minus a fully covered inner pixel is
+                        // zero, regardless of clipping or inherited opacity.
+                        if (x == skip_x0 && skip_x1 > skip_x0) {
+                            x = skip_x1 - 1;
+                            continue;
+                        }
                         const float sample_x = static_cast<float>(x) + 0.5F;
                         const float sample_y = static_cast<float>(y) + 0.5F;
                         const float outer = rounded_rect_coverage(sample_x, sample_y, b, radius);
