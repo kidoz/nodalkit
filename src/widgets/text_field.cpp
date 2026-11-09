@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 #include <nk/actions/shortcut.h>
 #include <nk/platform/application.h>
 #include <nk/platform/events.h>
@@ -22,7 +21,6 @@ namespace nk {
 namespace {
 
 using detail::decode_utf8_units;
-using detail::grapheme_boundaries;
 using detail::nearest_grapheme_boundary;
 using detail::next_grapheme_boundary;
 using detail::next_word_boundary;
@@ -800,19 +798,7 @@ std::size_t TextField::hit_test_cursor(Point point) const {
     const auto bounds = text_rect();
     const auto font = text_field_font();
     const float local_x = std::max(0.0F, point.x - bounds.x + impl_->scroll_x);
-    const auto boundaries = grapheme_boundaries(impl_->edit.text);
-
-    std::size_t best_index = 0;
-    float best_distance = std::numeric_limits<float>::infinity();
-    for (const auto index : boundaries) {
-        const float caret_x = measure_text(impl_->edit.text.substr(0, index), font).width;
-        const float distance = std::fabs(caret_x - local_x);
-        if (distance < best_distance) {
-            best_distance = distance;
-            best_index = index;
-        }
-    }
-    return best_index;
+    return hit_test_text(impl_->edit.text, font, local_x);
 }
 
 void TextField::move_cursor(std::size_t position, bool extend_selection) {

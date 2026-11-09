@@ -15,6 +15,9 @@ public:
 
     [[nodiscard]] Size measure(std::string_view text, const FontDescriptor& font) const override;
 
+    [[nodiscard]] std::size_t
+    hit_test(std::string_view text, const FontDescriptor& font, float x) const override;
+
     [[nodiscard]] ShapedText
     shape(std::string_view text, const FontDescriptor& font, Color color) const override;
 

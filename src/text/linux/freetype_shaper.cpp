@@ -3,6 +3,8 @@
 
 #include "freetype_shaper.h"
 
+#include "../text_boundaries.h"
+
 #include <ft2build.h>
 #include <nk/foundation/logging.h>
 #include FT_FREETYPE_H
@@ -12,7 +14,10 @@
 #include <cstring>
 #include <fontconfig/fontconfig.h>
 #include <harfbuzz/hb-ft.h>
+#include <harfbuzz/hb.h>
+#include <limits>
 #include <list>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -776,6 +781,75 @@ Size FreeTypeShaper::measure(std::string_view text, const FontDescriptor& font) 
     hb_buffer_destroy(hb_buffer);
     impl_->insert_measure(text, font, result);
     return result;
+}
+
+std::size_t
+FreeTypeShaper::hit_test(std::string_view text, const FontDescriptor& font, float x) const {
+    if (text.empty() || impl_->ft_library == nullptr ||
+        text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return 0;
+    }
+    auto* entry = impl_->resolve_face_for_text(font, text);
+    if (entry == nullptr) {
+        return 0;
+    }
+    const std::unique_ptr<hb_buffer_t, decltype(&hb_buffer_destroy)> buffer(hb_buffer_create(),
+                                                                            hb_buffer_destroy);
+    if (!buffer || hb_buffer_allocation_successful(buffer.get()) == 0) {
+        return 0;
+    }
+    hb_buffer_add_utf8(
+        buffer.get(), text.data(), static_cast<int>(text.size()), 0, static_cast<int>(text.size()));
+    hb_buffer_guess_segment_properties(buffer.get());
+    hb_buffer_set_cluster_level(buffer.get(), HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES);
+    hb_shape(entry->hb_font, buffer.get(), nullptr, 0);
+    unsigned int count = 0;
+    const auto* infos = hb_buffer_get_glyph_infos(buffer.get(), &count);
+    const auto* positions = hb_buffer_get_glyph_positions(buffer.get(), &count);
+    if (infos == nullptr || positions == nullptr) {
+        return 0;
+    }
+
+    const auto boundaries = detail::grapheme_boundaries(text);
+    const bool backwards = HB_DIRECTION_IS_BACKWARD(hb_buffer_get_direction(buffer.get()));
+    std::size_t best = 0;
+    float best_distance = std::numeric_limits<float>::infinity();
+    float pen = 0.0F;
+    for (unsigned int first = 0; first < count;) {
+        unsigned int next = first;
+        const float start = pen;
+        while (next < count && infos[next].cluster == infos[first].cluster) {
+            pen += static_cast<float>(positions[next].x_advance) / 64.0F;
+            ++next;
+        }
+        // Monotone HarfBuzz clusters can merge several editing boundaries
+        // into one ligature. Share its advance between those boundaries,
+        // retaining the editor's existing UTF-8/grapheme boundary contract.
+        std::size_t end = text.size();
+        if (backwards && first > 0) {
+            end = infos[first - 1].cluster;
+        } else if (!backwards && next < count) {
+            end = infos[next].cluster;
+        }
+        const auto begin_boundary = std::ranges::lower_bound(boundaries, infos[first].cluster);
+        const auto end_boundary = std::ranges::lower_bound(boundaries, end);
+        const auto segments = end_boundary - begin_boundary;
+        if (segments > 0) {
+            for (auto boundary = begin_boundary; boundary <= end_boundary; ++boundary) {
+                const float fraction =
+                    static_cast<float>(boundary - begin_boundary) / static_cast<float>(segments);
+                const float caret = backwards ? pen + ((start - pen) * fraction)
+                                              : start + ((pen - start) * fraction);
+                const float distance = std::abs(caret - x);
+                if (distance < best_distance || (distance == best_distance && *boundary < best)) {
+                    best_distance = distance;
+                    best = *boundary;
+                }
+            }
+        }
+        first = next;
+    }
+    return best;
 }
 
 ShapedText

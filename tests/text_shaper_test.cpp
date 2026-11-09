@@ -1,6 +1,8 @@
 /// @file text_shaper_test.cpp
 /// @brief Regression tests for platform text shaping output.
 
+#include "../src/text/text_boundaries.h"
+
 #include <algorithm>
 #include <array>
 #include <catch2/catch_approx.hpp>
@@ -8,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <nk/text/font.h>
 #include <nk/text/text_shaper.h>
 #include <optional>
 #include <string>
@@ -79,6 +82,38 @@ bool channel_matches_tint(uint8_t actual, float component) {
 }
 
 } // namespace
+
+TEST_CASE("Text shaper hit testing returns editing boundaries", "[text][pointer]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper);
+    const nk::FontDescriptor font{.family = "monospace", .size = 18};
+    CHECK(shaper->hit_test({}, font, 20) == 0);
+    CHECK(shaper->hit_test("abcd", font, -100) == 0);
+    CHECK(shaper->hit_test("abcd", font, 10000) == 4);
+    for (const std::string text :
+         {"e\u0301x", "a\U0001F469\u200D\U0001F4BBz", "ffi", "\u05D0\u05D1\u05D2"}) {
+        const auto boundaries = nk::detail::grapheme_boundaries(text);
+        for (int x = -2; x < 160; ++x) {
+            const auto offset = shaper->hit_test(text, font, static_cast<float>(x));
+            CHECK(std::find(boundaries.begin(), boundaries.end(), offset) != boundaries.end());
+        }
+    }
+}
+
+#if defined(__linux__)
+TEST_CASE("Linux text hit testing follows run direction and font size", "[text][pointer]") {
+    auto shaper = nk::TextShaper::create();
+    REQUIRE(shaper);
+    nk::FontDescriptor font{.family = "monospace", .size = 16};
+    const std::string rtl = "\u05D0\u05D1\u05D2";
+    CHECK(shaper->hit_test(rtl, font, -100) == rtl.size());
+    CHECK(shaper->hit_test(rtl, font, 10000) == 0);
+    const auto offset = shaper->hit_test("abcdefgh", font, 30);
+    font.size *= 2;
+    CHECK(shaper->hit_test("abcdefgh", font, 60) == offset);
+    CHECK(shaper->hit_test("x", font, 10000) == 1);
+}
+#endif
 
 TEST_CASE("Shaped text bitmaps keep more ink in the upper half for top-heavy glyphs", "[text]") {
     auto shaper = nk::TextShaper::create();

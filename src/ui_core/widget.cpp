@@ -1,7 +1,10 @@
 #include "../style/text_scale.h"
+#include "../text/text_boundaries.h"
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
+#include <limits>
 #include <nk/controllers/event_controller.h>
 #include <nk/layout/layout_manager.h>
 #include <nk/platform/events.h>
@@ -1198,6 +1201,26 @@ Size Widget::measure_text_wrapped(std::string_view text,
     const auto length = static_cast<float>(text.size());
     return {std::min(max_width, length * effective_font.size * 0.55F),
             effective_font.size * 1.35F * 2.0F};
+}
+
+std::size_t
+Widget::hit_test_text(std::string_view text, const FontDescriptor& font, float x) const {
+    note_text_measure_for_diagnostics();
+    const auto effective_font = detail::scaled_font(font);
+    if (impl_->host_window != nullptr && impl_->host_window->text_shaper() != nullptr) {
+        return impl_->host_window->text_shaper()->hit_test(text, effective_font, x);
+    }
+    std::size_t best = 0;
+    float distance = std::numeric_limits<float>::infinity();
+    for (const auto boundary : detail::grapheme_boundaries(text)) {
+        const float caret = static_cast<float>(boundary) * effective_font.size * 0.55F;
+        const float candidate = std::abs(caret - x);
+        if (candidate < distance) {
+            best = boundary;
+            distance = candidate;
+        }
+    }
+    return best;
 }
 
 void Widget::add_text_elided(SnapshotContext& ctx,

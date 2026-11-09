@@ -1,4 +1,11 @@
+#include "text_boundaries.h"
+
+#include <cmath>
+#include <cstddef>
+#include <limits>
+#include <nk/text/font.h>
 #include <nk/text/text_shaper.h>
+#include <string_view>
 
 #ifdef __APPLE__
 #include "macos/coretext_shaper.h"
@@ -10,6 +17,19 @@
 #endif
 
 namespace nk {
+
+std::size_t TextShaper::hit_test(std::string_view text, const FontDescriptor& font, float x) const {
+    std::size_t best = 0;
+    float distance = std::numeric_limits<float>::infinity();
+    for (const auto boundary : detail::grapheme_boundaries(text)) {
+        const float candidate = std::abs(measure(text.substr(0, boundary), font).width - x);
+        if (candidate < distance) {
+            best = boundary;
+            distance = candidate;
+        }
+    }
+    return best;
+}
 
 void TextShaper::set_scale_factor(float /*scale_factor*/) {}
 

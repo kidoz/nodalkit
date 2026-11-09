@@ -339,6 +339,10 @@ protected:
     /// accessibility text scale as SnapshotContext to nominal logical fonts.
     [[nodiscard]] Size measure_text(std::string_view text, const FontDescriptor& font) const;
 
+    /// Find a UTF-8 editing boundary at a horizontal position in logical pixels.
+    [[nodiscard]] std::size_t
+    hit_test_text(std::string_view text, const FontDescriptor& font, float x) const;
+
     /// Measure wrapped text using the host window's active text shaper.
     [[nodiscard]] Size
     measure_text_wrapped(std::string_view text, const FontDescriptor& font, float max_width) const;

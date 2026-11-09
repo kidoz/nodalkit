@@ -1192,6 +1192,7 @@ void force_symbol_references() {
     (void)static_cast<void (nk::ShapedText::*)(std::vector<uint8_t>, int, int)>(
         &nk::ShapedText::set_bitmap);
     (void)&nk::TextShaper::create;
+    (void)&nk::TextShaper::hit_test;
     (void)static_cast<nk::Widget* (nk::Widget::*)() const>(&nk::Widget::parent);
     (void)static_cast<std::span<const std::shared_ptr<nk::Widget>> (nk::Widget::*)() const>(
         &nk::Widget::children);

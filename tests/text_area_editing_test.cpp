@@ -48,6 +48,29 @@ std::vector<std::string> painted_text(nk::Widget& widget) {
 }
 } // namespace
 
+TEST_CASE("TextField pointer hit testing does not measure every text prefix",
+          "[text_field][pointer][performance]") {
+#if defined(__linux__)
+    nk::Window window({.title = "Text hit testing", .width = 320, .height = 80});
+    auto field = nk::TextField::create(std::string(2048, 'a'));
+    window.set_child(field);
+    field->allocate({0, 0, 300, 36});
+    REQUIRE(key(*field, nk::KeyCode::Home));
+    const auto before = field->debug_hotspot_counters().text_measure_count;
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Press, .x = 100, .y = 18, .button = 1}));
+    REQUIRE(field->handle_mouse_event(
+        {.type = nk::MouseEvent::Type::Release, .x = 100, .y = 18, .button = 1}));
+    CHECK(field->cursor_position() > 0);
+    CHECK(field->cursor_position() < 32);
+    // Caret visibility can measure the selected prefix and full text. The
+    // pointer lookup itself must not issue one measurement per character.
+    CHECK(field->debug_hotspot_counters().text_measure_count - before <= 8);
+#else
+    SKIP("The cluster-based native hit-test implementation is Linux-specific");
+#endif
+}
+
 TEST_CASE("TextArea replaces a keyboard selection and undoes it", "[text_area][editing]") {
     auto area = nk::TextArea::create();
     area->set_text("first\ncaf\u00E9");

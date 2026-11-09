@@ -3,6 +3,7 @@
 /// @file text_shaper.h
 /// @brief Abstract text measurement and rasterization interface.
 
+#include <cstddef>
 #include <memory>
 #include <nk/foundation/types.h>
 #include <nk/text/font.h>
@@ -51,6 +52,12 @@ public:
                                                    const FontDescriptor& font,
                                                    Color color,
                                                    float max_width) const;
+
+    /// Find the nearest editing boundary to a horizontal position in logical
+    /// pixels. Returns a UTF-8 byte offset. The default implementation measures
+    /// prefixes; native shapers may use glyph clusters to avoid repeated shaping.
+    [[nodiscard]] virtual std::size_t
+    hit_test(std::string_view text, const FontDescriptor& font, float x) const;
 
     /// Create the platform-appropriate text shaper.
     [[nodiscard]] static std::unique_ptr<TextShaper> create();
