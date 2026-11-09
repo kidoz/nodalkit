@@ -11,6 +11,20 @@ layout(push_constant) uniform PrimitivePushConstants {
     uvec4 params;
 } pc;
 
+struct Affine {
+    vec4 x;
+    vec4 y;
+};
+layout(std140, set = 1, binding = 0) uniform DrawUniform {
+    Affine world;
+    Affine clips[4];
+} draw;
+
+vec2 map_affine(Affine matrix, vec2 point) {
+    return vec2(dot(matrix.x.xyz, vec3(point, 1.0)),
+                dot(matrix.y.xyz, vec3(point, 1.0)));
+}
+
 layout(location = 0) out vec2 v_pixel_position;
 
 void main() {
@@ -23,10 +37,11 @@ void main() {
 
     vec2 unit = unit_positions[gl_VertexIndex];
     vec2 pixel = pc.rect.xy + (pc.rect.zw * unit);
+    vec2 world_pixel = map_affine(draw.world, pixel);
     vec2 viewport = vec2(float(pc.params.w & 0xFFFFu), float(pc.params.w >> 16u));
     vec2 ndc;
-    ndc.x = (pixel.x / viewport.x) * 2.0 - 1.0;
-    ndc.y = (pixel.y / viewport.y) * 2.0 - 1.0;
+    ndc.x = (world_pixel.x / viewport.x) * 2.0 - 1.0;
+    ndc.y = (world_pixel.y / viewport.y) * 2.0 - 1.0;
 
     gl_Position = vec4(ndc, 0.0, 1.0);
     v_pixel_position = pixel;

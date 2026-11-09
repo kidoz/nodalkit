@@ -13,8 +13,21 @@ layout(push_constant) uniform DrawPushConstants {
     uvec4 params;
 } pc;
 
+struct Affine {
+    vec4 x;
+    vec4 y;
+};
+layout(std140, set = 1, binding = 0) uniform DrawUniform {
+    Affine world;
+    Affine clips[4];
+} draw;
+
+vec2 map_affine(Affine matrix, vec2 point) {
+    return vec2(dot(matrix.x.xyz, vec3(point, 1.0)),
+                dot(matrix.y.xyz, vec3(point, 1.0)));
+}
+
 layout(location = 0) in vec2 v_tex_coord;
-layout(location = 1) in vec2 v_pixel_position;
 layout(location = 0) out vec4 out_color;
 
 float rounded_rect_sd(vec2 pixel, vec4 rect, float radius) {
@@ -34,8 +47,9 @@ void main() {
     float coverage = 1.0;
     for (uint clip_index = 0; clip_index < clip_count; ++clip_index) {
         float clip_radius = pc.clip_radii[clip_index];
+        vec2 clip_pixel = map_affine(draw.clips[clip_index], gl_FragCoord.xy);
         float clip_coverage =
-            clamp(0.5 - rounded_rect_sd(v_pixel_position, pc.clip_rects[clip_index], clip_radius),
+            clamp(0.5 - rounded_rect_sd(clip_pixel, pc.clip_rects[clip_index], clip_radius),
                   0.0,
                   1.0);
         coverage *= clip_coverage;

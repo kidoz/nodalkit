@@ -100,11 +100,18 @@ Vulkan uses a Vulkan 1.0 API baseline and negotiates a renderable BGRA8 or
 RGBA8 UNORM surface with nonlinear sRGB presentation. Other surface formats
 use software presentation. Its GPU draw path handles solid and
 rounded rectangles, borders, text, images, round-capped lines, linear gradients,
-distance-based box shadows, and per-draw opacity. Rounded clips support four
-levels; lines and gradients support three. Deeper clipping, paths, and affine
-transforms render the frame in software and upload it for Vulkan presentation.
-Affine fallback uses nearest sampling of bounded transparent layers; singular
-transforms draw no pixels.
+distance-based box shadows, per-draw opacity, and nested affine transforms
+(translation, scaling, rotation, reflection, and shear). Clips retain the
+coordinate space where they were defined. Rounded clips support four active
+regions after same-space flattening; lines and gradients support three. Deeper
+clipping and paths render the frame in software and upload it for Vulkan
+presentation. Singular and nonfinite transforms draw no pixels.
+
+GPU transforms rasterize primitives directly and sample image/text textures;
+software transforms use nearest sampling of bounded transparent layers. Edge
+antialiasing can therefore differ between these paths. Transform data uses a
+reusable dynamic uniform buffer while push constants remain within Vulkan 1.0's
+guaranteed 128-byte minimum.
 
 GPU image and text allocations share a 96 MiB cache budget. Cold allocations
 are evicted before making room for new ones. Frames whose working set exceeds

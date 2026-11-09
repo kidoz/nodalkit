@@ -4,11 +4,13 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <nk/platform/application.h>
 #include <nk/platform/window.h>
 #include <nk/platform/window_inspector.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/text/text_shaper.h>
 #include <nk/widgets/canvas_widget.h>
 #include <string>
 #include <vector>
@@ -151,6 +153,284 @@ TEST_CASE("Vulkan preserves transformed and path content through fallback", "[vu
     const auto a = canvas->allocation();
     check_rgb(*shot, {a.x + 40, a.y + 40}, window.scale_factor(), {0, 0, 0});
     check_rgb(*shot, {a.x + 120, a.y + 40}, window.scale_factor(), {0, 0, 0});
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan draws affine content and independent clip spaces on the GPU",
+          "[vulkan][render][affine]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    const auto matrix = GENERATE(
+        nk::Matrix3x2{},
+        nk::Matrix3x2{.m11 = 1.5F, .m22 = 0.75F},
+        nk::Matrix3x2{.m11 = 0, .m12 = 1, .m21 = -1, .m22 = 0, .m31 = 110},
+        nk::Matrix3x2{.m11 = -1, .m31 = 110},
+        nk::Matrix3x2{.m21 = 0.4F},
+        nk::Matrix3x2{.m11 = 0.8660254F, .m12 = 0.5F, .m21 = -0.5F, .m22 = 0.8660254F, .m31 = 55});
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan affine regression", .width = 280, .height = 260});
+    const std::array<uint32_t, 4> pixels{0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFF000000};
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        const auto black = nk::Color::from_rgb(0, 0, 0);
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        // The outer clip stays in root space; the inner clip rotates/scales.
+        ctx.push_rounded_clip({a.x + 25, a.y + 25, 160, 150}, 12);
+        ctx.push_transform({.m31 = a.x + 40, .m32 = a.y + 40});
+        ctx.push_transform(matrix);
+        ctx.push_rounded_clip({0, 0, 100, 100}, 10);
+        ctx.add_color_rect({-20, -20, 140, 140}, black);
+        ctx.add_image({10, 10, 80, 80}, pixels.data(), 2, 2);
+        ctx.push_opacity({20, 20, 20, 20}, 0.5F);
+        ctx.add_rounded_rect({20, 20, 20, 20}, black, 4);
+        ctx.pop_container();
+        ctx.pop_container();
+        ctx.pop_transform();
+        ctx.pop_transform();
+        ctx.pop_container();
+        // Nonfinite and singular transforms have no visible output.
+        ctx.push_transform({.m11 = 0, .m22 = 0});
+        ctx.add_color_rect(a, black);
+        ctx.pop_transform();
+        ctx.push_transform({.m31 = std::numeric_limits<float>::quiet_NaN()});
+        ctx.add_color_rect(a, black);
+        ctx.pop_transform();
+    };
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto path =
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+    REQUIRE(path != nk::GpuPresentPath::None);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+    REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+    const auto shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(shot);
+    REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+    const float scale = window.scale_factor();
+    nk::SnapshotContext reference_context;
+    draw(reference_context, canvas->allocation());
+    const auto root = reference_context.take_root();
+    nk::SoftwareRenderer reference;
+    reference.begin_frame({shot->width / scale, shot->height / scale}, scale);
+    reference.render(*root);
+    reference.end_frame();
+    // Software transforms resample a rasterized layer with nearest sampling;
+    // GPU transforms rasterize geometry directly. Compare flat interiors and
+    // exteriors, excluding a three-device-pixel neighborhood of reference edges.
+    std::size_t colored_samples = 0;
+    std::size_t mismatches = 0;
+    const auto* expected = reference.pixel_data();
+    const auto a = canvas->allocation();
+    for (int y = static_cast<int>(a.y * scale) + 4; y < (a.bottom() * scale) - 4; ++y) {
+        for (int x = static_cast<int>(a.x * scale) + 4; x < (a.right() * scale) - 4; ++x) {
+            const auto offset = (static_cast<std::size_t>(y) * shot->width + x) * 4;
+            bool flat = true;
+            for (int dy = -3; dy <= 3 && flat; ++dy) {
+                for (int dx = -3; dx <= 3 && flat; ++dx) {
+                    const auto neighbor =
+                        (static_cast<std::size_t>(y + dy) * shot->width + x + dx) * 4;
+                    for (std::size_t channel = 0; channel < 3; ++channel) {
+                        flat = flat && expected[offset + channel] == expected[neighbor + channel];
+                    }
+                }
+            }
+            if (!flat) {
+                continue;
+            }
+            colored_samples += expected[offset] != 255 || expected[offset + 1] != 255 ||
+                               expected[offset + 2] != 255;
+            for (std::size_t channel = 0; channel < 3; ++channel) {
+                mismatches += std::abs(static_cast<int>(shot->rgba[offset + channel]) -
+                                       expected[offset + channel]) > 2;
+            }
+        }
+    }
+    CHECK(colored_samples > 1000);
+    CHECK(mismatches == 0);
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan reuses affine textures and redraws transformed damage",
+          "[vulkan][render][affine]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan affine cache regression", .width = 320, .height = 220});
+    std::array<uint32_t, 4> pixels{0xFF000000, 0xFF000000, 0xFF000000, 0xFF000000};
+    float translation = 0;
+    auto canvas = nk::CanvasWidget::create();
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        const auto black = nk::Color::from_rgb(0, 0, 0);
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        ctx.push_transform({.m31 = a.x + 100 + translation, .m32 = a.y + 20});
+        ctx.add_image({-80, 0, 40, 40}, pixels.data(), 2, 2);
+        ctx.add_text({-80, 60}, "Affine", black, {.family = "DejaVu Sans", .size = 14});
+        ctx.add_border({-30, 0, 40, 40}, black, 6, 4);
+        ctx.add_line({30, 0}, {70, 40}, black, 4);
+        ctx.add_linear_gradient({-30, 60, 40, 40}, black, black);
+        ctx.add_shadow({30, 60, 40, 40}, black, 0, 0, 4);
+        ctx.pop_transform();
+        ctx.add_color_rect({a.x + 240, a.y + 120, 20, 20}, black);
+    };
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    for (int frame = 0; frame < 4; ++frame) {
+        translation = static_cast<float>(frame * 10);
+        canvas->queue_redraw({20, 20, 200, 120});
+        REQUIRE(app.event_loop().poll());
+        const auto counters = window.inspector().last_frame_diagnostics().render_hotspot_counters;
+        REQUIRE(counters.gpu_present_path != nk::GpuPresentPath::SoftwareUpload);
+        REQUIRE(counters.gpu_present_path != nk::GpuPresentPath::SoftwareDirect);
+        REQUIRE(counters.gpu_present_path != nk::GpuPresentPath::None);
+        REQUIRE(counters.gpu_present_path == nk::GpuPresentPath::PartialRedrawCopy);
+        CHECK(counters.gpu_skipped_command_count > 0);
+        CHECK(counters.texture_allocation_count == 0);
+        CHECK(counters.image_texture_upload_count == 0);
+        CHECK(counters.text_texture_upload_count == 0);
+        const auto shot = window.inspector().capture_debug_screenshot();
+        REQUIRE(shot);
+        REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+        const auto a = canvas->allocation();
+        check_rgb(*shot, {a.x + 40 + translation, a.y + 40}, window.scale_factor(), {0, 0, 0});
+        check_rgb(*shot, {a.x + 72 + translation, a.y + 40}, window.scale_factor(), {0, 0, 0});
+        check_rgb(*shot, {a.x + 150 + translation, a.y + 40}, window.scale_factor(), {0, 0, 0});
+        check_rgb(*shot, {a.x + 90 + translation, a.y + 100}, window.scale_factor(), {0, 0, 0});
+        check_rgb(*shot, {a.x + 150 + translation, a.y + 100}, window.scale_factor(), {0, 0, 0});
+        // Compare every glyph pixel for an integer-device-pixel translation.
+        auto shaper = nk::TextShaper::create();
+        REQUIRE(shaper);
+        nk::SnapshotContext context(shaper.get());
+        draw(context, a);
+        const auto root = context.take_root();
+        nk::SoftwareRenderer reference;
+        reference.set_text_shaper(shaper.get());
+        const float scale = window.scale_factor();
+        reference.begin_frame({shot->width / scale, shot->height / scale}, scale);
+        reference.render(*root);
+        reference.end_frame();
+        std::size_t glyph_mismatches = 0;
+        std::size_t glyph_pixels = 0;
+        for (int y = static_cast<int>((a.y + 80) * scale); y < (a.y + 110) * scale; ++y) {
+            for (int x = static_cast<int>((a.x + 20 + translation) * scale);
+                 x < (a.x + 66 + translation) * scale;
+                 ++x) {
+                const auto offset = (static_cast<std::size_t>(y) * shot->width + x) * 4;
+                glyph_pixels += reference.pixel_data()[offset] < 250;
+                for (std::size_t channel = 0; channel < 3; ++channel) {
+                    glyph_mismatches += std::abs(static_cast<int>(shot->rgba[offset + channel]) -
+                                                 reference.pixel_data()[offset + channel]) > 2;
+                }
+            }
+        }
+        CHECK(glyph_pixels > 20);
+        CHECK(glyph_mismatches == 0);
+    }
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan preserves clip capacity across affine coordinate spaces",
+          "[vulkan][render][affine]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    const int depth = GENERATE(4, 5);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan affine clip capacity", .width = 240, .height = 200});
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        ctx.push_transform({.m31 = a.x + 20, .m32 = a.y + 20});
+        // Many same-space rectangular clips still flatten into one slot.
+        for (int i = 0; i < 8; ++i) {
+            ctx.push_rounded_clip({0, 0, 120, 100}, 0);
+        }
+        for (int i = 1; i < depth; ++i) {
+            ctx.push_transform({.m31 = 1, .m32 = 1});
+            ctx.push_rounded_clip({0, 0, 120, 100}, 10);
+        }
+        ctx.add_color_rect({0, 0, 120, 100}, nk::Color::from_rgb(0, 0, 0));
+        for (int i = 1; i < depth; ++i) {
+            ctx.pop_container();
+            ctx.pop_transform();
+        }
+        for (int i = 0; i < 8; ++i) {
+            ctx.pop_container();
+        }
+        ctx.pop_transform();
+    });
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const auto path =
+        window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+    if (depth == 4) {
+        CHECK(path != nk::GpuPresentPath::None);
+        CHECK(path != nk::GpuPresentPath::SoftwareDirect);
+        CHECK(path != nk::GpuPresentPath::SoftwareUpload);
+    } else {
+        CHECK(path == nk::GpuPresentPath::SoftwareUpload);
+    }
+    const auto shot = window.inspector().capture_debug_screenshot();
+    REQUIRE(shot);
+    REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+    const auto a = canvas->allocation();
+    check_rgb(*shot, {a.x + 60, a.y + 60}, window.scale_factor(), {0, 0, 0});
+    check_rgb(*shot, {a.x + 150, a.y + 60}, window.scale_factor(), {255, 255, 255});
+    CHECK(connection.connected());
+}
+
+TEST_CASE("Vulkan grows and reuses affine uniform storage between frames",
+          "[vulkan][render][affine]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Vulkan affine buffer growth", .width = 280, .height = 240});
+    int count = 16;
+    auto canvas = nk::CanvasWidget::create();
+    auto connection = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.add_color_rect(a, nk::Color::from_rgb(255, 255, 255));
+        for (int index = 0; index < count; ++index) {
+            ctx.push_transform({.m31 = a.x + 20 + static_cast<float>(index % 40) * 5,
+                                .m32 = a.y + 20 + static_cast<float>(index / 40) * 5});
+            ctx.add_color_rect({-10, -10, 4, 4}, nk::Color::from_rgb(0, 0, 0));
+            ctx.pop_transform();
+        }
+    });
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    for (int next_count : {600, 1000, 32}) {
+        count = next_count;
+        canvas->queue_redraw();
+        REQUIRE(app.event_loop().poll());
+        const auto path =
+            window.inspector().last_frame_diagnostics().render_hotspot_counters.gpu_present_path;
+        REQUIRE(path != nk::GpuPresentPath::None);
+        REQUIRE(path != nk::GpuPresentPath::SoftwareUpload);
+        REQUIRE(path != nk::GpuPresentPath::SoftwareDirect);
+        const auto shot = window.inspector().capture_debug_screenshot();
+        REQUIRE(shot);
+        REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+        const auto a = canvas->allocation();
+        check_rgb(*shot, {a.x + 12, a.y + 12}, window.scale_factor(), {0, 0, 0});
+        check_rgb(*shot,
+                  {a.x + 12 + static_cast<float>((count - 1) % 40) * 5,
+                   a.y + 12 + static_cast<float>((count - 1) / 40) * 5},
+                  window.scale_factor(),
+                  {0, 0, 0});
+        check_rgb(*shot, {a.x + 250, a.y + 180}, window.scale_factor(), {255, 255, 255});
+    }
     CHECK(connection.connected());
 }
 

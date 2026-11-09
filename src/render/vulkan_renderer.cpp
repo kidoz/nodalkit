@@ -26,6 +26,7 @@
 #include <limits>
 #include <memory>
 #include <nk/foundation/logging.h>
+#include <nk/foundation/types.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/render/clip_stack.h>
 #include <nk/render/image_node.h>
@@ -65,6 +66,130 @@ FontDescriptor renderer_font_for_shape(FontDescriptor font, float scale_factor) 
 }
 
 constexpr std::size_t kMaxClipDepth = 4;
+
+// Matrices map local logical coordinates to the root. Device-space matrices
+// keep the linear part and scale only the translation.
+Matrix3x2 compose_affine(const Matrix3x2& outer, const Matrix3x2& inner) {
+    return {
+        inner.m11 * outer.m11 + inner.m12 * outer.m21,
+        inner.m11 * outer.m12 + inner.m12 * outer.m22,
+        inner.m21 * outer.m11 + inner.m22 * outer.m21,
+        inner.m21 * outer.m12 + inner.m22 * outer.m22,
+        inner.m31 * outer.m11 + inner.m32 * outer.m21 + outer.m31,
+        inner.m31 * outer.m12 + inner.m32 * outer.m22 + outer.m32,
+    };
+}
+
+bool valid_affine(const Matrix3x2& matrix) {
+    const float determinant = matrix.m11 * matrix.m22 - matrix.m12 * matrix.m21;
+    return std::isfinite(matrix.m11) && std::isfinite(matrix.m12) && std::isfinite(matrix.m21) &&
+           std::isfinite(matrix.m22) && std::isfinite(matrix.m31) && std::isfinite(matrix.m32) &&
+           std::isfinite(determinant) && determinant != 0.0F;
+}
+
+Matrix3x2 inverse_affine(const Matrix3x2& matrix) {
+    const float determinant = matrix.m11 * matrix.m22 - matrix.m12 * matrix.m21;
+    return {matrix.m22 / determinant,
+            -matrix.m12 / determinant,
+            -matrix.m21 / determinant,
+            matrix.m11 / determinant,
+            (matrix.m21 * matrix.m32 - matrix.m22 * matrix.m31) / determinant,
+            (matrix.m12 * matrix.m31 - matrix.m11 * matrix.m32) / determinant};
+}
+
+Rect affine_bounds(Rect rect, const Matrix3x2& matrix) {
+    const float x = rect.x * matrix.m11 + rect.y * matrix.m21 + matrix.m31;
+    const float y = rect.x * matrix.m12 + rect.y * matrix.m22 + matrix.m32;
+    const float xx = rect.width * matrix.m11;
+    const float xy = rect.width * matrix.m12;
+    const float yx = rect.height * matrix.m21;
+    const float yy = rect.height * matrix.m22;
+    return {x + std::min(0.0F, xx) + std::min(0.0F, yx),
+            y + std::min(0.0F, xy) + std::min(0.0F, yy),
+            std::abs(xx) + std::abs(yx),
+            std::abs(xy) + std::abs(yy)};
+}
+
+bool finite_rect(Rect rect) {
+    return std::isfinite(rect.x) && std::isfinite(rect.y) && std::isfinite(rect.right()) &&
+           std::isfinite(rect.bottom());
+}
+
+struct AffineClip {
+    ClipRegion region;
+    Matrix3x2 transform;
+};
+
+// Flatten only clips defined in the same space. A clip outside a transform
+// remains fixed in the root, while a clip inside it follows that transform.
+class AffineClipStack {
+public:
+    bool push(ClipRegion region, const Matrix3x2& transform) {
+        for (std::size_t index = 0; index < count_; ++index) {
+            if (regions_[index].transform != transform) {
+                continue;
+            }
+            merger_.clear();
+            (void)merger_.push(regions_[index].region);
+            (void)merger_.push(region);
+            if (merger_.active().size() == 1) {
+                frames_.push_back({regions_, count_});
+                regions_[index].region = merger_.active()[0];
+                return true;
+            }
+        }
+        if (count_ == kMaxClipDepth) {
+            return false;
+        }
+        frames_.push_back({regions_, count_});
+        regions_[count_++] = {region, transform};
+        return true;
+    }
+
+    void pop() {
+        regions_ = frames_.back().regions;
+        count_ = frames_.back().count;
+        frames_.pop_back();
+    }
+
+    std::span<const AffineClip> active() const { return {regions_.data(), count_}; }
+
+    void clear() {
+        count_ = 0;
+        frames_.clear();
+    }
+
+private:
+    struct Frame {
+        std::array<AffineClip, kMaxClipDepth> regions;
+        std::size_t count;
+    };
+
+    std::array<AffineClip, kMaxClipDepth> regions_{};
+    std::size_t count_ = 0;
+    std::vector<Frame> frames_;
+    ClipStack merger_{2};
+};
+
+// std140: two vec4 rows per affine, followed by four inverse clip matrices.
+// This leaves the Vulkan 1.0 minimum push-constant budget unchanged.
+struct GpuAffine {
+    std::array<float, 4> x{1, 0, 0, 0};
+    std::array<float, 4> y{0, 1, 0, 0};
+};
+
+GpuAffine gpu_affine(const Matrix3x2& matrix, float scale) {
+    return {{matrix.m11, matrix.m21, matrix.m31 * scale, 0},
+            {matrix.m12, matrix.m22, matrix.m32 * scale, 0}};
+}
+
+struct DrawUniform {
+    GpuAffine world;
+    std::array<GpuAffine, kMaxClipDepth> clips;
+};
+
+static_assert(sizeof(DrawUniform) == 160);
+static_assert(offsetof(DrawUniform, clips) == 32);
 
 struct PrimitiveCommand {
     Rect rect{};
@@ -106,6 +231,9 @@ enum class DrawCommandKind : uint8_t {
 struct DrawCommand {
     DrawCommandKind kind = DrawCommandKind::Primitive;
     std::size_t command_index = 0;
+    Matrix3x2 transform;
+    Rect device_bounds{};
+    std::array<Matrix3x2, kMaxClipDepth> clip_transforms{};
 };
 
 // Packed to exactly the 128-byte push-constant minimum while carrying four
@@ -813,7 +941,7 @@ public:
             !ensure_draw_textures_ready()) {
             use_gpu_path_ = false;
         }
-        if (use_gpu_path_ && !prepare_texture_uploads()) {
+        if (use_gpu_path_ && (!prepare_texture_uploads() || !prepare_draw_uniforms())) {
             use_gpu_path_ = false;
         }
 
@@ -1240,16 +1368,20 @@ private:
         return true;
     }
 
-    [[nodiscard]] Rect draw_command_bounds(const DrawCommand& draw_command) const {
+    [[nodiscard]] Rect draw_local_bounds(const DrawCommand& draw_command) const {
         switch (draw_command.kind) {
         case DrawCommandKind::Primitive:
-            return scale_rect(primitive_commands_[draw_command.command_index].rect, scale_factor_);
+            return primitive_commands_[draw_command.command_index].rect;
         case DrawCommandKind::Image:
-            return scale_rect(image_commands_[draw_command.command_index].rect, scale_factor_);
+            return image_commands_[draw_command.command_index].rect;
         case DrawCommandKind::Text:
-            return scale_rect(text_commands_[draw_command.command_index].rect, scale_factor_);
+            return text_commands_[draw_command.command_index].rect;
         }
         return {};
+    }
+
+    [[nodiscard]] static Rect draw_command_bounds(const DrawCommand& draw_command) {
+        return draw_command.device_bounds;
     }
 
     [[nodiscard]] std::size_t clipped_draw_pixel_area(Rect bounds) const {
@@ -1384,7 +1516,16 @@ private:
 
         for (std::size_t draw_index = 0; draw_index < draw_commands_.size(); ++draw_index) {
             const auto& draw_command = draw_commands_[draw_index];
-            Rect command_bounds{};
+            const Rect command_bounds = draw_command_bounds(draw_command);
+            const auto uniform_offset = static_cast<uint32_t>(draw_index * draw_uniform_stride_);
+            vkCmdBindDescriptorSets(command_buffer_,
+                                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    pipeline_layout_,
+                                    1,
+                                    1,
+                                    &draw_uniform_set_,
+                                    1,
+                                    &uniform_offset);
 
             if (draw_command.kind == DrawCommandKind::Primitive) {
                 if (!pipeline_bound || active_kind != DrawCommandKind::Primitive) {
@@ -1395,7 +1536,6 @@ private:
                 }
 
                 const auto& command = primitive_commands_[draw_command.command_index];
-                command_bounds = scale_rect(command.rect, scale_factor_);
                 DrawPushConstants push_constants{};
                 populate_draw_push_constants(
                     push_constants,
@@ -1497,7 +1637,6 @@ private:
             DrawPushConstants push_constants{};
             if (draw_command.kind == DrawCommandKind::Image) {
                 const auto& command = image_commands_[draw_command.command_index];
-                command_bounds = scale_rect(command.rect, scale_factor_);
                 populate_draw_push_constants(
                     push_constants,
                     command.rect,
@@ -1508,7 +1647,6 @@ private:
                     swapchain_extent_);
             } else {
                 const auto& command = text_commands_[draw_command.command_index];
-                command_bounds = scale_rect(command.rect, scale_factor_);
                 populate_draw_push_constants(
                     push_constants,
                     command.rect,
@@ -1719,21 +1857,46 @@ private:
             return false;
         }
 
-        const VkDescriptorPoolSize pool_size = {
-            .type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .descriptorCount = 1024,
+        const VkDescriptorSetLayoutBinding uniform_binding{
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .pImmutableSamplers = nullptr,
         };
+        auto uniform_layout_info = descriptor_set_layout_info;
+        uniform_layout_info.pBindings = &uniform_binding;
+        if (!vk_ok(vkCreateDescriptorSetLayout(
+                       device_, &uniform_layout_info, nullptr, &draw_uniform_layout_),
+                   "vkCreateDescriptorSetLayout(affine)")) {
+            return false;
+        }
+        const std::array<VkDescriptorPoolSize, 2> pool_sizes{{
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1024},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1},
+        }};
         const VkDescriptorPoolCreateInfo descriptor_pool_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .pNext = nullptr,
             .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
-            .maxSets = 1024,
-            .poolSizeCount = 1,
-            .pPoolSizes = &pool_size,
+            .maxSets = 1025,
+            .poolSizeCount = static_cast<uint32_t>(pool_sizes.size()),
+            .pPoolSizes = pool_sizes.data(),
         };
         if (!vk_ok(
                 vkCreateDescriptorPool(device_, &descriptor_pool_info, nullptr, &descriptor_pool_),
                 "vkCreateDescriptorPool")) {
+            return false;
+        }
+        const VkDescriptorSetAllocateInfo uniform_set_info{
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .pNext = nullptr,
+            .descriptorPool = descriptor_pool_,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &draw_uniform_layout_,
+        };
+        if (!vk_ok(vkAllocateDescriptorSets(device_, &uniform_set_info, &draw_uniform_set_),
+                   "vkAllocateDescriptorSets(affine)")) {
             return false;
         }
 
@@ -2182,12 +2345,14 @@ private:
             .offset = 0,
             .size = sizeof(DrawPushConstants),
         };
+        const std::array<VkDescriptorSetLayout, 2> layouts{descriptor_set_layout_,
+                                                           draw_uniform_layout_};
         const VkPipelineLayoutCreateInfo pipeline_layout_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             .pNext = nullptr,
             .flags = 0,
-            .setLayoutCount = 1,
-            .pSetLayouts = &descriptor_set_layout_,
+            .setLayoutCount = static_cast<uint32_t>(layouts.size()),
+            .pSetLayouts = layouts.data(),
             .pushConstantRangeCount = 1,
             .pPushConstantRanges = &push_constant_range,
         };
@@ -2709,6 +2874,113 @@ private:
         }
         std::memcpy(
             texture_upload_mapped_, texture_upload_bytes_.data(), texture_upload_bytes_.size());
+        return true;
+    }
+
+    void destroy_draw_uniform_buffer() {
+        if (draw_uniform_mapped_ != nullptr) {
+            vkUnmapMemory(device_, draw_uniform_memory_);
+        }
+        if (draw_uniform_buffer_ != VK_NULL_HANDLE) {
+            vkDestroyBuffer(device_, draw_uniform_buffer_, nullptr);
+        }
+        if (draw_uniform_memory_ != VK_NULL_HANDLE) {
+            vkFreeMemory(device_, draw_uniform_memory_, nullptr);
+        }
+        draw_uniform_mapped_ = nullptr;
+        draw_uniform_buffer_ = VK_NULL_HANDLE;
+        draw_uniform_memory_ = VK_NULL_HANDLE;
+        draw_uniform_capacity_ = 0;
+    }
+
+    [[nodiscard]] bool prepare_draw_uniforms() {
+        const VkDeviceSize alignment =
+            std::max<VkDeviceSize>(1, device_properties_.limits.minUniformBufferOffsetAlignment);
+        draw_uniform_stride_ = ((sizeof(DrawUniform) + alignment - 1) / alignment) * alignment;
+        if (draw_commands_.size() > std::numeric_limits<uint32_t>::max() / draw_uniform_stride_) {
+            return false;
+        }
+        const VkDeviceSize bytes = draw_commands_.size() * draw_uniform_stride_;
+        if (bytes == 0) {
+            return true;
+        }
+        if (bytes > draw_uniform_capacity_) {
+            destroy_draw_uniform_buffer();
+            const VkDeviceSize capacity = std::max<VkDeviceSize>(65536, std::bit_ceil(bytes));
+            const VkBufferCreateInfo buffer_info{
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .size = capacity,
+                .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                .queueFamilyIndexCount = 0,
+                .pQueueFamilyIndices = nullptr,
+            };
+            if (!vk_ok(vkCreateBuffer(device_, &buffer_info, nullptr, &draw_uniform_buffer_),
+                       "vkCreateBuffer(draw_uniform)")) {
+                return false;
+            }
+            VkMemoryRequirements requirements{};
+            vkGetBufferMemoryRequirements(device_, draw_uniform_buffer_, &requirements);
+            const auto memory_type = find_memory_type(requirements.memoryTypeBits,
+                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            if (memory_type == std::numeric_limits<uint32_t>::max()) {
+                destroy_draw_uniform_buffer();
+                return false;
+            }
+            const VkMemoryAllocateInfo memory_info{
+                .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+                .pNext = nullptr,
+                .allocationSize = requirements.size,
+                .memoryTypeIndex = memory_type,
+            };
+            if (!vk_ok(vkAllocateMemory(device_, &memory_info, nullptr, &draw_uniform_memory_),
+                       "vkAllocateMemory(draw_uniform)") ||
+                !vk_ok(vkBindBufferMemory(device_, draw_uniform_buffer_, draw_uniform_memory_, 0),
+                       "vkBindBufferMemory(draw_uniform)")) {
+                destroy_draw_uniform_buffer();
+                return false;
+            }
+            void* mapped = nullptr;
+            if (!vk_ok(vkMapMemory(device_, draw_uniform_memory_, 0, capacity, 0, &mapped),
+                       "vkMapMemory(draw_uniform)")) {
+                destroy_draw_uniform_buffer();
+                return false;
+            }
+            draw_uniform_mapped_ = static_cast<uint8_t*>(mapped);
+            draw_uniform_capacity_ = capacity;
+            const VkDescriptorBufferInfo buffer_descriptor{
+                draw_uniform_buffer_, 0, sizeof(DrawUniform)};
+            const VkWriteDescriptorSet write{
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .pNext = nullptr,
+                .dstSet = draw_uniform_set_,
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+                .pImageInfo = nullptr,
+                .pBufferInfo = &buffer_descriptor,
+                .pTexelBufferView = nullptr,
+            };
+            vkUpdateDescriptorSets(device_, 1, &write, 0, nullptr);
+        }
+        for (std::size_t index = 0; index < draw_commands_.size(); ++index) {
+            const auto& command = draw_commands_[index];
+            DrawUniform uniform{.world = gpu_affine(command.transform, scale_factor_), .clips = {}};
+            for (std::size_t clip = 0; clip < kMaxClipDepth; ++clip) {
+                const auto inverse = inverse_affine(command.clip_transforms[clip]);
+                if (!valid_affine(inverse) || !std::isfinite(inverse.m31 * scale_factor_) ||
+                    !std::isfinite(inverse.m32 * scale_factor_)) {
+                    return false;
+                }
+                uniform.clips[clip] = gpu_affine(inverse, scale_factor_);
+            }
+            std::memcpy(
+                draw_uniform_mapped_ + index * draw_uniform_stride_, &uniform, sizeof(uniform));
+        }
         return true;
     }
 
@@ -3808,17 +4080,35 @@ private:
         software_->present(surface);
     }
 
-    void append_primitive(PrimitiveCommand command, float opacity) {
+    bool append_draw(DrawCommandKind kind, std::size_t index, const Matrix3x2& transform) {
+        DrawCommand draw{.kind = kind, .command_index = index, .transform = transform};
+        const auto local_bounds = draw_local_bounds(draw);
+        draw.device_bounds = scale_rect(affine_bounds(local_bounds, transform), scale_factor_);
+        if (!finite_rect(draw.device_bounds) ||
+            !finite_rect(scale_rect(local_bounds, scale_factor_))) {
+            return false;
+        }
+        const auto clips = active_clips_.active();
+        for (std::size_t clip = 0; clip < clips.size(); ++clip) {
+            draw.clip_transforms[clip] = clips[clip].transform;
+        }
+        draw_commands_.push_back(draw);
+        return true;
+    }
+
+    bool append_primitive(PrimitiveCommand command, float opacity, const Matrix3x2& transform) {
         command.color.a *= opacity;
         const auto clips = active_clips_.active();
         command.clip_count = static_cast<uint32_t>(clips.size());
-        std::copy(clips.begin(), clips.end(), command.clips.begin());
+        for (std::size_t clip = 0; clip < clips.size(); ++clip) {
+            command.clips[clip] = clips[clip].region;
+        }
         primitive_commands_.push_back(command);
-        draw_commands_.push_back(
-            {.kind = DrawCommandKind::Primitive, .command_index = primitive_commands_.size() - 1});
+        return append_draw(DrawCommandKind::Primitive, primitive_commands_.size() - 1, transform);
     }
 
-    bool collect_draw_commands(const RenderNode& node, float opacity = 1.0F) {
+    bool
+    collect_draw_commands(const RenderNode& node, float opacity = 1.0F, Matrix3x2 transform = {}) {
         switch (node.kind()) {
         case RenderNodeKind::Line: {
             if (active_clips_.active().size() >= kMaxClipDepth) {
@@ -3842,16 +4132,31 @@ private:
                               end.x * scale_factor_,
                               end.y * scale_factor_},
             };
-            append_primitive(command, opacity);
-            return true;
+            return append_primitive(command, opacity, transform);
         }
         case RenderNodeKind::Path:
-        case RenderNodeKind::Transform:
-            // The software path implements these nodes; never silently discard them.
+            // Paths retain the software fallback until GPU tessellation is available.
             return false;
+        case RenderNodeKind::Transform: {
+            const auto& local = static_cast<const TransformNode&>(node).transform();
+            if (!valid_affine(local)) {
+                return true;
+            }
+            const auto combined = compose_affine(transform, local);
+            if (!valid_affine(combined) || !std::isfinite(combined.m31 * scale_factor_) ||
+                !std::isfinite(combined.m32 * scale_factor_)) {
+                return false;
+            }
+            for (const auto& child : node.children()) {
+                if (child != nullptr && !collect_draw_commands(*child, opacity, combined)) {
+                    return false;
+                }
+            }
+            return true;
+        }
         case RenderNodeKind::Container:
             for (const auto& child : node.children()) {
-                if (child != nullptr && !collect_draw_commands(*child, opacity)) {
+                if (child != nullptr && !collect_draw_commands(*child, opacity, transform)) {
                     return false;
                 }
             }
@@ -3865,8 +4170,7 @@ private:
                 .thickness = 0.0F,
                 .kind = 0,
             };
-            append_primitive(command, opacity);
-            return true;
+            return append_primitive(command, opacity, transform);
         }
         case RenderNodeKind::RoundedRect: {
             const auto& rounded_node = static_cast<const RoundedRectNode&>(node);
@@ -3878,8 +4182,7 @@ private:
                 .thickness = 0.0F,
                 .kind = 0,
             };
-            append_primitive(command, opacity);
-            return true;
+            return append_primitive(command, opacity, transform);
         }
         case RenderNodeKind::Border: {
             const auto& border_node = static_cast<const BorderNode&>(node);
@@ -3891,15 +4194,17 @@ private:
                 .thickness = std::max(0.0F, border_node.thickness()),
                 .kind = 1,
             };
-            append_primitive(command, opacity);
-            return true;
+            return append_primitive(command, opacity, transform);
         }
         case RenderNodeKind::RoundedClip: {
             const auto& clip_node = static_cast<const RoundedClipNode&>(node);
-            const bool pushed = active_clips_.push({
-                .rect = clip_node.bounds(),
-                .radius = effective_corner_radius(clip_node.bounds(), clip_node.corner_radius()),
-            });
+            const bool pushed = active_clips_.push(
+                {
+                    .rect = clip_node.bounds(),
+                    .radius =
+                        effective_corner_radius(clip_node.bounds(), clip_node.corner_radius()),
+                },
+                transform);
             if (!pushed) {
                 if (!clip_depth_warning_logged_) {
                     clip_depth_warning_logged_ = true;
@@ -3911,7 +4216,7 @@ private:
                 return false;
             }
             for (const auto& child : node.children()) {
-                if (child != nullptr && !collect_draw_commands(*child, opacity)) {
+                if (child != nullptr && !collect_draw_commands(*child, opacity, transform)) {
                     active_clips_.pop();
                     return false;
                 }
@@ -3944,11 +4249,11 @@ private:
             };
             const auto active_clips = active_clips_.active();
             command.clip_count = static_cast<uint32_t>(active_clips.size());
-            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
+            for (std::size_t clip = 0; clip < active_clips.size(); ++clip) {
+                command.clips[clip] = active_clips[clip].region;
+            }
             image_commands_.push_back(command);
-            draw_commands_.push_back(
-                {.kind = DrawCommandKind::Image, .command_index = image_commands_.size() - 1});
-            return true;
+            return append_draw(DrawCommandKind::Image, image_commands_.size() - 1, transform);
         }
         case RenderNodeKind::Text: {
             const auto& text_node = static_cast<const TextNode&>(node);
@@ -3973,16 +4278,16 @@ private:
             };
             const auto active_clips = active_clips_.active();
             command.clip_count = static_cast<uint32_t>(active_clips.size());
-            std::copy(active_clips.begin(), active_clips.end(), command.clips.begin());
+            for (std::size_t clip = 0; clip < active_clips.size(); ++clip) {
+                command.clips[clip] = active_clips[clip].region;
+            }
             text_commands_.push_back(std::move(command));
-            draw_commands_.push_back(
-                {.kind = DrawCommandKind::Text, .command_index = text_commands_.size() - 1});
-            return true;
+            return append_draw(DrawCommandKind::Text, text_commands_.size() - 1, transform);
         }
         case RenderNodeKind::Opacity:
             opacity *= static_cast<const OpacityNode&>(node).opacity();
             for (const auto& child : node.children()) {
-                if (child != nullptr && !collect_draw_commands(*child, opacity)) {
+                if (child != nullptr && !collect_draw_commands(*child, opacity, transform)) {
                     return false;
                 }
             }
@@ -4000,8 +4305,7 @@ private:
                 .kind = gradient.direction() == Orientation::Vertical ? 4U : 5U,
                 .auxiliary = {end.r, end.g, end.b, end.a},
             };
-            append_primitive(command, opacity);
-            return true;
+            return append_primitive(command, opacity, transform);
         }
         case RenderNodeKind::Shadow: {
             const auto& shadow = static_cast<const ShadowNode&>(node);
@@ -4012,8 +4316,7 @@ private:
                 .thickness = std::max(0.0F, shadow.blur_radius()),
                 .kind = 3,
             };
-            append_primitive(command, opacity);
-            return true;
+            return append_primitive(command, opacity, transform);
         }
         }
         return false;
@@ -4053,6 +4356,7 @@ private:
 
         destroy_texture_caches();
         destroy_texture_upload_buffer();
+        destroy_draw_uniform_buffer();
         destroy_staging_buffer();
         destroy_swapchain();
 
@@ -4067,6 +4371,11 @@ private:
         if (descriptor_pool_ != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
             descriptor_pool_ = VK_NULL_HANDLE;
+        }
+        draw_uniform_set_ = VK_NULL_HANDLE;
+        if (draw_uniform_layout_ != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device_, draw_uniform_layout_, nullptr);
+            draw_uniform_layout_ = VK_NULL_HANDLE;
         }
         if (descriptor_set_layout_ != VK_NULL_HANDLE) {
             vkDestroyDescriptorSetLayout(device_, descriptor_set_layout_, nullptr);
@@ -4160,7 +4469,14 @@ private:
     std::vector<TextCommand> text_commands_;
     std::vector<TextureCacheEntry*> draw_textures_;
     std::vector<VkDescriptorSet> draw_descriptor_sets_;
-    ClipStack active_clips_{kMaxClipDepth};
+    AffineClipStack active_clips_;
+    VkDescriptorSetLayout draw_uniform_layout_ = VK_NULL_HANDLE;
+    VkDescriptorSet draw_uniform_set_ = VK_NULL_HANDLE;
+    VkBuffer draw_uniform_buffer_ = VK_NULL_HANDLE;
+    VkDeviceMemory draw_uniform_memory_ = VK_NULL_HANDLE;
+    VkDeviceSize draw_uniform_capacity_ = 0;
+    VkDeviceSize draw_uniform_stride_ = 0;
+    uint8_t* draw_uniform_mapped_ = nullptr;
     bool clip_depth_warning_logged_ = false;
     std::vector<Rect> damage_regions_;
     std::vector<VkRectLayerKHR> present_regions_;
