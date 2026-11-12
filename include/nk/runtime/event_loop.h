@@ -70,6 +70,12 @@ public:
     /// were processed.
     bool poll();
 
+    /// Bound a native event wait by the next scheduled work, up to maximum.
+    /// Returns zero for queued tasks, uncancelled idles, or due timers.
+    /// Positive waits round up to milliseconds; negative maximums become zero.
+    /// Call on the owning loop thread. Does not dispatch callbacks.
+    [[nodiscard]] std::chrono::milliseconds poll_timeout(std::chrono::milliseconds maximum) const;
+
     /// Wake the event loop from another thread. Thread-safe.
     /// Used by EventLoop::post() and platform backends.
     void wake();

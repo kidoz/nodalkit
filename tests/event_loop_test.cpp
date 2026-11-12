@@ -187,3 +187,55 @@ TEST_CASE("Fallback run wakes for a task-poster callback and exits", "[event_loo
     worker.join();
     REQUIRE(exit_code == 7);
 }
+
+TEST_CASE("Native wait respects ready work and timer cancellation", "[event_loop]") {
+    nk::EventLoop loop;
+    REQUIRE(loop.poll_timeout(8ms) == 8ms);
+    REQUIRE(loop.poll_timeout(-1ms) == 0ms);
+
+    const auto distant = loop.set_timeout(1h, [] {});
+    REQUIRE(loop.poll_timeout(8ms) == 8ms);
+    const auto due = loop.set_timeout(0ms, [] {});
+    REQUIRE(loop.poll_timeout(8ms) == 0ms);
+    loop.cancel(due);
+    REQUIRE(loop.poll_timeout(8ms) == 8ms);
+
+    const auto idle = loop.add_idle([] {});
+    REQUIRE(loop.poll_timeout(8ms) == 0ms);
+    loop.cancel(idle);
+    REQUIRE(loop.poll_timeout(8ms) == 8ms);
+
+    std::thread worker([post = loop.task_poster()] { post([] {}); });
+    worker.join();
+    REQUIRE(loop.poll_timeout(8ms) == 0ms);
+    REQUIRE(loop.poll());
+    REQUIRE(loop.poll_timeout(8ms) == 8ms);
+    loop.cancel(distant);
+}
+
+TEST_CASE("Native wait shortens for the next timer without dispatching it", "[event_loop]") {
+    nk::EventLoop loop;
+    bool fired = false;
+    const auto timer = loop.set_timeout(20ms, [&] { fired = true; });
+    const auto timeout = loop.poll_timeout(1h);
+    REQUIRE(timeout >= 0ms);
+    REQUIRE(timeout <= 20ms);
+    CHECK_FALSE(fired);
+    loop.cancel(timer);
+    REQUIRE(loop.poll_timeout(1h) == 1h);
+}
+
+TEST_CASE("A running interval is parked while a native wait is queried", "[event_loop]") {
+    nk::EventLoop loop;
+    int calls = 0;
+    nk::CallbackHandle timer;
+    timer = loop.set_interval(1ms, [&] {
+        ++calls;
+        CHECK(loop.poll_timeout(8ms) == 8ms);
+        loop.cancel(timer);
+    });
+    std::this_thread::sleep_for(2ms);
+    REQUIRE(loop.poll());
+    CHECK(calls == 1);
+    CHECK(loop.poll_timeout(8ms) == 8ms);
+}

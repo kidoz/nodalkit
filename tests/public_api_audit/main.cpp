@@ -1151,6 +1151,8 @@ void force_symbol_references() {
     (void)static_cast<nk::CallbackHandle (nk::EventLoop::*)(
         std::function<void()>, std::string_view)>(&nk::EventLoop::add_idle);
     (void)static_cast<bool (nk::EventLoop::*)()>(&nk::EventLoop::poll);
+    (void)static_cast<std::chrono::milliseconds (nk::EventLoop::*)(std::chrono::milliseconds)
+                          const>(&nk::EventLoop::poll_timeout);
     (void)static_cast<void (nk::EventLoop::*)()>(&nk::EventLoop::wake);
     (void)static_cast<void (nk::EventLoop::*)(std::function<void()>)>(
         &nk::EventLoop::set_wake_handler);

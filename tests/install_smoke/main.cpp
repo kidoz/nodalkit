@@ -9,6 +9,7 @@
 // reachable through pkg-config and that every public type links against
 // the installed libNodalKit.
 
+#include <chrono>
 #include <cstdio>
 #include <nk/actions/action.h>
 #include <nk/actions/shortcut.h>
@@ -29,6 +30,7 @@
 #include <nk/render/image_node.h>
 #include <nk/render/renderer.h>
 #include <nk/render/snapshot_context.h>
+#include <nk/runtime/event_loop.h>
 #include <nk/style/theme.h>
 #include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
@@ -413,6 +415,11 @@ void check_l10n() {
 } // namespace
 
 int main() {
+    {
+        nk::EventLoop loop;
+        check(loop.poll_timeout(std::chrono::milliseconds(8)) == std::chrono::milliseconds(8),
+              "Installed event loop exports native wait scheduling");
+    }
     check_foundation();
     check_layout();
     check_model();

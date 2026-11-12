@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -269,6 +270,32 @@ CallbackHandle EventLoop::add_idle(std::function<void()> callback, std::string_v
         false,
     });
     return h;
+}
+
+std::chrono::milliseconds EventLoop::poll_timeout(std::chrono::milliseconds maximum) const {
+    using namespace std::chrono;
+    auto timeout = std::max(maximum, milliseconds::zero());
+    {
+        std::lock_guard lock(impl_->task_queue->mutex);
+        if (!impl_->task_queue->posted_tasks.empty()) {
+            return milliseconds::zero();
+        }
+    }
+    if (std::ranges::any_of(impl_->idle_callbacks,
+                            [](const auto& idle) { return !idle.cancelled; })) {
+        return milliseconds::zero();
+    }
+    const auto now = steady_clock::now();
+    for (const auto& timer : impl_->timers) {
+        if (timer.cancelled) {
+            continue;
+        }
+        if (timer.fire_at <= now) {
+            return milliseconds::zero();
+        }
+        timeout = std::min(timeout, ceil<milliseconds>(timer.fire_at - now));
+    }
+    return timeout;
 }
 
 bool EventLoop::poll() {
