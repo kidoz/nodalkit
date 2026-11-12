@@ -15,6 +15,7 @@
 #include <cstring>
 #include <nk/foundation/logging.h>
 #include <nk/platform/events.h>
+#include <nk/runtime/event_loop.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
@@ -210,6 +211,7 @@ WaylandSurface::WaylandSurface(WaylandBackend& backend, const WindowConfig& conf
 }
 
 WaylandSurface::~WaylandSurface() {
+    cancel_scheduled_frame(false);
     // Input may still hold focus pointers at this surface; clear them before
     // the native objects go away so late events cannot dereference it.
     if (auto* input = backend_.input(); input != nullptr) {
@@ -328,13 +330,59 @@ void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
 // ---------------------------------------------------------------------------
 
 void WaylandSurface::show() {
+    cancel_scheduled_frame(true);
     // On Wayland the surface becomes visible once a buffer is committed.
     // present() handles the actual commit.
 }
 
 void WaylandSurface::hide() {
+    cancel_scheduled_frame(true);
     wl_surface_attach(surface_, nullptr, 0, 0);
     wl_surface_commit(surface_);
+}
+
+bool WaylandSurface::schedule_frame(EventLoop& loop, std::function<void()> frame) {
+    if (frame_callback_ == nullptr) {
+        return false;
+    }
+    pending_frame_ = [post = loop.task_poster("wayland.repaint"),
+                      frame = std::move(frame)]() mutable { post(std::move(frame)); };
+    return true;
+}
+
+void WaylandSurface::prepare_frame() {
+    if (frame_callback_ != nullptr) {
+        return;
+    }
+    // The renderer's buffer commit applies this request. An extra empty
+    // commit would supersede presentation feedback for the current buffer.
+    frame_callback_ = wl_surface_frame(surface_);
+    static constexpr wl_callback_listener listener = {
+        .done = [](void* data,
+                   wl_callback* callback,
+                   uint32_t) { static_cast<WaylandSurface*>(data)->handle_frame_done(callback); },
+    };
+    wl_callback_add_listener(frame_callback_, &listener, this);
+}
+
+void WaylandSurface::handle_frame_done(wl_callback* callback) {
+    wl_callback_destroy(callback);
+    frame_callback_ = nullptr;
+    auto frame = std::move(pending_frame_);
+    if (frame) {
+        frame();
+    }
+}
+
+void WaylandSurface::cancel_scheduled_frame(bool post_pending) {
+    if (frame_callback_ != nullptr) {
+        wl_callback_destroy(frame_callback_);
+        frame_callback_ = nullptr;
+    }
+    auto frame = std::move(pending_frame_);
+    if (post_pending && frame) {
+        frame();
+    }
 }
 
 void WaylandSurface::set_title(std::string_view title) {

@@ -41,6 +41,8 @@ public:
                                                                 Window& owner) override;
 
     int run_event_loop(EventLoop& loop) override;
+    bool schedule_frame(NativeSurface& surface, std::function<void()> frame);
+    void prepare_frame(NativeSurface& surface);
     void wake_event_loop() override;
     void request_quit(int exit_code) override;
 

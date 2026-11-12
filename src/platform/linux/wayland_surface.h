@@ -4,12 +4,14 @@
 /// @brief Wayland native surface (private header).
 
 #include <cstdint>
+#include <functional>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/window.h>
 #include <unordered_set>
 #include <vector>
 
 struct wl_surface;
+struct wl_callback;
 struct wl_buffer;
 struct wl_output;
 struct wl_array;
@@ -30,6 +32,9 @@ public:
 
     void show() override;
     void hide() override;
+    bool schedule_frame(EventLoop& loop, std::function<void()> frame);
+    void prepare_frame();
+    void handle_frame_done(wl_callback* callback);
     void set_title(std::string_view title) override;
     void resize(int width, int height) override;
     [[nodiscard]] Size size() const override;
@@ -89,11 +94,14 @@ private:
     void ensure_decoration_object();
     void update_decoration_preference();
     void notify_native_chrome_changed();
+    void cancel_scheduled_frame(bool post_pending);
 
     WaylandBackend& backend_;
     Window& owner_;
 
     wl_surface* surface_ = nullptr;
+    wl_callback* frame_callback_ = nullptr;
+    std::function<void()> pending_frame_;
     xdg_surface* xdg_surface_ = nullptr;
     xdg_toplevel* xdg_toplevel_ = nullptr;
 

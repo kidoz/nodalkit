@@ -2,6 +2,8 @@
 #include "../ui_core/widget_type_name.h"
 #ifdef __APPLE__
 #include "macos/macos_backend.h"
+#elif defined(__linux__)
+#include "linux/wayland_backend.h"
 #endif
 
 #include <algorithm>
@@ -2512,6 +2514,14 @@ void Window::request_frame(FrameRequestReason reason) {
             }
         }
 #endif
+#ifdef __linux__
+        if (surface != nullptr && app->has_platform_backend()) {
+            if (auto* backend = dynamic_cast<WaylandBackend*>(&app->platform_backend());
+                backend != nullptr && backend->schedule_frame(*surface, callback)) {
+                return;
+            }
+        }
+#endif
         (void)app->event_loop().post(std::move(callback), "window.request-frame");
     };
     post_frame(
@@ -2553,6 +2563,18 @@ void Window::request_frame(FrameRequestReason reason) {
                 compute_debug_content_area(
                     sz, impl_->debug_overlay_flags, impl_->debug_inspector_presentation),
                 impl_->surface.get());
+#ifdef __linux__
+            if (impl_->surface != nullptr && impl_->renderer != nullptr &&
+                impl_->renderer->backend() == RendererBackend::Vulkan) {
+                if (auto* application = Application::instance();
+                    application != nullptr && application->has_platform_backend()) {
+                    if (auto* backend =
+                            dynamic_cast<WaylandBackend*>(&application->platform_backend())) {
+                        backend->prepare_frame(*impl_->surface);
+                    }
+                }
+            }
+#endif
             FrameDiagnostics frame;
             frame.frame_id = impl_->next_frame_id++;
             frame.logical_viewport = sz;

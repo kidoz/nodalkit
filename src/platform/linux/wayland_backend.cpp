@@ -1437,6 +1437,20 @@ std::unique_ptr<NativeSurface> WaylandBackend::create_surface(const WindowConfig
     return std::make_unique<WaylandSurface>(*this, config, owner);
 }
 
+bool WaylandBackend::schedule_frame(NativeSurface& surface, std::function<void()> frame) {
+    auto* wayland_surface = dynamic_cast<WaylandSurface*>(&surface);
+    return impl_->current_loop != nullptr && wayland_surface != nullptr &&
+           wayland_surface->schedule_frame(*impl_->current_loop, std::move(frame));
+}
+
+void WaylandBackend::prepare_frame(NativeSurface& surface) {
+    if (impl_->current_loop != nullptr) {
+        if (auto* wayland_surface = dynamic_cast<WaylandSurface*>(&surface)) {
+            wayland_surface->prepare_frame();
+        }
+    }
+}
+
 int WaylandBackend::run_event_loop(EventLoop& loop) {
     impl_->current_loop = &loop;
     loop.set_wake_handler([this] { wake_event_loop(); });
@@ -1458,8 +1472,10 @@ int WaylandBackend::run_event_loop(EventLoop& loop) {
         }
         wl_display_flush(impl_->display);
 
-        // Wait for new events (~120 Hz fallback timeout).
-        const int ret = poll(fds, 2, 8);
+        // Keep housekeeping responsive without rounding near timer deadlines
+        // to another full 8ms wait. Posted frame work must not wait either.
+        const auto timeout = loop.poll_timeout(std::chrono::milliseconds(8));
+        const int ret = poll(fds, 2, static_cast<int>(timeout.count()));
 
         if (ret > 0 && (fds[0].revents & POLLIN)) {
             wl_display_read_events(impl_->display);

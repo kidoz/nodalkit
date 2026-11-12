@@ -7138,3 +7138,62 @@ TEST_CASE("TreeView navigates updated rows while preserving node selection", "[a
     CHECK(tree->accessible()->value().find("renamed") != std::string_view::npos);
     CHECK(model->visible_row_for_node(inserted) == 3);
 }
+
+TEST_CASE("Native Vulkan frame callbacks survive remapping and pending destruction",
+          "[app][frame][wayland]") {
+#if defined(__linux__)
+    if (std::getenv("WAYLAND_DISPLAY") == nullptr ||
+        !nk::renderer_backend_available(nk::RendererBackend::Vulkan)) {
+        SKIP("Requires a native Wayland Vulkan surface");
+    }
+    ScopedTestEnvVar backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "vulkan") == 0);
+    nk::Application app(0, nullptr);
+    auto window = std::make_unique<nk::Window>(
+        nk::WindowConfig{.title = "Native repaint lifecycle", .width = 240, .height = 160});
+    auto canvas = nk::CanvasWidget::create();
+    int frames = 0;
+    auto draw = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ++frames;
+        ctx.add_color_rect(a, nk::Color::from_rgb(40, 80, 120));
+    });
+    window->set_child(canvas);
+    window->present();
+    if (window->renderer_backend() != nk::RendererBackend::Vulkan) {
+        SKIP("Native loop check needs the selected Vulkan renderer");
+    }
+    const auto updates = app.event_loop().set_interval(std::chrono::milliseconds(1), [&] {
+        if (window) {
+            canvas->queue_redraw();
+        }
+    });
+    int before_remap = 0;
+    int after_remap = 0;
+    (void)app.event_loop().set_timeout(std::chrono::milliseconds(80), [&] {
+        before_remap = frames;
+        window->hide();
+        window->present();
+    });
+    (void)app.event_loop().set_timeout(std::chrono::milliseconds(160), [&] {
+        after_remap = frames;
+        window->hide();
+        (void)app.event_loop().set_timeout(std::chrono::milliseconds(20),
+                                           [&] { window->present(); });
+    });
+    (void)app.event_loop().set_timeout(std::chrono::milliseconds(250), [&] {
+        // A requested repaint may still be waiting for the compositor.
+        canvas->queue_redraw();
+        window.reset();
+        app.event_loop().cancel(updates);
+        (void)app.event_loop().set_timeout(std::chrono::milliseconds(20), [&] { app.quit(); });
+    });
+    (void)app.event_loop().set_timeout(std::chrono::seconds(2), [&] { app.quit(9); });
+    REQUIRE(app.run() == 0);
+    CHECK(before_remap > 0);
+    CHECK(after_remap > before_remap);
+    CHECK(frames > after_remap);
+    CHECK(draw.connected());
+#else
+    SKIP("Wayland-specific frame callback lifecycle");
+#endif
+}
