@@ -1543,6 +1543,40 @@ private:
 
         vkCmdBeginRenderPass(command_buffer_, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
+        if (!full_redraw) {
+            // Transparent widgets may leave pixels uncovered by the new scene.
+            // Restore the same background as a full redraw before blending any
+            // commands, while preserving pixels outside the damaged regions.
+            const VkClearAttachment attachment = {
+                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                .colorAttachment = 0,
+                .clearValue = clear_value,
+            };
+            for (const auto& damage : damage_regions_) {
+                const float left = std::max(0.0F, damage.x);
+                const float top = std::max(0.0F, damage.y);
+                const float right =
+                    std::min(damage.right(), static_cast<float>(swapchain_extent_.width));
+                const float bottom =
+                    std::min(damage.bottom(), static_cast<float>(swapchain_extent_.height));
+                if (right <= left || bottom <= top) {
+                    continue;
+                }
+                const VkClearRect region = {
+                    .rect =
+                        {
+                            .offset = {static_cast<int32_t>(std::floor(left)),
+                                       static_cast<int32_t>(std::floor(top))},
+                            .extent = {static_cast<uint32_t>(std::ceil(right - left)),
+                                       static_cast<uint32_t>(std::ceil(bottom - top))},
+                        },
+                    .baseArrayLayer = 0,
+                    .layerCount = 1,
+                };
+                vkCmdClearAttachments(command_buffer_, 1, &attachment, 1, &region);
+            }
+        }
+
         const VkViewport viewport = {
             .x = 0.0F,
             .y = 0.0F,

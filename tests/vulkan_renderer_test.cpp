@@ -140,6 +140,53 @@ void check_reference_pixels(const nk::DebugScreenshot& shot,
 
 } // namespace
 
+TEST_CASE("Vulkan clears damaged transparent content before replay", "[vulkan][render]") {
+    if (!native_vulkan_available()) {
+        SKIP("Requires a native Vulkan surface");
+    }
+    VulkanEnvironment environment;
+    nk::Application app(0, nullptr);
+    nk::Window window(
+        {.title = "Vulkan transparent damage regression", .width = 320, .height = 180});
+    auto canvas = nk::CanvasWidget::create();
+    float translation = 0;
+    auto remote_color = nk::Color::from_rgb(0, 0, 0);
+    auto draw = [&](nk::SnapshotContext& ctx, nk::Rect a) {
+        ctx.push_opacity(a, 0.5F);
+        ctx.add_rounded_rect(
+            {a.x + 20 + translation, a.y + 20, 40, 40}, nk::Color::from_rgb(200, 40, 60), 6);
+        ctx.pop_container();
+        ctx.add_color_rect({a.x + 260, a.y + 120, 20, 20}, remote_color);
+    };
+    auto connection = canvas->on_draw().connect(draw);
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    remote_color = nk::Color::from_rgb(200, 0, 0);
+    for (const float offset : {60.0F, 120.0F, 0.0F}) {
+        translation = offset;
+        canvas->queue_redraw({20, 20, 200, 80});
+        REQUIRE(app.event_loop().poll());
+        const auto& counters = window.inspector().last_frame_diagnostics().render_hotspot_counters;
+        REQUIRE(counters.gpu_present_path == nk::GpuPresentPath::PartialRedrawCopy);
+        CHECK(counters.gpu_skipped_command_count > 0);
+        const auto shot = window.inspector().capture_debug_screenshot();
+        REQUIRE(shot);
+        REQUIRE(shot->source_backend == nk::RendererBackend::Vulkan);
+        const float scale = window.scale_factor();
+        nk::SnapshotContext context;
+        draw(context, canvas->allocation());
+        const auto root = context.take_root();
+        nk::SoftwareRenderer reference;
+        reference.begin_frame({shot->width / scale, shot->height / scale}, scale);
+        reference.render(*root);
+        reference.end_frame();
+        check_reference_pixels(*shot, reference, {0, 0, 220, 100}, scale, 2);
+        check_rgb(*shot, {270, 130}, scale, {0, 0, 0});
+    }
+    CHECK(connection.connected());
+}
+
 TEST_CASE("Vulkan paints effects and strokes without software rasterization", "[vulkan][render]") {
     if (!native_vulkan_available()) {
         SKIP("Requires a native Vulkan surface");
