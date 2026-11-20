@@ -5,11 +5,18 @@
 
 #include <memory>
 #include <nk/platform/platform_backend.h>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <windows.h>
 
 namespace nk {
+
+namespace detail {
+/// Read a CF_UNICODETEXT allocation while its clipboard or OLE owner keeps it alive.
+[[nodiscard]] std::optional<std::string> read_global_unicode_text(HGLOBAL data);
+} // namespace detail
 
 class Win32Backend : public PlatformBackend {
 public:

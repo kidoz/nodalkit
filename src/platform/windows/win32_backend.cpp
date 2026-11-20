@@ -932,14 +932,10 @@ payload_from_data_object(IDataObject* data_object) {
         .tymed = TYMED_HGLOBAL,
     };
     if (SUCCEEDED(data_object->GetData(&text_format, &medium)) && medium.hGlobal != nullptr) {
-        const auto* wide = static_cast<const wchar_t*>(GlobalLock(medium.hGlobal));
-        std::shared_ptr<const DragPayload> payload;
-        if (wide != nullptr) {
-            payload = std::make_shared<DragPayload>(DragPayload::from_text(wide_to_utf8(wide)));
-        }
-        GlobalUnlock(medium.hGlobal);
+        auto text = detail::read_global_unicode_text(medium.hGlobal);
         ReleaseStgMedium(&medium);
-        return payload;
+        return text ? std::make_shared<DragPayload>(DragPayload::from_text(std::move(*text)))
+                    : nullptr;
     }
     return nullptr;
 }
@@ -1727,6 +1723,31 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
 
 } // namespace
 
+std::optional<std::string> detail::read_global_unicode_text(HGLOBAL data) {
+    constexpr SIZE_T max_bytes = 16U * 1024U * 1024U;
+    const auto bytes = GlobalSize(data);
+    if (bytes < sizeof(wchar_t) || bytes > max_bytes) {
+        return std::nullopt;
+    }
+    const auto* wide = static_cast<const wchar_t*>(GlobalLock(data));
+    if (wide == nullptr) {
+        return std::nullopt;
+    }
+
+    struct Unlock {
+        HGLOBAL handle;
+
+        ~Unlock() { GlobalUnlock(handle); }
+    } unlock{data};
+
+    const std::wstring_view buffer(wide, bytes / sizeof(wchar_t));
+    const auto end = buffer.find(L'\0');
+    if (end == std::wstring_view::npos) {
+        return std::nullopt;
+    }
+    return wide_to_utf8(buffer.substr(0, end));
+}
+
 struct Win32Backend::Impl {
     HINSTANCE instance = GetModuleHandleW(nullptr);
     std::atomic<DWORD> event_loop_thread_id{0};
@@ -1903,11 +1924,7 @@ std::string Win32Backend::clipboard_text() const {
     std::string text;
     const HANDLE data = GetClipboardData(CF_UNICODETEXT);
     if (data != nullptr) {
-        const auto* wide = static_cast<const wchar_t*>(GlobalLock(data));
-        if (wide != nullptr) {
-            text = wide_to_utf8(wide);
-            GlobalUnlock(data);
-        }
+        text = detail::read_global_unicode_text(data).value_or(std::string{});
     }
 
     CloseClipboard();

@@ -20,6 +20,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include "../src/platform/windows/win32_backend.h"
+
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -96,6 +99,30 @@ private:
 };
 
 } // namespace
+
+TEST_CASE("Win32 text transfers use the extent of the locked allocation", "[windows][native]") {
+    auto memory = GlobalAlloc(GMEM_MOVEABLE, 16 * sizeof(wchar_t));
+    REQUIRE(memory != nullptr);
+    const auto capacity = GlobalSize(memory) / sizeof(wchar_t);
+    auto* data = static_cast<wchar_t*>(GlobalLock(memory));
+    REQUIRE(data != nullptr);
+    std::fill_n(data, capacity, L'x');
+    GlobalUnlock(memory);
+    CHECK_FALSE(nk::detail::read_global_unicode_text(memory).has_value());
+
+    data = static_cast<wchar_t*>(GlobalLock(memory));
+    REQUIRE(data != nullptr);
+    data[2] = L'\0';
+    GlobalUnlock(memory);
+    CHECK(nk::detail::read_global_unicode_text(memory) == "xx");
+    CHECK(GlobalFree(memory) == nullptr);
+
+    auto oversized =
+        GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 16U * 1024U * 1024U + sizeof(wchar_t));
+    REQUIRE(oversized != nullptr);
+    CHECK_FALSE(nk::detail::read_global_unicode_text(oversized).has_value());
+    CHECK(GlobalFree(oversized) == nullptr);
+}
 
 TEST_CASE("Win32 backend reports native app-menu support", "[windows][native]") {
     auto backend = nk::PlatformBackend::create();
