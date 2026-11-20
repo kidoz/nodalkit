@@ -89,6 +89,7 @@ private:
         bool initialized = false;
     };
 
+    void handle_buffer_release(wl_buffer* buffer);
     void destroy_buffer(ShmBuffer& buf);
     void ensure_buffer(ShmBuffer& buf, int w, int h);
     void ensure_decoration_object();
@@ -108,6 +109,7 @@ private:
     ShmBuffer buffers_[2];
     int current_buffer_ = 0;
     int last_presented_buffer_ = -1;
+    bool missed_shm_present_ = false;
 
     int width_;
     int height_;

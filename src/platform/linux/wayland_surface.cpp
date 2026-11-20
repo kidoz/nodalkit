@@ -80,19 +80,6 @@ static constexpr zxdg_toplevel_decoration_v1_listener decoration_listener = {
 };
 
 // ---------------------------------------------------------------------------
-// Buffer release callback
-// ---------------------------------------------------------------------------
-
-static void buffer_handle_release(void* data, struct wl_buffer* /*buffer*/) {
-    auto* busy = static_cast<bool*>(data);
-    *busy = false;
-}
-
-static constexpr struct wl_buffer_listener buffer_listener = {
-    .release = buffer_handle_release,
-};
-
-// ---------------------------------------------------------------------------
 // wl_surface listener (HiDPI enter/leave tracking)
 // ---------------------------------------------------------------------------
 
@@ -247,6 +234,18 @@ WaylandSurface::~WaylandSurface() {
     NK_LOG_DEBUG("Wayland", "Surface destroyed");
 }
 
+void WaylandSurface::handle_buffer_release(wl_buffer* buffer) {
+    for (auto& buf : buffers_) {
+        if (buf.buffer == buffer) {
+            buf.busy = false;
+            if (missed_shm_present_) {
+                owner_.request_frame();
+            }
+            return;
+        }
+    }
+}
+
 void WaylandSurface::destroy_buffer(ShmBuffer& buf) {
     if (buf.buffer) {
         wl_buffer_destroy(buf.buffer);
@@ -319,7 +318,13 @@ void WaylandSurface::ensure_buffer(ShmBuffer& buf, int w, int h) {
         return;
     }
 
-    wl_buffer_add_listener(buf.buffer, &buffer_listener, &buf.busy);
+    static constexpr wl_buffer_listener listener = {
+        .release =
+            [](void* data, wl_buffer* buffer) {
+                static_cast<WaylandSurface*>(data)->handle_buffer_release(buffer);
+            },
+    };
+    wl_buffer_add_listener(buf.buffer, &listener, this);
     buf.pool_size = needed;
     buf.width = w;
     buf.height = h;
@@ -336,6 +341,7 @@ void WaylandSurface::show() {
 }
 
 void WaylandSurface::hide() {
+    missed_shm_present_ = false;
     cancel_scheduled_frame(true);
     wl_surface_attach(surface_, nullptr, 0, 0);
     wl_surface_commit(surface_);
@@ -517,7 +523,13 @@ void WaylandSurface::present(const uint8_t* rgba,
         idx = 1 - idx;
     }
     if (buffers_[idx].busy) {
-        return; // Both buffers in use — skip this frame.
+        // The CPU framebuffer retains the latest pixels. Retry a full upload on release,
+        // including any damage that Window consumes before that retry.
+        missed_shm_present_ = true;
+        // Vulkan may have armed a frame callback before falling back to shm. This
+        // attempt makes no surface commit, so it cannot wait on that callback.
+        cancel_scheduled_frame(true);
+        return;
     }
 
     // Capture the geometry change before (re)allocating: a resize that preserves the byte size
@@ -552,7 +564,8 @@ void WaylandSurface::present(const uint8_t* rgba,
         }
     };
 
-    const bool full_upload = damage_regions.empty() || !buffers_[idx].initialized || size_changed;
+    const bool full_upload =
+        missed_shm_present_ || damage_regions.empty() || !buffers_[idx].initialized || size_changed;
     if (!full_upload && last_presented_buffer_ >= 0 && last_presented_buffer_ != idx &&
         buffers_[last_presented_buffer_].data != nullptr &&
         buffers_[last_presented_buffer_].width == w &&
@@ -571,6 +584,7 @@ void WaylandSurface::present(const uint8_t* rgba,
     }
     buffers_[idx].initialized = true;
 
+    missed_shm_present_ = false;
     buffers_[idx].busy = true;
     current_buffer_ = 1 - idx;
     last_presented_buffer_ = idx;

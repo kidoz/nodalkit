@@ -7197,3 +7197,47 @@ TEST_CASE("Native Vulkan frame callbacks survive remapping and pending destructi
     SKIP("Wayland-specific frame callback lifecycle");
 #endif
 }
+
+#if defined(__linux__)
+TEST_CASE("Wayland retries the final software frame after a busy buffer is released",
+          "[app][frame][wayland]") {
+    if (std::getenv("WAYLAND_DISPLAY") == nullptr) {
+        SKIP("Requires a native Wayland surface");
+    }
+    ScopedTestEnvVar backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(set_test_env("NK_RENDERER_BACKEND", "software") == 0);
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Software buffer release", .width = 160, .height = 120});
+    auto canvas = nk::CanvasWidget::create();
+    int color = 0;
+    auto draw = canvas->on_draw().connect([&](nk::SnapshotContext& ctx, nk::Rect bounds) {
+        ctx.add_color_rect(bounds, nk::Color::from_rgb(color, 40, 80));
+    });
+    window.set_child(canvas);
+    window.present();
+    REQUIRE(window.native_surface() != nullptr);
+    std::uint64_t last_attempt = 0;
+    (void)app.event_loop().set_timeout(std::chrono::milliseconds(100), [&] {
+        // Dispatch toolkit frames without dispatching any compositor releases.
+        // At most two of these consecutive uploads can acquire an shm buffer.
+        for (int i = 0; i < 3; ++i) {
+            color += 40;
+            canvas->queue_redraw();
+            app.event_loop().poll();
+        }
+        last_attempt = window.inspector().last_frame_diagnostics().frame_id;
+    });
+    (void)app.event_loop().set_interval(std::chrono::milliseconds(10), [&] {
+        const auto& frame = window.inspector().last_frame_diagnostics();
+        if (last_attempt && frame.frame_id > last_attempt &&
+            std::ranges::find(frame.request_reasons, nk::FrameRequestReason::Manual) !=
+                frame.request_reasons.end()) {
+            app.quit();
+        }
+    });
+    (void)app.event_loop().set_timeout(std::chrono::seconds(3), [&] { app.quit(9); });
+    REQUIRE(app.run() == 0);
+    CHECK(last_attempt >= 3);
+    CHECK(draw.connected());
+}
+#endif
