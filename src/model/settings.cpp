@@ -4,8 +4,10 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <nk/model/settings.h>
 #include <string>
@@ -17,6 +19,11 @@
 #endif
 
 #if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
+#include <objbase.h>
+#include <share.h>
+#include <sys/stat.h>
 #include <windows.h>
 #endif
 
@@ -189,69 +196,70 @@ bool Settings::save() const {
         }
     }
 
-    auto temporary = file_;
-    temporary += ".tmp";
-    std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    if (!out) {
-        return false;
-    }
-#if !defined(_WIN32)
-    std::filesystem::permissions(temporary,
-                                 std::filesystem::perms::owner_read |
-                                     std::filesystem::perms::owner_write,
-                                 std::filesystem::perm_options::replace,
-                                 ec);
-    if (ec) {
-        out.close();
-        std::filesystem::remove(temporary, ec);
-        return false;
-    }
-#endif
+    // Encode before opening the temporary file so allocation failures leave no scratch file.
+    std::string encoded;
     for (const auto& [key, value] : values_) {
-        out << percent_encode(key, kFileReserved) << '=' << percent_encode(value, kFileReserved)
-            << '\n';
+        encoded += percent_encode(key, kFileReserved);
+        encoded += '=';
+        encoded += percent_encode(value, kFileReserved);
+        encoded += '\n';
     }
-    out.flush();
-    if (!out.good()) {
-        out.close();
-        std::filesystem::remove(temporary, ec);
-        return false;
-    }
-    out.close();
-    if (out.fail()) {
-        std::filesystem::remove(temporary, ec);
-        return false;
-    }
-
-#if !defined(_WIN32)
-    if (const int fd = ::open(temporary.c_str(), O_RDONLY | O_CLOEXEC); fd >= 0) {
-        const int synced = ::fsync(fd);
-        ::close(fd);
-        if (synced != 0) {
-            std::filesystem::remove(temporary, ec);
-            return false;
-        }
-    } else {
-        std::filesystem::remove(temporary, ec);
-        return false;
-    }
-#endif
 
 #if defined(_WIN32)
-    if (MoveFileExW(temporary.c_str(),
-                    file_.c_str(),
-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
+    GUID id{};
+    wchar_t name[40]{};
+    if (FAILED(CoCreateGuid(&id)) || StringFromGUID2(id, name, 40) == 0) {
+        return false;
+    }
+    const auto temporary = parent / name;
+    int fd = -1;
+    if (_wsopen_s(&fd,
+                  temporary.c_str(),
+                  _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY | _O_NOINHERIT,
+                  _SH_DENYRW,
+                  _S_IREAD | _S_IWRITE) != 0) {
+        return false;
+    }
+    auto* out = _fdopen(fd, "wb");
+#else
+    auto temporary = (parent / ".nk-settings-XXXXXX").string();
+    const int fd = ::mkostemp(temporary.data(), O_CLOEXEC);
+    if (fd < 0) {
+        return false;
+    }
+    auto* out = ::fdopen(fd, "wb");
+#endif
+    if (!out) {
+#if defined(_WIN32)
+        _close(fd);
+#else
+        ::close(fd);
+#endif
         std::filesystem::remove(temporary, ec);
         return false;
+    }
+    const bool written = std::fwrite(encoded.data(), 1, encoded.size(), out) == encoded.size() &&
+                         std::fflush(out) == 0;
+#if defined(_WIN32)
+    const bool flushed = written && _commit(fd) == 0;
+    // CRT descriptors do not share delete access. Close before replacing the destination.
+    if (std::fclose(out) == 0 && flushed &&
+        MoveFileExW(temporary.c_str(),
+                    file_.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0) {
+        return true;
     }
 #else
-    std::filesystem::rename(temporary, file_, ec);
-    if (ec) {
-        std::filesystem::remove(temporary, ec);
-        return false;
+    if (written && ::fsync(fd) == 0) {
+        std::filesystem::rename(temporary, file_, ec);
+        if (!ec) {
+            return std::fclose(out) == 0;
+        }
     }
+    std::fclose(out);
 #endif
-    return true;
+    std::filesystem::remove(temporary, ec);
+    return false;
 }
 
 void Settings::set_string(std::string_view key, std::string_view value) {

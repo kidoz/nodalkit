@@ -1,11 +1,13 @@
 /// @file settings_test.cpp
 /// @brief Tests for the persistent Settings store.
 
+#include <barrier>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 #include <nk/model/settings.h>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -239,7 +241,55 @@ TEST_CASE("Repeated saves replace content without leaving temporary files", "[se
     nk::Settings reloaded(temp.path);
     REQUIRE(reloaded.load());
     CHECK(reloaded.get_string("value") == "second");
-    auto temporary = temp.path;
-    temporary += ".tmp";
-    CHECK_FALSE(std::filesystem::exists(temporary));
+    CHECK(std::distance(std::filesystem::directory_iterator(temp.path.parent_path()),
+                        std::filesystem::directory_iterator{}) == 1);
+}
+
+TEST_CASE("Saving settings preserves neighboring files", "[settings]") {
+    TempSettingsFile temp("neighbors");
+    std::filesystem::create_directories(temp.path.parent_path());
+    const auto neighbor = temp.path.parent_path() / "settings.conf.tmp";
+    std::ofstream(neighbor) << "keep";
+    nk::Settings settings(temp.path);
+    REQUIRE(settings.save());
+    std::string contents;
+    std::ifstream(neighbor) >> contents;
+    CHECK(contents == "keep");
+    CHECK(std::distance(std::filesystem::directory_iterator(temp.path.parent_path()),
+                        std::filesystem::directory_iterator{}) == 2);
+}
+
+TEST_CASE("Independent settings writers publish whole files", "[settings]") {
+    TempSettingsFile temp("writers");
+    std::barrier start(2);
+    auto publish = [&](char marker, bool& saved) {
+        nk::Settings settings(temp.path);
+        settings.set_string("marker", std::string(1, marker));
+        settings.set_string("payload", std::string(65536, marker));
+        start.arrive_and_wait();
+        saved = settings.save();
+    };
+    bool first = false;
+    bool second = false;
+    std::thread worker(publish, 'a', std::ref(first));
+    publish('b', second);
+    worker.join();
+    REQUIRE(first);
+    REQUIRE(second);
+    nk::Settings settings(temp.path);
+    REQUIRE(settings.load());
+    const auto marker = settings.get_string("marker");
+    REQUIRE((marker == "a" || marker == "b"));
+    CHECK(settings.get_string("payload") == std::string(65536, marker.front()));
+}
+
+TEST_CASE("A failed settings replacement cleans up its scratch file", "[settings]") {
+    TempSettingsFile temp("failed_replace");
+    std::filesystem::create_directories(temp.path);
+    nk::Settings settings(temp.path);
+    settings.set_string("value", "new");
+    CHECK_FALSE(settings.save());
+    CHECK(std::filesystem::is_directory(temp.path));
+    CHECK(std::distance(std::filesystem::directory_iterator(temp.path.parent_path()),
+                        std::filesystem::directory_iterator{}) == 1);
 }
