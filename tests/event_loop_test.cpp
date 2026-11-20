@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <future>
 #include <nk/runtime/event_loop.h>
 #include <thread>
 #include <vector>
@@ -238,4 +239,34 @@ TEST_CASE("A running interval is parked while a native wait is queried", "[event
     REQUIRE(loop.poll());
     CHECK(calls == 1);
     CHECK(loop.poll_timeout(8ms) == 8ms);
+}
+
+TEST_CASE("Fallback run dispatches idles queued by a posted task", "[event_loop]") {
+    nk::EventLoop loop;
+    loop.post([&] { (void)loop.add_idle([&] { loop.quit(7); }); });
+    (void)loop.set_timeout(1s, [&] { loop.quit(99); });
+    REQUIRE(loop.run() == 7);
+}
+
+TEST_CASE("A worker can stop a sleeping fallback loop directly", "[event_loop][thread]") {
+    nk::EventLoop loop;
+    std::promise<void> started;
+    std::promise<void> returned;
+    auto done = returned.get_future();
+    loop.post([&] { started.set_value(); });
+    bool needed_rescue = false;
+    std::thread worker([&] {
+        started.get_future().wait();
+        std::this_thread::sleep_for(20ms);
+        loop.quit(7);
+        if (done.wait_for(1s) != std::future_status::ready) {
+            needed_rescue = true;
+            loop.post([] {});
+        }
+    });
+    const int result = loop.run();
+    returned.set_value();
+    worker.join();
+    CHECK(result == 7);
+    CHECK_FALSE(needed_rescue);
 }

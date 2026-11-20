@@ -123,8 +123,11 @@ EventLoop* EventLoop::current() {
 }
 
 int EventLoop::run() {
-    impl_->running = true;
-    impl_->exit_code = 0;
+    {
+        std::lock_guard lock(impl_->task_queue->mutex);
+        impl_->exit_code = 0;
+        impl_->running = true;
+    }
 
     while (impl_->running) {
         poll();
@@ -133,7 +136,8 @@ int EventLoop::run() {
         }
 
         std::unique_lock lock(impl_->task_queue->mutex);
-        if (!impl_->task_queue->posted_tasks.empty()) {
+        if (std::ranges::any_of(impl_->idle_callbacks,
+                                [](const auto& idle) { return !idle.cancelled; })) {
             continue;
         }
 
@@ -144,7 +148,8 @@ int EventLoop::run() {
             }
         }
         const auto has_work = [this] {
-            return !impl_->task_queue->posted_tasks.empty() || !impl_->task_queue->accepting_tasks;
+            return !impl_->running || !impl_->task_queue->posted_tasks.empty() ||
+                   !impl_->task_queue->accepting_tasks;
         };
         if (next_fire == std::chrono::steady_clock::time_point::max()) {
             impl_->task_queue->work_available.wait(lock, has_work);
@@ -157,8 +162,11 @@ int EventLoop::run() {
 }
 
 void EventLoop::quit(int exit_code) {
-    impl_->exit_code = exit_code;
-    impl_->running = false;
+    {
+        std::lock_guard lock(impl_->task_queue->mutex);
+        impl_->exit_code = exit_code;
+        impl_->running = false;
+    }
     impl_->task_queue->work_available.notify_all();
     wake();
 }
