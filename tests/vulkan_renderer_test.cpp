@@ -359,7 +359,9 @@ TEST_CASE("Vulkan paths retain affine clips and localized damage",
         for (int index = 0; index < 8; ++index) {
             ctx.push_rounded_clip({-65, -5, 100, 60}, 8);
         }
-        ctx.add_path({.points = {{-60, 0}, {-20, 40}, {20, 0}}}, color, 8);
+        // Leave a flat interior even at 1x under the compressed affine transform.
+        // The comparison below excludes three device pixels around each AA edge.
+        ctx.add_path({.points = {{-60, 0}, {-20, 40}, {20, 0}}}, color, 20);
         for (int index = 0; index < 8; ++index) {
             ctx.pop_container();
         }
