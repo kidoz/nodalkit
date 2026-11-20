@@ -216,13 +216,7 @@ void StatusBar::set_segment_widget(std::size_t index, std::shared_ptr<Widget> wi
     if (slot == widget) {
         return;
     }
-    if (slot != nullptr) {
-        remove_child(*slot);
-    }
-    slot = std::move(widget);
-    if (slot != nullptr) {
-        append_child(slot);
-    }
+    replace_child(slot, std::move(widget));
     queue_layout();
     queue_redraw();
 }

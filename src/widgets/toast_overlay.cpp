@@ -172,13 +172,7 @@ void ToastOverlay::set_child(std::shared_ptr<Widget> child) {
     if (impl_->child == child) {
         return;
     }
-    if (impl_->child != nullptr) {
-        remove_child(*impl_->child);
-    }
-    impl_->child = std::move(child);
-    if (impl_->child != nullptr) {
-        insert_child(0, impl_->child);
-    }
+    replace_child(impl_->child, std::move(child), 0);
     queue_layout();
 }
 

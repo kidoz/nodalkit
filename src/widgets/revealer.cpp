@@ -51,12 +51,8 @@ void Revealer::set_child(std::shared_ptr<Widget> child) {
     if (impl_->child == child) {
         return;
     }
+    replace_child(impl_->child, std::move(child));
     if (impl_->child) {
-        remove_child(*impl_->child);
-    }
-    impl_->child = std::move(child);
-    if (impl_->child) {
-        append_child(impl_->child);
         impl_->child->set_visible(impl_->fraction > 0.0F);
     }
     queue_layout();

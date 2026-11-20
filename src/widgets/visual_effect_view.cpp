@@ -58,13 +58,7 @@ VisualEffectView::VisualEffectView(VisualEffectMaterial material)
 VisualEffectView::~VisualEffectView() = default;
 
 void VisualEffectView::set_child(std::shared_ptr<Widget> child) {
-    if (impl_->child) {
-        remove_child(*impl_->child);
-    }
-    impl_->child = std::move(child);
-    if (impl_->child) {
-        append_child(impl_->child);
-    }
+    replace_child(impl_->child, std::move(child));
     queue_layout();
     queue_redraw();
 }

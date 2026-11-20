@@ -1779,6 +1779,12 @@ Size Window::framebuffer_size() const {
 }
 
 void Window::set_child(std::shared_ptr<Widget> child) {
+    if (impl_->child == child) {
+        return;
+    }
+    if (child) {
+        child->require_detached();
+    }
     impl_->hovered_widget = nullptr;
     impl_->pressed_widget = nullptr;
     impl_->focused_widget = nullptr;
@@ -4403,6 +4409,7 @@ void Window::show_overlay(std::shared_ptr<Widget> overlay, bool modal) {
         }
     }
 
+    overlay->require_detached();
     overlay->set_host_window(this);
     append_unique_widget(impl_->dirty_widgets, overlay.get());
     Widget* overlay_ptr = overlay.get();

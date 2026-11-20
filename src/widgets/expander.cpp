@@ -87,14 +87,8 @@ void Expander::set_suffix(std::shared_ptr<Widget> suffix) {
     if (impl_->suffix == suffix) {
         return;
     }
-    if (impl_->suffix != nullptr) {
-        remove_child(*impl_->suffix);
-    }
-    impl_->suffix = std::move(suffix);
+    replace_child(impl_->suffix, std::move(suffix));
     impl_->suffix_bounds = {};
-    if (impl_->suffix != nullptr) {
-        append_child(impl_->suffix);
-    }
     queue_layout();
     queue_redraw();
 }
@@ -133,13 +127,9 @@ void Expander::set_expanded(bool expanded) {
 }
 
 void Expander::set_child(std::shared_ptr<Widget> child) {
-    if (impl_->child) {
-        remove_child(*impl_->child);
-    }
-    impl_->child = std::move(child);
+    replace_child(impl_->child, std::move(child));
     if (impl_->child) {
         impl_->child->set_visible(impl_->expanded);
-        append_child(impl_->child);
     }
     queue_layout();
     queue_redraw();

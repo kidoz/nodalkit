@@ -62,13 +62,7 @@ void StatusPage::set_icon(std::shared_ptr<Widget> icon) {
     if (impl_->icon == icon) {
         return;
     }
-    if (impl_->icon != nullptr) {
-        remove_child(*impl_->icon);
-    }
-    impl_->icon = std::move(icon);
-    if (impl_->icon != nullptr) {
-        append_child(impl_->icon);
-    }
+    replace_child(impl_->icon, std::move(icon));
     queue_layout();
 }
 
@@ -80,13 +74,7 @@ void StatusPage::set_action(std::shared_ptr<Widget> action) {
     if (impl_->action == action) {
         return;
     }
-    if (impl_->action != nullptr) {
-        remove_child(*impl_->action);
-    }
-    impl_->action = std::move(action);
-    if (impl_->action != nullptr) {
-        append_child(impl_->action);
-    }
+    replace_child(impl_->action, std::move(action));
     queue_layout();
 }
 
@@ -98,13 +86,7 @@ void StatusPage::set_content(std::shared_ptr<Widget> content) {
     if (impl_->content == content) {
         return;
     }
-    if (impl_->content != nullptr) {
-        remove_child(*impl_->content);
-    }
-    impl_->content = std::move(content);
-    if (impl_->content != nullptr) {
-        append_child(impl_->content);
-    }
+    replace_child(impl_->content, std::move(content));
     queue_layout();
 }
 

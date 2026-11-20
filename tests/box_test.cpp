@@ -7,6 +7,10 @@
 #include <nk/platform/window.h>
 #include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
+#include <nk/widgets/clamp.h>
+#include <nk/widgets/dialog.h>
+#include <nk/widgets/overlay_split_view.h>
+#include <nk/widgets/scroll_area.h>
 #include <stdexcept>
 
 namespace {
@@ -155,4 +159,73 @@ TEST_CASE("Box preserves descendant accessibility and keyboard order", "[box][ac
     CHECK_FALSE(tree.focused().has_value());
     CHECK(tree.root_children().empty());
     CHECK_FALSE(tree.info(ids[0]).has_value());
+}
+
+TEST_CASE("Windows accept only detached roots and overlays", "[box][lifetime]") {
+    nk::Window first;
+    nk::Window second;
+    auto root = nk::Box::create();
+    auto child = nk::Dialog::create("Child");
+    root->append(child);
+    first.set_child(root);
+    auto original = nk::Box::create();
+    second.set_child(original);
+    CHECK_THROWS_AS(second.set_child(child), std::invalid_argument);
+    CHECK_THROWS_AS(second.set_child(root), std::invalid_argument);
+    CHECK_THROWS_AS(child->present(second), std::invalid_argument);
+    CHECK_FALSE(child->is_presented());
+    CHECK(second.child() == original.get());
+    CHECK(first.child() == root.get());
+    CHECK(child->parent() == root.get());
+
+    root->remove(*child);
+    child->present(first);
+    CHECK_THROWS_AS(second.set_child(child), std::invalid_argument);
+    child->present(second);
+    REQUIRE(child->is_presented());
+    child->close();
+    second.set_child(child);
+    CHECK_THROWS_AS(child->present(second), std::invalid_argument);
+    CHECK_FALSE(child->is_presented());
+    CHECK(second.child() == child.get());
+
+    second.set_child(nullptr);
+    {
+        nk::Window temporary;
+        child->present(temporary);
+    }
+    first.set_child(child);
+    CHECK_FALSE(child->is_presented());
+    CHECK_THROWS_AS(child->present(first), std::invalid_argument);
+}
+
+TEST_CASE("Single-child replacements preserve ownership on rejection", "[box][lifetime]") {
+    auto verify = [](auto container, auto set, auto get) {
+        auto original = nk::Box::create();
+        auto foreign = nk::Box::create();
+        auto candidate = nk::Box::create();
+        foreign->append(candidate);
+        ((*container).*set)(original);
+        const auto count = container->children().size();
+        CHECK_THROWS_AS(((*container).*set)(candidate), std::invalid_argument);
+        CHECK_THROWS_AS(((*container).*set)(container), std::invalid_argument);
+        REQUIRE(((*container).*get)() == original.get());
+        CHECK(container->children().size() == count);
+        CHECK(original->parent() == container.get());
+        CHECK(candidate->parent() == foreign.get());
+        foreign->remove(*candidate);
+        ((*container).*set)(candidate);
+        CHECK(original->parent() == nullptr);
+        CHECK(candidate->parent() == container.get());
+        ((*container).*set)(nullptr);
+        CHECK(candidate->parent() == nullptr);
+    };
+    verify(nk::ScrollArea::create(), &nk::ScrollArea::set_content, &nk::ScrollArea::content);
+    verify(nk::Clamp::create(), &nk::Clamp::set_child, &nk::Clamp::child);
+    verify(nk::OverlaySplitView::create(),
+           &nk::OverlaySplitView::set_content,
+           &nk::OverlaySplitView::content);
+    verify(nk::OverlaySplitView::create(),
+           &nk::OverlaySplitView::set_sidebar,
+           &nk::OverlaySplitView::sidebar);
 }

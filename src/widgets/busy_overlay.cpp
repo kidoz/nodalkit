@@ -81,19 +81,14 @@ void BusyOverlay::set_child(std::shared_ptr<Widget> page) {
     if (impl_->page == page) {
         return;
     }
-    if (impl_->page != nullptr) {
-        if (impl_->busy && impl_->page_was_sensitive) {
-            impl_->page->set_sensitive(true);
-        }
-        remove_child(*impl_->page);
+    const auto previous = impl_->page;
+    replace_child(impl_->page, std::move(page), 0);
+    if (previous && impl_->busy && impl_->page_was_sensitive) {
+        previous->set_sensitive(true);
     }
-    impl_->page = std::move(page);
     impl_->page_was_sensitive = impl_->page == nullptr || impl_->page->is_sensitive();
-    if (impl_->page != nullptr) {
-        insert_child(0, impl_->page);
-        if (impl_->busy) {
-            impl_->page->set_sensitive(false);
-        }
+    if (impl_->page && impl_->busy) {
+        impl_->page->set_sensitive(false);
     }
     queue_layout();
 }

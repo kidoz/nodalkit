@@ -35,13 +35,7 @@ void Clamp::set_child(std::shared_ptr<Widget> child) {
     if (impl_->child == child) {
         return;
     }
-    if (impl_->child != nullptr) {
-        remove_child(*impl_->child);
-    }
-    impl_->child = std::move(child);
-    if (impl_->child != nullptr) {
-        append_child(impl_->child);
-    }
+    replace_child(impl_->child, std::move(child));
     queue_layout();
 }
 

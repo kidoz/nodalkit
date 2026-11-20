@@ -101,13 +101,7 @@ Popover::Popover() : impl_(std::make_unique<Impl>()) {
 Popover::~Popover() = default;
 
 void Popover::set_child(std::shared_ptr<Widget> child) {
-    if (impl_->child) {
-        remove_child(*impl_->child);
-    }
-    impl_->child = std::move(child);
-    if (impl_->child) {
-        append_child(impl_->child);
-    }
+    replace_child(impl_->child, std::move(child));
     if (impl_->open) {
         update_popup_geometry();
     }

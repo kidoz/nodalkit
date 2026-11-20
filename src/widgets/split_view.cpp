@@ -38,25 +38,13 @@ Orientation SplitView::orientation() const {
 }
 
 void SplitView::set_start_child(std::shared_ptr<Widget> child) {
-    if (impl_->start_child) {
-        remove_child(*impl_->start_child);
-    }
-    impl_->start_child = std::move(child);
-    if (impl_->start_child) {
-        append_child(impl_->start_child);
-    }
+    replace_child(impl_->start_child, std::move(child));
     queue_layout();
     queue_redraw();
 }
 
 void SplitView::set_end_child(std::shared_ptr<Widget> child) {
-    if (impl_->end_child) {
-        remove_child(*impl_->end_child);
-    }
-    impl_->end_child = std::move(child);
-    if (impl_->end_child) {
-        append_child(impl_->end_child);
-    }
+    replace_child(impl_->end_child, std::move(child));
     queue_layout();
     queue_redraw();
 }

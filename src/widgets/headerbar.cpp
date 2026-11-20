@@ -475,13 +475,7 @@ void Headerbar::set_title_widget(std::shared_ptr<Widget> widget) {
     if (impl_->title_widget == widget) {
         return;
     }
-    if (impl_->title_widget != nullptr) {
-        remove_child(*impl_->title_widget);
-    }
-    impl_->title_widget = std::move(widget);
-    if (impl_->title_widget != nullptr) {
-        append_child(impl_->title_widget);
-    }
+    replace_child(impl_->title_widget, std::move(widget));
     queue_layout();
 }
 

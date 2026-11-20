@@ -100,6 +100,7 @@ public:
     /// from the old parent first. Focus moves to the default response (else the
     /// first button) and the parent's previous focus is restored on close.
     /// Returns immediately; the response arrives via on_response().
+    /// Throws std::invalid_argument if the dialog is attached as a regular widget.
     void present(Window& parent);
     [[nodiscard]] bool is_presented() const;
 
@@ -134,6 +135,7 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 
+    void on_host_window_changed(Window* window) override;
     void append_response_button(std::string label,
                                 DialogResponse response,
                                 int custom_id,

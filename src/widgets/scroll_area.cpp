@@ -93,14 +93,8 @@ ScrollArea::ScrollArea() : impl_(std::make_unique<Impl>()) {
 ScrollArea::~ScrollArea() = default;
 
 void ScrollArea::set_content(std::shared_ptr<Widget> content) {
-    if (impl_->content) {
-        remove_child(*impl_->content);
-    }
+    replace_child(impl_->content, std::move(content));
     impl_->request.reset();
-    impl_->content = std::move(content);
-    if (impl_->content) {
-        append_child(impl_->content);
-    }
     queue_layout();
 }
 

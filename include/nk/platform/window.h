@@ -109,7 +109,8 @@ public:
     [[nodiscard]] float scale_factor() const;
     [[nodiscard]] Size framebuffer_size() const;
 
-    /// Set the root widget displayed in this window.
+    /// Set the root widget or clear it with nullptr. A new root must be detached.
+    /// Throws std::invalid_argument if it belongs to a widget or window.
     void set_child(std::shared_ptr<Widget> child);
 
     /// Get the current root widget.

@@ -102,13 +102,7 @@ void ToolbarView::set_content(std::shared_ptr<Widget> content) {
     if (impl_->content == content) {
         return;
     }
-    if (impl_->content != nullptr) {
-        remove_child(*impl_->content);
-    }
-    impl_->content = std::move(content);
-    if (impl_->content != nullptr) {
-        insert_child(0, impl_->content);
-    }
+    replace_child(impl_->content, std::move(content), 0);
     queue_layout();
 }
 

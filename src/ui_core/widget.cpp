@@ -810,10 +810,17 @@ Signal<DragDropEvent&>& Widget::on_drop() {
 
 // --- Child management ---
 
-void Widget::validate_child(const std::shared_ptr<Widget>& child) const {
-    if (!child || child->impl_->parent != nullptr || child->impl_->host_window != nullptr) {
-        throw std::invalid_argument("Child must be non-null and detached from its tree and window");
+void Widget::require_detached() const {
+    if (impl_->parent != nullptr || impl_->host_window != nullptr) {
+        throw std::invalid_argument("Widget must be detached from its tree and window");
     }
+}
+
+void Widget::validate_child(const std::shared_ptr<Widget>& child) const {
+    if (!child) {
+        throw std::invalid_argument("Child must be non-null");
+    }
+    child->require_detached();
     for (const auto* ancestor = this; ancestor != nullptr; ancestor = ancestor->parent()) {
         if (ancestor == child.get()) {
             throw std::invalid_argument("Widget trees cannot contain cycles");
@@ -837,6 +844,21 @@ void Widget::insert_child(std::size_t index, std::shared_ptr<Widget> child) {
                static_cast<std::ptrdiff_t>(std::min(index, impl_->children.size()));
     impl_->children.insert(pos, std::move(child));
     queue_layout();
+}
+
+void Widget::replace_child(std::shared_ptr<Widget>& slot,
+                           std::shared_ptr<Widget> child,
+                           std::optional<std::size_t> index) {
+    if (slot == child) {
+        return;
+    }
+    if (child) {
+        insert_child(index.value_or(impl_->children.size()), child);
+    }
+    if (slot) {
+        remove_child(*slot);
+    }
+    slot = std::move(child);
 }
 
 void Widget::remove_child(Widget& child) {

@@ -164,14 +164,8 @@ void Dialog::append_response_button(std::string label,
 }
 
 void Dialog::set_content(std::shared_ptr<Widget> content) {
-    if (impl_->content) {
-        remove_child(*impl_->content);
-    }
-    impl_->content = std::move(content);
-    if (impl_->content) {
-        // Content precedes the buttons in focus and reading order.
-        insert_child(0, impl_->content);
-    }
+    // Content precedes the buttons in focus and reading order.
+    replace_child(impl_->content, std::move(content), 0);
     queue_layout();
     queue_redraw();
 }
@@ -208,6 +202,7 @@ void Dialog::present(Window& parent) {
         host_window()->dismiss_overlay(*this);
     }
 
+    require_detached();
     impl_->presented = true;
     impl_->backdrop_dirty = true;
     parent.show_overlay(shared_from_this(), true);
@@ -220,6 +215,12 @@ void Dialog::present(Window& parent) {
         default_button->button->grab_focus();
     } else if (!impl_->buttons.empty()) {
         impl_->buttons.front().button->grab_focus();
+    }
+}
+
+void Dialog::on_host_window_changed(Window* window) {
+    if (!window) {
+        impl_->presented = false;
     }
 }
 

@@ -44,13 +44,7 @@ void NavigationSplitView::set_sidebar(std::shared_ptr<Widget> sidebar) {
     if (impl_->sidebar == sidebar) {
         return;
     }
-    if (impl_->sidebar != nullptr) {
-        remove_child(*impl_->sidebar);
-    }
-    impl_->sidebar = std::move(sidebar);
-    if (impl_->sidebar != nullptr) {
-        insert_child(0, impl_->sidebar);
-    }
+    replace_child(impl_->sidebar, std::move(sidebar), 0);
     queue_layout();
 }
 
@@ -62,13 +56,7 @@ void NavigationSplitView::set_content(std::shared_ptr<Widget> content) {
     if (impl_->content == content) {
         return;
     }
-    if (impl_->content != nullptr) {
-        remove_child(*impl_->content);
-    }
-    impl_->content = std::move(content);
-    if (impl_->content != nullptr) {
-        append_child(impl_->content);
-    }
+    replace_child(impl_->content, std::move(content));
     queue_layout();
 }
 

@@ -384,9 +384,18 @@ protected:
     /// layout pass, such as popup menus and combo drop-downs.
     void preserve_damage_regions_for_next_redraw();
 
+    /// Throw std::invalid_argument if this widget already belongs to a parent or window.
+    void require_detached() const;
+
     /// Container widgets call these to manage children.
     void append_child(std::shared_ptr<Widget> child);
     void insert_child(std::size_t index, std::shared_ptr<Widget> child);
+    /// Replace a container's stored child, appending by default. A null replacement clears it.
+    /// Throws std::invalid_argument for an attached or cyclic replacement before removing the old
+    /// child.
+    void replace_child(std::shared_ptr<Widget>& slot,
+                       std::shared_ptr<Widget> child,
+                       std::optional<std::size_t> index = std::nullopt);
     void remove_child(Widget& child);
     void clear_children();
 

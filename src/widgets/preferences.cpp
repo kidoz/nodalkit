@@ -87,13 +87,7 @@ void PreferencesRow::set_suffix(std::shared_ptr<Widget> suffix) {
     if (impl_->suffix == suffix) {
         return;
     }
-    if (impl_->suffix != nullptr) {
-        remove_child(*impl_->suffix);
-    }
-    impl_->suffix = std::move(suffix);
-    if (impl_->suffix != nullptr) {
-        append_child(impl_->suffix);
-    }
+    replace_child(impl_->suffix, std::move(suffix));
     queue_layout();
 }
 
@@ -512,12 +506,8 @@ void ExpanderRow::set_child(std::shared_ptr<Widget> child) {
     if (impl_->child == child) {
         return;
     }
-    if (impl_->child != nullptr) {
-        remove_child(*impl_->child);
-    }
-    impl_->child = std::move(child);
-    if (impl_->child != nullptr) {
-        append_child(impl_->child);
+    replace_child(impl_->child, std::move(child));
+    if (impl_->child) {
         impl_->child->set_visible(impl_->expanded);
     }
     queue_layout();
