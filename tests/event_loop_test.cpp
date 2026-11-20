@@ -270,3 +270,13 @@ TEST_CASE("A worker can stop a sleeping fallback loop directly", "[event_loop][t
     CHECK(result == 7);
     CHECK_FALSE(needed_rescue);
 }
+
+TEST_CASE("Nested poll consumes another due interval only once", "[event_loop]") {
+    nk::EventLoop loop;
+    int calls = 0;
+    (void)loop.set_timeout(0ms, [&] { loop.poll(); });
+    (void)loop.set_interval(1ms, [&] { ++calls; });
+    std::this_thread::sleep_for(3ms);
+    loop.poll();
+    REQUIRE(calls == 1);
+}

@@ -354,7 +354,7 @@ bool EventLoop::poll() {
     }
     for (auto& firing : due) {
         auto* live = find_timer(impl_->timers, firing.handle.id);
-        if (live == nullptr || live->cancelled) {
+        if (live == nullptr || live->cancelled || live->fire_at != firing.fire_at) {
             continue;
         }
         const bool is_interval = live->interval.count() > 0;
