@@ -4,15 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-Promotes Windows from an experimental platform to a secondary supported
-target (like macOS: supported while CI stays green) and closes the native
-integration gaps that kept the backend experimental: native menu accelerators,
-dark-mode window chrome, push-based system preference updates, app-modal file
-dialogs, double-click counting, an explicit AppUserModelID, IMM32 IME
-composition with caret-anchored candidates, and an OLE drag source for text
-and file payloads.
+## [0.6.0] - 2026-11-21
 
-### Support Matrix for Unreleased
+The sixth normal release of the NodalKit framework. 0.6.0 keeps the widget
+tree, layout system, theming, diagnostics, accessibility bridges, and platform
+integration of 0.5.0, promotes Windows to a secondary supported target, and
+closes the native integration gaps that kept the backend experimental: native
+menu accelerators, dark-mode window chrome, push-based system preference
+updates, app-modal file dialogs, double-click counting, an explicit
+AppUserModelID, IMM32 IME composition with caret-anchored candidates, and an
+OLE drag source for text and file payloads. The Vulkan GPU path now draws
+nested affine transforms, stroked paths, and arbitrarily deep clip stacks,
+Wayland repaints follow compositor frame callbacks, SpinButton becomes an
+editable text field with accessible stepping, and tab bars expose individual
+tabs to platform accessibility.
+
+### Support Matrix for 0.6.0
 *   **Linux Wayland:** Primary Release Target, CI-tested against a real
     headless Wayland compositor with a software Vulkan device.
 *   **macOS:** Secondary Release Target (supported while CI remains green).
@@ -61,6 +68,99 @@ and file payloads.
     counting, IME preedit conversion (BMP and astral characters), the drag
     data object's CF_HDROP/CF_UNICODETEXT round-trips, and the preference
     observation lifecycle.
+*   **Vulkan GPU Coverage:** the Vulkan GPU path draws nested affine
+    transforms (translation, scaling, rotation, reflection, and shear),
+    stroked paths with round caps and joins, and arbitrarily deep clip stacks.
+    Path and clip data share a reusable frame buffer with draw uniforms, clip
+    intersections retain fractional rectangle edges, and repeated clips use
+    the minimum coverage so antialiased edges stay correct. Singular and
+    nonfinite transforms draw no pixels, and frames that exceed storage or
+    allocation limits still fall back to software.
+*   **Editable SpinButton:** `SpinButton` now derives from `TextField`. Values
+    can be typed directly with locale-independent parsing and precision
+    validation; an incomplete or out-of-range draft restores the last
+    committed value, Escape discards the edit, Return commits and selects the
+    formatted value, and focus loss restores formatted text. The arrows,
+    Home, End, and normal text-editing keys share focus, the buttons are
+    capped at the theme width, and the field measures the widest form of its
+    range.
+*   **Accessible Steppers:** `AccessibleAction::Increment` and
+    `AccessibleAction::Decrement` let assistive technology step `SpinButton`
+    values. macOS maps the control to the incrementor role and implements
+    `accessibilityPerformIncrement` and `accessibilityPerformDecrement`.
+*   **Accessible Tabs:** every `TabBar` tab owns an invisible header widget
+    with its own accessible name, `Tab` role, selected state, and `Activate`
+    action. Assistive technology sees individual tabs, and the bar's
+    accessible value follows the selected label through insertion, renaming,
+    removal, and clearing.
+*   **Event Loop Waits:** `EventLoop::poll_timeout` bounds a native event wait
+    by queued tasks, idle callbacks, and timer deadlines, and returns zero
+    when work is already pending.
+
+### Changed
+*   **Widget Ownership:** `Window::set_child`, `Window::show_overlay`, and
+    `Dialog::present` reject attached widgets before changing window state,
+    and the new protected `Widget::replace_child` centralizes single-child
+    replacement so a rejected candidate leaves the previous child attached
+    and owned by its container. `Dialog` also clears its presented state when
+    its host window goes away.
+*   **Wayland Frame Pacing:** window repaints request a `wl_surface_frame`
+    callback and run on the compositor's next frame, coalescing redraws
+    instead of committing them immediately. Frame requests are applied by the
+    next buffer commit, and show, hide, and teardown cancel or flush pending
+    callbacks.
+*   **Text Hit Testing:** the text shaper resolves hit tests against shaped
+    clusters, and text fields use those bounds for caret placement.
+*   **Software Rendering:** fully opaque rounded spans fill their interior
+    without per-pixel blending while keeping the antialias ramp at fractional
+    edges.
+*   **Settings Durability:** `Settings::save` encodes the file before touching
+    disk, writes and flushes an exclusive temporary file (a unique mkostemp
+    name on Unix and a GUID name on Windows), syncs it, and atomically
+    replaces the destination. Concurrent writers publish whole files, and a
+    failed replacement removes its scratch file.
+*   **SpinButton Formatting:** values format and parse with the classic
+    locale, `set_precision` clamps to zero, and measurement follows the widest
+    formatted range endpoint instead of a fixed minimum width.
+*   **Release Gate:** Windows x64 joins the CI matrix and the release gate;
+    the i686 cross-build stays advisory, and the SDK smoke check requires
+    `imm32` in the pkg-config link line.
+*   **Showcase:** the search field filters rows through `FilterListModel` and
+    preserves a matching selection while counts update, split columns stack
+    when their minimum widths cannot fit, the read-only settings sheet is the
+    same preferences page on every platform, custom widgets and navigation
+    carry accessible names, and the menus and status text no longer offer an
+    Exit shortcut or claim a link was copied.
+*   **Trading Terminal:** below the 1086-point breakpoint the workspace
+    collapses into a five-tab compact layout with a scrollable order ticket
+    and restores the split layout when the window grows. Cancel enables only
+    for a selected working order with a tooltip and accessible description
+    explaining the disabled state, orders and positions show empty-state
+    hints, and selectors and chart zoom controls carry accessible names.
+*   **Documentation:** the platform support reference documents the Vulkan
+    transform, path, and clip coverage.
+*   **Test Coverage:** new suites cover Vulkan transforms, paths, and deep
+    clips, Wayland frame callbacks and shm release retries, fallback event
+    loop wakeups and timer generations, atomic settings saves, SpinButton
+    editing and stepping, per-tab and stepper accessibility, and the compact
+    trading terminal layout and cancel state.
+
+### Fixed
+*   **Transparent Vulkan Replay:** damaged regions clear before transparent
+    content is replayed, so stale pixels from the previous frame do not
+    linger through localized redraws.
+*   **Wayland Buffer Release:** when both shm buffers are busy, the surface
+    remembers the skipped present and retries a full upload after a buffer
+    release, including damage consumed before the retry.
+*   **Event Loop Wakeups:** idle callbacks queued by a posted task run before
+    the fallback loop sleeps, a worker-thread quit wakes and stops a sleeping
+    loop without a rescue post, and a re-entrant poll no longer fires a due
+    interval twice.
+*   **Win32 Text Payloads:** clipboard and drag text reads stay within the
+    locked allocation's extent, reject a missing terminator or an oversized
+    allocation, and keep the lock scoped.
+*   **List Summary:** list views describe a single row as "1 item" in the
+    accessible summary.
 
 ## [0.5.0] - 2026-11-07
 
