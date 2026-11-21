@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 *   **Windows IME Hardening:** focus loss cancels an in-flight IME composition (`ImmNotifyIME(CPS_CANCEL)` plus a `ClearPreedit` event) so half-composed text never outlives the editor; secure (password) editors cancel composition and force the IME closed without ever forcing it back open; input-language changes are acknowledged. A message-level native suite drives the composition lifecycle through a real window (`WM_IME_STARTCOMPOSITION`/`ENDCOMPOSITION`, `WM_CHAR`, `WM_KILLFOCUS`, secure-state resync) and synthesizes IMM composition strings Wine-style where an IME context is available, skipping cleanly on bare US-locale runners.
+*   **MSVC `cl` Toolchain:** the entire library, examples, and test suite build and pass under MSVC `/W4 /WX` (verified with VS 2026, `cl` 19.52; the historical clang-only-flags claim was stale — that flag is meson-gated to clang). The sanitizer frame-pointer argument is now compiler-gated, `ci.yml` gained an advisory MSVC lane, and the toolchain matrix row moved to experimental; the floor is VS 2022 17.2+.
 
 ### Fixed
 *   **Degenerate Rect Corner Radius:** all three render backends (software,
@@ -39,8 +40,10 @@ tabs to platform accessibility.
     Win32 native integration now covers menus with working keyboard
     accelerators, IMM32 IME, clipboard, dialogs, drag & drop (both
     directions), high-DPI, dark-mode chrome, and system preference
-    observation. A UI Automation provider exposes the accessibility tree;
-    ARM64, MSVC, and MinGW remain unsupported; see the Windows support matrix.
+    observation. A UI Automation provider exposes the accessibility tree.
+    MSVC (`cl`) builds and passes the full suite under `/W4 /WX` with an
+    advisory CI lane; ARM64 and MinGW remain untested; see the Windows
+    support matrix.
 *   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
 *   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
     earlier in correctness confidence than the software render paths.

@@ -81,8 +81,8 @@ TEST_CASE("Box rejects duplicate ownership and cycles without changing the tree"
 
 TEST_CASE("Box measures and allocates rows and columns with padding", "[box][layout]") {
     auto box = nk::Box::create(nk::Orientation::Horizontal, 5);
-    auto first = std::make_shared<FixedWidget>(10, 20);
-    auto second = std::make_shared<FixedWidget>(30, 40);
+    auto first = std::make_shared<FixedWidget>(10.0F, 20.0F);
+    auto second = std::make_shared<FixedWidget>(30.0F, 40.0F);
     box->append(first);
     box->append(second);
     box->set_padding({.top = 2, .right = 3, .bottom = 4, .left = 6});

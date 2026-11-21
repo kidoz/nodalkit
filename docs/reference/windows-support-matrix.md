@@ -20,9 +20,9 @@ lightly tested · ❌ not implemented.
 
 | Toolchain | Status | Notes |
 | --------- | ------ | ----- |
-| clang / clang++ + lld-link | ✅ | The supported Windows toolchain; the dev host and CI both use it. |
-| clang-cl | 🧪 | Should work (same front end); not the primary CI path. |
-| MSVC (`cl`) | ❌ | Not supported: the sources use clang-only flags such as `-Wno-c2y-extensions`. |
+| clang / clang++ + lld-link | ✅ | The primary Windows toolchain; the dev host and CI both use it. |
+| MSVC (`cl`) | 🧪 | Builds and passes the full suite under `/W4 /WX` (verified locally with VS 2026, `cl` 19.52; the codebase needed no source changes — the historical `-Wno-c2y-extensions` claim was stale, that flag is meson-gated to clang). CI runs an advisory lane; floor is VS 2022 17.2+ (C++20 designated initializers). |
+| clang-cl | 🧪 | Should work (same front end); not a CI path. |
 | MinGW | ❌ | Not tested. |
 
 ## Render backends

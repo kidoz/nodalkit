@@ -494,10 +494,14 @@ endif
 
 windows_sanitizer_runtime_dir = ''
 if get_option('b_sanitize') != 'none'
-    foreach lang : nk_enabled_languages
-        add_project_arguments('-fno-omit-frame-pointer', language : lang)
-        add_project_link_arguments('-fno-omit-frame-pointer', language : lang)
-    endforeach
+    # The frame-pointer flag is a GCC/Clang spelling; MSVC does not know it
+    # (its debug runtimes already keep frame pointers where it matters).
+    if cpp_compiler.get_id() in ['clang', 'clang-cl', 'gcc']
+        foreach lang : nk_enabled_languages
+            add_project_arguments('-fno-omit-frame-pointer', language : lang)
+            add_project_link_arguments('-fno-omit-frame-pointer', language : lang)
+        endforeach
+    endif
 
     if host_system == 'windows' and cpp_compiler.get_id() == 'clang'
         # Meson's MSVC-ABI linker does not forward the GNU Clang sanitizer

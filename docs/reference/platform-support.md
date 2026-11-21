@@ -35,7 +35,7 @@ package config module in 0.x.
 | Meson | 1.11 or newer. |
 | Compiler | C++23. |
 | `pkg-config` or `pkgconf` | Required for downstream SDK consumption. |
-| Windows SDK | Win32, DWM, Shell, IMM, UI Automation, DirectWrite, D3D11, D3D12, D3DCompiler, DXGI, and COM development libraries. The current Windows host uses `clang++` with `lld-link`. |
+| Windows SDK | Win32, DWM, Shell, IMM, UI Automation, DirectWrite, D3D11, D3D12, D3DCompiler, DXGI, and COM development libraries. The primary Windows host uses `clang++` with `lld-link`; MSVC `cl` (VS 2022 17.2+) also builds and passes the suite — see the [Windows support matrix](windows-support-matrix.md). |
 | Vulkan (optional) | A Vulkan SDK or system package discoverable by Meson plus `glslangValidator` at NodalKit build time. When missing, the Windows build still installs the Win32, DirectWrite, D3D11, and D3D12 surface. |
 
 ## Render backends
