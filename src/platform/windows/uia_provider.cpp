@@ -15,6 +15,7 @@
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <wrl/client.h>
@@ -117,6 +118,17 @@ class UiaFragment;
 /// UIA_E_ELEMENTNOTAVAILABLE once the bridge disconnected.
 using UiaLiveness = std::shared_ptr<std::atomic<bool>>;
 
+/// Last-reported per-element state, diffed on each synchronization to raise
+/// property-changed events for what actually moved.
+struct UiaReportedState {
+    std::string name;
+    std::string value;
+    bool checked = false;
+    bool selected = false;
+    bool enabled = true;
+    bool has_numeric_range = false;
+};
+
 /// Shared hub every provider reads: the live accessibility tree for one
 /// window, its HWND, the lazily created element providers, and the fragment
 /// root. Owned by Win32UiaBridge::Impl; providers hold a raw pointer plus the
@@ -126,13 +138,25 @@ struct UiaSite {
     Window* window = nullptr;
     std::unique_ptr<AccessibilityTree> tree;
     ComPtr<IRawElementProviderFragmentRoot> root;
+    /// The same root object viewed as its simple interface, for the event
+    /// raising helpers (cross-interface COM pointers do not convert).
+    ComPtr<IRawElementProviderSimple> root_simple;
     std::unordered_map<AccessibleId, void*> providers;
+    std::unordered_map<AccessibleId, UiaReportedState> reported;
     UiaLiveness alive = std::make_shared<std::atomic<bool>>(true);
+    /// False until the first synchronization walked the tree; the initial
+    /// population must not raise structure events.
+    bool initial_population_done = false;
     bool clients_connected = false;
 
     /// Provider for an exposed element, created on first use. The site keeps
     /// the owning reference; UIA adds its own while clients hold the element.
-    [[nodiscard]] UiaFragment* fragment_for(AccessibleId id);
+    /// fragment_for returns the simple interface (patterns, event raising);
+    /// fragment_navigator_for returns the fragment interface (Navigate,
+    /// GetFocus). COM interface pointers do not convert across interfaces, so
+    /// callers pick the view they need.
+    [[nodiscard]] IRawElementProviderSimple* fragment_for(AccessibleId id);
+    [[nodiscard]] IRawElementProviderFragment* fragment_navigator_for(AccessibleId id);
 
     /// Convert a window-logical rect into physical screen coordinates.
     [[nodiscard]] UiaRect screen_rect(Rect logical) const {
@@ -210,6 +234,10 @@ public:
         }
         const bool performed = state_.site->tree->perform(state_.id, AccessibleAction::Activate) ||
                                state_.site->tree->perform(state_.id, AccessibleAction::Toggle);
+        if (performed && UiaClientsAreListening() != FALSE) {
+            UiaRaiseAutomationEvent(state_.site->fragment_for(state_.id),
+                                    UIA_Invoke_InvokedEventId);
+        }
         return performed ? S_OK : UIA_E_INVALIDOPERATION;
     }
 
@@ -626,7 +654,7 @@ public:
             // A nullopt parent means the window root is the parent.
             const auto parent = site_->tree->parent(id_);
             if (parent.has_value()) {
-                *out = site_->fragment_for(*parent);
+                *out = site_->fragment_navigator_for(*parent);
                 (*out)->AddRef();
             } else {
                 site_->root.CopyTo(out);
@@ -666,7 +694,7 @@ public:
             return S_OK;
         }
         if (target.has_value()) {
-            *out = site_->fragment_for(*target);
+            *out = site_->fragment_navigator_for(*target);
             (*out)->AddRef();
         }
         return S_OK;
@@ -857,8 +885,8 @@ public:
             if (children.empty()) {
                 return S_OK;
             }
-            *out = site_->fragment_for(direction == NavigateDirection_FirstChild ? children.front()
-                                                                                 : children.back());
+            *out = site_->fragment_navigator_for(
+                direction == NavigateDirection_FirstChild ? children.front() : children.back());
             (*out)->AddRef();
         }
         // Parent/sibling navigation above the root is the host's job.
@@ -920,7 +948,7 @@ public:
         const Point logical = site_->logical_point(x, y);
         const auto hit = site_->tree->hit_test(logical);
         if (hit.has_value()) {
-            *out = site_->fragment_for(*hit);
+            *out = site_->fragment_navigator_for(*hit);
             (*out)->AddRef();
             return S_OK;
         }
@@ -937,7 +965,7 @@ public:
         *out = nullptr;
         const auto focused = site_->tree->focused();
         if (focused.has_value()) {
-            *out = site_->fragment_for(*focused);
+            *out = site_->fragment_navigator_for(*focused);
             (*out)->AddRef();
         }
         return S_OK;
@@ -949,13 +977,99 @@ private:
     UiaLiveness alive_;
 };
 
-UiaFragment* UiaSite::fragment_for(AccessibleId id) {
-    if (const auto found = providers.find(id); found != providers.end()) {
+namespace {
+UiaFragment* ensure_fragment(UiaSite& site, AccessibleId id) {
+    if (const auto found = site.providers.find(id); found != site.providers.end()) {
         return static_cast<UiaFragment*>(found->second);
     }
-    auto* provider = new UiaFragment(this, id);
-    providers.emplace(id, provider);
+    auto* provider = new UiaFragment(&site, id);
+    site.providers.emplace(id, provider);
     return provider;
+}
+} // namespace
+
+IRawElementProviderSimple* UiaSite::fragment_for(AccessibleId id) {
+    return ensure_fragment(*this, id);
+}
+
+IRawElementProviderFragment* UiaSite::fragment_navigator_for(AccessibleId id) {
+    return ensure_fragment(*this, id);
+}
+
+/// Drop the site's owning reference for an element and disconnect clients.
+void retire_fragment(UiaSite& site, AccessibleId id) {
+    if (const auto found = site.providers.find(id); found != site.providers.end()) {
+        auto* provider = static_cast<UiaFragment*>(found->second);
+        site.providers.erase(found);
+        UiaDisconnectProvider(provider);
+        provider->Release();
+    }
+    site.reported.erase(id);
+}
+
+/// Announce a child appearing/disappearing under its parent (or the root when
+/// the parent is gone, which tells clients to rescan). ChildRemoved carries
+/// the removed element's runtime id as a raw int pair.
+void raise_structure_changed(UiaSite& site, AccessibleId id, StructureChangeType type) {
+    IRawElementProviderSimple* target = nullptr;
+    const auto parent = site.tree->parent(id);
+    if (parent.has_value()) {
+        target = site.fragment_for(*parent);
+    } else {
+        target = site.root_simple.Get();
+    }
+    if (target == nullptr) {
+        return;
+    }
+    if (type == StructureChangeType_ChildRemoved) {
+        int runtime_id[2] = {UiaAppendRuntimeId, static_cast<int>(id)};
+        UiaRaiseStructureChangedEvent(target, type, runtime_id, 2);
+        return;
+    }
+    UiaRaiseStructureChangedEvent(target, type, nullptr, 0);
+}
+
+void raise_string_property(IRawElementProviderSimple* provider,
+                           PROPERTYID property,
+                           const std::string& old_value,
+                           const std::string& new_value) {
+    VARIANT old_variant{};
+    VARIANT new_variant{};
+    const auto old_wide = win32_wide_from_utf8(old_value);
+    const auto new_wide = win32_wide_from_utf8(new_value);
+    old_variant.vt = VT_BSTR;
+    old_variant.bstrVal = SysAllocStringLen(old_wide.c_str(), static_cast<UINT>(old_wide.size()));
+    new_variant.vt = VT_BSTR;
+    new_variant.bstrVal = SysAllocStringLen(new_wide.c_str(), static_cast<UINT>(new_wide.size()));
+    UiaRaiseAutomationPropertyChangedEvent(provider, property, old_variant, new_variant);
+    VariantClear(&old_variant);
+    VariantClear(&new_variant);
+}
+
+void raise_bool_property(IRawElementProviderSimple* provider,
+                         PROPERTYID property,
+                         bool old_value,
+                         bool new_value) {
+    VARIANT old_variant{};
+    VARIANT new_variant{};
+    old_variant.vt = VT_BOOL;
+    old_variant.boolVal = old_value ? VARIANT_TRUE : VARIANT_FALSE;
+    new_variant.vt = VT_BOOL;
+    new_variant.boolVal = new_value ? VARIANT_TRUE : VARIANT_FALSE;
+    UiaRaiseAutomationPropertyChangedEvent(provider, property, old_variant, new_variant);
+}
+
+void raise_numeric_property(IRawElementProviderSimple* provider,
+                            PROPERTYID property,
+                            double old_value,
+                            double new_value) {
+    VARIANT old_variant{};
+    VARIANT new_variant{};
+    old_variant.vt = VT_R8;
+    old_variant.dblVal = old_value;
+    new_variant.vt = VT_R8;
+    new_variant.dblVal = new_value;
+    UiaRaiseAutomationPropertyChangedEvent(provider, property, old_variant, new_variant);
 }
 
 } // namespace
@@ -1052,6 +1166,7 @@ Win32UiaBridge::Win32UiaBridge(HWND hwnd, Window& owner) : impl_(std::make_uniqu
     impl_->site.tree = std::make_unique<AccessibilityTree>(owner);
     impl_->root = new UiaRootFragment(&impl_->site);
     impl_->site.root = impl_->root;
+    impl_->site.root_simple = impl_->root;
 }
 
 Win32UiaBridge::~Win32UiaBridge() {
@@ -1084,11 +1199,14 @@ void Win32UiaBridge::disconnect() {
     site.providers.clear();
     UiaDisconnectProvider(impl_->root);
     site.root.Reset();
+    site.root_simple.Reset();
     impl_->root->Release();
     impl_->root = nullptr;
     // The tree itself outlives the providers by construction (providers only
     // hold the site pointer), but resetting keeps teardown explicit.
     site.tree.reset();
+    site.reported.clear();
+    site.initial_population_done = false;
     site.clients_connected = false;
 }
 
@@ -1100,14 +1218,106 @@ void Win32UiaBridge::synchronize() {
     // Retire providers of destroyed widgets regardless of listeners, so their
     // references do not outlive the widgets they describe.
     for (const AccessibleId id : site.tree->purge()) {
-        if (const auto found = site.providers.find(id); found != site.providers.end()) {
-            auto* provider = static_cast<UiaFragment*>(found->second);
-            site.providers.erase(found);
-            UiaDisconnectProvider(provider);
-            provider->Release();
+        retire_fragment(site, id);
+    }
+
+    // Walk the exposed tree and diff against the last reported state so
+    // clients hear property and structure changes (the same full-walk model
+    // the AT-SPI bridge uses for its snapshot diffs). The cache is kept fresh
+    // even without listeners so a newly attached client is not flooded with
+    // spurious change events.
+    const bool listeners = UiaClientsAreListening() != FALSE;
+    const bool raise_events = listeners && site.initial_population_done;
+
+    std::vector<AccessibleId> exposed;
+    std::vector<AccessibleId> stack = site.tree->root_children();
+    while (!stack.empty()) {
+        const auto id = stack.back();
+        stack.pop_back();
+        exposed.push_back(id);
+        for (const auto child : site.tree->children(id)) {
+            stack.push_back(child);
         }
     }
-    if (UiaClientsAreListening() == FALSE) {
+
+    std::unordered_set<AccessibleId> live;
+    live.reserve(exposed.size());
+    for (const auto id : exposed) {
+        live.insert(id);
+        const auto info = site.tree->info(id);
+        if (!info.has_value()) {
+            continue;
+        }
+        UiaReportedState next{
+            .name = info->name,
+            .value = info->value,
+            .checked = (info->state & StateFlags::Checked) != StateFlags::None,
+            .selected = (info->state & StateFlags::Selected) != StateFlags::None,
+            .enabled = info->enabled,
+            .has_numeric_range = info->numeric_range.has_value(),
+        };
+        const auto found = site.reported.find(id);
+        if (found == site.reported.end()) {
+            if (raise_events) {
+                raise_structure_changed(site, id, StructureChangeType_ChildAdded);
+            }
+            site.reported.emplace(id, std::move(next));
+            continue;
+        }
+        if (raise_events) {
+            auto* provider = site.fragment_for(id);
+            const auto& previous = found->second;
+            if (previous.name != next.name) {
+                raise_string_property(provider, UIA_NamePropertyId, previous.name, next.name);
+            }
+            if (previous.value != next.value) {
+                // Range widgets report their value through the range pattern
+                // property id; everything else through Value.
+                if (next.has_numeric_range) {
+                    raise_numeric_property(provider,
+                                           UIA_RangeValueValuePropertyId,
+                                           parse_accessible_number(previous.value).value_or(0.0),
+                                           parse_accessible_number(next.value).value_or(0.0));
+                } else {
+                    raise_string_property(
+                        provider, UIA_ValueValuePropertyId, previous.value, next.value);
+                }
+            }
+            if (previous.checked != next.checked) {
+                raise_bool_property(
+                    provider, UIA_ToggleToggleStatePropertyId, previous.checked, next.checked);
+            }
+            if (previous.selected != next.selected) {
+                raise_bool_property(provider,
+                                    UIA_SelectionItemIsSelectedPropertyId,
+                                    previous.selected,
+                                    next.selected);
+            }
+            if (previous.enabled != next.enabled) {
+                raise_bool_property(
+                    provider, UIA_IsEnabledPropertyId, previous.enabled, next.enabled);
+            }
+        }
+        found->second = std::move(next);
+    }
+
+    // Elements that vanished from the exposure (hidden, closed popup, or
+    // replaced by a modal): retire their providers and let clients know.
+    for (auto it = site.reported.begin(); it != site.reported.end();) {
+        const auto id = it->first;
+        if (live.contains(id)) {
+            ++it;
+            continue;
+        }
+        it = site.reported.erase(it);
+        if (raise_events) {
+            raise_structure_changed(site, id, StructureChangeType_ChildRemoved);
+        }
+        retire_fragment(site, id);
+    }
+    site.initial_population_done = true;
+
+    if (!listeners) {
         return;
     }
     const auto focused = site.tree->focused();
