@@ -110,6 +110,20 @@ SAFEARRAY* rect_safearray(const UiaRect& rect) {
            role == AccessibleRole::ToggleButton;
 }
 
+/// Containers whose children are selectable through the shared model's
+/// Selected state (lists, tab strips, menus, trees, grids).
+[[nodiscard]] bool is_selection_container(AccessibleRole role) {
+    return role == AccessibleRole::List || role == AccessibleRole::TabList ||
+           role == AccessibleRole::Menu || role == AccessibleRole::Tree ||
+           role == AccessibleRole::Grid;
+}
+
+/// Items that report Selected state and select through activation.
+[[nodiscard]] bool is_selection_item(AccessibleRole role) {
+    return role == AccessibleRole::ListItem || role == AccessibleRole::Tab ||
+           role == AccessibleRole::TreeItem || role == AccessibleRole::GridCell;
+}
+
 class UiaFragment;
 
 /// Liveness token shared by the bridge, the fragments, and the pattern
@@ -473,6 +487,178 @@ private:
     UiaPatternState state_;
 };
 
+class UiaSelectionPattern final : public ISelectionProvider {
+public:
+    UiaSelectionPattern(UiaSite* site, AccessibleId id, const UiaLiveness& alive)
+        : state_{site, id, alive} {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_ISelectionProvider) {
+            *out = static_cast<ISelectionProvider*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // The toolkit's list/tab/menu containers are single-select today.
+    HRESULT STDMETHODCALLTYPE get_CanSelectMultiple(BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = FALSE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_IsSelectionRequired(BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = FALSE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetSelection(SAFEARRAY** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = nullptr;
+        if (!state_.live()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        std::vector<IRawElementProviderSimple*> selected;
+        for (const auto child : state_.site->tree->children(state_.id)) {
+            const auto info = state_.site->tree->info(child);
+            if (info.has_value() && (info->state & StateFlags::Selected) != StateFlags::None) {
+                selected.push_back(state_.site->fragment_for(child));
+            }
+        }
+        SAFEARRAYBOUND bound{};
+        bound.lLbound = 0;
+        bound.cElements = static_cast<ULONG>(selected.size());
+        *out = SafeArrayCreate(VT_UNKNOWN, 1, &bound);
+        if (*out == nullptr) {
+            return E_OUTOFMEMORY;
+        }
+        for (LONG index = 0; index < static_cast<LONG>(selected.size()); ++index) {
+            // The array owns one reference; fragment_for's initial reference
+            // belongs to the site.
+            selected[static_cast<std::size_t>(index)]->AddRef();
+            const auto element = selected[static_cast<std::size_t>(index)];
+            if (FAILED(SafeArrayPutElement(*out, &index, element))) {
+                element->Release();
+                SafeArrayDestroy(*out);
+                *out = nullptr;
+                return E_FAIL;
+            }
+        }
+        return S_OK;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    UiaPatternState state_;
+};
+
+class UiaSelectionItemPattern final : public ISelectionItemProvider {
+public:
+    UiaSelectionItemPattern(UiaSite* site, AccessibleId id, const UiaLiveness& alive)
+        : state_{site, id, alive} {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_ISelectionItemProvider) {
+            *out = static_cast<ISelectionItemProvider*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_IsSelected(BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        const auto info = state_.site->tree->info(state_.id);
+        if (!state_.live() || !info.has_value()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        *out = (info->state & StateFlags::Selected) != StateFlags::None ? TRUE : FALSE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_SelectionContainer(IRawElementProviderSimple** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = nullptr;
+        if (!state_.live()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        const auto parent = state_.site->tree->parent(state_.id);
+        if (parent.has_value()) {
+            *out = state_.site->fragment_for(*parent);
+        } else {
+            *out = state_.site->root_simple.Get();
+        }
+        (*out)->AddRef();
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE Select() override {
+        if (!state_.live() || !state_.site->tree->is_exposed(state_.id)) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        // Activation selects for the toolkit's list items and tabs.
+        const bool performed = state_.site->tree->perform(state_.id, AccessibleAction::Activate) ||
+                               state_.site->tree->perform(state_.id, AccessibleAction::Toggle);
+        if (performed && UiaClientsAreListening() != FALSE) {
+            UiaRaiseAutomationEvent(state_.site->fragment_for(state_.id),
+                                    UIA_SelectionItem_ElementSelectedEventId);
+        }
+        return performed ? S_OK : UIA_E_INVALIDOPERATION;
+    }
+
+    HRESULT STDMETHODCALLTYPE AddToSelection() override {
+        return state_.live() ? E_NOTIMPL : UIA_E_ELEMENTNOTAVAILABLE; // single-select
+    }
+
+    HRESULT STDMETHODCALLTYPE RemoveFromSelection() override {
+        return state_.live() ? E_NOTIMPL : UIA_E_ELEMENTNOTAVAILABLE;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    UiaPatternState state_;
+};
+
 // --- Element provider --------------------------------------------------------
 
 /// UIA provider for one exposed element. Answers every property live from the
@@ -549,6 +735,16 @@ public:
         case UIA_RangeValuePatternId:
             if (info->numeric_range.has_value()) {
                 *out = new UiaRangeValuePattern(site_, id_, alive_);
+            }
+            break;
+        case UIA_SelectionPatternId:
+            if (is_selection_container(info->role)) {
+                *out = new UiaSelectionPattern(site_, id_, alive_);
+            }
+            break;
+        case UIA_SelectionItemPatternId:
+            if (is_selection_item(info->role)) {
+                *out = new UiaSelectionItemPattern(site_, id_, alive_);
             }
             break;
         default:

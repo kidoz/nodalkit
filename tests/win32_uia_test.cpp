@@ -27,6 +27,7 @@
 #include <nk/widgets/progress_bar.h>
 #include <nk/widgets/slider.h>
 #include <nk/widgets/spin_button.h>
+#include <nk/widgets/tab_bar.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -439,6 +440,60 @@ TEST_CASE("Win32 UIA exposes real numeric ranges", "[windows][uia]") {
         require_ok(range->SetValue(99.0));
         CHECK(spin->value() == 10.0);
     }
+}
+
+TEST_CASE("Win32 UIA selection drives tabs", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA tab probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto tabs = nk::TabBar::create();
+    tabs->append_tab("Alpha");
+    tabs->append_tab("Bravo");
+    tabs->append_tab("Charlie");
+    tabs->set_selected_index(0);
+    root->append(tabs);
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(nk::window_hwnd(window), &element));
+
+    // The tab strip reports the selected tab.
+    auto strip = uia.find_by_control_type(element.Get(), UIA_TabControlTypeId);
+    REQUIRE(strip != nullptr);
+    ComPtr<IUnknown> selection_unknown;
+    require_ok(strip->GetCurrentPattern(UIA_SelectionPatternId, selection_unknown.GetAddressOf()));
+    ComPtr<IUIAutomationSelectionPattern> selection;
+    require_ok(selection_unknown.As(&selection));
+    BOOL multiple = TRUE;
+    require_ok(selection->get_CurrentCanSelectMultiple(&multiple));
+    CHECK(multiple == FALSE);
+    ComPtr<IUIAutomationElementArray> selected;
+    require_ok(selection->GetCurrentSelection(selected.GetAddressOf()));
+    int selected_count = -1;
+    require_ok(selected->get_Length(&selected_count));
+    REQUIRE(selected_count == 1);
+    ComPtr<IUIAutomationElement> selected_tab;
+    require_ok(selected->GetElement(0, selected_tab.GetAddressOf()));
+    CHECK(narrow(uia.string_property(selected_tab.Get(), UIA_NamePropertyId)) == "Alpha");
+
+    // Selecting a tab item through UIA moves the toolkit selection.
+    auto bravo = uia.find_by_name(element.Get(), "Bravo");
+    REQUIRE(bravo != nullptr);
+    CHECK(uia.int_property(bravo.Get(), UIA_ControlTypePropertyId) == UIA_TabItemControlTypeId);
+    ComPtr<IUnknown> item_unknown;
+    require_ok(bravo->GetCurrentPattern(UIA_SelectionItemPatternId, item_unknown.GetAddressOf()));
+    ComPtr<IUIAutomationSelectionItemPattern> item;
+    require_ok(item_unknown.As(&item));
+    BOOL is_selected = TRUE;
+    require_ok(item->get_CurrentIsSelected(&is_selected));
+    CHECK(is_selected == FALSE);
+    require_ok(item->Select());
+    CHECK(tabs->selected_index() == 1);
+    require_ok(item->get_CurrentIsSelected(&is_selected));
+    CHECK(is_selected == TRUE);
 }
 
 TEST_CASE("Win32 UIA SetFocus moves toolkit focus", "[windows][uia]") {
