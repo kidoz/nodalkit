@@ -9,6 +9,7 @@
 #include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/data_table.h>
+#include <nk/widgets/label.h>
 #include <optional>
 #include <vector>
 
@@ -30,12 +31,14 @@ public:
 
 private:
     void update_cancel_button();
+    void update_empty_state();
 
     std::shared_ptr<TradingModel> model_;
     std::shared_ptr<ViewListModel> order_rows_;
     std::shared_ptr<nk::SelectionModel> order_selection_;
     std::shared_ptr<nk::DataTable> orders_table_;
     std::shared_ptr<nk::Button> cancel_button_;
+    std::shared_ptr<nk::Label> empty_hint_;
     std::shared_ptr<nk::Box> root_;
     std::uint64_t seen_revision_ = 0;
     std::size_t seen_row_count_ = 0;

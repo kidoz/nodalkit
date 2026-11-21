@@ -30,6 +30,10 @@ OrdersView::OrdersView(std::shared_ptr<TradingModel> model) : model_(std::move(m
     orders_toolbar->append(cancel_button_);
     orders_page->append(orders_toolbar);
 
+    empty_hint_ = nk::Label::create("No orders yet. Submit one from the order ticket.");
+    empty_hint_->add_style_class("muted");
+    orders_page->append(empty_hint_);
+
     orders_table_ = nk::DataTable::create();
     orders_table_->set_model(order_rows_);
     order_selection_ = std::make_shared<nk::SelectionModel>();
@@ -102,6 +106,7 @@ OrdersView::OrdersView(std::shared_ptr<TradingModel> model) : model_(std::move(m
 
     root_ = orders_page;
     update_cancel_button();
+    update_empty_state();
     connections_.emplace_back(
         order_selection_->on_selection_changed().connect([this] { update_cancel_button(); }));
 
@@ -118,6 +123,7 @@ void OrdersView::refresh() {
     }
     seen_revision_ = model_->order_revision();
     update_cancel_button();
+    update_empty_state();
 }
 
 void OrdersView::update_cancel_button() {
@@ -125,6 +131,10 @@ void OrdersView::update_cancel_button() {
     cancel_button_->set_sensitive(
         !selected.empty() && *selected.begin() < model_->orders().size() &&
         model_->orders()[*selected.begin()].status == OrderStatus::Working);
+}
+
+void OrdersView::update_empty_state() {
+    empty_hint_->set_visible(model_->orders().empty());
 }
 
 std::optional<std::uint64_t> OrdersView::selected_order_id() const {

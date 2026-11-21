@@ -22,6 +22,9 @@ PositionsView::PositionsView(std::shared_ptr<TradingModel> model) : model_(std::
     auto positions_page = nk::Box::create(nk::Orientation::Vertical, 7.0F);
     auto account_summary = nk::Label::create("Demo account  •  USD  •  Simulated P&L");
     positions_page->append(account_summary);
+    empty_hint_ = nk::Label::create("No open positions. Filled orders create positions here.");
+    empty_hint_->add_style_class("muted");
+    positions_page->append(empty_hint_);
     positions_table_ = nk::DataTable::create();
     positions_table_->set_model(position_rows_);
     positions_table_->set_columns({
@@ -76,6 +79,7 @@ PositionsView::PositionsView(std::shared_ptr<TradingModel> model) : model_(std::
     positions_page->append(positions_table_);
 
     root_ = positions_page;
+    update_empty_state();
 }
 
 void PositionsView::refresh() {
@@ -85,5 +89,10 @@ void PositionsView::refresh() {
     } else {
         position_rows_->data_changed();
     }
+    update_empty_state();
+}
+
+void PositionsView::update_empty_state() {
+    empty_hint_->set_visible(model_->positions().empty());
 }
 } // namespace trading
