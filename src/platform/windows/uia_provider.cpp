@@ -2287,6 +2287,9 @@ struct Win32UiaBridge::Impl {
     // interface reference. Both are released in disconnect().
     UiaRootFragment* root = nullptr;
     std::optional<AccessibleId> last_focused;
+    // Menu element exposed during the previous synchronization (0 = none);
+    // drives the UIA menu-mode start/end events.
+    AccessibleId open_menu_id = 0;
 };
 
 Win32UiaBridge::Win32UiaBridge(HWND hwnd, Window& owner) : impl_(std::make_unique<Impl>()) {
@@ -2371,11 +2374,17 @@ void Win32UiaBridge::synchronize() {
 
     std::unordered_set<AccessibleId> live;
     live.reserve(exposed.size());
+    // Menu elements surface only while a context menu or menu-bar dropdown is
+    // open, so their presence in the exposure is the menu-mode signal.
+    AccessibleId open_menu_id = 0;
     for (const auto id : exposed) {
         live.insert(id);
         const auto info = site.tree->info(id);
         if (!info.has_value()) {
             continue;
+        }
+        if (info->role == AccessibleRole::Menu && open_menu_id == 0) {
+            open_menu_id = id;
         }
         UiaReportedState next{
             .name = info->name,
@@ -2450,6 +2459,18 @@ void Win32UiaBridge::synchronize() {
         retire_fragment(site, id);
     }
     site.initial_population_done = true;
+
+    if (raise_events) {
+        if (open_menu_id != 0 && impl_->open_menu_id == 0) {
+            // Menu mode started on the newly open menu.
+            UiaRaiseAutomationEvent(site.fragment_for(open_menu_id), UIA_MenuModeStartEventId);
+        } else if (open_menu_id == 0 && impl_->open_menu_id != 0) {
+            // The menu itself left the exposure; announce the end on the root,
+            // the surviving scope clients still hold.
+            UiaRaiseAutomationEvent(site.root_simple.Get(), UIA_MenuModeEndEventId);
+        }
+    }
+    impl_->open_menu_id = open_menu_id;
 
     if (!listeners) {
         return;

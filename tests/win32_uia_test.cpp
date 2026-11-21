@@ -25,6 +25,7 @@
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/combo_box.h>
+#include <nk/widgets/context_menu.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/progress_bar.h>
 #include <nk/widgets/scroll_area.h>
@@ -630,6 +631,67 @@ TEST_CASE("Win32 UIA scrolls elements into view", "[windows][uia]") {
 
 namespace {
 
+/// Event handler counting menu-mode start/end notifications.
+class MenuModeHandler final : public IUIAutomationEventHandler {
+public:
+    MenuModeHandler(std::atomic<int>& starts, std::atomic<int>& ends)
+        : starts_(starts), ends_(ends) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IUIAutomationEventHandler) {
+            *out = static_cast<IUIAutomationEventHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    HRESULT STDMETHODCALLTYPE HandleAutomationEvent(IUIAutomationElement* /*sender*/,
+                                                    EVENTID id) override {
+        if (id == UIA_MenuModeStartEventId) {
+            ++starts_;
+        } else if (id == UIA_MenuModeEndEventId) {
+            ++ends_;
+        }
+        return S_OK;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    std::atomic<int>& starts_;
+    std::atomic<int>& ends_;
+};
+
+/// The backend raises events only after a client subscribed, and diffing
+/// happens in message handlers, so poke the window with a benign system
+/// broadcast (no widget input — a stray mouse event could dismiss the menu)
+/// to run a synchronize pass.
+void poke_synchronize(HWND hwnd) {
+    SendMessageW(hwnd, WM_SETTINGCHANGE, 0, 0);
+}
+
+/// Wait up to three seconds for an async event count to change.
+bool wait_for_count(const std::atomic<int>& count, int expected) {
+    for (int i = 0; i < 300 && count.load() != expected; ++i) {
+        Sleep(10);
+    }
+    return count.load() == expected;
+}
+
 /// Event handler counting live-region change notifications.
 class LiveRegionHandler final : public IUIAutomationEventHandler {
 public:
@@ -818,6 +880,56 @@ TEST_CASE("Win32 UIA resolves labelled-by relations", "[windows][uia]") {
     const auto label_element = static_cast<IUIAutomationElement*>(labeled_by.punkVal);
     CHECK(narrow(uia.string_property(label_element, UIA_NamePropertyId)) == "Search query");
     VariantClear(&labeled_by);
+}
+
+TEST_CASE("Win32 UIA announces menu mode", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA menu probe", .width = 360, .height = 240});
+    auto menu = nk::ContextMenu::create();
+    menu->add_item("Save State");
+    menu->add_separator();
+    menu->add_item("Settings");
+    window.set_child(menu);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(hwnd, &element));
+
+    // Subscribing turns on client-listener gating and routes menu-mode
+    // notifications to this handler (delivered on a UIA worker thread).
+    std::atomic<int> starts{0};
+    std::atomic<int> ends{0};
+    auto* handler = new MenuModeHandler(starts, ends);
+    const TreeScope scope = static_cast<TreeScope>(TreeScope_Element | TreeScope_Descendants);
+    require_ok(uia.get()->AddAutomationEventHandler(
+        UIA_MenuModeStartEventId, element.Get(), scope, nullptr, handler));
+    require_ok(uia.get()->AddAutomationEventHandler(
+        UIA_MenuModeEndEventId, element.Get(), scope, nullptr, handler));
+
+    // First poke populates the diff cache without events (no menu open yet).
+    poke_synchronize(hwnd);
+    CHECK_FALSE(menu->is_open());
+    CHECK(starts.load() == 0);
+
+    // Opening the context menu surfaces a Menu element: menu mode starts.
+    menu->show_at({20, 30});
+    REQUIRE(menu->is_open());
+    poke_synchronize(hwnd);
+    CHECK(wait_for_count(starts, 1));
+
+    // Dismissing removes the Menu from the exposure: menu mode ends.
+    menu->dismiss();
+    REQUIRE_FALSE(menu->is_open());
+    poke_synchronize(hwnd);
+    CHECK(wait_for_count(ends, 1));
+
+    uia.get()->RemoveAutomationEventHandler(UIA_MenuModeStartEventId, element.Get(), handler);
+    uia.get()->RemoveAutomationEventHandler(UIA_MenuModeEndEventId, element.Get(), handler);
+    handler->Release();
 }
 
 #endif // defined(_WIN32)
