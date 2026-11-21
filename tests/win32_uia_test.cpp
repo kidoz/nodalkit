@@ -627,4 +627,71 @@ TEST_CASE("Win32 UIA scrolls elements into view", "[windows][uia]") {
     CHECK(scroll->v_offset() > 0.0F);
 }
 
+TEST_CASE("Win32 UIA exposes editor text through the Text pattern", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA text probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto field = nk::TextField::create();
+    field->set_placeholder("Editor");
+    field->set_text("Hello World");
+    root->append(field);
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    field->grab_focus();
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(nk::window_hwnd(window), &element));
+    auto field_element = uia.find_by_name(element.Get(), "Editor");
+    REQUIRE(field_element != nullptr);
+
+    ComPtr<IUnknown> unknown;
+    require_ok(field_element->GetCurrentPattern(UIA_TextPatternId, unknown.GetAddressOf()));
+    ComPtr<IUIAutomationTextPattern> text;
+    require_ok(unknown.As(&text));
+
+    SupportedTextSelection selection_mode = SupportedTextSelection_None;
+    require_ok(text->get_SupportedTextSelection(&selection_mode));
+    CHECK(selection_mode == SupportedTextSelection_Single);
+
+    // The document range covers the whole committed text.
+    ComPtr<IUIAutomationTextRange> document_range;
+    require_ok(text->get_DocumentRange(document_range.GetAddressOf()));
+    BSTR document_text = nullptr;
+    require_ok(document_range->GetText(-1, &document_text));
+    CHECK(narrow(document_text != nullptr ? document_text : L"") == "Hello World");
+    SysFreeString(document_text);
+
+    // The editor selection (cursor..anchor) reads through GetSelection.
+    field->select_all();
+    ComPtr<IUIAutomationTextRangeArray> selection;
+    require_ok(text->GetSelection(selection.GetAddressOf()));
+    int selection_count = 0;
+    require_ok(selection->get_Length(&selection_count));
+    REQUIRE(selection_count == 1);
+    ComPtr<IUIAutomationTextRange> selected;
+    require_ok(selection->GetElement(0, selected.GetAddressOf()));
+    BSTR selected_text = nullptr;
+    require_ok(selected->GetText(-1, &selected_text));
+    CHECK(narrow(selected_text != nullptr ? selected_text : L"") == "Hello World");
+    SysFreeString(selected_text);
+
+    // Word movement: move one word from the document start, then expand.
+    ComPtr<IUIAutomationTextRange> word_range;
+    require_ok(document_range->Clone(word_range.GetAddressOf()));
+    int moved = 0;
+    require_ok(word_range->Move(TextUnit_Word, 1, &moved));
+    CHECK(moved == 1);
+    BSTR moved_text = nullptr;
+    require_ok(word_range->GetText(-1, &moved_text));
+    CHECK(narrow(moved_text != nullptr ? moved_text : L"").empty()); // collapsed
+    SysFreeString(moved_text);
+    require_ok(word_range->ExpandToEnclosingUnit(TextUnit_Word));
+    BSTR expanded_text = nullptr;
+    require_ok(word_range->GetText(-1, &expanded_text));
+    CHECK(narrow(expanded_text != nullptr ? expanded_text : L"") == "World");
+    SysFreeString(expanded_text);
+}
+
 #endif // defined(_WIN32)

@@ -44,6 +44,10 @@ struct AccessibleNodeInfo {
     bool numeric_settable = false;
     // The element edits secure (password) input.
     bool secure = false;
+    // Editor caret and selection anchor as UTF-8 byte offsets into `value`;
+    // nullopt for elements without a text-input state.
+    std::optional<std::size_t> text_cursor;
+    std::optional<std::size_t> text_anchor;
 };
 
 // Platform-neutral structure behind native accessibility bridges. UI thread only.

@@ -88,6 +88,18 @@ SAFEARRAY* rect_safearray(const UiaRect& rect) {
     return array;
 }
 
+/// UTF-8 copy of a BSTR.
+[[nodiscard]] std::string win32_utf8_from_bstr(BSTR text) {
+    if (text == nullptr) {
+        return {};
+    }
+    const int length = static_cast<int>(SysStringLen(text));
+    const int bytes = WideCharToMultiByte(CP_UTF8, 0, text, length, nullptr, 0, nullptr, nullptr);
+    std::string utf8(static_cast<std::size_t>(bytes), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text, length, utf8.data(), bytes, nullptr, nullptr);
+    return utf8;
+}
+
 /// Numeric prefix of an accessible value string ("42", "37%"), if any.
 [[nodiscard]] std::optional<double> parse_accessible_number(std::string_view text) {
     if (text.empty()) {
@@ -777,6 +789,633 @@ private:
     UiaPatternState state_;
 };
 
+// --- Text pattern -------------------------------------------------------------
+// Ranges address the element's live committed text (info->value, UTF-8) by
+// BYTE offset, clamped on every use so a stale range never reads out of
+// bounds. Movement counts code points, matching how the AT-SPI bridge counts
+// characters.
+
+class UiaTextRange;
+
+/// Byte offset of the n-th code point (n may equal the code point count).
+[[nodiscard]] std::size_t utf8_byte_offset_for_index(std::string_view text, std::size_t index) {
+    std::size_t seen = 0;
+    std::size_t byte = 0;
+    while (byte < text.size() && seen < index) {
+        const auto lead = static_cast<unsigned char>(text[byte]);
+        std::size_t length = 1;
+        if ((lead & 0x80U) == 0x00U) {
+            length = 1;
+        } else if ((lead & 0xE0U) == 0xC0U) {
+            length = 2;
+        } else if ((lead & 0xF0U) == 0xE0U) {
+            length = 3;
+        } else if ((lead & 0xF8U) == 0xF0U) {
+            length = 4;
+        }
+        byte += length;
+        ++seen;
+    }
+    return byte;
+}
+
+/// Code point index for a byte offset (clamped into the text).
+[[nodiscard]] std::size_t utf8_index_for_byte_offset(std::string_view text, std::size_t byte) {
+    byte = std::min(byte, text.size());
+    std::size_t seen = 0;
+    std::size_t at = 0;
+    while (at < byte) {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        std::size_t length = 1;
+        if ((lead & 0x80U) == 0x00U) {
+            length = 1;
+        } else if ((lead & 0xE0U) == 0xC0U) {
+            length = 2;
+        } else if ((lead & 0xF0U) == 0xE0U) {
+            length = 3;
+        } else if ((lead & 0xF8U) == 0xF0U) {
+            length = 4;
+        }
+        at += length;
+        ++seen;
+    }
+    return seen;
+}
+
+[[nodiscard]] std::size_t clamp_text_offset(std::string_view text, std::size_t offset) {
+    return std::min(offset, text.size());
+}
+
+/// Byte bounds [start, end) of the unit enclosing `offset`.
+void unit_bounds(std::string_view text,
+                 TextUnit unit,
+                 std::size_t offset,
+                 std::size_t& start,
+                 std::size_t& end) {
+    offset = clamp_text_offset(text, offset);
+    switch (unit) {
+    case TextUnit_Character: {
+        // The unit containing offset is the code point AT offset (or, at the
+        // very end, the degenerate end).
+        std::size_t index = utf8_index_for_byte_offset(text, offset);
+        start = utf8_byte_offset_for_index(text, index);
+        end = utf8_byte_offset_for_index(text, index + 1);
+        return;
+    }
+    case TextUnit_Word: {
+        const auto is_space = [](char c) {
+            return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+        };
+        // A position inside a word resolves to that word; a position on
+        // whitespace resolves to the word before it (the classic caret-on-
+        // the-space boundary rule).
+        start = offset;
+        if (start < text.size() && !is_space(text[start])) {
+            while (start > 0 && !is_space(text[start - 1])) {
+                --start;
+            }
+        } else {
+            while (start > 0 && is_space(text[start - 1])) {
+                --start;
+            }
+            while (start > 0 && !is_space(text[start - 1])) {
+                --start;
+            }
+        }
+        end = offset;
+        while (end < text.size() && is_space(text[end])) {
+            ++end;
+        }
+        while (end < text.size() && !is_space(text[end])) {
+            ++end;
+        }
+        return;
+    }
+    case TextUnit_Line:
+    case TextUnit_Paragraph: {
+        start = offset;
+        while (start > 0 && text[start - 1] != '\n') {
+            --start;
+        }
+        end = offset;
+        while (end < text.size() && text[end] != '\n') {
+            ++end;
+        }
+        if (unit == TextUnit_Line && end < text.size()) {
+            ++end; // the newline belongs to the line
+        }
+        return;
+    }
+    case TextUnit_Document:
+    case TextUnit_Format:
+    default: {
+        start = 0;
+        end = text.size();
+        return;
+    }
+    }
+}
+
+/// Signed code point delta between two byte offsets.
+[[nodiscard]] long codepoint_delta(std::string_view text, std::size_t from, std::size_t to) {
+    from = clamp_text_offset(text, from);
+    to = clamp_text_offset(text, to);
+    if (from == to) {
+        return 0;
+    }
+    const auto from_index = utf8_index_for_byte_offset(text, from);
+    const auto to_index = utf8_index_for_byte_offset(text, to);
+    return static_cast<long>(to_index) - static_cast<long>(from_index);
+}
+
+/// A live text range over one element; offsets are byte-based and re-clamped
+/// against the current text on every call.
+class UiaTextRange final : public ITextRangeProvider {
+public:
+    UiaTextRange(UiaSite* site,
+                 AccessibleId id,
+                 const UiaLiveness& alive,
+                 std::size_t start,
+                 std::size_t end)
+        : site_(site), id_(id), alive_(alive), start_(start), end_(end) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_ITextRangeProvider) {
+            *out = static_cast<ITextRangeProvider*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // ITextRangeProvider
+    HRESULT STDMETHODCALLTYPE Clone(ITextRangeProvider** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = new UiaTextRange(site_, id_, alive_, start_, end_);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE Compare(ITextRangeProvider* range, BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = FALSE;
+        const auto same = same_element_range(range);
+        if (same.has_value()) {
+            const auto text = current_text();
+            *out = same->first == start_ && same->second == end_ ? TRUE : FALSE;
+        }
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE CompareEndpoints(TextPatternRangeEndpoint endpoint,
+                                               ITextRangeProvider* range,
+                                               TextPatternRangeEndpoint target_endpoint,
+                                               int* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = 0;
+        const auto same = same_element_range(range);
+        if (!same.has_value()) {
+            return E_INVALIDARG;
+        }
+        const auto text = current_text();
+        const std::size_t mine = endpoint == TextPatternRangeEndpoint_Start ? start_ : end_;
+        const std::size_t theirs =
+            target_endpoint == TextPatternRangeEndpoint_Start ? same->first : same->second;
+        *out = static_cast<int>(codepoint_delta(text, theirs, mine));
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE ExpandToEnclosingUnit(TextUnit unit) override {
+        if (!alive()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        const auto text = current_text();
+        unit_bounds(text, unit, start_, start_, end_);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE FindAttribute(TEXTATTRIBUTEID /*attribute*/,
+                                            VARIANT /*value*/,
+                                            BOOL /*backward*/,
+                                            ITextRangeProvider** /*out*/) override {
+        return UIA_E_NOTSUPPORTED; // no attributes are exposed
+    }
+
+    HRESULT STDMETHODCALLTYPE FindText(BSTR text,
+                                       BOOL /*backward*/,
+                                       BOOL ignore_case,
+                                       ITextRangeProvider** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = nullptr;
+        const auto current = current_text();
+        const auto needle = win32_utf8_from_bstr(text);
+        if (needle.empty()) {
+            return S_FALSE;
+        }
+        std::size_t found = std::string::npos;
+        if (ignore_case != FALSE) {
+            const auto lower = [](std::string s) {
+                for (char& c : s) {
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                }
+                return s;
+            };
+            const auto haystack = lower(current.substr(start_, end_ - start_));
+            const auto match = haystack.find(lower(needle));
+            if (match != std::string::npos) {
+                found = start_ + match;
+            }
+        } else {
+            found = current.find(needle, start_);
+            if (found >= end_) {
+                found = std::string::npos;
+            }
+        }
+        if (found == std::string::npos) {
+            return S_FALSE;
+        }
+        *out = new UiaTextRange(site_, id_, alive_, found, found + needle.size());
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetAttributeValue(TEXTATTRIBUTEID /*attribute*/,
+                                                VARIANT* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        VariantInit(out);
+        return UIA_E_NOTSUPPORTED; // no attributes are exposed
+    }
+
+    HRESULT STDMETHODCALLTYPE GetBoundingRectangles(SAFEARRAY** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = nullptr;
+        const auto info = current_info();
+        if (!info.has_value()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        // Line-level geometry is not in the shared model; the element rect
+        // stands in for the whole range.
+        *out = rect_safearray(site_->screen_rect(info->bounds));
+        return *out != nullptr ? S_OK : E_OUTOFMEMORY;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetEnclosingElement(IRawElementProviderSimple** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (!alive()) {
+            *out = nullptr;
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        *out = site_->fragment_for(id_);
+        (*out)->AddRef();
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetText(int max_length, BSTR* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        const auto text = current_text();
+        auto start = clamp_text_offset(text, start_);
+        auto end = clamp_text_offset(text, end_);
+        if (start > end) {
+            std::swap(start, end);
+        }
+        std::string_view range_text = std::string_view(text).substr(start, end - start);
+        if (max_length >= 0) {
+            const auto limit =
+                utf8_byte_offset_for_index(range_text, static_cast<std::size_t>(max_length));
+            range_text = range_text.substr(0, limit);
+        }
+        const auto wide = win32_wide_from_utf8(range_text);
+        *out = SysAllocStringLen(wide.c_str(), static_cast<UINT>(wide.size()));
+        return *out != nullptr ? S_OK : E_OUTOFMEMORY;
+    }
+
+    HRESULT STDMETHODCALLTYPE Move(TextUnit unit, int count, int* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = 0;
+        if (count == 0) {
+            return S_OK;
+        }
+        const auto text = current_text();
+        const auto is_space = [](char c) {
+            return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+        };
+        long moved = 0;
+        std::size_t position = start_;
+        const int direction = count > 0 ? 1 : -1;
+        for (int i = 0; i < count * direction; ++i) {
+            std::size_t next_start = 0;
+            std::size_t next_end = 0;
+            unit_bounds(text, unit, position, next_start, next_end);
+            std::size_t next = direction > 0 ? next_end : next_start;
+            if (direction > 0 && unit == TextUnit_Word) {
+                // Collapse at the START of the next word, past the trailing
+                // space, so a following ExpandToEnclosingUnit yields it.
+                while (next < text.size() && is_space(text[next])) {
+                    ++next;
+                }
+            }
+            if (direction < 0) {
+                // Moving backwards lands at the start of the enclosing unit;
+                // step past it into the previous unit.
+                if (next == position) {
+                    unit_bounds(text, unit, position - 1, next_start, next_end);
+                    next = next_start;
+                }
+                if (next == position) {
+                    break; // at the document start already
+                }
+            } else if (next == position) {
+                // Degenerate unit at the end of the text: done.
+                break;
+            }
+            position = next;
+            moved += direction;
+        }
+        start_ = clamp_text_offset(text, position);
+        end_ = start_; // Move collapses to a degenerate range
+        *out = static_cast<int>(moved);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE MoveEndpointByUnit(TextPatternRangeEndpoint endpoint,
+                                                 TextUnit unit,
+                                                 int count,
+                                                 int* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = 0;
+        if (count == 0) {
+            return S_OK;
+        }
+        const auto text = current_text();
+        std::size_t& offset = endpoint == TextPatternRangeEndpoint_Start ? start_ : end_;
+        long moved = 0;
+        const int direction = count > 0 ? 1 : -1;
+        for (int i = 0; i < count * direction; ++i) {
+            std::size_t unit_start = 0;
+            std::size_t unit_end = 0;
+            unit_bounds(text, unit, offset, unit_start, unit_end);
+            std::size_t next = direction > 0 ? unit_end : unit_start;
+            if (direction < 0 && next == offset) {
+                unit_bounds(text, unit, offset - 1, unit_start, unit_end);
+                next = unit_start;
+            }
+            if (next == offset) {
+                break;
+            }
+            offset = next;
+            moved += direction;
+        }
+        *out = static_cast<int>(moved);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE
+    MoveEndpointByRange(TextPatternRangeEndpoint endpoint,
+                        ITextRangeProvider* range,
+                        TextPatternRangeEndpoint target_endpoint) override {
+        const auto same = same_element_range(range);
+        if (!same.has_value()) {
+            return E_INVALIDARG;
+        }
+        const std::size_t target =
+            target_endpoint == TextPatternRangeEndpoint_Start ? same->first : same->second;
+        if (endpoint == TextPatternRangeEndpoint_Start) {
+            start_ = target;
+        } else {
+            end_ = target;
+        }
+        normalize();
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE Select() override {
+        // The shared accessibility model exposes editor text read-only;
+        // setting the selection through the tree needs a model extension.
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE AddToSelection() override {
+        return E_NOTIMPL; // single selection only
+    }
+
+    HRESULT STDMETHODCALLTYPE RemoveFromSelection() override {
+        return E_NOTIMPL; // single selection only
+    }
+
+    HRESULT STDMETHODCALLTYPE ScrollIntoView(BOOL /*align_to_top*/) override {
+        if (!alive() || !site_->tree->is_exposed(id_)) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        (void)site_->tree->reveal(id_);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetChildren(SAFEARRAY** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        // The text of an element has no child elements.
+        *out = nullptr;
+        return S_OK;
+    }
+
+private:
+    [[nodiscard]] bool alive() const { return alive_->load(); }
+
+    [[nodiscard]] std::string current_text() const {
+        const auto info = site_->tree->info(id_);
+        return info.has_value() ? info->value : std::string{};
+    }
+
+    [[nodiscard]] std::optional<AccessibleNodeInfo> current_info() const {
+        return site_->tree->info(id_);
+    }
+
+    /// Offsets of another range's endpoints when it addresses the same live
+    /// element, re-clamped against the current text.
+    [[nodiscard]] std::optional<std::pair<std::size_t, std::size_t>>
+    same_element_range(ITextRangeProvider* range) const {
+        if (range == nullptr) {
+            return std::nullopt;
+        }
+        auto* other = dynamic_cast<UiaTextRange*>(range);
+        if (other == nullptr || !other->alive() || !alive() || other->id_ != id_) {
+            return std::nullopt;
+        }
+        const auto text = current_text();
+        return std::make_pair(clamp_text_offset(text, other->start_),
+                              clamp_text_offset(text, other->end_));
+    }
+
+    void normalize() {
+        if (start_ > end_) {
+            std::swap(start_, end_);
+        }
+    }
+
+    std::atomic<ULONG> ref_count_{1};
+    UiaSite* site_;
+    AccessibleId id_;
+    UiaLiveness alive_;
+    std::size_t start_;
+    std::size_t end_;
+};
+
+class UiaTextPattern final : public ITextProvider {
+public:
+    UiaTextPattern(UiaSite* site, AccessibleId id, const UiaLiveness& alive)
+        : state_{site, id, alive} {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_ITextProvider) {
+            *out = static_cast<ITextProvider*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // ITextProvider
+    HRESULT STDMETHODCALLTYPE GetSelection(SAFEARRAY** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = nullptr;
+        const auto info = state_.site->tree->info(state_.id);
+        if (!state_.live() || !info.has_value() || !info->text_cursor.has_value()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        // The editor selection is cursor..anchor (single selection).
+        const std::size_t cursor = *info->text_cursor;
+        const std::size_t anchor = info->text_anchor.has_value() ? *info->text_anchor : cursor;
+        return single_range_array(out, std::min(cursor, anchor), std::max(cursor, anchor));
+    }
+
+    HRESULT STDMETHODCALLTYPE GetVisibleRanges(SAFEARRAY** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        // Viewport geometry is not in the shared model; the document stands
+        // in as the single visible range.
+        const auto text = current_text();
+        return single_range_array(out, 0, text.size());
+    }
+
+    HRESULT STDMETHODCALLTYPE RangeFromChild(IRawElementProviderSimple* /*child*/,
+                                             ITextRangeProvider** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        const auto text = current_text();
+        *out = new UiaTextRange(state_.site, state_.id, state_.alive, 0, text.size());
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE RangeFromPoint(UiaPoint /*point*/,
+                                             ITextRangeProvider** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        // Per-glyph hit geometry is not in the shared model; the collapsed
+        // document-start range is the honest floor.
+        *out = new UiaTextRange(state_.site, state_.id, state_.alive, 0, 0);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_DocumentRange(ITextRangeProvider** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        const auto text = current_text();
+        *out = new UiaTextRange(state_.site, state_.id, state_.alive, 0, text.size());
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_SupportedTextSelection(SupportedTextSelection* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = SupportedTextSelection_Single;
+        return S_OK;
+    }
+
+private:
+    [[nodiscard]] std::string current_text() const {
+        const auto info = state_.site->tree->info(state_.id);
+        return info.has_value() ? info->value : std::string{};
+    }
+
+    HRESULT single_range_array(SAFEARRAY** out, std::size_t start, std::size_t end) {
+        auto* range = new UiaTextRange(state_.site, state_.id, state_.alive, start, end);
+        SAFEARRAYBOUND bound{};
+        bound.lLbound = 0;
+        bound.cElements = 1;
+        *out = SafeArrayCreate(VT_UNKNOWN, 1, &bound);
+        if (*out == nullptr) {
+            range->Release();
+            return E_OUTOFMEMORY;
+        }
+        // The array owns one reference (ours is the initial one).
+        const auto unknown = static_cast<IUnknown*>(range);
+        if (FAILED(SafeArrayPutElement(*out, &bound.lLbound, unknown))) {
+            range->Release();
+            SafeArrayDestroy(*out);
+            *out = nullptr;
+            return E_FAIL;
+        }
+        return S_OK;
+    }
+
+    std::atomic<ULONG> ref_count_{1};
+    UiaPatternState state_;
+};
+
 // --- Element provider --------------------------------------------------------
 
 /// UIA provider for one exposed element. Answers every property live from the
@@ -876,6 +1515,13 @@ public:
             // view, not just the classic item roles.
             if (site_->tree->has_scrollable_ancestor(id_)) {
                 *out = new UiaScrollItemPattern(site_, id_, alive_);
+            }
+            break;
+        case UIA_TextPatternId:
+            // Editors expose their committed text (secure editors already
+            // report a masked value through the shared model).
+            if (info->role == AccessibleRole::TextInput) {
+                *out = new UiaTextPattern(site_, id_, alive_);
             }
             break;
         default:
