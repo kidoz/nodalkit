@@ -1064,10 +1064,12 @@ private:
 /// UIA provider for the window itself: the fragment root handed to
 /// UiaReturnRawElementProvider. Window-level defaults (name, runtime id,
 /// process id, class name, base geometry) are left to the host window provider
-/// by returning VT_EMPTY; only the fragment tree is described here.
+/// by returning VT_EMPTY; only the fragment tree is described here. The root
+/// also carries the Window pattern.
 class UiaRootFragment final : public IRawElementProviderSimple,
                               public IRawElementProviderFragment,
-                              public IRawElementProviderFragmentRoot {
+                              public IRawElementProviderFragmentRoot,
+                              public IWindowProvider {
 public:
     explicit UiaRootFragment(UiaSite* site) : site_(site), alive_(site->alive) {}
 
@@ -1082,6 +1084,8 @@ public:
             *out = static_cast<IRawElementProviderFragment*>(this);
         } else if (riid == IID_IRawElementProviderFragmentRoot) {
             *out = static_cast<IRawElementProviderFragmentRoot*>(this);
+        } else if (riid == IID_IWindowProvider) {
+            *out = static_cast<IWindowProvider*>(this);
         } else {
             *out = nullptr;
             return E_NOINTERFACE;
@@ -1109,11 +1113,15 @@ public:
         return S_OK;
     }
 
-    HRESULT STDMETHODCALLTYPE GetPatternProvider(PATTERNID /*pattern*/, IUnknown** out) override {
+    HRESULT STDMETHODCALLTYPE GetPatternProvider(PATTERNID pattern, IUnknown** out) override {
         if (out == nullptr) {
             return E_POINTER;
         }
-        // Window and selection patterns are not implemented yet.
+        if (pattern == UIA_WindowPatternId) {
+            *out = static_cast<IWindowProvider*>(this);
+            AddRef();
+            return S_OK;
+        }
         *out = nullptr;
         return S_OK;
     }
@@ -1246,6 +1254,100 @@ public:
             *out = site_->fragment_navigator_for(*focused);
             (*out)->AddRef();
         }
+        return S_OK;
+    }
+
+    // IWindowProvider
+    HRESULT STDMETHODCALLTYPE get_CanMaximize(BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        const auto style = GetWindowLongPtrW(site_->hwnd, GWL_STYLE);
+        *out = (style & WS_MAXIMIZEBOX) != 0 ? TRUE : FALSE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_CanMinimize(BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        const auto style = GetWindowLongPtrW(site_->hwnd, GWL_STYLE);
+        *out = (style & WS_MINIMIZEBOX) != 0 ? TRUE : FALSE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_IsModal(BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        // The exposure rules surface only the topmost modal dialog while one
+        // is shown, so a lone Dialog child means the window is modal.
+        const auto children = site_->tree->root_children();
+        *out = children.size() == 1 &&
+                       site_->tree->info(children.front())->role == AccessibleRole::Dialog
+                   ? TRUE
+                   : FALSE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_IsTopmost(BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = FALSE;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_WindowVisualState(WindowVisualState* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (IsZoomed(site_->hwnd) != FALSE) {
+            *out = WindowVisualState_Maximized;
+        } else if (IsIconic(site_->hwnd) != FALSE) {
+            *out = WindowVisualState_Minimized;
+        } else {
+            *out = WindowVisualState_Normal;
+        }
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE get_WindowInteractionState(WindowInteractionState* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = WindowInteractionState_ReadyForUserInteraction;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE SetVisualState(WindowVisualState state) override {
+        switch (state) {
+        case WindowVisualState_Maximized:
+            ShowWindow(site_->hwnd, SW_MAXIMIZE);
+            return S_OK;
+        case WindowVisualState_Minimized:
+            ShowWindow(site_->hwnd, SW_MINIMIZE);
+            return S_OK;
+        case WindowVisualState_Normal:
+            ShowWindow(site_->hwnd, SW_RESTORE);
+            return S_OK;
+        default:
+            return E_INVALIDARG;
+        }
+    }
+
+    HRESULT STDMETHODCALLTYPE Close() override {
+        // Route through the toolkit's close handling, exactly like the title
+        // bar close button.
+        SendMessageW(site_->hwnd, WM_CLOSE, 0, 0);
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE WaitForInputIdle(int /*milliseconds*/, BOOL* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        *out = FALSE; // the toolkit has no separate input-idle state
         return S_OK;
     }
 
