@@ -261,6 +261,7 @@ TEST_CASE("Orders view retains source order identity across sorting and refresh"
         orders.on_cancel_requested().connect([&] { requested_id = orders.selected_order_id(); }));
     auto* cancel = find_widget<nk::Button>(*orders.widget());
     REQUIRE(cancel != nullptr);
+    CHECK(cancel->is_sensitive());
     REQUIRE(
         cancel->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Return}));
     REQUIRE(requested_id == second.value());
@@ -269,6 +270,7 @@ TEST_CASE("Orders view retains source order identity across sorting and refresh"
     orders.refresh();
     REQUIRE(orders.selected_order_id() == second.value());
     REQUIRE(table->columns().back().text(*table->model(), 1) == "Cancelled");
+    CHECK_FALSE(cancel->is_sensitive());
 }
 
 TEST_CASE("Watchlist selection synchronization does not emit recursive requests",
@@ -289,6 +291,29 @@ TEST_CASE("Watchlist selection synchronization does not emit recursive requests"
     watchlist.refresh();
     REQUIRE(table->selection_model()->current_row() == 1);
     REQUIRE(requested.size() == 1);
+}
+
+TEST_CASE("Cancel follows the selected working order across refresh and deselection",
+          "[trading_terminal]") {
+    auto model = std::make_shared<trading::TradingModel>();
+    trading::OrdersView orders(model);
+    auto* cancel = find_widget<nk::Button>(*orders.widget());
+    auto* table = find_widget<nk::DataTable>(*orders.widget());
+    REQUIRE(cancel);
+    REQUIRE(table);
+    CHECK_FALSE(cancel->is_sensitive());
+    REQUIRE(
+        model->submit_order({"NODA", trading::OrderSide::Buy, trading::OrderType::Market, 1, 0}));
+    REQUIRE(
+        model->submit_order({"NODA", trading::OrderSide::Buy, trading::OrderType::Limit, 1, 1}));
+    orders.refresh();
+    table->selection_model()->select(0);
+    CHECK_FALSE(cancel->is_sensitive());
+    table->selection_model()->select(1);
+    CHECK(cancel->is_sensitive());
+    table->selection_model()->clear();
+    CHECK_FALSE(cancel->is_sensitive());
+    CHECK_FALSE(orders.selected_order_id());
 }
 
 TEST_CASE("Compact terminal keeps order entry and activity reachable after resizing",

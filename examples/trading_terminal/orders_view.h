@@ -29,6 +29,8 @@ public:
     nk::Signal<>& on_cancel_requested() { return cancel_requested_; }
 
 private:
+    void update_cancel_button();
+
     std::shared_ptr<TradingModel> model_;
     std::shared_ptr<ViewListModel> order_rows_;
     std::shared_ptr<nk::SelectionModel> order_selection_;

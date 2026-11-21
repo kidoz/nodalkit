@@ -101,6 +101,10 @@ OrdersView::OrdersView(std::shared_ptr<TradingModel> model) : model_(std::move(m
     orders_page->append(orders_table_);
 
     root_ = orders_page;
+    update_cancel_button();
+    connections_.emplace_back(
+        order_selection_->on_selection_changed().connect([this] { update_cancel_button(); }));
+
     connections_.emplace_back(
         cancel_button_->on_clicked().connect([this] { cancel_requested_.emit(); }));
 }
@@ -113,13 +117,21 @@ void OrdersView::refresh() {
         order_rows_->data_changed();
     }
     seen_revision_ = model_->order_revision();
+    update_cancel_button();
+}
+
+void OrdersView::update_cancel_button() {
+    const auto& selected = order_selection_->selected_rows();
+    cancel_button_->set_sensitive(
+        !selected.empty() && *selected.begin() < model_->orders().size() &&
+        model_->orders()[*selected.begin()].status == OrderStatus::Working);
 }
 
 std::optional<std::uint64_t> OrdersView::selected_order_id() const {
-    const auto row = order_selection_->current_row();
-    if (row >= model_->orders().size()) {
+    const auto& selected = order_selection_->selected_rows();
+    if (selected.empty() || *selected.begin() >= model_->orders().size()) {
         return std::nullopt;
     }
-    return model_->orders()[row].id;
+    return model_->orders()[*selected.begin()].id;
 }
 } // namespace trading
