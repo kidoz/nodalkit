@@ -43,6 +43,8 @@ struct Accessible::Impl {
     bool hidden = false;
     StateFlags state = StateFlags::None;
     std::string value;
+    std::optional<AccessibleRange> numeric_range;
+    std::function<bool(double)> numeric_setter;
     std::vector<AccessibleAction> action_list;
     std::vector<ActionBinding> actions;
     std::vector<AccessibleRelation> relations;
@@ -98,6 +100,31 @@ std::string_view Accessible::value() const {
 
 void Accessible::set_value(std::string value) {
     impl_->value = std::move(value);
+}
+
+std::optional<AccessibleRange> Accessible::numeric_range() const {
+    return impl_->numeric_range;
+}
+
+void Accessible::set_numeric_range(AccessibleRange range) {
+    impl_->numeric_range = range;
+}
+
+void Accessible::set_numeric_setter(std::function<bool(double)> setter) {
+    impl_->numeric_setter = std::move(setter);
+}
+
+bool Accessible::numeric_settable() const {
+    return impl_->numeric_setter != nullptr && impl_->numeric_range.has_value();
+}
+
+bool Accessible::perform_numeric_set(double value) const {
+    if (!numeric_settable()) {
+        return false;
+    }
+    const auto& range = *impl_->numeric_range;
+    const double clamped = std::clamp(value, range.minimum, range.maximum);
+    return impl_->numeric_setter(clamped);
 }
 
 void Accessible::add_action(AccessibleAction action, std::function<bool()> handler) {

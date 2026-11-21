@@ -30,9 +30,23 @@ Slider::Slider(Orientation orientation) : impl_(std::make_unique<Impl>()) {
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Slider);
     accessible.set_value("0");
+    sync_accessible_range();
     accessible.add_action(AccessibleAction::Focus, [this]() {
         grab_focus();
         return true;
+    });
+    accessible.add_action(AccessibleAction::Increment, [this]() {
+        step_accessible_value(1);
+        return true;
+    });
+    accessible.add_action(AccessibleAction::Decrement, [this]() {
+        step_accessible_value(-1);
+        return true;
+    });
+    accessible.set_numeric_setter([this](double value) {
+        const double before = impl_->value;
+        set_value(value);
+        return impl_->value != before;
     });
 }
 
@@ -74,6 +88,7 @@ void Slider::set_range(double min, double max) {
     impl_->min_val = min;
     impl_->max_val = max;
     set_value(impl_->value);
+    sync_accessible_range();
 }
 
 double Slider::step() const {
@@ -82,6 +97,22 @@ double Slider::step() const {
 
 void Slider::set_step(double s) {
     impl_->step = s;
+    sync_accessible_range();
+}
+
+void Slider::sync_accessible_range() {
+    ensure_accessible().set_numeric_range({impl_->min_val, impl_->max_val, impl_->step});
+}
+
+void Slider::step_accessible_value(int direction) {
+    const double range = impl_->max_val - impl_->min_val;
+    if (range <= 0.0) {
+        return;
+    }
+    // Without a configured step, assistive-technology increments use a
+    // tenth of the range so repeated steps traverse the whole slider.
+    const double step = impl_->step > 0.0 ? impl_->step : range / 10.0;
+    set_value(impl_->value + static_cast<double>(direction) * step);
 }
 
 Signal<double>& Slider::on_value_changed() {

@@ -38,6 +38,10 @@ struct AccessibleNodeInfo {
     bool focusable = false;
     bool focused = false;
     std::vector<AccessibleAction> actions;
+    // Numeric value range, when the element has one (sliders, progress,
+    // spin buttons); settable marks ranges accepting programmatic values.
+    std::optional<AccessibleRange> numeric_range;
+    bool numeric_settable = false;
 };
 
 // Platform-neutral structure behind native accessibility bridges. UI thread only.
@@ -78,6 +82,11 @@ public:
     // Actions run only on exposed, enabled elements.
     bool perform(AccessibleId id, AccessibleAction action);
     bool focus(AccessibleId id);
+
+    // Set the numeric value of an exposed, enabled element with a range
+    // setter (see Accessible::set_numeric_setter). Returns whether the
+    // value changed.
+    bool set_numeric_value(AccessibleId id, double value);
 
     // Forget identities of destroyed widgets and return them, so bridges can
     // announce and release their native elements.

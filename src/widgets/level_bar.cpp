@@ -19,6 +19,9 @@ LevelBar::LevelBar() : impl_(std::make_unique<Impl>()) {
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::Meter);
     accessible.set_name("Level");
+    // The level runs 0..maximum in unit steps; read-only for assistive
+    // technologies (publish_value carries the human-readable form).
+    accessible.set_numeric_range({0.0, static_cast<double>(impl_->maximum), 1.0});
     publish_value();
 }
 
@@ -49,6 +52,7 @@ void LevelBar::set_maximum(int maximum) {
     }
     impl_->maximum = clamped;
     impl_->value = std::min(impl_->value, impl_->maximum);
+    ensure_accessible().set_numeric_range({0.0, static_cast<double>(impl_->maximum), 1.0});
     publish_value();
     queue_layout();
     queue_redraw();

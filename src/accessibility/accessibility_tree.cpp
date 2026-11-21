@@ -176,6 +176,8 @@ std::optional<AccessibleNodeInfo> AccessibilityTree::info(AccessibleId id) const
         .focusable = widget->is_focusable(),
         .focused = window_.focused_widget() == widget,
         .actions = {actions.begin(), actions.end()},
+        .numeric_range = accessible.numeric_range(),
+        .numeric_settable = accessible.numeric_settable(),
     };
 }
 
@@ -217,6 +219,16 @@ bool AccessibilityTree::focus(AccessibleId id) {
     const auto keep_alive = widget->shared_from_this();
     widget->grab_focus();
     return window_.focused_widget() == widget;
+}
+
+bool AccessibilityTree::set_numeric_value(AccessibleId id, double value) {
+    auto* widget = exposed_widget(id);
+    if (widget == nullptr || !is_enabled(*widget)) {
+        return false;
+    }
+    // The value change may reconfigure the tree; keep the widget alive.
+    const auto keep_alive = widget->shared_from_this();
+    return widget->accessible()->perform_numeric_set(value);
 }
 
 std::vector<AccessibleId> AccessibilityTree::purge() {

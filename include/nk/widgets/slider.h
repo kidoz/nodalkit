@@ -46,6 +46,9 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    void sync_accessible_range();
+    void step_accessible_value(int direction);
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

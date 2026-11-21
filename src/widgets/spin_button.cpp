@@ -94,6 +94,12 @@ SpinButton::SpinButton() : TextField("0"), impl_(std::make_unique<Impl>()) {
         return true;
     });
     accessible.set_value(format_value(impl_->value, impl_->precision));
+    sync_accessible_range();
+    accessible.set_numeric_setter([this](double value) {
+        const double before = impl_->value;
+        set_value(value);
+        return impl_->value != before;
+    });
     accessible.add_action(AccessibleAction::Focus, [this]() {
         grab_focus();
         return true;
@@ -131,6 +137,7 @@ void SpinButton::set_range(double min, double max) {
     impl_->min_val = min;
     impl_->max_val = max;
     set_value(impl_->value);
+    sync_accessible_range();
     queue_layout();
 }
 
@@ -140,6 +147,11 @@ double SpinButton::step() const {
 
 void SpinButton::set_step(double s) {
     impl_->step = s;
+    sync_accessible_range();
+}
+
+void SpinButton::sync_accessible_range() {
+    ensure_accessible().set_numeric_range({impl_->min_val, impl_->max_val, impl_->step});
 }
 
 int SpinButton::precision() const {

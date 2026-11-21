@@ -25,6 +25,9 @@ ProgressBar::ProgressBar() : impl_(std::make_unique<Impl>(*this)) {
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::ProgressBar);
     accessible.set_value("0%");
+    // Progress is a read-only percentage; the "N%" string value and the
+    // numeric range stay in sync by construction.
+    accessible.set_numeric_range({0.0, 100.0, 0.0});
     impl_->motion.set_host_gate([this] {
         const Window* host = host_window();
         return host != nullptr && host->is_visible();

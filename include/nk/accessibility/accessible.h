@@ -7,6 +7,7 @@
 #include <memory>
 #include <nk/accessibility/role.h>
 #include <nk/ui_core/state_flags.h>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,6 +24,17 @@ enum class AccessibleAction : uint8_t {
 };
 
 [[nodiscard]] std::string_view accessible_action_name(AccessibleAction action) noexcept;
+
+/// Numeric value range for range-bearing widgets (sliders, progress
+/// indicators, spin buttons). Assistive technologies expose it as a real
+/// range with a programmatic value setter instead of guessing from the
+/// string value. Read-only indicators simply omit the setter.
+struct AccessibleRange {
+    double minimum = 0.0;
+    double maximum = 1.0;
+    /// Discrete step size; 0 means continuous.
+    double step = 0.0;
+};
 
 enum class AccessibleRelationKind : uint8_t {
     LabelledBy,
@@ -73,6 +85,19 @@ public:
     /// Optional user-visible value for editable/value-bearing widgets.
     [[nodiscard]] std::string_view value() const;
     void set_value(std::string value);
+
+    /// Numeric range of this element's value, when it has one.
+    [[nodiscard]] std::optional<AccessibleRange> numeric_range() const;
+    void set_numeric_range(AccessibleRange range);
+
+    /// Enables programmatic value adjustment for this element's range
+    /// (assistive technologies setting a slider, for example). The handler
+    /// receives the requested value already clamped to the range and returns
+    /// whether the value changed. Elements with a range but no setter are
+    /// read-only indicators.
+    void set_numeric_setter(std::function<bool(double)> setter);
+    [[nodiscard]] bool numeric_settable() const;
+    [[nodiscard]] bool perform_numeric_set(double value) const;
 
     /// Supported accessible actions.
     void add_action(AccessibleAction action, std::function<bool()> handler = {});

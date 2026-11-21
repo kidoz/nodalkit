@@ -46,6 +46,8 @@ protected:
     [[nodiscard]] Rect text_rect() const override;
 
 private:
+    void sync_accessible_range();
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
