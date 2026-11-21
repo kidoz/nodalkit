@@ -389,6 +389,29 @@ TEST_CASE("Win32 backend observes system preferences through a hidden window",
     backend->shutdown();
 }
 
+// Regression: a bare role-less Widget container leaves its children with
+// degenerate allocations on the first frame; the render backends must cope
+// without inverting std::clamp bounds (which asserts under the MSVC debug
+// STL). Exercises the real window + D3D11 render path.
+TEST_CASE("Degenerate allocations render a first frame without asserting", "[windows][native]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Degenerate allocation", .width = 360, .height = 240});
+
+    class Bare : public nk::Widget {
+    public:
+        static std::shared_ptr<Bare> create() { return std::shared_ptr<Bare>(new Bare()); }
+
+        void append(std::shared_ptr<nk::Widget> child) { append_child(std::move(child)); }
+    };
+
+    auto root = Bare::create();
+    root->append(nk::Button::create("Activate me"));
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    SUCCEED("first frame rendered with a degenerate child allocation");
+}
+
 namespace {
 
 /// Focusable probe that records the text-input events the backend delivers

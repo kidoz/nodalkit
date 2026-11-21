@@ -748,7 +748,14 @@ std::size_t pixel_area(Rect rect) {
 }
 
 float effective_corner_radius(Rect rect, float requested_radius) {
-    return std::clamp(requested_radius, 0.0F, std::min(rect.width, rect.height) * 0.5F);
+    const float max_radius = std::min(rect.width, rect.height) * 0.5F;
+    // A degenerate rect (zero or negative extents) cannot host a corner
+    // radius; clamping against a negative bound would invert the clamp
+    // arguments (asserting under the MSVC debug STL).
+    if (max_radius <= 0.0F) {
+        return 0.0F;
+    }
+    return std::clamp(requested_radius, 0.0F, max_radius);
 }
 
 bool rounded_rect_contains_point(Rect rect, float radius, Point point) {
