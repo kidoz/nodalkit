@@ -105,3 +105,24 @@ TEST_CASE("Showcase wrapped text reuses measurements and follows text and theme 
     CHECK(text->measure({.max_width = 360.0F}).natural_width > large.natural_width);
     nk::Theme::set_active(previous_theme);
 }
+
+TEST_CASE("Showcase search filters source names and preserves a matching selection", "[showcase]") {
+    auto source = std::make_shared<nk::StringListModel>(std::vector<std::string>{"Alpha", "Bravo"});
+    nk::FilterListModel filtered(source);
+    nk::SelectionModel selection;
+    filter_showcase_items(filtered, selection, "RAv");
+    REQUIRE(filtered.row_count() == 1);
+    CHECK(filtered.display_text(0) == "Bravo");
+    CHECK(selection.is_selected(0));
+    source->append("Bravura");
+    CHECK(filtered.row_count() == 2);
+    filter_showcase_items(filtered, selection, "");
+    REQUIRE(filtered.row_count() == 3);
+    CHECK(selection.current_row() == 1);
+    filter_showcase_items(filtered, selection, "missing");
+    CHECK(filtered.row_count() == 0);
+    CHECK(selection.selected_rows().empty());
+    filter_showcase_items(filtered, selection, "");
+    CHECK(filtered.row_count() == 3);
+    CHECK(selection.is_selected(0));
+}

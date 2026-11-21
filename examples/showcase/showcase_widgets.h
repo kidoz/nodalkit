@@ -4,6 +4,7 @@
 /// @brief Custom widget primitives used by the showcase example.
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -11,6 +12,8 @@
 #include <nk/foundation/signal.h>
 #include <nk/layout/box_layout.h>
 #include <nk/layout/stack_layout.h>
+#include <nk/model/list_model_adapters.h>
+#include <nk/model/selection_model.h>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/platform/window.h>
@@ -27,6 +30,30 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+inline void filter_showcase_items(nk::FilterListModel& items,
+                                  nk::SelectionModel& selection,
+                                  std::string_view query) {
+    const auto current = selection.current_row();
+    const auto source =
+        current < items.row_count() ? std::optional{items.map_to_source(current)} : std::nullopt;
+    items.set_filter(
+        [needle = std::string(query)](const nk::AbstractListModel& model, std::size_t row) {
+            const auto name = model.display_text(row);
+            return needle.empty() ||
+                   std::ranges::search(name, needle, [](unsigned char a, unsigned char b) {
+                       return std::tolower(a) == std::tolower(b);
+                   }).begin() != name.end();
+        });
+    selection.clear();
+    if (items.row_count() != 0) {
+        const auto row = source ? items.map_from_source(*source).value_or(0) : 0;
+        selection.select(row);
+        selection.set_current_row(row);
+    } else {
+        selection.set_current_row(static_cast<std::size_t>(-1));
+    }
+}
 
 namespace showcase_detail {
 

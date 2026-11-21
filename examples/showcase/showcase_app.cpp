@@ -19,6 +19,7 @@
 #include <nk/foundation/types.h>
 #include <nk/layout/breakpoint.h>
 #include <nk/model/abstract_list_model.h>
+#include <nk/model/list_model_adapters.h>
 #include <nk/model/selection_model.h>
 #include <nk/model/tree_model.h>
 #include <nk/platform/application.h>
@@ -375,7 +376,8 @@ int run_showcase(int argc, char** argv) {
     auto selection = std::make_shared<nk::SelectionModel>(nk::SelectionMode::Single);
     selection->select(0);
     auto list_view = nk::ListView::create();
-    list_view->set_model(model);
+    auto filtered_items = std::make_shared<nk::FilterListModel>(model);
+    list_view->set_model(filtered_items);
     list_view->set_selection_model(selection);
     list_view->set_row_height(is_linux_wayland ? 40.0F : 30.0F);
     const float model_stage_padding = is_linux_wayland ? 0.0F : profile.list_stage_padding;
@@ -389,13 +391,17 @@ int run_showcase(int argc, char** argv) {
     auto add_item_btn = nk::Button::create("Add Item");
     add_item_btn->add_style_class("suggested");
 
-    auto add_showcase_item = [&] {
-        const auto next = model->row_count() + 1;
-        model->append("Item " + std::to_string(next));
-        const auto count_text = std::to_string(model->row_count()) + " items";
+    auto update_item_count = [&] {
+        const auto count = filtered_items->row_count();
+        const auto count_text = std::to_string(count) + (count == 1 ? " item" : " items");
         list_status->set_text(count_text);
         status_bar->set_segment(1, count_text);
         hero_items_pill->set_text(count_text);
+    };
+    auto add_showcase_item = [&] {
+        const auto next = model->row_count() + 1;
+        model->append("Item " + std::to_string(next));
+        update_item_count();
         show_linux_toast("Added item " + std::to_string(next));
     };
     (void)add_item_btn->on_clicked().connect(add_showcase_item);
@@ -1339,6 +1345,8 @@ int run_showcase(int argc, char** argv) {
         search.label = "Search";
         search.tooltip = "Filter by name";
         search.on_search_submit = [&](std::string_view query) {
+            filter_showcase_items(*filtered_items, *selection, query);
+            update_item_count();
             const std::string text =
                 query.empty() ? "Search cleared" : "Search: " + std::string(query);
             status_bar->set_segment(0, text);
