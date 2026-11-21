@@ -1,5 +1,6 @@
 #include "win32_backend.h"
 
+#include "uia_provider.h"
 #include "win32_spell_checker.h"
 
 #include <algorithm>
@@ -1268,6 +1269,8 @@ private:
     // OLE drop target registered on this window. Owned via refcount; we hold one
     // strong reference and revoke it in the destructor before releasing.
     ComPtr<Win32DropTarget> drop_target_;
+    // UI Automation bridge, created lazily on the first UIA WM_GETOBJECT.
+    std::unique_ptr<detail::Win32UiaBridge> uia_;
 };
 
 Win32Surface::Win32Surface(HINSTANCE instance, const WindowConfig& config, Window& owner)
@@ -1346,6 +1349,9 @@ Win32Surface::~Win32Surface() {
         }
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
+        // The bridge was disconnected from WM_DESTROY; release it with the
+        // surface so providers never outlive the window they describe.
+        uia_.reset();
     }
 }
 
@@ -2245,11 +2251,36 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_CLOSE:
         owner_.dispatch_window_event({.type = WindowEvent::Type::Close});
         return 0;
+    case WM_GETOBJECT:
+        // UI Automation asks with the UiaRootObjectId; everything else (MSAA
+        // object ids) falls through to DefWindowProc untouched.
+        if (detail::Win32UiaBridge::is_uia_request(lparam)) {
+            if (uia_ == nullptr) {
+                uia_ = std::make_unique<detail::Win32UiaBridge>(hwnd_, owner_);
+            }
+            const LRESULT uia_result = uia_->handle_get_object(wparam, lparam);
+            if (uia_result != 0) {
+                return uia_result;
+            }
+        }
+        break;
+    case WM_DESTROY:
+        // Purge UIA's event map for this window before the providers go away.
+        if (uia_ != nullptr) {
+            uia_->disconnect();
+        }
+        break;
     case WM_SETFOCUS:
         owner_.dispatch_window_event({.type = WindowEvent::Type::FocusIn});
+        if (uia_ != nullptr) {
+            uia_->synchronize();
+        }
         return 0;
     case WM_KILLFOCUS:
         owner_.dispatch_window_event({.type = WindowEvent::Type::FocusOut});
+        if (uia_ != nullptr) {
+            uia_->synchronize();
+        }
         return 0;
     case WM_SIZE:
         if (handling_dpi_change_) {
@@ -2341,6 +2372,9 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
              .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_,
              .button = message == WM_LBUTTONUP ? 1 : (message == WM_RBUTTONUP ? 2 : 3),
              .click_count = press_click_count_});
+        if (uia_ != nullptr) {
+            uia_->synchronize();
+        }
         return 0;
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
@@ -2360,6 +2394,9 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         dispatch_key_event({.type = KeyEvent::Type::Press,
                             .key = translate_key_code(wparam, lparam),
                             .is_repeat = (lparam & 0x40000000) != 0});
+        if (uia_ != nullptr) {
+            uia_->synchronize();
+        }
         return 0;
     case WM_KEYUP:
     case WM_SYSKEYUP:
@@ -2615,6 +2652,14 @@ IDataObject* detail::win32_make_drag_data_object(const DragPayload& payload) {
         return nullptr;
     }
     return new Win32DragDataObject(payload);
+}
+
+float detail::win32_dpi_scale_for_hwnd(HWND hwnd) {
+    return query_dpi_scale(hwnd);
+}
+
+std::wstring detail::win32_wide_from_utf8(std::string_view text) {
+    return utf8_to_wide(text);
 }
 
 struct Win32Backend::Impl {

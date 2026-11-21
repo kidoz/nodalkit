@@ -398,6 +398,7 @@ elif host_system == 'windows'
     shell32_dep = cpp_compiler.find_library('shell32', required : true)
     shcore_dep = cpp_compiler.find_library('shcore', required : true)
     imm32_dep = cpp_compiler.find_library('imm32', required : true)
+    uiautomationcore_dep = cpp_compiler.find_library('uiautomationcore', required : true)
     dwrite_dep = cpp_compiler.find_library('dwrite', required : true)
     d3d11_dep = cpp_compiler.find_library('d3d11', required : true)
     d3d12_dep = cpp_compiler.find_library('d3d12', required : true)
@@ -409,6 +410,7 @@ elif host_system == 'windows'
     nk_sources += files(
         'src/platform/windows/win32_backend.cpp',
         'src/platform/windows/win32_spell_checker.cpp',
+        'src/platform/windows/uia_provider.cpp',
         'src/render/directx_renderer.cpp',
         'src/render/directx_device.cpp',
         'src/text/windows/directwrite_text_shaper.cpp',
@@ -418,7 +420,7 @@ elif host_system == 'windows'
     # These import libraries are identical across i686 and x86_64 Windows; the
     # 32-bit vs 64-bit distinction is handled by the toolchain/cross file, not
     # by selecting different libraries here.
-    nk_windows_system_deps = [user32_dep, gdi32_dep, advapi32_dep, dwmapi_dep, ole32_dep, shell32_dep, shcore_dep, imm32_dep, dwrite_dep, d3d11_dep, d3d12_dep, d3dcompiler_dep, dxgi_dep]
+    nk_windows_system_deps = [user32_dep, gdi32_dep, advapi32_dep, dwmapi_dep, ole32_dep, shell32_dep, shcore_dep, imm32_dep, uiautomationcore_dep, dwrite_dep, d3d11_dep, d3d12_dep, d3dcompiler_dep, dxgi_dep]
     nk_deps += nk_windows_system_deps
     # NodalKit is a static_library on Windows (see below), so every one of these
     # must land in nodalkit.pc's Libs.private for downstream links to resolve.

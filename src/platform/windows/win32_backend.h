@@ -66,6 +66,13 @@ win32_accel_for_shortcut(const NativeMenuShortcut& shortcut, UINT command, ACCEL
 /// CF_HDROP (files) and CF_UNICODETEXT (text) for DoDragDrop. Returns null
 /// when the payload carries neither files nor text.
 [[nodiscard]] IDataObject* win32_make_drag_data_object(const DragPayload& payload);
+
+/// Current per-window DPI scale (1.0 at 96 DPI); falls back like the backend's
+/// own PMv2-aware query. Used by the UIA bridge for physical-pixel geometry.
+[[nodiscard]] float win32_dpi_scale_for_hwnd(HWND hwnd);
+
+/// UTF-8 to UTF-16 conversion shared with the UIA bridge.
+[[nodiscard]] std::wstring win32_wide_from_utf8(std::string_view text);
 } // namespace detail
 
 class Win32Backend : public PlatformBackend {
