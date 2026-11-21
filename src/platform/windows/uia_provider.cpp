@@ -124,6 +124,12 @@ SAFEARRAY* rect_safearray(const UiaRect& rect) {
            role == AccessibleRole::TreeItem || role == AccessibleRole::GridCell;
 }
 
+/// Widget type-name match accepting both bare and namespaced class names
+/// (the tree reports e.g. "nk::ComboBox"), like the AT-SPI mapper's helper.
+[[nodiscard]] bool type_is(const AccessibleNodeInfo& info, std::string_view type) {
+    return info.type_name == type || info.type_name.ends_with("::" + std::string(type));
+}
+
 class UiaFragment;
 
 /// Liveness token shared by the bridge, the fragments, and the pattern
@@ -659,6 +665,76 @@ private:
     UiaPatternState state_;
 };
 
+class UiaExpandCollapsePattern final : public IExpandCollapseProvider {
+public:
+    UiaExpandCollapsePattern(UiaSite* site, AccessibleId id, const UiaLiveness& alive)
+        : state_{site, id, alive} {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IExpandCollapseProvider) {
+            *out = static_cast<IExpandCollapseProvider*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // Children are exposed only while a combo box or submenu is open, so
+    // their presence is the expansion state.
+    HRESULT STDMETHODCALLTYPE get_ExpandCollapseState(ExpandCollapseState* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (!state_.live()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        *out = state_.site->tree->children(state_.id).empty() ? ExpandCollapseState_Collapsed
+                                                              : ExpandCollapseState_Expanded;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE Expand() override {
+        if (!state_.live()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        if (!state_.site->tree->children(state_.id).empty()) {
+            return S_OK; // already expanded
+        }
+        const bool performed = state_.site->tree->perform(state_.id, AccessibleAction::Activate);
+        return performed ? S_OK : UIA_E_INVALIDOPERATION;
+    }
+
+    HRESULT STDMETHODCALLTYPE Collapse() override {
+        if (!state_.live()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        if (state_.site->tree->children(state_.id).empty()) {
+            return S_OK; // already collapsed
+        }
+        // Activation toggles the popup/submenu closed again.
+        const bool performed = state_.site->tree->perform(state_.id, AccessibleAction::Activate);
+        return performed ? S_OK : UIA_E_INVALIDOPERATION;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    UiaPatternState state_;
+};
+
 // --- Element provider --------------------------------------------------------
 
 /// UIA provider for one exposed element. Answers every property live from the
@@ -745,6 +821,12 @@ public:
         case UIA_SelectionItemPatternId:
             if (is_selection_item(info->role)) {
                 *out = new UiaSelectionItemPattern(site_, id_, alive_);
+            }
+            break;
+        case UIA_ExpandCollapsePatternId:
+            if (type_is(*info, "ComboBox") ||
+                (info->role == AccessibleRole::MenuItem && !site_->tree->children(id_).empty())) {
+                *out = new UiaExpandCollapsePattern(site_, id_, alive_);
             }
             break;
         default:
@@ -1271,16 +1353,20 @@ void raise_numeric_property(IRawElementProviderSimple* provider,
 } // namespace
 
 int win32_uia_control_type(AccessibleRole role, std::string_view type_name) {
-    // Type-name special cases mirror the macOS bridge's mapping.
-    if (type_name == "ComboBox") {
+    // Type-name special cases mirror the macOS bridge's mapping; type_name may
+    // arrive bare or namespaced, hence the suffix match.
+    const auto type_matches = [type_name](std::string_view type) {
+        return type_name == type || type_name.ends_with("::" + std::string(type));
+    };
+    if (type_matches("ComboBox")) {
         return UIA_ComboBoxControlTypeId;
     }
-    if (type_name == "TextArea") {
+    if (type_matches("TextArea")) {
         // Multi-line edit; Document replaces Edit once text-range support
         // lands.
         return UIA_EditControlTypeId;
     }
-    if (type_name == "Switch") {
+    if (type_matches("Switch")) {
         // UIA has no switch control type; a switch is an on/off checkbox.
         return UIA_CheckBoxControlTypeId;
     }

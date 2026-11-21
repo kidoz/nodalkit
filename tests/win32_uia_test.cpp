@@ -23,6 +23,7 @@
 #include <nk/widgets/box.h>
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
+#include <nk/widgets/combo_box.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/progress_bar.h>
 #include <nk/widgets/slider.h>
@@ -494,6 +495,41 @@ TEST_CASE("Win32 UIA selection drives tabs", "[windows][uia]") {
     CHECK(tabs->selected_index() == 1);
     require_ok(item->get_CurrentIsSelected(&is_selected));
     CHECK(is_selected == TRUE);
+}
+
+TEST_CASE("Win32 UIA combo boxes expand and collapse", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA combo probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto combo = nk::ComboBox::create();
+    combo->set_items({"First", "Second", "Third"});
+    root->append(combo);
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(nk::window_hwnd(window), &element));
+    auto combo_element = uia.find_by_control_type(element.Get(), UIA_ComboBoxControlTypeId);
+    REQUIRE(combo_element != nullptr);
+
+    ComPtr<IUnknown> unknown;
+    require_ok(
+        combo_element->GetCurrentPattern(UIA_ExpandCollapsePatternId, unknown.GetAddressOf()));
+    ComPtr<IUIAutomationExpandCollapsePattern> expand;
+    require_ok(unknown.As(&expand));
+    ExpandCollapseState state = ExpandCollapseState_Expanded;
+    require_ok(expand->get_CurrentExpandCollapseState(&state));
+    CHECK(state == ExpandCollapseState_Collapsed); // items hidden while closed
+
+    require_ok(expand->Expand());
+    require_ok(expand->get_CurrentExpandCollapseState(&state));
+    CHECK(state == ExpandCollapseState_Expanded); // popup items are exposed
+
+    require_ok(expand->Collapse());
+    require_ok(expand->get_CurrentExpandCollapseState(&state));
+    CHECK(state == ExpandCollapseState_Collapsed);
 }
 
 TEST_CASE("Win32 UIA SetFocus moves toolkit focus", "[windows][uia]") {
