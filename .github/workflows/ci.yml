@@ -201,6 +201,7 @@ jobs:
           test -f "$pc" || { echo "nodalkit.pc not installed"; exit 1; }
           grep -Eq -- '-luser32' "$pc" || { echo "nodalkit.pc missing Windows system libs"; cat "$pc"; exit 1; }
           grep -Eq -- '-limm32' "$pc" || { echo "nodalkit.pc missing imm32 (IME)"; cat "$pc"; exit 1; }
+          grep -Eq -- '-luiautomationcore' "$pc" || { echo "nodalkit.pc missing uiautomationcore (UIA)"; cat "$pc"; exit 1; }
           cat "$pc"
 
   sanitizers:
