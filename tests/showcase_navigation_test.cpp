@@ -126,3 +126,22 @@ TEST_CASE("Showcase search filters source names and preserves a matching selecti
     CHECK(filtered.row_count() == 3);
     CHECK(selection.is_selected(0));
 }
+
+TEST_CASE("Showcase stacks columns that cannot fit their controls", "[showcase][layout]") {
+    auto left = nk::Button::create("Increment the counter");
+    auto right = nk::Button::create("Reset the preview");
+    auto columns = SplitColumns::create(left, right);
+    const auto min_width =
+        left->measure({}).minimum_width + right->measure({}).minimum_width + 24.0F;
+    for (const auto width : {min_width + 10.0F, min_width - 1.0F, min_width + 10.0F}) {
+        auto size = columns->measure({.max_width = width});
+        columns->allocate({0, 0, width, size.natural_height});
+        if (width < min_width) {
+            CHECK(right->allocation().y >= left->allocation().bottom());
+            CHECK(right->allocation().width == width);
+        } else {
+            CHECK(right->allocation().x >= left->allocation().right());
+        }
+        CHECK(right->allocation().bottom() <= size.natural_height);
+    }
+}

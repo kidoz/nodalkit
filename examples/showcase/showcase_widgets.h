@@ -1699,10 +1699,17 @@ public:
         const auto left_req = left_ ? left_->measure(constraints) : nk::SizeRequest{};
         const auto right_req = right_ ? right_->measure(constraints) : nk::SizeRequest{};
 
+        if (constraints.max_width < left_req.minimum_width + spacing_ + right_req.minimum_width) {
+            return {std::max(left_req.minimum_width, right_req.minimum_width),
+                    left_req.minimum_height + spacing_ + right_req.minimum_height,
+                    std::max(left_req.natural_width, right_req.natural_width),
+                    left_req.natural_height + spacing_ + right_req.natural_height};
+        }
         auto left_height = left_req;
         auto right_height = right_req;
         if (std::isfinite(constraints.max_width)) {
-            const auto [left_width, right_width] = column_widths(constraints.max_width);
+            const auto [left_width, right_width] = column_widths(
+                constraints.max_width, left_req.minimum_width, right_req.minimum_width);
             left_height = left_ ? left_->measure({.max_width = left_width}) : nk::SizeRequest{};
             right_height = right_ ? right_->measure({.max_width = right_width}) : nk::SizeRequest{};
         }
@@ -1720,7 +1727,19 @@ public:
             return;
         }
 
-        const auto [left_width, right_width] = column_widths(allocation.width);
+        const auto left = left_->measure({.max_width = allocation.width});
+        const auto right = right_->measure({.max_width = allocation.width});
+        if (allocation.width < left.minimum_width + spacing_ + right.minimum_width) {
+            const float left_height = left.natural_height;
+            left_->allocate({allocation.x, allocation.y, allocation.width, left_height});
+            right_->allocate({allocation.x,
+                              allocation.y + left_height + spacing_,
+                              allocation.width,
+                              std::max(0.0F, allocation.height - left_height - spacing_)});
+            return;
+        }
+        const auto [left_width, right_width] =
+            column_widths(allocation.width, left.minimum_width, right.minimum_width);
 
         left_->allocate({allocation.x, allocation.y, left_width, allocation.height});
         right_->allocate({
@@ -1734,28 +1753,12 @@ public:
 private:
     SplitColumns() = default;
 
-    [[nodiscard]] std::pair<float, float> column_widths(float width) const {
-        const auto left_req =
-            left_ ? left_->measure(nk::Constraints{.max_width = width}) : nk::SizeRequest{};
-        const auto right_req =
-            right_ ? right_->measure(nk::Constraints{.max_width = width}) : nk::SizeRequest{};
-
-        const float available_width = std::max(0.0F, width - spacing_);
-        const float min_left = std::min(left_req.minimum_width, available_width);
-        const float min_right = std::min(right_req.minimum_width, available_width);
-        const float min_sum = min_left + min_right;
-        float left_width = available_width * split_ratio_;
-        if (min_sum > available_width && min_sum > 0.0F) {
-            // Over-constrained: both minimums cannot fit, so squeeze the
-            // columns proportionally instead of starving one side.
-            left_width = available_width * (min_left / min_sum);
-        } else {
-            const float max_left = std::max(min_left, available_width - min_right);
-            left_width = std::clamp(left_width, min_left, max_left);
-        }
-        const float right_width = std::max(0.0F, available_width - left_width);
-
-        return {left_width, right_width};
+    [[nodiscard]] std::pair<float, float>
+    column_widths(float width, float min_left, float min_right) const {
+        const float available = width - spacing_;
+        const float left = std::clamp(
+            available * split_ratio_, min_left, std::max(min_left, available - min_right));
+        return {left, available - left};
     }
 
     void replace_child(const std::shared_ptr<nk::Widget>& old_child,
