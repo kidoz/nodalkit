@@ -641,7 +641,7 @@ void ListView::sync_accessible_summary() {
     const auto count = impl_->model ? impl_->model->row_count() : 0;
     const auto row = current_row_index(impl_->selection.get());
     std::ostringstream description;
-    description << count << " items, "
+    description << count << (count == 1 ? " item, " : " items, ")
                 << (impl_->selection ? impl_->selection->selected_rows().size() : 0) << " selected";
     if (impl_->model && row < count) {
         const auto text = impl_->model->display_text(row);
