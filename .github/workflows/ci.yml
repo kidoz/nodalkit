@@ -150,11 +150,10 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    # Windows is an experimental platform and explicitly not a release gate
-    # (see the README support policy). The jobs run for signal but never
-    # block main: the clang-to-MSVC toolchain has never been green end to
-    # end on the runners and still fails in the linker.
-    continue-on-error: true
+    # Windows is a secondary supported target (see the README support policy):
+    # x64 regressions block CI and releases. The i686 cross-build stays
+    # advisory per docs/reference/windows-support-matrix.md.
+    continue-on-error: ${{ matrix.arch == 'x86' }}
     strategy:
       fail-fast: false
       matrix:
@@ -201,6 +200,7 @@ jobs:
           pc="$PWD/.local/lib/pkgconfig/nodalkit.pc"
           test -f "$pc" || { echo "nodalkit.pc not installed"; exit 1; }
           grep -Eq -- '-luser32' "$pc" || { echo "nodalkit.pc missing Windows system libs"; cat "$pc"; exit 1; }
+          grep -Eq -- '-limm32' "$pc" || { echo "nodalkit.pc missing imm32 (IME)"; cat "$pc"; exit 1; }
           cat "$pc"
 
   sanitizers:
