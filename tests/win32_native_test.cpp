@@ -12,9 +12,13 @@
 #if defined(_WIN32)
 
 #include <catch2/catch_test_macros.hpp>
+#include <nk/platform/application.h>
 #include <nk/platform/native_menu.h>
 #include <nk/platform/platform_backend.h>
 #include <nk/platform/spell_checker.h>
+#include <nk/platform/window.h>
+#include <nk/platform/windows_interop.h>
+#include <nk/widgets/button.h>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -23,11 +27,12 @@
 #define NOMINMAX
 #endif
 #include "../src/platform/windows/win32_backend.h"
-
+// imm.h needs the windows.h types pulled in above.
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <imm.h>
 #include <memory>
 // ole2.h pulls in windows.h (EXTERN_C and friends) and sorts before
 // shellapi.h, so the include sorter keeps the order the shell header needs.
@@ -382,6 +387,137 @@ TEST_CASE("Win32 backend observes system preferences through a hidden window",
     CHECK_FALSE(notified);
 
     backend->shutdown();
+}
+
+namespace {
+
+/// Focusable probe that records the text-input events the backend delivers
+/// and reports a controllable editor state (caret rect, secure flag).
+class InputProbe : public nk::Widget {
+public:
+    static std::shared_ptr<InputProbe> create() {
+        auto probe = std::shared_ptr<InputProbe>(new InputProbe());
+        probe->set_focusable(true);
+        return probe;
+    }
+
+    bool handle_text_input_event(const nk::TextInputEvent& event) override {
+        events.push_back(event);
+        return true;
+    }
+
+    [[nodiscard]] std::optional<nk::WidgetTextInputState> text_input_state() const override {
+        nk::WidgetTextInputState state;
+        state.text = text;
+        state.cursor = text.size();
+        state.caret_rect = {0.0F, 0.0F, 2.0F, 16.0F};
+        state.secure = secure;
+        return state;
+    }
+
+    std::vector<nk::TextInputEvent> events;
+    std::string text;
+    bool secure = false;
+};
+
+/// Dispatch pending window messages so synthesized IME input reaches the
+/// backend's window procedure (IMM may post rather than send).
+void pump_window_messages() {
+    MSG message;
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+}
+
+} // namespace
+
+TEST_CASE("IME composition lifecycle follows window messages", "[windows][native]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "IME lifecycle", .width = 320, .height = 200});
+    auto probe = InputProbe::create();
+    window.set_child(probe);
+    window.present();
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+    probe->grab_focus();
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.current_text_input_state().has_value());
+    REQUIRE(probe->events.empty());
+
+    SECTION("WM_CHAR commits through the focused editor") {
+        SendMessageW(hwnd, WM_CHAR, L'A', 0);
+        REQUIRE(probe->events.size() == 1);
+        CHECK(probe->events[0].type == nk::TextInputEvent::Type::Commit);
+        CHECK(probe->events[0].text == "A");
+    }
+
+    SECTION("focus loss cancels an in-flight composition") {
+        SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0);
+        CHECK(probe->events.empty()); // starting composition alone emits nothing
+        SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
+        REQUIRE(probe->events.size() == 1);
+        CHECK(probe->events[0].type == nk::TextInputEvent::Type::ClearPreedit);
+    }
+
+    SECTION("secure editors cancel composition and close the IME") {
+        SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0);
+        CHECK(probe->events.empty());
+        probe->secure = true;
+        // A redraw request on the focused editor re-syncs text input state,
+        // which routes through the backend's secure-field handling.
+        probe->queue_redraw();
+        REQUIRE(probe->events.size() == 1);
+        CHECK(probe->events[0].type == nk::TextInputEvent::Type::ClearPreedit);
+    }
+
+    SECTION("WM_IME_ENDCOMPOSITION clears the preedit") {
+        SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0);
+        SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
+        REQUIRE(probe->events.size() == 1);
+        CHECK(probe->events[0].type == nk::TextInputEvent::Type::ClearPreedit);
+    }
+}
+
+TEST_CASE("IMM composition strings drive preedit when an IME is active", "[windows][native]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "IMM composition", .width = 320, .height = 200});
+    auto probe = InputProbe::create();
+    window.set_child(probe);
+    window.present();
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+    probe->grab_focus();
+    REQUIRE(app.event_loop().poll());
+
+    // Prime the window's IME context like Wine's imm32 conformance tests:
+    // ImmSetCompositionString with SCS_SETSTR generates WM_IME_COMPOSITION.
+    // Without an active IME (e.g. bare US-locale CI runners) the call fails
+    // or produces no message, so this part reports a skip instead of failing.
+    HIMC context = ImmGetContext(hwnd);
+    REQUIRE(context != nullptr);
+    // The SDK signature takes a non-const LPVOID composition buffer.
+    wchar_t composition[] = L"あ";
+    const BOOL primed = ImmSetCompositionStringW(
+        context, SCS_SETSTR, composition, sizeof(composition) - sizeof(wchar_t), nullptr, 0);
+    ImmReleaseContext(hwnd, context);
+    if (!primed) {
+        SKIP("No IME context available to synthesize a composition");
+    }
+
+    SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0);
+    pump_window_messages();
+
+    const bool preedit_arrived =
+        !probe->events.empty() && probe->events.back().type == nk::TextInputEvent::Type::Preedit;
+    if (!preedit_arrived) {
+        SKIP("IMM did not deliver WM_IME_COMPOSITION without an interactive IME");
+    }
+    CHECK(probe->events.back().text == "あ");
+
+    SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
+    REQUIRE_FALSE(probe->events.empty());
+    CHECK(probe->events.back().type == nk::TextInputEvent::Type::ClearPreedit);
 }
 
 #endif // defined(_WIN32)

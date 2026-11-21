@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+*   **Windows IME Hardening:** focus loss cancels an in-flight IME composition (`ImmNotifyIME(CPS_CANCEL)` plus a `ClearPreedit` event) so half-composed text never outlives the editor; secure (password) editors cancel composition and force the IME closed without ever forcing it back open; input-language changes are acknowledged. A message-level native suite drives the composition lifecycle through a real window (`WM_IME_STARTCOMPOSITION`/`ENDCOMPOSITION`, `WM_CHAR`, `WM_KILLFOCUS`, secure-state resync) and synthesizes IMM composition strings Wine-style where an IME context is available, skipping cleanly on bare US-locale runners.
+
 ## [0.6.0] - 2026-11-21
 
 The sixth normal release of the NodalKit framework. 0.6.0 keeps the widget

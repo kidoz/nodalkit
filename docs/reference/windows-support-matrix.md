@@ -48,7 +48,7 @@ GPU coverage, software fallback limits, and validation commands.
 | High-DPI | ✅ | Per-Monitor V2 DPI awareness; scale tracked per window; `WM_DPICHANGED` applies the suggested rect. |
 | Dark-mode chrome | ✅ | Title bar and menu bar follow the system color scheme (`DWMWA_USE_IMMERSIVE_DARK_MODE` with the legacy attribute fallback) and re-apply on theme change. |
 | System preferences | ✅ | Push-based observation via `WM_SETTINGCHANGE` / `WM_THEMECHANGE` on a hidden utility window (no polling fallback); color scheme, contrast, motion, transparency, text scale, and accent color are read from the OS. |
-| IME / text input | 🧪 | IMM32 composition: preedit rendered inline by the toolkit (`Preedit`/`ClearPreedit` events), commits through `GCS_RESULTSTR` exactly once, and composition + candidate windows anchored to the focused editor's caret. Unit-tested; live IME validation across keyboards is still maturing. |
+| IME / text input | 🧪 | IMM32 composition: preedit rendered inline by the toolkit (`Preedit`/`ClearPreedit` events), commits through `GCS_RESULTSTR` exactly once, and composition + candidate windows anchored to the focused editor's caret. Focus loss cancels an in-flight composition, secure (password) editors cancel composition and close the IME, and input-language changes are acknowledged. Covered by message-level window tests (`WM_IME_*`, `WM_CHAR`) plus Wine-style IMM composition-string synthesis; live validation across real keyboards is still maturing. |
 | Fullscreen | ✅ | Borderless-on-monitor toggle. |
 | Text shaping | ✅ | DirectWrite, with a GDI fallback shaper. |
 | Native window handle | ✅ | `HWND` / `HINSTANCE` via [`windows_interop.h`](../../include/nk/platform/windows_interop.h). See the [Native handle contract](native-handles.md). |

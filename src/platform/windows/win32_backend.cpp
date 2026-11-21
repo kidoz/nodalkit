@@ -1232,6 +1232,7 @@ private:
     void dispatch_native_menu_role(NativeMenuRole role);
     void handle_ime_composition(LPARAM lparam);
     void position_ime_windows();
+    void cancel_ime_composition();
     LRESULT handle_message(UINT message, WPARAM wparam, LPARAM lparam);
 
     HINSTANCE instance_ = nullptr;
@@ -1534,6 +1535,19 @@ void Win32Surface::position_ime_windows() {
     // editor's caret so IME UI tracks the text being composed.
     const auto state = owner_.current_text_input_state();
     if (!state.has_value() || state->caret_rect.width <= 0.0F || state->caret_rect.height <= 0.0F) {
+        return;
+    }
+    if (state->secure) {
+        // Secure editors must not compose: force the IME closed and drop any
+        // in-flight composition, matching the Wayland sensitive-data hints
+        // and the macOS nil-input-context behavior. The toolkit never forces
+        // the IME back open; the user does that after leaving the field.
+        cancel_ime_composition();
+        HIMC context = ImmGetContext(hwnd_);
+        if (context != nullptr) {
+            ImmSetOpenStatus(context, FALSE);
+            ImmReleaseContext(hwnd_, context);
+        }
         return;
     }
     const float scale = scale_factor_ > 0.0F ? scale_factor_ : 1.0F;
@@ -2174,6 +2188,24 @@ void Win32Surface::dispatch_text_utf16(wchar_t code_unit) {
     return buffer;
 }
 
+void Win32Surface::cancel_ime_composition() {
+    if (hwnd_ == nullptr) {
+        return;
+    }
+    // Ask the IME to drop any in-flight composition, then clear the toolkit
+    // preedit so no half-composed text outlives the trigger (focus loss or a
+    // secure editor taking over).
+    HIMC context = ImmGetContext(hwnd_);
+    if (context != nullptr) {
+        (void)ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+        ImmReleaseContext(hwnd_, context);
+    }
+    if (ime_composing_) {
+        ime_composing_ = false;
+        owner_.dispatch_text_input_event({.type = TextInputEvent::Type::ClearPreedit, .text = {}});
+    }
+}
+
 void Win32Surface::handle_ime_composition(LPARAM lparam) {
     HIMC context = ImmGetContext(hwnd_);
     if (context == nullptr) {
@@ -2277,6 +2309,10 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         }
         return 0;
     case WM_KILLFOCUS:
+        // Focus loss must not leave an in-flight composition stuck: cancel it
+        // native-side and clear the toolkit preedit before focus bookkeeping
+        // moves on (the same ordering as the Wayland keyboard_leave path).
+        cancel_ime_composition();
         owner_.dispatch_window_event({.type = WindowEvent::Type::FocusOut});
         if (uia_ != nullptr) {
             uia_->synchronize();
@@ -2425,6 +2461,11 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         // (GCS_RESULTSTR); swallow the per-character translation so committed
         // text is not delivered twice.
         return 0;
+    case WM_INPUTLANGCHANGE:
+        // Input language or keyboard layout changed. DefWindowProc
+        // acknowledges the change; the toolkit sees actual input through
+        // the normal key events.
+        break;
     case WM_CHAR:
         dispatch_text_utf16(static_cast<wchar_t>(wparam));
         return 0;
