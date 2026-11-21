@@ -390,6 +390,10 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
                                                        backing:NSBackingStoreBuffered
                                                          defer:NO] autorelease];
                 cover.releasedWhenClosed = NO;
+                // Keep the cover above the key window while its search editor
+                // and toolbar are reinstalled across several generations.
+                cover.level = native.level + 1;
+                cover.hasShadow = NO;
                 cover.opaque = YES;
                 cover.backgroundColor = NSColor.windowBackgroundColor;
             }
@@ -458,8 +462,8 @@ TEST_CASE("macOS toolbar replacement and removal release objects and disconnect 
                     REQUIRE(search.currentEditor != nil);
                 }
                 if (cover) {
-                    [cover setFrame:native.frame display:YES];
-                    [cover orderWindow:NSWindowAbove relativeTo:native.windowNumber];
+                    [cover setFrame:NSInsetRect(native.frame, -32, -32) display:YES];
+                    [cover orderFrontRegardless];
                     const auto deadline =
                         std::chrono::steady_clock::now() + std::chrono::seconds(1);
                     while ((native.occlusionState & NSWindowOcclusionStateVisible) != 0 &&
