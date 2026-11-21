@@ -348,12 +348,9 @@ std::vector<nk::Menu> build_showcase_menus(const ShowcaseProfile& profile) {
                          .modifiers = NativeMenuModifier::Ctrl | NativeMenuModifier::Shift,
                      }),
                  nk::MenuItem::make_separator(),
-                 nk::MenuItem::action("Exit",
-                                      "file.quit",
-                                      NativeMenuShortcut{
-                                          .key = KeyCode::Q,
-                                          .modifiers = NativeMenuModifier::Ctrl,
-                                      }),
+                 // Windows convention: Exit carries no menu shortcut; Alt+F4
+                 // is provided by the system.
+                 nk::MenuItem::action("Exit", "file.quit"),
              }},
             {"Edit",
              {
