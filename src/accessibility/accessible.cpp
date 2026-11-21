@@ -9,6 +9,10 @@ std::string_view accessible_action_name(AccessibleAction action) noexcept {
         return "activate";
     case AccessibleAction::Focus:
         return "focus";
+    case AccessibleAction::Increment:
+        return "increment";
+    case AccessibleAction::Decrement:
+        return "decrement";
     case AccessibleAction::Toggle:
         return "toggle";
     }

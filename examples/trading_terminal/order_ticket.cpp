@@ -35,6 +35,7 @@ OrderTicket::OrderTicket() {
 
     panel->append(nk::Label::create("Quantity"));
     quantity_input_ = nk::SpinButton::create();
+    quantity_input_->ensure_accessible().set_name("Quantity");
     quantity_input_->set_range(1.0, 1000000.0);
     quantity_input_->set_step(1.0);
     quantity_input_->set_precision(0);
@@ -44,6 +45,7 @@ OrderTicket::OrderTicket() {
     price_label_ = nk::Label::create("Limit price  •  USD");
     panel->append(price_label_);
     price_input_ = nk::SpinButton::create();
+    price_input_->ensure_accessible().set_name("Limit price in USD");
     price_input_->set_range(0.01, 1000000.0);
     price_input_->set_step(0.01);
     price_input_->set_precision(2);

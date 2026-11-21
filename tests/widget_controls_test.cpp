@@ -1732,3 +1732,37 @@ TEST_CASE("Text scaling agrees between measurement and snapshots and does not co
     auto field = nk::TextField::create();
     CHECK(field->measure(nk::Constraints::unbounded()).natural_height == Catch::Approx(72.0F));
 }
+
+TEST_CASE("SpinButton edits exact numeric values through platform text input",
+          "[widgets][spin_button]") {
+    auto spin = nk::SpinButton::create();
+    spin->set_range(1, 1000000);
+    spin->set_value(10);
+    spin->grab_focus();
+    auto type = [&](std::string text) {
+        return spin->handle_text_input_event(
+            {.type = nk::TextInputEvent::Type::Commit, .text = std::move(text)});
+    };
+    REQUIRE(type("2"));
+    REQUIRE(type("5"));
+    CHECK(spin->value() == 25);
+    REQUIRE(spin->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Up}));
+    CHECK(spin->value() == 26);
+    spin->set_precision(2);
+    spin->select_all();
+    REQUIRE(type("123.45"));
+    CHECK(spin->value() == Catch::Approx(123.45));
+    spin->on_focus_changed(false);
+    CHECK(spin->text() == "123.45");
+    spin->grab_focus();
+    REQUIRE(type("100000"));
+    REQUIRE(type("1"));
+    REQUIRE(spin->value() == Catch::Approx(123.45));
+    spin->on_focus_changed(false);
+    CHECK(spin->text() == "123.45");
+    spin->grab_focus();
+    REQUIRE(type("7.5"));
+    REQUIRE(
+        spin->handle_key_event({.type = nk::KeyEvent::Type::Press, .key = nk::KeyCode::Escape}));
+    CHECK(spin->value() == Catch::Approx(123.45));
+}

@@ -1,10 +1,13 @@
 #include <algorithm>
+#include <cmath>
+#include <locale>
 #include <nk/platform/events.h>
 #include <nk/platform/key_codes.h>
 #include <nk/render/snapshot_context.h>
 #include <nk/text/font.h>
 #include <nk/widgets/spin_button.h>
 #include <sstream>
+#include <utility>
 
 namespace nk {
 
@@ -20,9 +23,26 @@ FontDescriptor spin_button_font() {
 
 std::string format_value(double value, int precision) {
     std::ostringstream oss;
+    oss.imbue(std::locale::classic());
     oss.precision(precision);
     oss << std::fixed << value;
     return oss.str();
+}
+
+std::optional<double> parse_value(std::string_view text, int precision) {
+    const auto dot = text.find('.');
+    if (text.empty() || text.find_first_not_of("-0123456789.") != std::string_view::npos ||
+        (dot != std::string_view::npos &&
+         (precision == 0 || text.size() - dot - 1 > static_cast<std::size_t>(precision)))) {
+        return std::nullopt;
+    }
+    std::istringstream input{std::string(text)};
+    input.imbue(std::locale::classic());
+    double value = 0.0;
+    if (!(input >> value) || !input.eof() || !std::isfinite(value)) {
+        return std::nullopt;
+    }
+    return value;
 }
 
 } // namespace
@@ -34,6 +54,10 @@ struct SpinButton::Impl {
     double step = 1.0;
     int precision = 0;
     Signal<double> value_changed;
+    ScopedConnection edited;
+    double initial_value = 0.0;
+    bool formatting = false;
+    bool first_click = false;
     int armed_button = 0; // -1 = dec, 0 = none, 1 = inc
 };
 
@@ -41,11 +65,34 @@ std::shared_ptr<SpinButton> SpinButton::create() {
     return std::shared_ptr<SpinButton>(new SpinButton());
 }
 
-SpinButton::SpinButton() : impl_(std::make_unique<Impl>()) {
-    set_focusable(true);
+SpinButton::SpinButton() : TextField("0"), impl_(std::make_unique<Impl>()) {
+    remove_style_class("text-field");
     add_style_class("spin-button");
     auto& accessible = ensure_accessible();
     accessible.set_role(AccessibleRole::SpinButton);
+    accessible.set_name({});
+    impl_->edited = ScopedConnection(on_text_changed().connect([this](std::string_view draft) {
+        if (impl_->formatting) {
+            return;
+        }
+        const auto number = parse_value(draft, impl_->precision);
+        // An incomplete or out-of-range edit must never leave a valid prefix
+        // (for example the first six digits of a large quantity) as the value.
+        const double next =
+            number && *number >= minimum() && *number <= maximum() ? *number : impl_->initial_value;
+        if (next != value()) {
+            impl_->value = next;
+            impl_->value_changed.emit(next);
+        }
+    }));
+    accessible.add_action(AccessibleAction::Increment, [this] {
+        set_value(value() + step());
+        return true;
+    });
+    accessible.add_action(AccessibleAction::Decrement, [this] {
+        set_value(value() - step());
+        return true;
+    });
     accessible.set_value(format_value(impl_->value, impl_->precision));
     accessible.add_action(AccessibleAction::Focus, [this]() {
         grab_focus();
@@ -61,11 +108,14 @@ double SpinButton::value() const {
 
 void SpinButton::set_value(double val) {
     val = std::clamp(val, impl_->min_val, impl_->max_val);
-    if (impl_->value != val) {
-        impl_->value = val;
-        ensure_accessible().set_value(format_value(impl_->value, impl_->precision));
-        queue_redraw();
-        impl_->value_changed.emit(impl_->value);
+    const bool changed = impl_->value != val;
+    impl_->value = val;
+    impl_->initial_value = val;
+    impl_->formatting = true;
+    set_text(format_value(val, impl_->precision));
+    impl_->formatting = false;
+    if (changed) {
+        impl_->value_changed.emit(val);
     }
 }
 
@@ -81,6 +131,7 @@ void SpinButton::set_range(double min, double max) {
     impl_->min_val = min;
     impl_->max_val = max;
     set_value(impl_->value);
+    queue_layout();
 }
 
 double SpinButton::step() const {
@@ -96,8 +147,9 @@ int SpinButton::precision() const {
 }
 
 void SpinButton::set_precision(int digits) {
-    impl_->precision = digits;
-    ensure_accessible().set_value(format_value(impl_->value, impl_->precision));
+    impl_->precision = std::max(0, digits);
+    set_value(value());
+    queue_layout();
     queue_redraw();
 }
 
@@ -106,18 +158,22 @@ Signal<double>& SpinButton::on_value_changed() {
 }
 
 SizeRequest SpinButton::measure(const Constraints& /*constraints*/) const {
-    const float w = theme_number("min-width", 120.0F);
+    const float digits =
+        std::max(measure_text(format_value(minimum(), precision()), spin_button_font()).width,
+                 measure_text(format_value(maximum(), precision()), spin_button_font()).width);
+    const float w = std::max(theme_number("min-width", 120.0F),
+                             2 * theme_number("button-width", 28.0F) + digits + 16.0F);
     const float h = theme_number("min-height", 36.0F);
     return {w, h, w, h};
 }
 
 bool SpinButton::handle_mouse_event(const MouseEvent& event) {
     if (event.button != 1) {
-        return false;
+        return TextField::handle_mouse_event(event);
     }
 
     const auto a = allocation();
-    const float button_width = theme_number("button-width", a.width / 3.0F);
+    const float button_width = std::min(a.width / 3.0F, theme_number("button-width", 28.0F));
     const auto point = Point{event.x, event.y};
 
     auto zone_at = [&](Point pt) -> int {
@@ -140,6 +196,10 @@ bool SpinButton::handle_mouse_event(const MouseEvent& event) {
             return false;
         }
         impl_->armed_button = zone;
+        const bool keep_selection = std::exchange(impl_->first_click, false);
+        if (zone == 0 && !keep_selection && has_flag(state_flags(), StateFlags::Focused)) {
+            return TextField::handle_mouse_event(event);
+        }
         grab_focus();
         queue_redraw();
         return true;
@@ -157,7 +217,7 @@ bool SpinButton::handle_mouse_event(const MouseEvent& event) {
             }
             return true;
         }
-        return a.contains(point);
+        return TextField::handle_mouse_event(event) || a.contains(point);
     }
     case MouseEvent::Type::Move:
     case MouseEvent::Type::Enter:
@@ -166,7 +226,7 @@ bool SpinButton::handle_mouse_event(const MouseEvent& event) {
     case MouseEvent::Type::DragStart:
     case MouseEvent::Type::DragUpdate:
     case MouseEvent::Type::DragEnd:
-        return false;
+        return TextField::handle_mouse_event(event);
     }
 
     return false;
@@ -177,24 +237,66 @@ bool SpinButton::handle_key_event(const KeyEvent& event) {
         return false;
     }
 
-    switch (event.key) {
-    case KeyCode::Up:
-    case KeyCode::Right:
-        set_value(impl_->value + impl_->step);
-        return true;
-    case KeyCode::Down:
-    case KeyCode::Left:
-        set_value(impl_->value - impl_->step);
-        return true;
-    case KeyCode::Home:
-        set_value(impl_->min_val);
-        return true;
-    case KeyCode::End:
-        set_value(impl_->max_val);
-        return true;
-    default:
-        return false;
+    // Keep navigation shortcuts when selecting a value. A caret or partial
+    // selection uses the normal text-editing keys.
+    const bool navigation = event.key == KeyCode::Home || event.key == KeyCode::End ||
+                            event.key == KeyCode::Left || event.key == KeyCode::Right;
+    const bool whole_value =
+        has_selection() && selection_end() - selection_start() == text().size();
+    if (navigation && (event.modifiers != Modifiers::None ||
+                       (has_flag(state_flags(), StateFlags::Focused) && !whole_value))) {
+        return TextField::handle_key_event(event);
     }
+    switch (event.key) {
+    case KeyCode::Home:
+        set_value(minimum());
+        break;
+    case KeyCode::End:
+        set_value(maximum());
+        break;
+    case KeyCode::Right:
+    case KeyCode::Up:
+        set_value(value() + step());
+        break;
+    case KeyCode::Left:
+    case KeyCode::Down:
+        set_value(value() - step());
+        break;
+    case KeyCode::Escape:
+        if (has_preedit()) {
+            return TextField::handle_key_event(event);
+        }
+        set_value(impl_->initial_value);
+        break;
+    case KeyCode::Return:
+        if (!has_preedit()) {
+            set_value(value());
+            select_all();
+        }
+        return TextField::handle_key_event(event);
+    default:
+        return TextField::handle_key_event(event);
+    }
+    select_all();
+    return true;
+}
+
+void SpinButton::on_focus_changed(bool focused) {
+    TextField::on_focus_changed(focused);
+    if (focused) {
+        impl_->initial_value = value();
+        impl_->first_click = has_flag(state_flags(), StateFlags::Pressed);
+        select_all();
+    } else {
+        set_value(value());
+    }
+}
+
+Rect SpinButton::text_rect() const {
+    const auto body = inner_body_rect();
+    const float side =
+        std::min(allocation().width / 3.0F, theme_number("button-width", 28.0F)) + 4.0F;
+    return {body.x + side, body.y, std::max(0.0F, body.width - 2 * side), body.height};
 }
 
 CursorShape SpinButton::cursor_shape() const {
@@ -204,7 +306,7 @@ CursorShape SpinButton::cursor_shape() const {
 void SpinButton::snapshot(SnapshotContext& ctx) const {
     const auto a = allocation();
     const float corner_radius = theme_number("corner-radius", 10.0F);
-    const float button_width = theme_number("button-width", a.width / 3.0F);
+    const float button_width = std::min(a.width / 3.0F, theme_number("button-width", 28.0F));
     auto body = a;
 
     if (has_flag(state_flags(), StateFlags::Focused)) {
@@ -222,7 +324,7 @@ void SpinButton::snapshot(SnapshotContext& ctx) const {
     const auto border_color = theme_color("border-color", Color{0.78F, 0.8F, 0.84F, 1.0F});
     const auto button_bg = theme_color("button-background", Color{0.94F, 0.95F, 0.97F, 1.0F});
     const auto armed_bg = theme_color("armed-background", Color{0.88F, 0.9F, 0.93F, 1.0F});
-    const auto text_color = theme_color("text-color");
+
     const auto button_text_color =
         theme_color("button-text-color", Color{0.25F, 0.27F, 0.3F, 1.0F});
 
@@ -266,16 +368,7 @@ void SpinButton::snapshot(SnapshotContext& ctx) const {
         ctx.add_text({text_x, text_y}, "+", button_text_color, font);
     }
 
-    // Value text centered
-    {
-        const auto value_str = format_value(impl_->value, impl_->precision);
-        const auto measured = measure_text(value_str, font);
-        const float center_start = body.x + button_width;
-        const float center_width = std::max(0.0F, body.width - button_width * 2.0F);
-        const float text_x = center_start + std::max(0.0F, (center_width - measured.width) * 0.5F);
-        const float text_y = body.y + std::max(0.0F, (body.height - measured.height) * 0.5F);
-        ctx.add_text({text_x, text_y}, value_str, text_color, font);
-    }
+    snapshot_text(ctx);
 }
 
 } // namespace nk

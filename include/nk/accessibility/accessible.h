@@ -18,6 +18,8 @@ enum class AccessibleAction : uint8_t {
     Activate,
     Focus,
     Toggle,
+    Increment,
+    Decrement,
 };
 
 [[nodiscard]] std::string_view accessible_action_name(AccessibleAction action) noexcept;

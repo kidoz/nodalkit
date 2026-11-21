@@ -28,6 +28,8 @@
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
+#include <nk/widgets/spin_button.h>
+#include <nk/widgets/tab_bar.h>
 #include <nk/widgets/text_field.h>
 #import <objc/runtime.h>
 #include <string>
@@ -1030,5 +1032,54 @@ TEST_CASE("The real showcase palette Quit command exits the application",
         [timer invalidate];
         CHECK(activated);
         CHECK(result == 0);
+    }
+}
+
+TEST_CASE("macOS exposes individual tabs and named numeric steppers", "[macos][accessibility]") {
+    @autoreleasepool {
+        nk::Application app(0, nullptr);
+        nk::Window window({.title = "Accessible controls"});
+        auto tabs = nk::TabBar::create();
+        tabs->append_tab("Orders");
+        tabs->append_tab("Positions");
+        auto quantity = nk::SpinButton::create();
+        quantity->ensure_accessible().set_name("Quantity");
+        tabs->set_tab_page(0, quantity);
+        window.set_child(tabs);
+        window.present();
+        settle(app);
+        id group = find_element(
+            [root_element(window) accessibilityChildren], NSAccessibilityTabGroupRole, nil);
+        REQUIRE(group != nil);
+        CHECK([[group accessibilityValue] isEqualToString:@"Orders"]);
+        id orders =
+            find_element([group accessibilityChildren], NSAccessibilityRadioButtonRole, @"Orders");
+        id positions = find_element(
+            [group accessibilityChildren], NSAccessibilityRadioButtonRole, @"Positions");
+        REQUIRE(orders != nil);
+        REQUIRE(positions != nil);
+        CHECK([orders isAccessibilitySelected]);
+        CHECK_FALSE([positions isAccessibilitySelected]);
+        id stepper = find_element(
+            [group accessibilityChildren], NSAccessibilityIncrementorRole, @"Quantity");
+        REQUIRE(stepper != nil);
+        REQUIRE([stepper accessibilityPerformIncrement]);
+        CHECK(quantity->value() == 1);
+        REQUIRE([stepper accessibilityPerformDecrement]);
+        CHECK(quantity->value() == 0);
+        REQUIRE([positions accessibilityPerformPress]);
+        CHECK([[group accessibilityValue] isEqualToString:@"Positions"]);
+        CHECK([positions isAccessibilitySelected]);
+        CHECK_FALSE([orders isAccessibilitySelected]);
+        tabs->insert_tab(0, "New");
+        REQUIRE([orders accessibilityPerformPress]);
+        CHECK(tabs->selected_index() == 1);
+        tabs->set_tab_label(1, "Working orders");
+        CHECK([[group accessibilityValue] isEqualToString:@"Working orders"]);
+        tabs->remove_tab(1);
+        CHECK_FALSE([orders accessibilityPerformPress]);
+        CHECK([[group accessibilityValue] isEqualToString:@"Positions"]);
+        tabs->clear_tabs();
+        CHECK([group accessibilityValue] == nil);
     }
 }

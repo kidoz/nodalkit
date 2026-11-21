@@ -100,6 +100,7 @@
 #include <nk/widgets/search_bar.h>
 #include <nk/widgets/segmented_control.h>
 #include <nk/widgets/shortcut_label.h>
+#include <nk/widgets/spin_button.h>
 #include <nk/widgets/split_button.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/status_page.h>
@@ -1590,6 +1591,7 @@ void force_symbol_references() {
         &nk::SegmentedControl::cursor_shape);
     (void)static_cast<void (nk::SegmentedControl::*)(bool)>(
         &nk::SegmentedControl::on_focus_changed);
+    (void)&nk::SpinButton::on_focus_changed;
     (void)&nk::TabBar::create;
     (void)static_cast<void (nk::TabBar::*)(std::string)>(&nk::TabBar::append_tab);
     (void)static_cast<void (nk::TabBar::*)(std::size_t, std::string)>(&nk::TabBar::insert_tab);

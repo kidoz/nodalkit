@@ -1430,8 +1430,9 @@ static NSString* macos_accessibility_role(const nk::detail::AccessibleNodeInfo& 
     case Role::ScrollBar:
         return NSAccessibilityScrollBarRole;
     case Role::Slider:
-    case Role::SpinButton:
         return NSAccessibilitySliderRole;
+    case Role::SpinButton:
+        return NSAccessibilityIncrementorRole;
     case Role::TabList:
         return NSAccessibilityTabGroupRole;
     case Role::TextInput:
@@ -1651,7 +1652,26 @@ static std::optional<double> accessibility_number(const std::string& text) {
     return performed ? YES : NO;
 }
 
+- (BOOL)accessibilityPerformIncrement {
+    auto* tree = [self tree];
+    return tree != nullptr && tree->perform(node_, nk::AccessibleAction::Increment);
+}
+
+- (BOOL)accessibilityPerformDecrement {
+    auto* tree = [self tree];
+    return tree != nullptr && tree->perform(node_, nk::AccessibleAction::Decrement);
+}
+
 - (BOOL)isAccessibilitySelectorAllowed:(SEL)selector {
+    if (selector == @selector(accessibilityPerformIncrement) ||
+        selector == @selector(accessibilityPerformDecrement)) {
+        const auto info = [self info];
+        const auto action = selector == @selector(accessibilityPerformIncrement)
+                                ? nk::AccessibleAction::Increment
+                                : nk::AccessibleAction::Decrement;
+        return info && info->enabled &&
+               std::ranges::find(info->actions, action) != info->actions.end();
+    }
     if (selector == @selector(accessibilityPerformPress)) {
         const auto info = [self info];
         return info.has_value() && info->enabled &&

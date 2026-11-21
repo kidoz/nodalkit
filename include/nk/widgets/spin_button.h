@@ -5,12 +5,14 @@
 
 #include <memory>
 #include <nk/foundation/signal.h>
-#include <nk/ui_core/widget.h>
+#include <nk/widgets/text_field.h>
 
 namespace nk {
 
 /// A numeric entry field with increment and decrement buttons.
-class SpinButton : public Widget {
+/// Type a value directly or use the arrows to step. Return or loss of focus
+/// restores formatted text. Escape discards an unfinished edit.
+class SpinButton : public TextField {
 public:
     [[nodiscard]] static std::shared_ptr<SpinButton> create();
     ~SpinButton() override;
@@ -36,10 +38,12 @@ public:
     bool handle_mouse_event(const MouseEvent& event) override;
     bool handle_key_event(const KeyEvent& event) override;
     [[nodiscard]] CursorShape cursor_shape() const override;
+    void on_focus_changed(bool focused) override;
 
 protected:
     SpinButton();
     void snapshot(SnapshotContext& ctx) const override;
+    [[nodiscard]] Rect text_rect() const override;
 
 private:
     struct Impl;
