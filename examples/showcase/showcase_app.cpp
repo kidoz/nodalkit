@@ -714,7 +714,7 @@ int run_showcase(int argc, char** argv) {
             (void)about_dialog->on_link_activated().connect([&](std::string_view url) {
                 // Opening a browser is the application's call, not the toolkit's.
                 status_bar->set_segment(0, "Link: " + std::string(url));
-                show_linux_toast("Copied link to the status bar");
+                show_linux_toast("Link shown in the status bar");
             });
         }
         about_dialog->present(window);
