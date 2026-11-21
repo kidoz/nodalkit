@@ -159,6 +159,6 @@ through NSAccessibility elements below the window's content view. Both expose
 one element per widget with a role. While a
 modal dialog is open, macOS exposes only that dialog, and disabled or covered
 controls reject accessibility actions. Windows exposes it through a UI
-Automation provider: the fragment tree, core properties, and
-Invoke/Toggle/Value/RangeValue patterns, with selection patterns, event
-raising, and the Text pattern not yet available.
+Automation provider: the fragment tree, core properties, patterns, and event
+raising mirror the shared model, with the remaining gaps listed in the
+[Windows support matrix](windows-support-matrix.md).
