@@ -109,12 +109,6 @@ SAFEARRAY* rect_safearray(const UiaRect& rect) {
            role == AccessibleRole::ToggleButton;
 }
 
-/// Percent-bearing roles whose string value maps onto a 0..100 read-only
-/// range, pending numeric min/max support in the accessibility model.
-[[nodiscard]] bool is_percent_range_role(AccessibleRole role) {
-    return role == AccessibleRole::ProgressBar || role == AccessibleRole::Meter;
-}
-
 class UiaFragment;
 
 /// Liveness token shared by the bridge, the fragments, and the pattern
@@ -371,10 +365,13 @@ public:
             return E_POINTER;
         }
         const auto info = state_.site->tree->info(state_.id);
-        if (!state_.live() || !info.has_value()) {
+        if (!state_.live() || !info.has_value() || !info->numeric_range.has_value()) {
             return UIA_E_ELEMENTNOTAVAILABLE;
         }
-        *out = std::clamp(parse_accessible_number(info->value).value_or(0.0), 0.0, 100.0);
+        const auto& range = *info->numeric_range;
+        *out = std::clamp(parse_accessible_number(info->value).value_or(range.minimum),
+                          range.minimum,
+                          range.maximum);
         return S_OK;
     }
 
@@ -382,7 +379,12 @@ public:
         if (out == nullptr) {
             return E_POINTER;
         }
-        *out = TRUE;
+        const auto info = state_.site->tree->info(state_.id);
+        if (!state_.live() || !info.has_value()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        // Read-only indicators (progress, meters) install no setter.
+        *out = info->numeric_settable ? FALSE : TRUE;
         return S_OK;
     }
 
@@ -390,7 +392,11 @@ public:
         if (out == nullptr) {
             return E_POINTER;
         }
-        *out = 100.0;
+        const auto info = state_.site->tree->info(state_.id);
+        if (!state_.live() || !info.has_value() || !info->numeric_range.has_value()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        *out = info->numeric_range->maximum;
         return S_OK;
     }
 
@@ -398,7 +404,11 @@ public:
         if (out == nullptr) {
             return E_POINTER;
         }
-        *out = 0.0;
+        const auto info = state_.site->tree->info(state_.id);
+        if (!state_.live() || !info.has_value() || !info->numeric_range.has_value()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        *out = info->numeric_range->minimum;
         return S_OK;
     }
 
@@ -406,7 +416,7 @@ public:
         if (out == nullptr) {
             return E_POINTER;
         }
-        *out = 0.0; // read-only range: no changes
+        *out = 0.0; // UIA has no required large-change contract here
         return S_OK;
     }
 
@@ -414,12 +424,20 @@ public:
         if (out == nullptr) {
             return E_POINTER;
         }
-        *out = 0.0;
+        const auto info = state_.site->tree->info(state_.id);
+        if (!state_.live() || !info.has_value() || !info->numeric_range.has_value()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        *out = info->numeric_range->step;
         return S_OK;
     }
 
-    HRESULT STDMETHODCALLTYPE SetValue(double /*value*/) override {
-        return state_.live() ? UIA_E_INVALIDOPERATION : UIA_E_ELEMENTNOTAVAILABLE;
+    HRESULT STDMETHODCALLTYPE SetValue(double value) override {
+        if (!state_.live()) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        const bool changed = state_.site->tree->set_numeric_value(state_.id, value);
+        return changed ? S_OK : UIA_E_INVALIDOPERATION;
     }
 
 private:
@@ -501,7 +519,7 @@ public:
             }
             break;
         case UIA_RangeValuePatternId:
-            if (is_percent_range_role(info->role) && parse_accessible_number(info->value)) {
+            if (info->numeric_range.has_value()) {
                 *out = new UiaRangeValuePattern(site_, id_, alive_);
             }
             break;

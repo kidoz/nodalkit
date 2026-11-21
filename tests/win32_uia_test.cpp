@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <cstring>
+#include <iomanip>
 #include <nk/platform/application.h>
 #include <nk/platform/window.h>
 #include <nk/platform/windows_interop.h>
@@ -23,6 +24,9 @@
 #include <nk/widgets/button.h>
 #include <nk/widgets/check_box.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/progress_bar.h>
+#include <nk/widgets/slider.h>
+#include <nk/widgets/spin_button.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -64,11 +68,29 @@ public:
         ComPtr<IUIAutomation> automation;
         const HRESULT hr = CoCreateInstance(
             CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation, &automation);
-        REQUIRE(SUCCEEDED(hr));
+        if (FAILED(hr)) {
+            FAIL("CoCreateInstance(CUIAutomation) failed: " << std::hex << hr);
+        }
         automation_ = std::move(automation);
     }
 
     [[nodiscard]] IUIAutomation* get() const { return automation_.Get(); }
+
+    /// Find a descendant by control type, searching from the window element.
+    [[nodiscard]] ComPtr<IUIAutomationElement> find_by_control_type(IUIAutomationElement* scope,
+                                                                    CONTROLTYPEID type) {
+        VARIANT condition_value{};
+        condition_value.vt = VT_I4;
+        condition_value.lVal = static_cast<LONG>(type);
+        ComPtr<IUIAutomationCondition> condition;
+        ComPtr<IUIAutomationElement> found;
+        if (SUCCEEDED(automation_->CreatePropertyCondition(
+                UIA_ControlTypePropertyId, condition_value, &condition))) {
+            (void)scope->FindFirst(TreeScope_Descendants, condition.Get(), &found);
+        }
+        VariantClear(&condition_value);
+        return found;
+    }
 
     /// Find a descendant by name, searching from the window element.
     [[nodiscard]] ComPtr<IUIAutomationElement> find_by_name(IUIAutomationElement* scope,
@@ -330,6 +352,93 @@ TEST_CASE("Win32 UIA geometry and automation ids match the model", "[windows][ui
     CHECK(uia.bool_property(button_element.Get(), UIA_IsEnabledPropertyId) == model->enabled);
     CHECK(uia.bool_property(button_element.Get(), UIA_IsKeyboardFocusablePropertyId) ==
           model->focusable);
+}
+
+TEST_CASE("Win32 UIA exposes real numeric ranges", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA range probe", .width = 360, .height = 280});
+    auto root = probe_box();
+    auto slider = nk::Slider::create();
+    slider->set_range(0.0, 100.0);
+    slider->set_step(5.0);
+    slider->set_value(40.0);
+    auto progress = nk::ProgressBar::create();
+    progress->set_fraction(0.25F);
+    auto spin = nk::SpinButton::create();
+    spin->set_range(0.0, 10.0);
+    spin->set_step(2.0);
+    spin->set_value(2.0);
+    root->append(slider);
+    root->append(progress);
+    root->append(spin);
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(nk::window_hwnd(window), &element));
+
+    SECTION("slider range reads and writes") {
+        auto slider_element = uia.find_by_control_type(element.Get(), UIA_SliderControlTypeId);
+        REQUIRE(slider_element != nullptr);
+        ComPtr<IUnknown> unknown;
+        require_ok(
+            slider_element->GetCurrentPattern(UIA_RangeValuePatternId, unknown.GetAddressOf()));
+        ComPtr<IUIAutomationRangeValuePattern> range;
+        require_ok(unknown.As(&range));
+        double value = -1.0;
+        double minimum = -1.0;
+        double maximum = -1.0;
+        double small_change = -1.0;
+        BOOL read_only = TRUE;
+        require_ok(range->get_CurrentValue(&value));
+        require_ok(range->get_CurrentMinimum(&minimum));
+        require_ok(range->get_CurrentMaximum(&maximum));
+        require_ok(range->get_CurrentSmallChange(&small_change));
+        require_ok(range->get_CurrentIsReadOnly(&read_only));
+        CHECK(value == 40.0);
+        CHECK(minimum == 0.0);
+        CHECK(maximum == 100.0);
+        CHECK(small_change == 5.0);
+        CHECK(read_only == FALSE);
+
+        require_ok(range->SetValue(60.0));
+        CHECK(slider->value() == 60.0); // on the configured step grid
+    }
+
+    SECTION("progress is a read-only percentage range") {
+        auto progress_element =
+            uia.find_by_control_type(element.Get(), UIA_ProgressBarControlTypeId);
+        REQUIRE(progress_element != nullptr);
+        ComPtr<IUnknown> unknown;
+        require_ok(
+            progress_element->GetCurrentPattern(UIA_RangeValuePatternId, unknown.GetAddressOf()));
+        ComPtr<IUIAutomationRangeValuePattern> range;
+        require_ok(unknown.As(&range));
+        double value = -1.0;
+        BOOL read_only = FALSE;
+        require_ok(range->get_CurrentValue(&value));
+        require_ok(range->get_CurrentIsReadOnly(&read_only));
+        CHECK(value == 25.0);
+        CHECK(read_only == TRUE);
+        CHECK(FAILED(range->SetValue(90.0)));
+    }
+
+    SECTION("spin button accepts programmatic values") {
+        auto spin_element = uia.find_by_control_type(element.Get(), UIA_SpinnerControlTypeId);
+        REQUIRE(spin_element != nullptr);
+        ComPtr<IUnknown> unknown;
+        require_ok(
+            spin_element->GetCurrentPattern(UIA_RangeValuePatternId, unknown.GetAddressOf()));
+        ComPtr<IUIAutomationRangeValuePattern> range;
+        require_ok(unknown.As(&range));
+        require_ok(range->SetValue(4.0));
+        CHECK(spin->value() == 4.0);
+        // Out-of-range requests clamp to the range, not past it.
+        require_ok(range->SetValue(99.0));
+        CHECK(spin->value() == 10.0);
+    }
 }
 
 TEST_CASE("Win32 UIA SetFocus moves toolkit focus", "[windows][uia]") {
