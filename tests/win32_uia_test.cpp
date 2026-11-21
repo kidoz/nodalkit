@@ -29,6 +29,7 @@
 #include <nk/widgets/slider.h>
 #include <nk/widgets/spin_button.h>
 #include <nk/widgets/tab_bar.h>
+#include <nk/widgets/text_field.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -530,6 +531,34 @@ TEST_CASE("Win32 UIA combo boxes expand and collapse", "[windows][uia]") {
     require_ok(expand->Collapse());
     require_ok(expand->get_CurrentExpandCollapseState(&state));
     CHECK(state == ExpandCollapseState_Collapsed);
+}
+
+TEST_CASE("Win32 UIA marks secure editors", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA secure probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto plain = nk::TextField::create();
+    plain->set_placeholder("Plain field");
+    auto secret = nk::TextField::create();
+    secret->set_placeholder("Password");
+    secret->set_secure_text_entry(true);
+    root->append(plain);
+    root->append(secret);
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(nk::window_hwnd(window), &element));
+
+    auto plain_element = uia.find_by_name(element.Get(), "Plain field");
+    REQUIRE(plain_element != nullptr);
+    CHECK_FALSE(uia.bool_property(plain_element.Get(), UIA_IsPasswordPropertyId));
+
+    auto secret_element = uia.find_by_name(element.Get(), "Password");
+    REQUIRE(secret_element != nullptr);
+    CHECK(uia.bool_property(secret_element.Get(), UIA_IsPasswordPropertyId));
 }
 
 TEST_CASE("Win32 UIA SetFocus moves toolkit focus", "[windows][uia]") {

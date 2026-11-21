@@ -895,9 +895,7 @@ public:
             set_i4(variant.get(), static_cast<int>(GetCurrentProcessId()));
             break;
         case UIA_IsPasswordPropertyId:
-            // Not exposed until the accessibility model carries editor
-            // security state.
-            set_bool(variant.get(), FALSE);
+            set_bool(variant.get(), info->secure ? TRUE : FALSE);
             break;
         default:
             break; // VT_EMPTY: UIA falls back to its defaults for this element

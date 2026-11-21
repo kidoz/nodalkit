@@ -42,6 +42,8 @@ struct AccessibleNodeInfo {
     // spin buttons); settable marks ranges accepting programmatic values.
     std::optional<AccessibleRange> numeric_range;
     bool numeric_settable = false;
+    // The element edits secure (password) input.
+    bool secure = false;
 };
 
 // Platform-neutral structure behind native accessibility bridges. UI thread only.
