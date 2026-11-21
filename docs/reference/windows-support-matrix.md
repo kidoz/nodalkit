@@ -53,7 +53,7 @@ GPU coverage, software fallback limits, and validation commands.
 | Text shaping | ✅ | DirectWrite, with a GDI fallback shaper. |
 | Native window handle | ✅ | `HWND` / `HINSTANCE` via [`windows_interop.h`](../../include/nk/platform/windows_interop.h). See the [Native handle contract](native-handles.md). |
 | Taskbar identity | ✅ | The first window sets the process AppUserModelID from `WindowConfig::app_id` (seeded from `Application::app_id()`), so taskbar grouping and jump lists are stable. |
-| Accessibility | ❌ | No UI Automation provider yet. The accessibility model (`nk/accessibility`) is populated, but only the Linux AT-SPI and macOS NSAccessibility bridges are wired. This is the largest remaining gap for Windows parity. |
+| Accessibility | 🧪 | UI Automation provider: fragment tree over the shared accessibility model with WM_GETOBJECT wiring, navigation, core properties (name/control type/automation id/bounds/help text/focus/enabled), and Invoke/Toggle/Value/RangeValue patterns, verified through the IUIAutomation client API in `tests/win32_uia_test.cpp`. Not yet implemented: selection/expand/window patterns, event raising, the Text pattern, and screen-reader validation. |
 | Spell checking | ✅ | Windows Spell Checking API (`ISpellCheckerFactory` / `ISpellChecker`) in `src/platform/windows/win32_spell_checker.cpp`. Lazily picks the first supported language; returns empty results (no crash) when no spell-check language is installed. Returned `SpellCheckRange` offsets are UTF-8 bytes. |
 
 ## Release gating

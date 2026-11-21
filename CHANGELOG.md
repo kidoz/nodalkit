@@ -27,15 +27,16 @@ tabs to platform accessibility.
     Win32 native integration now covers menus with working keyboard
     accelerators, IMM32 IME, clipboard, dialogs, drag & drop (both
     directions), high-DPI, dark-mode chrome, and system preference
-    observation. No UI Automation provider yet, and ARM64, MSVC, and MinGW
-    remain unsupported; see the Windows support matrix.
+    observation. A UI Automation provider exposes the accessibility tree;
+    ARM64, MSVC, and MinGW remain unsupported; see the Windows support matrix.
 *   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
 *   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
     earlier in correctness confidence than the software render paths.
-*   **Accessibility:** Linux AT-SPI and macOS NSAccessibility ship; Windows
-    still has no UI Automation provider.
+*   **Accessibility:** Linux AT-SPI, macOS NSAccessibility, and Windows UI
+    Automation ship.
 
 ### Added
+*   **Windows UI Automation:** the Win32 backend now exposes the shared accessibility tree to UI Automation clients through a server-side provider: `WM_GETOBJECT` wiring with lazy activation, fragment navigation, core properties (name, control type, automation id, help text, bounds in physical screen pixels, focus and enablement), and Invoke/Toggle/Value/RangeValue patterns that run toolkit actions directly on the UI thread (`ProviderOptions_UseComThreading` over the existing STA). A new `win32_uia` suite verifies tree shape, control types, patterns, geometry, and focus through the IUIAutomation client API. Selection/expand-collapse patterns, event raising, and the Text pattern are not implemented yet.
 *   **Windows Menu Accelerators:** native menu bars now install a real HACCEL
     table. Menu shortcuts (e.g. Ctrl+O) are translated in the message loop
     before key dispatch, so they work without focus quirks and cannot
