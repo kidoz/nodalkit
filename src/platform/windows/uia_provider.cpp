@@ -1613,6 +1613,12 @@ public:
             }
             break;
         }
+        case UIA_LiveSettingPropertyId:
+            // Status elements (toasts, status bars) announce politely.
+            if (info->role == AccessibleRole::Status) {
+                set_i4(variant.get(), static_cast<int>(LiveSetting::Polite));
+            }
+            break;
         default:
             break; // VT_EMPTY: UIA falls back to its defaults for this element
         }
@@ -2419,6 +2425,11 @@ void Win32UiaBridge::synchronize() {
             if (previous.enabled != next.enabled) {
                 raise_bool_property(
                     provider, UIA_IsEnabledPropertyId, previous.enabled, next.enabled);
+            }
+            if (info->role == AccessibleRole::Status &&
+                (previous.name != next.name || previous.value != next.value)) {
+                // Status elements are live regions: content changes announce.
+                UiaRaiseAutomationEvent(provider, UIA_LiveRegionChangedEventId);
             }
         }
         found->second = std::move(next);

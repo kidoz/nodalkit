@@ -13,6 +13,7 @@
 
 #include "../src/accessibility/accessibility_tree.h"
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
 #include <cstring>
@@ -627,6 +628,51 @@ TEST_CASE("Win32 UIA scrolls elements into view", "[windows][uia]") {
     CHECK(scroll->v_offset() > 0.0F);
 }
 
+namespace {
+
+/// Event handler counting live-region change notifications.
+class LiveRegionHandler final : public IUIAutomationEventHandler {
+public:
+    explicit LiveRegionHandler(std::atomic<int>& changes) : changes_(changes) {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IUIAutomationEventHandler) {
+            *out = static_cast<IUIAutomationEventHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    HRESULT STDMETHODCALLTYPE HandleAutomationEvent(IUIAutomationElement* /*sender*/,
+                                                    EVENTID id) override {
+        if (id == UIA_LiveRegionChangedEventId) {
+            ++changes_;
+        }
+        return S_OK;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    std::atomic<int>& changes_;
+};
+
+} // namespace
+
 TEST_CASE("Win32 UIA exposes editor text through the Text pattern", "[windows][uia]") {
     nk::Application app(0, nullptr);
     nk::Window window({.title = "UIA text probe", .width = 360, .height = 240});
@@ -692,6 +738,53 @@ TEST_CASE("Win32 UIA exposes editor text through the Text pattern", "[windows][u
     require_ok(word_range->GetText(-1, &expanded_text));
     CHECK(narrow(expanded_text != nullptr ? expanded_text : L"") == "World");
     SysFreeString(expanded_text);
+}
+
+TEST_CASE("Win32 UIA announces live region changes for status elements", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA live probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto status = nk::Label::create("Idle");
+    status->ensure_accessible().set_role(nk::AccessibleRole::Status);
+    root->append(status);
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(hwnd, &element));
+    auto status_element = uia.find_by_name(element.Get(), "Idle");
+    REQUIRE(status_element != nullptr);
+
+    // Status elements announce politely.
+    CHECK(uia.int_property(status_element.Get(), UIA_LiveSettingPropertyId) ==
+          static_cast<int>(LiveSetting::Polite));
+
+    std::atomic<int> live_changes{0};
+    auto* handler = new LiveRegionHandler(live_changes);
+    const TreeScope scope = static_cast<TreeScope>(TreeScope_Element | TreeScope_Descendants);
+    require_ok(uia.get()->AddAutomationEventHandler(
+        UIA_LiveRegionChangedEventId, element.Get(), scope, nullptr, handler));
+
+    // First poke populates the diff cache.
+    SendMessageW(hwnd, WM_SETTINGCHANGE, 0, 0);
+    CHECK(live_changes.load() == 0);
+
+    // A status label whose text changes is a live-region change.
+    status->set_text("Syncing");
+    SendMessageW(hwnd, WM_SETTINGCHANGE, 0, 0);
+    bool announced = false;
+    for (int i = 0; i < 300 && !announced; ++i) {
+        Sleep(10);
+        announced = live_changes.load() >= 1;
+    }
+    CHECK(announced);
+
+    uia.get()->RemoveAutomationEventHandler(UIA_LiveRegionChangedEventId, element.Get(), handler);
+    handler->Release();
 }
 
 TEST_CASE("Win32 UIA resolves labelled-by relations", "[windows][uia]") {
