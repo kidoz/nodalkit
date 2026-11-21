@@ -25,6 +25,12 @@ namespace detail {
 /// UIA_*ControlTypeId constants in tests.
 [[nodiscard]] int win32_uia_control_type(AccessibleRole role, std::string_view type_name);
 
+/// Disconnect every UIA provider this process handed out (backend shutdown).
+/// UIA core keeps cross-apartment state alive across OleUninitialize unless
+/// providers are disconnected first, which breaks a later re-initialization;
+/// only one Application exists per process, so process-wide is correct here.
+void win32_uia_disconnect_all_providers();
+
 /// The WM_GETOBJECT object id that identifies a UI Automation request
 /// (the SDK's UiaRootObjectId; mirrored here so this header stays lean).
 constexpr LONG kUiaRootObjectId = -25;

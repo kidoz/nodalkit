@@ -1712,4 +1712,11 @@ void Win32UiaBridge::synchronize() {
     }
 }
 
+void win32_uia_disconnect_all_providers() {
+    // UIA core retains cross-apartment bookkeeping for every provider it has
+    // seen; without an explicit disconnect that state survives OleUninitialize
+    // and poisons the next OleInitialize on the same thread.
+    UiaDisconnectAllProviders();
+}
+
 } // namespace nk::detail

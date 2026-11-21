@@ -2783,6 +2783,9 @@ void Win32Backend::shutdown() {
     impl_->app_menu_handler = {};
     impl_->app_menu_model.clear();
     if (impl_->ole_initialized) {
+        // Drop every UIA provider before tearing down the apartment: UIA core
+        // keeps cross-apartment state alive across OleUninitialize otherwise.
+        detail::win32_uia_disconnect_all_providers();
         OleUninitialize();
         impl_->ole_initialized = false;
     }
