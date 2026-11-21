@@ -39,6 +39,7 @@
 #include <nk/widgets/dialog.h>
 #include <nk/widgets/grid_view.h>
 #include <nk/widgets/headerbar.h>
+#include <nk/widgets/label.h>
 #include <nk/widgets/list_view.h>
 #include <nk/widgets/menu_bar.h>
 #include <nk/widgets/navigation_split_view.h>
@@ -720,82 +721,55 @@ int run_showcase(int argc, char** argv) {
     };
 
     auto present_preferences_sheet = [&] {
-        auto dialog = is_linux_wayland
-                          ? nk::Dialog::create("System Integration")
-                          : nk::Dialog::create(
-                                "Preferences",
-                                "Review the current showcase shell configuration before applying "
-                                "the change.");
+        auto dialog = nk::Dialog::create(is_linux_wayland ? "System Integration" : "Preferences");
         dialog->set_presentation_style(nk::DialogPresentationStyle::Sheet);
         dialog->set_minimum_panel_width(is_linux_wayland ? 620.0F : 460.0F);
+        const auto& preferences = app.system_preferences();
+        auto page =
+            nk::PreferencesPage::create(is_linux_wayland ? "System Integration" : "System Settings",
+                                        "Desktop settings currently used by this showcase.");
 
-        if (is_linux_wayland) {
-            const auto& preferences = app.system_preferences();
-            auto page = nk::PreferencesPage::create(
-                "System Integration", "Desktop settings currently used by this showcase.");
+        auto appearance = nk::PreferencesGroup::create("Appearance");
+        auto color_scheme = nk::PreferencesRow::create(
+            "Color Scheme", "Follows the desktop light or dark appearance preference.");
+        color_scheme->set_suffix(nk::Label::create(
+            preferences.color_scheme == nk::ColorScheme::Dark ? "Dark" : "Light"));
+        appearance->add(color_scheme);
 
-            auto appearance = nk::PreferencesGroup::create("Appearance");
-            auto color_scheme = nk::PreferencesRow::create(
-                "Color Scheme", "Follows the GNOME light or dark appearance preference.");
-            color_scheme->set_suffix(ValueText::create(
-                preferences.color_scheme == nk::ColorScheme::Dark ? "Dark" : "Light"));
-            appearance->add(color_scheme);
+        auto accent = nk::PreferencesRow::create(
+            "Accent Color", "Uses the desktop accent without a showcase override.");
+        accent->set_suffix(
+            nk::Label::create(preferences.accent_color.has_value() ? "System" : "Fallback"));
+        appearance->add(accent);
 
-            auto accent = nk::PreferencesRow::create(
-                "Accent Color", "Uses the desktop accent without a showcase override.");
-            accent->set_suffix(
-                ValueText::create(preferences.accent_color.has_value() ? "System" : "Fallback"));
-            appearance->add(accent);
+        auto typography = nk::PreferencesGroup::create("Typography & Accessibility");
+        auto text_scale = nk::PreferencesRow::create(
+            "Text Scale", "Scales type and control metrics through the resolved theme.");
+        const auto text_scale_percent =
+            static_cast<int>(std::lround(preferences.text_scale_factor * 100.0F));
+        text_scale->set_suffix(nk::Label::create(std::to_string(text_scale_percent) + "%"));
+        typography->add(text_scale);
 
-            auto typography = nk::PreferencesGroup::create("Typography & Accessibility");
-            auto text_scale = nk::PreferencesRow::create(
-                "Text Scale", "Scales type and control metrics through the resolved theme.");
-            const auto text_scale_percent =
-                static_cast<int>(std::lround(preferences.text_scale_factor * 100.0F));
-            text_scale->set_suffix(ValueText::create(std::to_string(text_scale_percent) + "%"));
-            typography->add(text_scale);
+        auto motion = nk::PreferencesRow::create("Animations",
+                                                 "Respects the desktop reduced-motion preference.");
+        motion->set_suffix(nk::Label::create(
+            preferences.motion == nk::MotionPreference::Reduced ? "Reduced" : "Enabled"));
+        typography->add(motion);
 
-            auto motion = nk::PreferencesRow::create(
-                "Animations", "Respects the desktop reduced-motion preference.");
-            motion->set_suffix(ValueText::create(
-                preferences.motion == nk::MotionPreference::Reduced ? "Reduced" : "Enabled"));
-            typography->add(motion);
+        auto contrast = nk::PreferencesRow::create(
+            "Contrast", "Uses the high-contrast palette when requested by the desktop.");
+        contrast->set_suffix(nk::Label::create(
+            preferences.contrast == nk::ContrastPreference::High ? "High" : "Normal"));
+        typography->add(contrast);
 
-            auto contrast = nk::PreferencesRow::create(
-                "Contrast", "Uses the high-contrast palette when requested by the desktop.");
-            contrast->set_suffix(ValueText::create(
-                preferences.contrast == nk::ContrastPreference::High ? "High" : "Normal"));
-            typography->add(contrast);
-
-            page->add(appearance);
-            page->add(typography);
-            dialog->set_content(page);
-        }
-
-        if (is_linux_wayland) {
-            dialog->add_button("Close", nk::DialogResponse::Accept);
-        } else {
-            dialog->add_button("Later", nk::DialogResponse::Cancel);
-            dialog->add_button("Apply", nk::DialogResponse::Accept);
-        }
-        (void)dialog->on_response().connect([&](nk::DialogResponse response) {
-            if (is_linux_wayland) {
-                runtime_status->set_text("System integration inspected.");
-                runtime_status_detail->set_text("The read-only desktop settings sheet was closed.");
-                return;
-            }
-            if (response == nk::DialogResponse::Accept) {
-                status_bar->set_segment(0, "Sheet: Applied");
-                runtime_status->set_text("Preferences sheet applied.");
-                runtime_status_detail->set_text(
-                    "The top-attached sheet closed after an accepted response.");
-                show_linux_toast("Preferences applied");
-            } else {
-                status_bar->set_segment(0, "Sheet: Deferred");
-                runtime_status->set_text("Preferences sheet deferred.");
-                runtime_status_detail->set_text(
-                    "The sheet was dismissed without applying any changes.");
-            }
+        page->add(appearance);
+        page->add(typography);
+        dialog->set_content(page);
+        dialog->add_button("Close", nk::DialogResponse::Accept);
+        (void)dialog->on_response().connect([&](nk::DialogResponse) {
+            status_bar->set_segment(0, "Settings inspected");
+            runtime_status->set_text("System settings inspected.");
+            runtime_status_detail->set_text("The read-only desktop settings sheet was closed.");
         });
         dialog->present(window);
     };
