@@ -7,6 +7,7 @@
 #include "trading_model.h"
 #include "watchlist_view.h"
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -14,6 +15,7 @@
 #include <iostream>
 #include <memory>
 #include <nk/foundation/types.h>
+#include <nk/layout/breakpoint.h>
 #include <nk/platform/application.h>
 #include <nk/platform/window.h>
 #include <nk/platform/window_inspector.h>
@@ -21,6 +23,7 @@
 #include <nk/widgets/box.h>
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/scroll_area.h>
 #include <nk/widgets/split_view.h>
 #include <nk/widgets/status_bar.h>
 #include <nk/widgets/tab_bar.h>
@@ -30,6 +33,101 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+namespace trading {
+std::shared_ptr<nk::Widget> build_workspace(std::shared_ptr<nk::Widget> watchlist,
+                                            std::shared_ptr<nk::Widget> chart,
+                                            std::shared_ptr<nk::Widget> ticket,
+                                            std::shared_ptr<nk::Widget> orders,
+                                            std::shared_ptr<nk::Widget> positions) {
+    auto ticket_scroll = nk::ScrollArea::create();
+    ticket_scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+    ticket_scroll->set_content(ticket);
+    auto activity = nk::TabBar::create();
+    activity->append_tab("Orders");
+    activity->set_tab_page(0, orders);
+    activity->append_tab("Positions");
+    activity->set_tab_page(1, positions);
+
+    auto center_right = nk::SplitView::create(nk::Orientation::Horizontal);
+    center_right->set_start_child(chart);
+    center_right->set_end_child(ticket_scroll);
+    center_right->set_position(0.70F);
+    center_right->set_min_start_size(460.0F);
+    center_right->set_min_end_size(280.0F);
+
+    auto workspace = nk::SplitView::create(nk::Orientation::Horizontal);
+    workspace->set_start_child(watchlist);
+    workspace->set_end_child(center_right);
+    workspace->set_position(0.29F);
+    workspace->set_min_start_size(330.0F);
+    workspace->set_min_end_size(740.0F);
+
+    auto main_split = nk::SplitView::create(nk::Orientation::Vertical);
+    main_split->set_start_child(workspace);
+    main_split->set_end_child(activity);
+    main_split->set_position(0.68F);
+    main_split->set_min_start_size(390.0F);
+    main_split->set_min_end_size(180.0F);
+
+    auto compact = nk::TabBar::create();
+    const std::array<std::shared_ptr<nk::Widget>, 5> pages{
+        watchlist, chart, ticket_scroll, orders, positions};
+    for (const auto* label : {"Watchlist", "Chart", "Order ticket", "Orders", "Positions"}) {
+        compact->append_tab(label);
+    }
+    compact->set_selected_index(2);
+    auto bin = nk::BreakpointBin::create();
+    bin->set_child(main_split);
+    // The three side-by-side panes require 330, 460, and 280 points plus dividers.
+    auto narrow = nk::Breakpoint::create(
+        {.min_width = {}, .max_width = 1086.0F, .min_height = {}, .max_height = {}});
+    bin->add_breakpoint(narrow);
+    (void)narrow->on_active_changed().connect([weak_bin = std::weak_ptr{bin},
+                                               pages,
+                                               compact,
+                                               main_split,
+                                               workspace,
+                                               center_right,
+                                               activity](bool active) {
+        auto host = weak_bin.lock();
+        if (!host) {
+            return;
+        }
+        if (active) {
+            if (compact->selected_index() >= 3) {
+                compact->set_selected_index(3 + activity->selected_index());
+            }
+            workspace->set_start_child(nullptr);
+            center_right->set_start_child(nullptr);
+            center_right->set_end_child(nullptr);
+            activity->set_tab_page(0, nullptr);
+            activity->set_tab_page(1, nullptr);
+            for (std::size_t i = 0; i < pages.size(); ++i) {
+                compact->set_tab_page(i, pages[i]);
+            }
+            host->set_child(compact);
+        } else {
+            for (std::size_t i = 0; i < pages.size(); ++i) {
+                compact->set_tab_page(i, nullptr);
+            }
+            for (const auto& page : pages) {
+                page->set_visible(true);
+            }
+            workspace->set_start_child(pages[0]);
+            center_right->set_start_child(pages[1]);
+            center_right->set_end_child(pages[2]);
+            activity->set_tab_page(0, pages[3]);
+            activity->set_tab_page(1, pages[4]);
+            if (compact->selected_index() >= 3) {
+                activity->set_selected_index(compact->selected_index() - 3);
+            }
+            host->set_child(main_split);
+        }
+    });
+    return bin;
+}
+} // namespace trading
 
 namespace {
 
@@ -117,32 +215,15 @@ private:
         ticket_ = std::make_unique<trading::OrderTicket>();
         orders_ = std::make_unique<trading::OrdersView>(model_);
         positions_ = std::make_unique<trading::PositionsView>(model_);
-        auto activity = build_activity_tabs();
-
-        auto center_right = nk::SplitView::create(nk::Orientation::Horizontal);
-        center_right->set_start_child(chart_panel_->widget());
-        center_right->set_end_child(ticket_->widget());
-        center_right->set_position(0.70F);
-        center_right->set_min_start_size(460.0F);
-        center_right->set_min_end_size(280.0F);
-
-        auto workspace = nk::SplitView::create(nk::Orientation::Horizontal);
-        workspace->set_start_child(watchlist_->widget());
-        workspace->set_end_child(center_right);
-        workspace->set_position(0.29F);
-        workspace->set_min_start_size(330.0F);
-        workspace->set_min_end_size(740.0F);
-
-        auto main_split = nk::SplitView::create(nk::Orientation::Vertical);
-        main_split->set_start_child(workspace);
-        main_split->set_end_child(activity);
-        main_split->set_position(0.68F);
-        main_split->set_min_start_size(390.0F);
-        main_split->set_min_end_size(180.0F);
-        main_split->set_horizontal_size_policy(nk::SizePolicy::Expanding);
-        main_split->set_vertical_size_policy(nk::SizePolicy::Expanding);
-        main_split->set_vertical_stretch(1);
-        root->append(main_split);
+        auto workspace = trading::build_workspace(watchlist_->widget(),
+                                                  chart_panel_->widget(),
+                                                  ticket_->widget(),
+                                                  orders_->widget(),
+                                                  positions_->widget());
+        workspace->set_horizontal_size_policy(nk::SizePolicy::Expanding);
+        workspace->set_vertical_size_policy(nk::SizePolicy::Expanding);
+        workspace->set_vertical_stretch(1);
+        root->append(workspace);
 
         status_bar_ = nk::StatusBar::create();
         status_bar_->set_segments({"SIMULATED DATA", "Feed connected", "Gateway connected"});
@@ -150,7 +231,10 @@ private:
         root->append(status_bar_);
 
         toasts_ = nk::ToastOverlay::create();
-        toasts_->set_child(root);
+        auto scroll = nk::ScrollArea::create();
+        scroll->set_h_scroll_policy(nk::ScrollPolicy::Never);
+        scroll->set_content(root);
+        toasts_->set_child(scroll);
         window_.set_child(toasts_);
 
         connections_.emplace_back(
@@ -165,15 +249,6 @@ private:
             [this](std::size_t index) { select_instrument(index); }));
         connections_.emplace_back(
             orders_->on_cancel_requested().connect([this] { cancel_selected_order(); }));
-    }
-
-    std::shared_ptr<nk::Widget> build_activity_tabs() {
-        auto tabs = nk::TabBar::create();
-        tabs->append_tab("Orders");
-        tabs->set_tab_page(0, orders_->widget());
-        tabs->append_tab("Positions");
-        tabs->set_tab_page(1, positions_->widget());
-        return tabs;
     }
 
     void select_instrument(std::size_t index) {

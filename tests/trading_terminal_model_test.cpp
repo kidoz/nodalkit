@@ -2,6 +2,7 @@
 #include "examples/trading_terminal/order_ticket.h"
 #include "examples/trading_terminal/orders_view.h"
 #include "examples/trading_terminal/trading_model.h"
+#include "examples/trading_terminal/trading_terminal_app.h"
 #include "examples/trading_terminal/watchlist_view.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -17,7 +18,9 @@
 #include <nk/widgets/button.h>
 #include <nk/widgets/data_table.h>
 #include <nk/widgets/label.h>
+#include <nk/widgets/scroll_area.h>
 #include <nk/widgets/spin_button.h>
+#include <nk/widgets/tab_bar.h>
 #include <optional>
 #include <string>
 #include <vector>
@@ -286,4 +289,42 @@ TEST_CASE("Watchlist selection synchronization does not emit recursive requests"
     watchlist.refresh();
     REQUIRE(table->selection_model()->current_row() == 1);
     REQUIRE(requested.size() == 1);
+}
+
+TEST_CASE("Compact terminal keeps order entry and activity reachable after resizing",
+          "[trading_terminal]") {
+    trading::OrderTicket ticket;
+    ticket.set_quantity(25);
+    auto model = std::make_shared<trading::TradingModel>();
+    trading::OrdersView orders(model);
+    auto chart = nk::Label::create("Chart");
+    auto workspace = trading::build_workspace(nk::Label::create("Watchlist"),
+                                              chart,
+                                              ticket.widget(),
+                                              orders.widget(),
+                                              nk::Label::create("Positions"));
+    workspace->allocate({0, 0, 1440, 780});
+    workspace->allocate({0, 0, 734, 465});
+    auto* tabs = find_widget<nk::TabBar>(*workspace);
+    REQUIRE(tabs != nullptr);
+    REQUIRE(tabs->tab_count() == 5);
+    auto* ticket_scroll = dynamic_cast<nk::ScrollArea*>(tabs->tab_page(2));
+    REQUIRE(ticket_scroll != nullptr);
+    REQUIRE(ticket_scroll->content() == ticket.widget().get());
+    auto* buy = find_widget<nk::Button>(*ticket.widget());
+    REQUIRE(buy != nullptr);
+    ticket_scroll->reveal_child(*buy);
+    CHECK(buy->allocation().y >= ticket_scroll->allocation().y);
+    CHECK(buy->allocation().right() <= workspace->allocation().right());
+    CHECK(buy->allocation().bottom() <= workspace->allocation().bottom());
+    tabs->set_selected_index(3);
+    workspace->allocate({0, 0, 734, 465});
+    auto* table = find_widget<nk::DataTable>(*orders.widget());
+    REQUIRE(table != nullptr);
+    CHECK(table->allocation().height > 0);
+    CHECK(table->allocation().bottom() <= workspace->allocation().bottom());
+    workspace->allocate({0, 0, 1440, 780});
+    CHECK(ticket.widget()->is_visible());
+    CHECK(orders.widget()->is_visible());
+    CHECK(ticket.request().quantity == 25);
 }

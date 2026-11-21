@@ -216,6 +216,7 @@ test('showcase_navigation', test_showcase_navigation)
 
 test_trading_terminal_model = executable('test_trading_terminal_model',
     'trading_terminal_model_test.cpp',
+    '../examples/trading_terminal/trading_terminal_app.cpp',
     '../examples/trading_terminal/trading_model.cpp',
     '../examples/trading_terminal/candlestick_chart.cpp',
     '../examples/trading_terminal/order_ticket.cpp',

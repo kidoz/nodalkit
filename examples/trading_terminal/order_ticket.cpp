@@ -43,6 +43,7 @@ OrderTicket::OrderTicket() {
     panel->append(quantity_input_);
 
     price_label_ = nk::Label::create("Limit price  •  USD");
+    price_label_->set_wrapping(true);
     panel->append(price_label_);
     price_input_ = nk::SpinButton::create();
     price_input_->ensure_accessible().set_name("Limit price in USD");
