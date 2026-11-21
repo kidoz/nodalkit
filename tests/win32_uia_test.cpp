@@ -1,0 +1,371 @@
+/// @file win32_uia_test.cpp
+/// @brief Windows-only UI Automation provider tests driven through the
+/// IUIAutomation client API.
+///
+/// Each case builds a real (realized, possibly shown) NodalKit window, asks
+/// the UIA client API for its element tree, and asserts tree shape, control
+/// types, names, patterns, and geometry against the shared accessibility
+/// model. The client runs on the same STA thread as the providers, so calls
+/// are direct and need no message pumping. Tagged `[windows]`; registered
+/// non-parallel because native windows need exclusive desktop interaction.
+
+#if defined(_WIN32)
+
+#include "../src/accessibility/accessibility_tree.h"
+
+#include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <cstring>
+#include <nk/platform/application.h>
+#include <nk/platform/window.h>
+#include <nk/platform/windows_interop.h>
+#include <nk/widgets/box.h>
+#include <nk/widgets/button.h>
+#include <nk/widgets/check_box.h>
+#include <nk/widgets/label.h>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+// objbase.h defines the `interface` keyword the UI Automation headers use;
+// WIN32_LEAN_AND_MEAN strips it out of windows.h.
+#include <objbase.h>
+#include <uiautomation.h>
+#include <windows.h>
+#include <wrl/client.h>
+
+namespace {
+
+using Microsoft::WRL::ComPtr;
+
+/// Catch2 v3 has no HRESULT assertion; centralize the check instead of a macro.
+void require_ok(HRESULT hr) {
+    REQUIRE(SUCCEEDED(hr));
+}
+
+/// Vertical box laying the probe widgets out top to bottom. A role-less box is
+/// flattened by the accessibility tree, so its children surface directly under
+/// the window root; using the toolkit's real container (not a bare widget)
+/// keeps allocations well-formed during frame rendering.
+[[nodiscard]] std::shared_ptr<nk::Box> probe_box() {
+    return nk::Box::create(nk::Orientation::Vertical, 8.0F);
+}
+
+class UiaClient {
+public:
+    UiaClient() {
+        ComPtr<IUIAutomation> automation;
+        const HRESULT hr = CoCreateInstance(
+            CLSID_CUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_IUIAutomation, &automation);
+        REQUIRE(SUCCEEDED(hr));
+        automation_ = std::move(automation);
+    }
+
+    [[nodiscard]] IUIAutomation* get() const { return automation_.Get(); }
+
+    /// Find a descendant by name, searching from the window element.
+    [[nodiscard]] ComPtr<IUIAutomationElement> find_by_name(IUIAutomationElement* scope,
+                                                            const char* name_utf8) {
+        const int wide_length = MultiByteToWideChar(
+            CP_UTF8, 0, name_utf8, static_cast<int>(std::strlen(name_utf8)), nullptr, 0);
+        std::wstring wide(static_cast<std::size_t>(wide_length), L'\0');
+        MultiByteToWideChar(CP_UTF8,
+                            0,
+                            name_utf8,
+                            static_cast<int>(std::strlen(name_utf8)),
+                            wide.data(),
+                            wide_length);
+
+        VARIANT condition_value{};
+        condition_value.vt = VT_BSTR;
+        condition_value.bstrVal = SysAllocStringLen(wide.c_str(), static_cast<UINT>(wide.size()));
+        ComPtr<IUIAutomationCondition> condition;
+        ComPtr<IUIAutomationElement> found;
+        if (SUCCEEDED(automation_->CreatePropertyCondition(
+                UIA_NamePropertyId, condition_value, &condition))) {
+            (void)scope->FindFirst(TreeScope_Descendants, condition.Get(), &found);
+        }
+        VariantClear(&condition_value);
+        return found;
+    }
+
+    [[nodiscard]] std::wstring string_property(IUIAutomationElement* element, PROPERTYID id) {
+        VARIANT value{};
+        if (FAILED(element->GetCurrentPropertyValue(id, &value)) || value.vt != VT_BSTR) {
+            VariantClear(&value);
+            return {};
+        }
+        std::wstring result(value.bstrVal != nullptr ? value.bstrVal : L"");
+        VariantClear(&value);
+        return result;
+    }
+
+    [[nodiscard]] int int_property(IUIAutomationElement* element, PROPERTYID id) {
+        VARIANT value{};
+        if (FAILED(element->GetCurrentPropertyValue(id, &value)) || value.vt != VT_I4) {
+            VariantClear(&value);
+            return 0;
+        }
+        const int result = value.lVal;
+        VariantClear(&value);
+        return result;
+    }
+
+    [[nodiscard]] bool bool_property(IUIAutomationElement* element, PROPERTYID id) {
+        VARIANT value{};
+        if (FAILED(element->GetCurrentPropertyValue(id, &value)) || value.vt != VT_BOOL) {
+            VariantClear(&value);
+            return false;
+        }
+        const bool result = value.boolVal != VARIANT_FALSE;
+        VariantClear(&value);
+        return result;
+    }
+
+private:
+    ComPtr<IUIAutomation> automation_;
+};
+
+std::string narrow(const std::wstring& text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int length = WideCharToMultiByte(
+        CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    std::string result(static_cast<std::size_t>(length), '\0');
+    WideCharToMultiByte(CP_UTF8,
+                        0,
+                        text.c_str(),
+                        static_cast<int>(text.size()),
+                        result.data(),
+                        length,
+                        nullptr,
+                        nullptr);
+    return result;
+}
+
+} // namespace
+
+TEST_CASE("Win32 UIA exposes the widget tree with control types", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA tree probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto button = nk::Button::create("Activate me");
+    auto check = nk::CheckBox::create("Enable extras");
+    auto label = nk::Label::create("Just text");
+    root->append(button);
+    root->append(check);
+    root->append(label);
+    window.set_child(root);
+    window.present();
+
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(hwnd, &element));
+    REQUIRE(element != nullptr);
+
+    // The root describes itself as a NodalKit window.
+    CHECK(uia.int_property(element.Get(), UIA_ControlTypePropertyId) == UIA_WindowControlTypeId);
+    CHECK(narrow(uia.string_property(element.Get(), UIA_FrameworkIdPropertyId)) == "NodalKit");
+
+    // Walk the control view. UIA appends host-provided chrome (title bar)
+    // after the fragment children, so collect the NodalKit children in order.
+    ComPtr<IUIAutomationTreeWalker> walker;
+    require_ok(uia.get()->get_ControlViewWalker(&walker));
+
+    std::vector<std::pair<std::string, int>> toolkit_children;
+    ComPtr<IUIAutomationElement> current;
+    require_ok(walker->GetFirstChildElement(element.Get(), &current));
+    while (current != nullptr) {
+        if (narrow(uia.string_property(current.Get(), UIA_FrameworkIdPropertyId)) == "NodalKit") {
+            toolkit_children.emplace_back(
+                narrow(uia.string_property(current.Get(), UIA_NamePropertyId)),
+                uia.int_property(current.Get(), UIA_ControlTypePropertyId));
+        }
+        ComPtr<IUIAutomationElement> next;
+        require_ok(walker->GetNextSiblingElement(current.Get(), &next));
+        current = std::move(next);
+    }
+
+    REQUIRE(toolkit_children.size() == 3);
+    CHECK(toolkit_children[0] ==
+          std::make_pair(std::string("Activate me"), static_cast<int>(UIA_ButtonControlTypeId)));
+    CHECK(toolkit_children[1] == std::make_pair(std::string("Enable extras"),
+                                                static_cast<int>(UIA_CheckBoxControlTypeId)));
+    CHECK(toolkit_children[2] ==
+          std::make_pair(std::string("Just text"), static_cast<int>(UIA_TextControlTypeId)));
+
+    // Walking up from a widget lands on the NodalKit window root.
+    ComPtr<IUIAutomationElement> first_widget;
+    require_ok(walker->GetFirstChildElement(element.Get(), &first_widget));
+    ComPtr<IUIAutomationElement> parent;
+    require_ok(walker->GetParentElement(first_widget.Get(), &parent));
+    REQUIRE(parent != nullptr);
+    CHECK(narrow(uia.string_property(parent.Get(), UIA_FrameworkIdPropertyId)) == "NodalKit");
+    CHECK(uia.int_property(parent.Get(), UIA_ControlTypePropertyId) == UIA_WindowControlTypeId);
+}
+
+TEST_CASE("Win32 UIA patterns drive toolkit actions", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA pattern probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto button = nk::Button::create("Activate me");
+    int clicked = 0;
+    (void)button->on_clicked().connect([&] { ++clicked; });
+    auto check = nk::CheckBox::create("Enable extras");
+    root->append(button);
+    root->append(check);
+    window.set_child(root);
+    window.present();
+
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(hwnd, &element));
+
+    // Invoke on the button fires the toolkit action on the UI thread.
+    ComPtr<IUIAutomationElement> button_element = uia.find_by_name(element.Get(), "Activate me");
+    REQUIRE(button_element != nullptr);
+    ComPtr<IUnknown> invoke_unknown;
+    require_ok(
+        button_element->GetCurrentPattern(UIA_InvokePatternId, invoke_unknown.GetAddressOf()));
+    ComPtr<IUIAutomationInvokePattern> invoke;
+    require_ok(invoke_unknown.As(&invoke));
+    REQUIRE(invoke != nullptr);
+    CHECK(SUCCEEDED(invoke->Invoke()));
+    CHECK(clicked == 1);
+
+    // Toggle reflects and changes the checked state.
+    ComPtr<IUIAutomationElement> check_element = uia.find_by_name(element.Get(), "Enable extras");
+    REQUIRE(check_element != nullptr);
+    ComPtr<IUnknown> toggle_unknown;
+    require_ok(
+        check_element->GetCurrentPattern(UIA_TogglePatternId, toggle_unknown.GetAddressOf()));
+    ComPtr<IUIAutomationTogglePattern> toggle;
+    require_ok(toggle_unknown.As(&toggle));
+    REQUIRE(toggle != nullptr);
+    ToggleState state = ToggleState_Indeterminate;
+    require_ok(toggle->get_CurrentToggleState(&state));
+    CHECK(state == ToggleState_Off);
+    require_ok(toggle->Toggle());
+    require_ok(toggle->get_CurrentToggleState(&state));
+    CHECK(state == ToggleState_On);
+}
+
+TEST_CASE("Win32 UIA geometry and automation ids match the model", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA geometry probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto button = nk::Button::create("Activate me");
+    root->append(button);
+    window.set_child(root);
+    window.present();
+
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+
+    // Pump the event loop so the presented window lays out and renders a frame.
+    REQUIRE(app.event_loop().poll());
+
+    // Expected values straight from the shared model.
+    nk::detail::AccessibilityTree tree(window);
+    std::optional<nk::detail::AccessibleId> button_id;
+    for (const auto id : tree.root_children()) {
+        if (tree.info(id)->name == "Activate me") {
+            button_id = id;
+        }
+    }
+    REQUIRE(button_id.has_value());
+    const auto model = tree.info(*button_id);
+    REQUIRE(model.has_value());
+    // Precondition: layout ran, so geometry assertions cannot pass on zeros.
+    REQUIRE(model->bounds.width > 0.0F);
+    REQUIRE(model->bounds.height > 0.0F);
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(hwnd, &element));
+    ComPtr<IUIAutomationElement> button_element = uia.find_by_name(element.Get(), "Activate me");
+    REQUIRE(button_element != nullptr);
+
+    // AutomationId is the widget debug name the model reports.
+    CHECK(narrow(uia.string_property(button_element.Get(), UIA_AutomationIdPropertyId)) ==
+          model->debug_name);
+
+    // BoundingRectangle is the allocation converted to physical screen px.
+    POINT origin{0, 0};
+    ClientToScreen(hwnd, &origin);
+    UINT dpi = 96;
+    if (const auto get_dpi = reinterpret_cast<UINT (*)(HWND)>(
+            GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"))) {
+        dpi = get_dpi(hwnd);
+    }
+    const float scale = static_cast<float>(dpi) / 96.0F;
+    RECT rect{};
+    REQUIRE(button_element->get_CurrentBoundingRectangle(&rect) == S_OK);
+    INFO("rect={" << rect.left << "," << rect.top << "," << rect.right << "," << rect.bottom
+                  << "} origin={" << origin.x << "," << origin.y << "} scale=" << scale
+                  << " bounds={" << model->bounds.x << "," << model->bounds.y << ","
+                  << model->bounds.width << "," << model->bounds.height << "}");
+    CHECK(std::abs(static_cast<double>(rect.left) - (origin.x + model->bounds.x * scale)) < 1.5);
+    CHECK(std::abs(static_cast<double>(rect.top) - (origin.y + model->bounds.y * scale)) < 1.5);
+    CHECK(std::abs(static_cast<double>(rect.right - rect.left) - (model->bounds.width * scale)) <
+          1.5);
+    CHECK(std::abs(static_cast<double>(rect.bottom - rect.top) - (model->bounds.height * scale)) <
+          1.5);
+
+    // Enabled/focusable mirror the model.
+    CHECK(uia.bool_property(button_element.Get(), UIA_IsEnabledPropertyId) == model->enabled);
+    CHECK(uia.bool_property(button_element.Get(), UIA_IsKeyboardFocusablePropertyId) ==
+          model->focusable);
+}
+
+TEST_CASE("Win32 UIA SetFocus moves toolkit focus", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA focus probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto first = nk::Button::create("First target");
+    auto second = nk::Button::create("Second target");
+    root->append(first);
+    root->append(second);
+    window.set_child(root);
+    window.present();
+
+    const HWND hwnd = nk::window_hwnd(window);
+    REQUIRE(hwnd != nullptr);
+
+    nk::detail::AccessibilityTree tree(window);
+    std::optional<nk::detail::AccessibleId> second_id;
+    for (const auto id : tree.root_children()) {
+        if (tree.info(id)->name == "Second target") {
+            second_id = id;
+        }
+    }
+    REQUIRE(second_id.has_value());
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(hwnd, &element));
+    ComPtr<IUIAutomationElement> second_element = uia.find_by_name(element.Get(), "Second target");
+    REQUIRE(second_element != nullptr);
+    REQUIRE(SUCCEEDED(second_element->SetFocus()));
+
+    const auto focused = tree.focused();
+    REQUIRE(focused.has_value());
+    CHECK(*focused == *second_id);
+    CHECK(uia.bool_property(second_element.Get(), UIA_HasKeyboardFocusPropertyId));
+}
+
+#endif // defined(_WIN32)

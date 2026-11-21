@@ -181,6 +181,12 @@ if host_system == 'windows'
         dependencies : [nk_dep, catch2_test_dep],
     )
     test('win32_native', test_win32_native)
+    test_win32_uia = executable('test_win32_uia',
+        'win32_uia_test.cpp',
+        dependencies : [nk_dep, catch2_test_dep],
+    )
+    # Non-parallel: drives real native windows through the UIA client API.
+    test('win32_uia', test_win32_uia, is_parallel : false, timeout : 120)
 endif
 
 test_widget_controls = executable('test_widget_controls',
