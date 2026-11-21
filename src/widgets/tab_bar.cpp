@@ -10,6 +10,35 @@
 
 namespace nk {
 
+// The bar paints and hit-tests its strip. Each header also has a stable
+// identity and activation target in the platform accessibility tree.
+class TabBar::TabHeader final : public Widget {
+public:
+    explicit TabHeader(std::string_view label) {
+        auto& info = ensure_accessible();
+        info.set_role(AccessibleRole::Tab);
+        info.set_name(std::string(label));
+        info.add_action(AccessibleAction::Activate, [this] {
+            auto* bar = dynamic_cast<TabBar*>(parent());
+            if (!bar) {
+                return false;
+            }
+            const auto siblings = bar->children();
+            const auto it = std::ranges::find(siblings, this, &std::shared_ptr<Widget>::get);
+            if (it == siblings.end()) {
+                return false;
+            }
+            bar->grab_focus();
+            bar->set_selected_index(static_cast<int>(it - siblings.begin()));
+            return true;
+        });
+    }
+
+    void set_selected(bool selected) { set_state_flag(StateFlags::Selected, selected); }
+
+    bool hit_test(Point) const override { return false; }
+};
+
 namespace {
 
 FontDescriptor tab_font() {
@@ -86,10 +115,14 @@ void TabBar::insert_tab(std::size_t index, std::string label) {
     if (index > impl_->tabs.size()) {
         throw std::out_of_range("TabBar::insert_tab: index out of range");
     }
+    // Headers precede pages, in tab order. The overflow menu stays last.
+    auto header = std::make_shared<TabHeader>(label);
+    insert_child(index, header);
     impl_->tabs.insert(impl_->tabs.begin() + static_cast<std::ptrdiff_t>(index),
                        Tab{.label = std::move(label),
                            .icon = SymbolicIcon::None,
                            .closable = false,
+                           .header = std::move(header),
                            .page = nullptr});
     if (impl_->selected_index >= static_cast<int>(index)) {
         ++impl_->selected_index;
@@ -111,6 +144,7 @@ void TabBar::remove_tab(std::size_t index) {
     if (impl_->tabs[index].page != nullptr) {
         remove_child(*impl_->tabs[index].page);
     }
+    remove_child(*impl_->tabs[index].header);
     impl_->tabs.erase(impl_->tabs.begin() + static_cast<std::ptrdiff_t>(index));
     const int previous = impl_->selected_index;
     if (impl_->tabs.empty()) {
@@ -132,11 +166,13 @@ void TabBar::remove_tab(std::size_t index) {
 
 void TabBar::clear_tabs() {
     for (const auto& tab : impl_->tabs) {
+        remove_child(*tab.header);
         if (tab.page != nullptr) {
             remove_child(*tab.page);
         }
     }
     impl_->tabs.clear();
+    ensure_accessible().set_value({});
     impl_->selected_index = -1;
     impl_->hovered_index = -1;
     impl_->armed_index = -1;
@@ -154,6 +190,8 @@ std::string_view TabBar::tab_label(std::size_t index) const {
 
 void TabBar::set_tab_label(std::size_t index, std::string label) {
     tab_at(index).label = std::move(label);
+    tab_at(index).header->ensure_accessible().set_name(tab_at(index).label);
+    sync_pages();
     queue_layout();
     queue_redraw();
 }
@@ -212,7 +250,6 @@ void TabBar::set_selected_index(int index) {
         return;
     }
     impl_->selected_index = index;
-    ensure_accessible().set_value(std::string(impl_->tabs[static_cast<std::size_t>(index)].label));
     sync_pages();
     queue_redraw();
     impl_->selection_changed.emit(index);
@@ -237,7 +274,12 @@ const TabBar::Tab& TabBar::tab_at(std::size_t index) const {
 }
 
 void TabBar::sync_pages() {
+    ensure_accessible().set_value(
+        impl_->selected_index < 0
+            ? std::string{}
+            : impl_->tabs[static_cast<std::size_t>(impl_->selected_index)].label);
     for (std::size_t index = 0; index < impl_->tabs.size(); ++index) {
+        impl_->tabs[index].header->set_selected(static_cast<int>(index) == impl_->selected_index);
         if (impl_->tabs[index].page != nullptr) {
             impl_->tabs[index].page->set_visible(static_cast<int>(index) == impl_->selected_index);
         }
@@ -343,7 +385,10 @@ SizeRequest TabBar::measure(const Constraints& constraints) const {
 void TabBar::allocate(const Rect& allocation) {
     Widget::allocate(allocation);
     const float header = std::min(bar_height(), allocation.height);
+    const auto placed = placement();
     for (std::size_t index = 0; index < impl_->tabs.size(); ++index) {
+        impl_->tabs[index].header->allocate(
+            index < placed.visible.size() ? placed.visible[index].bounds : Rect{});
         const auto& page = impl_->tabs[index].page;
         if (page == nullptr) {
             continue;

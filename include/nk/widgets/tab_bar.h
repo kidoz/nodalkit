@@ -63,10 +63,13 @@ protected:
     void snapshot(SnapshotContext& ctx) const override;
 
 private:
+    class TabHeader;
+
     struct Tab {
         std::string label;
         SymbolicIcon icon = SymbolicIcon::None;
         bool closable = false;
+        std::shared_ptr<TabHeader> header;
         std::shared_ptr<Widget> page;
     };
 
