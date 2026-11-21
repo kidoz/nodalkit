@@ -249,7 +249,7 @@ int run_showcase(int argc, char** argv) {
     auto hero_preview_pill = StatusPill::create(profile.platform_pill_text);
     std::shared_ptr<nk::Widget> hero_close_button;
     if (profile.show_hero_close_button) {
-        auto close_button = HeaderActionButton::create("×");
+        auto close_button = HeaderActionButton::create("×", "Close");
         (void)close_button->on_clicked().connect([&] { app.quit(0); });
         hero_close_button = close_button;
     }

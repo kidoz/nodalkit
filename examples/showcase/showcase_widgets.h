@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <nk/accessibility/accessible.h>
+#include <nk/accessibility/role.h>
 #include <nk/foundation/signal.h>
 #include <nk/layout/box_layout.h>
 #include <nk/layout/stack_layout.h>
@@ -653,6 +655,7 @@ public:
     void set_text(std::string text) {
         if (text_ != text) {
             text_ = std::move(text);
+            sync_accessible();
             queue_layout();
             queue_redraw();
         }
@@ -683,6 +686,13 @@ private:
     explicit SectionTitle(std::string text) : text_(std::move(text)) {
         add_style_class("label");
         add_style_class("heading");
+        sync_accessible();
+    }
+
+    void sync_accessible() {
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Label);
+        accessible.set_name(text_);
     }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
@@ -706,6 +716,7 @@ public:
     void set_text(std::string text) {
         if (text_ != text) {
             text_ = std::move(text);
+            sync_accessible();
             cached_layouts_.clear();
             queue_layout();
             queue_redraw();
@@ -739,6 +750,13 @@ private:
     explicit SecondaryText(std::string text) : text_(std::move(text)) {
         add_style_class("label");
         add_style_class("muted");
+        sync_accessible();
+    }
+
+    void sync_accessible() {
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Label);
+        accessible.set_name(text_);
     }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
@@ -796,6 +814,7 @@ public:
     void set_text(std::string text) {
         if (text_ != text) {
             text_ = std::move(text);
+            sync_accessible();
             cached_size_.reset();
             queue_layout();
             queue_redraw();
@@ -827,6 +846,13 @@ private:
     explicit FieldLabel(std::string text) : text_(std::move(text)) {
         add_style_class("label");
         add_style_class("muted");
+        sync_accessible();
+    }
+
+    void sync_accessible() {
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Label);
+        accessible.set_name(text_);
     }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
@@ -850,6 +876,7 @@ public:
     void set_text(std::string text) {
         if (text_ != text) {
             text_ = std::move(text);
+            sync_accessible();
             cached_size_.reset();
             queue_layout();
             queue_redraw();
@@ -881,7 +908,16 @@ protected:
     }
 
 private:
-    explicit ValueText(std::string text) : text_(std::move(text)) { add_style_class("label"); }
+    explicit ValueText(std::string text) : text_(std::move(text)) {
+        add_style_class("label");
+        sync_accessible();
+    }
+
+    void sync_accessible() {
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Label);
+        accessible.set_name(text_);
+    }
 
     [[nodiscard]] nk::FontDescriptor font_descriptor() const {
         return {
@@ -1014,6 +1050,7 @@ public:
     void set_text(std::string text) {
         if (text_ != text) {
             text_ = std::move(text);
+            sync_accessible();
             cached_size_.reset();
             queue_layout();
             queue_redraw();
@@ -1054,7 +1091,15 @@ protected:
 
 private:
     StatusPill(std::string text, bool emphasized)
-        : text_(std::move(text)), emphasized_(emphasized) {}
+        : text_(std::move(text)), emphasized_(emphasized) {
+        sync_accessible();
+    }
+
+    void sync_accessible() {
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Status);
+        accessible.set_name(text_);
+    }
 
     static nk::FontDescriptor font_descriptor() {
         return {
@@ -1071,16 +1116,25 @@ private:
 
 class HeaderActionButton : public nk::Widget {
 public:
-    static std::shared_ptr<HeaderActionButton> create(std::string glyph) {
-        auto button = std::shared_ptr<HeaderActionButton>(new HeaderActionButton(std::move(glyph)));
-        button->set_focusable(false);
-        return button;
+    static std::shared_ptr<HeaderActionButton> create(std::string glyph,
+                                                      std::string accessible_name = {}) {
+        return std::shared_ptr<HeaderActionButton>(
+            new HeaderActionButton(std::move(glyph), std::move(accessible_name)));
     }
 
     nk::Signal<>& on_clicked() { return clicked_; }
 
     [[nodiscard]] nk::SizeRequest measure(const nk::Constraints& /*constraints*/) const override {
         return {28.0F, 28.0F, 28.0F, 28.0F};
+    }
+
+    bool handle_key_event(const nk::KeyEvent& event) override {
+        if (event.type == nk::KeyEvent::Type::Press &&
+            (event.key == nk::KeyCode::Space || event.key == nk::KeyCode::Return)) {
+            clicked_.emit();
+            return true;
+        }
+        return false;
     }
 
     bool handle_mouse_event(const nk::MouseEvent& event) override {
@@ -1119,7 +1173,14 @@ public:
 
 protected:
     void snapshot(nk::SnapshotContext& ctx) const override {
-        const auto a = allocation();
+        auto a = allocation();
+        if (nk::has_flag(state_flags(), nk::StateFlags::FocusVisible)) {
+            ctx.add_rounded_rect(a, theme_color("focus-ring-color"), a.height * 0.5F + 2.0F);
+            a = {a.x + 2.0F,
+                 a.y + 2.0F,
+                 std::max(0.0F, a.width - 4.0F),
+                 std::max(0.0F, a.height - 4.0F)};
+        }
         const auto background =
             armed_ ? nk::Color{0.88F, 0.90F, 0.93F, 1.0F} : nk::Color{0.95F, 0.96F, 0.98F, 1.0F};
         const auto border = theme_color("border-color", nk::Color{0.84F, 0.87F, 0.91F, 1.0F});
@@ -1135,7 +1196,17 @@ protected:
     }
 
 private:
-    explicit HeaderActionButton(std::string glyph) : glyph_(std::move(glyph)) {}
+    HeaderActionButton(std::string glyph, std::string accessible_name)
+        : glyph_(std::move(glyph)), accessible_name_(std::move(accessible_name)) {
+        set_focusable(true);
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Button);
+        accessible.set_name(accessible_name_.empty() ? glyph_ : accessible_name_);
+        accessible.add_action(nk::AccessibleAction::Activate, [this] {
+            clicked_.emit();
+            return true;
+        });
+    }
 
     static nk::FontDescriptor glyph_font() {
         return {
@@ -1146,6 +1217,7 @@ private:
     }
 
     std::string glyph_;
+    std::string accessible_name_;
     nk::Signal<> clicked_;
     bool armed_ = false;
 };
@@ -1313,7 +1385,13 @@ protected:
     }
 
 private:
-    PreviewCanvas() = default;
+    PreviewCanvas() {
+        auto& accessible = ensure_accessible();
+        accessible.set_role(nk::AccessibleRole::Image);
+        accessible.set_name("Live image preview");
+        accessible.set_description("Animated sample pattern rendered with the selected scale "
+                                   "mode.");
+    }
 
     std::vector<uint32_t> pixels_;
     int src_width_ = 0;
