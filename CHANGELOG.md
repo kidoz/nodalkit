@@ -2,11 +2,98 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.7.0] - 2026-11-21
+
+The seventh normal release of the NodalKit framework. 0.7.0 keeps the widget
+tree, layout system, theming, diagnostics, and platform integration of 0.6.0,
+and closes the largest remaining Windows parity gap: the shared accessibility
+model is exposed to UI Automation clients through a server-side provider with
+fragment navigation, core properties, the Invoke, Toggle, Value, Selection,
+SelectionItem, ExpandCollapse, Window, ScrollItem, and Text patterns, and
+event raising. Accessibility gains real numeric ranges for sliders, spin
+buttons, progress bars, and level bars; IME composition survives focus loss
+without leaving half-composed text behind; degenerate rectangles no longer
+invert corner-radius clamps; and the library, examples, and test suite also
+build and pass under MSVC `cl`.
+
+### Support Matrix for 0.7.0
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Secondary Release Target (supported while CI remains green).
+    Win32 integration covers menus with keyboard accelerators, IMM32 IME
+    (including focus-loss and secure-editor composition cancellation),
+    clipboard, dialogs, drag & drop, high-DPI, dark-mode chrome, system
+    preference observation, and a UI Automation accessibility provider.
+    MSVC (`cl`) builds and passes the full suite under `/W4 /WX` with an
+    advisory CI lane; ARM64 and MinGW remain untested; see the Windows
+    support matrix.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Accessibility:** Linux AT-SPI, macOS NSAccessibility, and Windows UI
+    Automation ship.
 
 ### Added
-*   **Windows IME Hardening:** focus loss cancels an in-flight IME composition (`ImmNotifyIME(CPS_CANCEL)` plus a `ClearPreedit` event) so half-composed text never outlives the editor; secure (password) editors cancel composition and force the IME closed without ever forcing it back open; input-language changes are acknowledged. A message-level native suite drives the composition lifecycle through a real window (`WM_IME_STARTCOMPOSITION`/`ENDCOMPOSITION`, `WM_CHAR`, `WM_KILLFOCUS`, secure-state resync) and synthesizes IMM composition strings Wine-style where an IME context is available, skipping cleanly on bare US-locale runners.
-*   **MSVC `cl` Toolchain:** the entire library, examples, and test suite build and pass under MSVC `/W4 /WX` (verified with VS 2026, `cl` 19.52; the historical clang-only-flags claim was stale — that flag is meson-gated to clang). The sanitizer frame-pointer argument is now compiler-gated, `ci.yml` gained an advisory MSVC lane, and the toolchain matrix row moved to experimental; the floor is VS 2022 17.2+.
+*   **Windows UI Automation:** the Win32 backend exposes the shared
+    accessibility tree to UI Automation clients through a server-side
+    provider: `WM_GETOBJECT` wiring with lazy activation, fragment
+    navigation, core properties (name, control type, automation id, help
+    text, bounds in physical screen pixels, focus, enablement, password
+    marking, labelled-by relations resolved to live elements, and live
+    setting for status regions), Invoke/Toggle/Value patterns that run
+    toolkit actions directly on the UI thread
+    (`ProviderOptions_UseComThreading` over the existing STA),
+    Selection/SelectionItem patterns for tabs, lists, menus, trees and grids,
+    ExpandCollapse for combo boxes and submenus, the Window pattern (visual
+    state, modality, close), ScrollItem for anything inside a scrollable
+    container, a Text pattern over editor text (document ranges, live
+    selection reads, code-point-accurate character/word/line movement and
+    expansion, case-insensitive find, range cloning and endpoint comparison;
+    text-setting stays read-only until the model grows a selection setter),
+    and event raising for focus, name, value, checked, selected, enablement,
+    structure, invoke, selection, menu-mode, and live-region changes, gated
+    by `UiaClientsAreListening` and resynchronized when the system color
+    scheme changes. The backend disconnects all providers before
+    `OleUninitialize`, which is required for a clean re-initialization on the
+    same thread. A `win32_uia` suite verifies tree shape, control types,
+    patterns, geometry, focus, ranges, selection, expansion, password
+    marking, ScrollIntoView, menu-mode announcements, text navigation, live
+    regions, and labelled-by resolution through the IUIAutomation client API.
+    Per-glyph hit testing, line-level geometry, virtualized items, and
+    screen-reader validation are not implemented yet.
+*   **Accessible Numeric Ranges:** `Accessible` carries a numeric range
+    (minimum, maximum, step) with an optional programmatic value setter,
+    surfaced to assistive technologies as a real range instead of a guessed
+    percentage. `Slider` and `SpinButton` expose settable ranges with
+    Increment/Decrement actions (a tenth of the range when no step is
+    configured), and `ProgressBar` and `LevelBar` report read-only ranges.
+*   **Windows IME Hardening:** focus loss cancels an in-flight IME composition
+    (`ImmNotifyIME(CPS_CANCEL)` plus a `ClearPreedit` event) so half-composed
+    text never outlives the editor; secure (password) editors cancel
+    composition and force the IME closed without ever forcing it back open;
+    input-language changes are acknowledged. A message-level native suite
+    drives the composition lifecycle through a real window
+    (`WM_IME_STARTCOMPOSITION`/`ENDCOMPOSITION`, `WM_CHAR`, `WM_KILLFOCUS`,
+    secure-state resync) and synthesizes IMM composition strings Wine-style
+    where an IME context is available, skipping cleanly on bare US-locale
+    runners.
+*   **MSVC `cl` Toolchain:** the entire library, examples, and test suite
+    build and pass under MSVC `/W4 /WX` (verified with VS 2026, `cl` 19.52;
+    the historical clang-only-flags claim was stale — that flag is
+    meson-gated to clang). The sanitizer frame-pointer argument is now
+    compiler-gated, `ci.yml` gained an advisory MSVC lane, and the toolchain
+    matrix row moved to experimental; the floor is VS 2022 17.2+.
+
+### Changed
+*   **Release Gate:** the SDK smoke check requires `uiautomationcore` in the
+    pkg-config link line of the installed Windows package.
+*   **Documentation:** the platform support reference and the Windows support
+    matrix document the UI Automation coverage, the IME composition
+    cancellation behavior, and the MSVC toolchain state.
+*   **Test Coverage:** the `win32_uia` suite drives every provider pattern
+    through the IUIAutomation client API, and the `win32_native` suite grows
+    message-level IME lifecycle and degenerate-rect coverage.
 
 ### Fixed
 *   **Degenerate Rect Corner Radius:** all three render backends (software,
@@ -40,19 +127,15 @@ tabs to platform accessibility.
     Win32 native integration now covers menus with working keyboard
     accelerators, IMM32 IME, clipboard, dialogs, drag & drop (both
     directions), high-DPI, dark-mode chrome, and system preference
-    observation. A UI Automation provider exposes the accessibility tree.
-    MSVC (`cl`) builds and passes the full suite under `/W4 /WX` with an
-    advisory CI lane; ARM64 and MinGW remain untested; see the Windows
-    support matrix.
+    observation. No UI Automation provider yet, and ARM64, MSVC, and MinGW
+    remain unsupported; see the Windows support matrix.
 *   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
 *   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
     earlier in correctness confidence than the software render paths.
-*   **Accessibility:** Linux AT-SPI, macOS NSAccessibility, and Windows UI
-    Automation ship.
+*   **Accessibility:** Linux AT-SPI and macOS NSAccessibility ship; Windows
+    still has no UI Automation provider.
 
 ### Added
-*   **Windows UI Automation:** the Win32 backend exposes the shared accessibility tree to UI Automation clients through a server-side provider: `WM_GETOBJECT` wiring with lazy activation, fragment navigation, core properties (name, control type, automation id, help text, bounds in physical screen pixels, focus, enablement, password marking, labelled-by relations resolved to live elements, and live setting for status regions), Invoke/Toggle/Value patterns that run toolkit actions directly on the UI thread (`ProviderOptions_UseComThreading` over the existing STA), Selection/SelectionItem patterns for tabs, lists, menus, trees and grids, ExpandCollapse for combo boxes and submenus, the Window pattern (visual state, modality, close), ScrollItem for anything inside a scrollable container, a Text pattern over editor text (document ranges, live selection reads, code-point-accurate character/word/line movement and expansion, case-insensitive find, range cloning and endpoint comparison; text-setting stays read-only until the model grows a selection setter), and event raising for focus, name, value, checked, selected, enablement, structure, invoke, selection, menu-mode, and live-region changes, gated by `UiaClientsAreListening`. The backend disconnects all providers before `OleUninitialize`, which is required for a clean re-initialization on the same thread. A `win32_uia` suite verifies tree shape, control types, patterns, geometry, focus, ranges, selection, expansion, password marking, ScrollIntoView, menu-mode announcements, text navigation, live regions, and labelled-by resolution through the IUIAutomation client API. Per-glyph hit testing, line-level geometry, virtualized items, and screen-reader validation are not implemented yet.
-*   **Accessible Numeric Ranges:** `Accessible` carries a numeric range (minimum, maximum, step) with an optional programmatic value setter, surfaced to assistive technologies as a real range instead of a guessed percentage. `Slider` and `SpinButton` expose settable ranges with Increment/Decrement actions (a tenth of the range when no step is configured), and `ProgressBar` and `LevelBar` report read-only ranges.
 *   **Windows Menu Accelerators:** native menu bars now install a real HACCEL
     table. Menu shortcuts (e.g. Ctrl+O) are translated in the message loop
     before key dispatch, so they work without focus quirks and cannot
