@@ -195,6 +195,7 @@ private:
         top_bar->append(simulation);
 
         symbol_selector_ = nk::ComboBox::create();
+        symbol_selector_->ensure_accessible().set_name("Instrument");
         std::vector<std::string> symbols;
         for (const auto& instrument : model_->instruments()) {
             symbols.push_back(instrument.symbol + "  •  " + instrument.name);
@@ -205,6 +206,7 @@ private:
         top_bar->append(symbol_selector_);
 
         auto account_selector = nk::ComboBox::create();
+        account_selector->ensure_accessible().set_name("Account");
         account_selector->set_items({"Demo account  •  USD"});
         account_selector->set_selected_index(0);
         top_bar->append(account_selector);

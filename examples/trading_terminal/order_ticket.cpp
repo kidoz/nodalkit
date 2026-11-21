@@ -23,12 +23,14 @@ OrderTicket::OrderTicket() {
 
     panel->append(nk::Label::create("Side"));
     side_selector_ = nk::SegmentedControl::create();
+    side_selector_->ensure_accessible().set_name("Side");
     side_selector_->set_segments({"Buy", "Sell"});
     side_selector_->set_selected_index(0);
     panel->append(side_selector_);
 
     panel->append(nk::Label::create("Order type"));
     type_selector_ = nk::ComboBox::create();
+    type_selector_->ensure_accessible().set_name("Order type");
     type_selector_->set_items({"Market", "Limit"});
     type_selector_->set_selected_index(0);
     panel->append(type_selector_);
