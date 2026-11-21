@@ -26,6 +26,7 @@
 #include <nk/widgets/combo_box.h>
 #include <nk/widgets/label.h>
 #include <nk/widgets/progress_bar.h>
+#include <nk/widgets/scroll_area.h>
 #include <nk/widgets/slider.h>
 #include <nk/widgets/spin_button.h>
 #include <nk/widgets/tab_bar.h>
@@ -595,6 +596,35 @@ TEST_CASE("Win32 UIA SetFocus moves toolkit focus", "[windows][uia]") {
     REQUIRE(focused.has_value());
     CHECK(*focused == *second_id);
     CHECK(uia.bool_property(second_element.Get(), UIA_HasKeyboardFocusPropertyId));
+}
+
+TEST_CASE("Win32 UIA scrolls elements into view", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA scroll probe", .width = 240, .height = 300});
+    auto scroll = nk::ScrollArea::create();
+    auto rows = probe_box();
+    for (int i = 0; i < 30; ++i) {
+        rows->append(nk::Label::create("Row " + std::to_string(i)));
+    }
+    scroll->set_content(rows);
+    window.set_child(scroll);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(nk::window_hwnd(window), &element));
+
+    // A far-down row is outside the viewport; ScrollIntoView scrolls to it.
+    auto row_element = uia.find_by_name(element.Get(), "Row 25");
+    REQUIRE(row_element != nullptr);
+    CHECK(scroll->v_offset() == 0.0F);
+    ComPtr<IUnknown> unknown;
+    require_ok(row_element->GetCurrentPattern(UIA_ScrollItemPatternId, unknown.GetAddressOf()));
+    ComPtr<IUIAutomationScrollItemPattern> scroll_item;
+    require_ok(unknown.As(&scroll_item));
+    require_ok(scroll_item->ScrollIntoView());
+    CHECK(scroll->v_offset() > 0.0F);
 }
 
 #endif // defined(_WIN32)

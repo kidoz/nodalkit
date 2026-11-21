@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <nk/platform/window.h>
 #include <nk/ui_core/widget.h>
+#include <nk/widgets/scroll_area.h>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -233,6 +234,37 @@ bool AccessibilityTree::set_numeric_value(AccessibleId id, double value) {
     // The value change may reconfigure the tree; keep the widget alive.
     const auto keep_alive = widget->shared_from_this();
     return widget->accessible()->perform_numeric_set(value);
+}
+
+bool AccessibilityTree::reveal(AccessibleId id) {
+    auto* widget = exposed_widget(id);
+    if (widget == nullptr) {
+        return false;
+    }
+    // Reveal from the inside out, like the focus path: scrolling an inner
+    // viewport changes the target allocation the next enclosing viewport sees.
+    const auto keep_alive = widget->shared_from_this();
+    bool revealed = false;
+    for (auto* parent = widget->parent(); parent != nullptr; parent = parent->parent()) {
+        if (auto* scroll = dynamic_cast<ScrollArea*>(parent); scroll != nullptr) {
+            scroll->reveal_child(*widget);
+            revealed = true;
+        }
+    }
+    return revealed;
+}
+
+bool AccessibilityTree::has_scrollable_ancestor(AccessibleId id) const {
+    const auto* widget = exposed_widget(id);
+    if (widget == nullptr) {
+        return false;
+    }
+    for (auto* parent = widget->parent(); parent != nullptr; parent = parent->parent()) {
+        if (dynamic_cast<const ScrollArea*>(parent) != nullptr) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::vector<AccessibleId> AccessibilityTree::purge() {

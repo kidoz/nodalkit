@@ -735,6 +735,48 @@ private:
     UiaPatternState state_;
 };
 
+class UiaScrollItemPattern final : public IScrollItemProvider {
+public:
+    UiaScrollItemPattern(UiaSite* site, AccessibleId id, const UiaLiveness& alive)
+        : state_{site, id, alive} {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IScrollItemProvider) {
+            *out = static_cast<IScrollItemProvider*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    HRESULT STDMETHODCALLTYPE ScrollIntoView() override {
+        if (!state_.live() || !state_.site->tree->is_exposed(state_.id)) {
+            return UIA_E_ELEMENTNOTAVAILABLE;
+        }
+        // Scrolls every enclosing ScrollArea inside-out without moving focus.
+        const bool revealed = state_.site->tree->reveal(state_.id);
+        return revealed ? S_OK : UIA_E_INVALIDOPERATION;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    UiaPatternState state_;
+};
+
 // --- Element provider --------------------------------------------------------
 
 /// UIA provider for one exposed element. Answers every property live from the
@@ -827,6 +869,13 @@ public:
             if (type_is(*info, "ComboBox") ||
                 (info->role == AccessibleRole::MenuItem && !site_->tree->children(id_).empty())) {
                 *out = new UiaExpandCollapsePattern(site_, id_, alive_);
+            }
+            break;
+        case UIA_ScrollItemPatternId:
+            // Anything inside a scrollable container can be scrolled into
+            // view, not just the classic item roles.
+            if (site_->tree->has_scrollable_ancestor(id_)) {
+                *out = new UiaScrollItemPattern(site_, id_, alive_);
             }
             break;
         default:

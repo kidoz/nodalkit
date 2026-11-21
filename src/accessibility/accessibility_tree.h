@@ -90,6 +90,15 @@ public:
     // value changed.
     bool set_numeric_value(AccessibleId id, double value);
 
+    // Scroll every enclosing ScrollArea of an exposed element to reveal it
+    // (assistive-technology ScrollIntoView). Returns whether any scrollable
+    // ancestor existed.
+    bool reveal(AccessibleId id);
+
+    // Whether an exposed element sits inside a ScrollArea (scrollable into
+    // view). Platform bridges use this to decide ScrollItem exposure.
+    [[nodiscard]] bool has_scrollable_ancestor(AccessibleId id) const;
+
     // Forget identities of destroyed widgets and return them, so bridges can
     // announce and release their native elements.
     std::vector<AccessibleId> purge();
