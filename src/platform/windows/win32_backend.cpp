@@ -2355,6 +2355,9 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         // preferences window separately notifies Application with the
         // refreshed preference snapshot.
         apply_color_scheme_chrome(hwnd_, query_color_scheme());
+        if (uia_ != nullptr) {
+            uia_->synchronize();
+        }
         break;
     case WM_MOUSEMOVE: {
         if (!tracking_mouse_) {
