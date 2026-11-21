@@ -33,8 +33,12 @@ InstrumentChartPanel::InstrumentChartPanel() {
     auto controls = nk::Box::create(nk::Orientation::Horizontal, 7.0F);
     auto zoom_out = nk::Button::create("−");
     zoom_out->set_tooltip("Zoom out (Minus)");
+    zoom_out->ensure_accessible().set_name("Zoom out");
+    zoom_out->ensure_accessible().set_description("Zoom out (Minus)");
     auto zoom_in = nk::Button::create("+");
-    zoom_in->set_tooltip("Zoom in (Equals)");
+    zoom_in->set_tooltip("Zoom in (Plus)");
+    zoom_in->ensure_accessible().set_name("Zoom in");
+    zoom_in->ensure_accessible().set_description("Zoom in (Plus)");
     auto reset = nk::Button::create("Reset chart");
     controls->append(zoom_out);
     controls->append(zoom_in);

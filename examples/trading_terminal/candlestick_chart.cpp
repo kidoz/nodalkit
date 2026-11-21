@@ -37,7 +37,7 @@ CandlestickChart::CandlestickChart() {
     accessible.set_role(nk::AccessibleRole::Image);
     accessible.set_name("Candlestick chart");
     accessible.set_description(
-        "Use Left and Right to inspect candles, Equals and Minus to zoom, and Escape to clear "
+        "Use Left and Right to inspect candles, Plus and Minus to zoom, and Escape to clear "
         "the inspection cursor.");
     accessible.add_action(nk::AccessibleAction::Focus, [this] {
         grab_focus();
