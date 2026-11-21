@@ -11,7 +11,7 @@ Windows backend in detail, see the
 | -------- | ---- | ------- |
 | Linux Wayland | Primary release target | Regressions block a release. |
 | macOS | Secondary target | Supported while CI stays green. |
-| Windows | Experimental | Win32, D3D11/D3D12, DirectWrite/GDI. Actively developed; CI builds and tests it, but a Windows regression does not block a release. |
+| Windows | Secondary target | Win32, D3D11/D3D12, DirectWrite/GDI. Supported while CI stays green; Windows regressions block a release. No UI Automation provider yet — see the [Windows support matrix](windows-support-matrix.md) for the granular state. |
 | X11 | Not a release target | Not supported yet. |
 
 ## Distribution surface
@@ -26,7 +26,7 @@ package config module in 0.x.
 | -------- | ----------------- | ------- | ---------------------------------- |
 | Linux Wayland | `libNodalKit.so` | Shared | `wayland-client`, `xkbcommon`, `freetype2`, `fontconfig`, `harfbuzz`, `gio-2.0`. On most distributions these come in the matching `-dev` packages. |
 | macOS | `libNodalKit.dylib` | Shared | Nothing extra. The dylib links the Cocoa, CoreGraphics, CoreText, Metal, QuartzCore, and UniformTypeIdentifiers frameworks, and downstream applications pick them up automatically. |
-| Windows | Static library; the exact filename is toolchain-dependent and the current clang-based build emits `libNodalKit.a` | Static | Nothing extra when consuming through `pkg-config`. The generated `nodalkit.pc` includes `user32`, `gdi32`, `advapi32`, `dwmapi`, `ole32`, `shcore`, `dwrite`, `d3d11`, `d3d12`, `d3dcompiler`, and `dxgi`. Optional Vulkan link flags are present only when Vulkan support was detected while building NodalKit. |
+| Windows | Static library; the exact filename is toolchain-dependent and the current clang-based build emits `libNodalKit.a` | Static | Nothing extra when consuming through `pkg-config`. The generated `nodalkit.pc` includes `user32`, `gdi32`, `advapi32`, `dwmapi`, `ole32`, `shcore`, `imm32`, `dwrite`, `d3d11`, `d3d12`, `d3dcompiler`, and `dxgi`. Optional Vulkan link flags are present only when Vulkan support was detected while building NodalKit. |
 
 ## Build requirements
 
@@ -35,7 +35,7 @@ package config module in 0.x.
 | Meson | 1.11 or newer. |
 | Compiler | C++23. |
 | `pkg-config` or `pkgconf` | Required for downstream SDK consumption. |
-| Windows SDK | Win32, DWM, Shell, DirectWrite, D3D11, D3D12, D3DCompiler, DXGI, and COM development libraries. The current Windows host uses `clang++` with `lld-link`. |
+| Windows SDK | Win32, DWM, Shell, IMM, DirectWrite, D3D11, D3D12, D3DCompiler, DXGI, and COM development libraries. The current Windows host uses `clang++` with `lld-link`. |
 | Vulkan (optional) | A Vulkan SDK or system package discoverable by Meson plus `glslangValidator` at NodalKit build time. When missing, the Windows build still installs the Win32, DirectWrite, D3D11, and D3D12 surface. |
 
 ## Render backends
@@ -91,8 +91,7 @@ meson test -C build directx_renderer renderer basic_app --print-errorlogs
 
 Set `NK_DIRECTX_DEBUG=1` to enable the D3D11 and D3D12 debug layers; this requires
 the Windows Graphics Tools optional feature. Debug-layer errors invalidate the
-GPU path and fail the native pixel checks. Windows remains an experimental
-platform; this implementation does not change its release tier.
+GPU path and fail the native pixel checks.
 
 ### Vulkan rendering
 

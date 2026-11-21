@@ -1,8 +1,9 @@
 # Windows support matrix
 
-Windows is an experimental, actively developed target. This page makes the
-"experimental" label granular so consumers (e.g. a 32-bit emulator frontend)
-can see exactly what is covered.
+Windows is a secondary supported target (like macOS: supported while CI stays
+green; Windows regressions block a release). This page makes the support
+granular so consumers (e.g. a 32-bit emulator frontend) can see exactly what
+is covered and what is still open.
 
 Status legend: ✅ implemented and CI-built · 🧪 implemented, experimental /
 lightly tested · ❌ not implemented.
@@ -40,22 +41,28 @@ GPU coverage, software fallback limits, and validation commands.
 
 | Integration | Status | Notes |
 | ----------- | ------ | ----- |
-| File / save dialogs | 🧪 | Common Item Dialog. |
-| Clipboard | 🧪 | Win32 clipboard. |
-| Drag & drop | 🧪 | OLE `IDropTarget` receive side. External drops (files via `CF_HDROP`, text via `CF_UNICODETEXT`) are translated to `DragPayload` and delivered through `Window::dispatch_drag_drop_event`. Drag *source* (`DoDragDrop`) is not yet wired; in-process drags keep using the toolkit's synthetic simulation. |
-| App / menu bar | 🧪 | Native menu bar built per window from the app-global `NativeMenu` model (`SetMenu` / `AppendMenuW`); `WM_COMMAND` dispatches `action_name` through the shared `NativeMenuActionHandler`. Shortcuts render as label text only; `HACCEL` accelerators are not installed. |
-| High-DPI | 🧪 | Per-monitor DPI awareness; scale tracked per window. |
-| Fullscreen | 🧪 | Borderless-on-monitor toggle. |
-| Text shaping | 🧪 | DirectWrite, with a GDI fallback shaper. |
+| File / save dialogs | ✅ | Common Item Dialog, owned by the active window (app-modal). |
+| Clipboard | ✅ | Win32 clipboard, `CF_UNICODETEXT` text both ways. |
+| Drag & drop | ✅ | Both directions. Receive side: OLE `IDropTarget`; external drops (files via `CF_HDROP`, text via `CF_UNICODETEXT`) are translated to `DragPayload` and delivered through `Window::dispatch_drag_drop_event`. Source side: `Window::start_drag` runs a native `DoDragDrop` for text and file payloads so drags leave the process; in-process application data keeps the toolkit's synthetic simulation. |
+| App / menu bar | ✅ | Native menu bar built per window from the app-global `NativeMenu` model (`SetMenu` / `AppendMenuW`); `WM_COMMAND` dispatches `action_name` through the shared `NativeMenuActionHandler`. A `HACCEL` accelerator table is installed per window, so menu shortcuts (Ctrl+O, ...) actually trigger, translated before toolkit key dispatch so they cannot double-activate. Native roles (Undo/Redo/Cut/Copy/Paste/Select All/Minimize) are enabled and dispatched by replaying their conventional shortcut. |
+| High-DPI | ✅ | Per-Monitor V2 DPI awareness; scale tracked per window; `WM_DPICHANGED` applies the suggested rect. |
+| Dark-mode chrome | ✅ | Title bar and menu bar follow the system color scheme (`DWMWA_USE_IMMERSIVE_DARK_MODE` with the legacy attribute fallback) and re-apply on theme change. |
+| System preferences | ✅ | Push-based observation via `WM_SETTINGCHANGE` / `WM_THEMECHANGE` on a hidden utility window (no polling fallback); color scheme, contrast, motion, transparency, text scale, and accent color are read from the OS. |
+| IME / text input | 🧪 | IMM32 composition: preedit rendered inline by the toolkit (`Preedit`/`ClearPreedit` events), commits through `GCS_RESULTSTR` exactly once, and composition + candidate windows anchored to the focused editor's caret. Unit-tested; live IME validation across keyboards is still maturing. |
+| Fullscreen | ✅ | Borderless-on-monitor toggle. |
+| Text shaping | ✅ | DirectWrite, with a GDI fallback shaper. |
 | Native window handle | ✅ | `HWND` / `HINSTANCE` via [`windows_interop.h`](../../include/nk/platform/windows_interop.h). See the [Native handle contract](native-handles.md). |
-| Accessibility | ❌ | No UI Automation provider yet. The accessibility model (`nk/accessibility`) is populated, but only the Linux AT-SPI bridge is wired. |
-| Spell checking | 🧪 | Windows Spell Checking API (`ISpellCheckerFactory` / `ISpellChecker`) in `src/platform/windows/win32_spell_checker.cpp`. Lazily picks the first supported language; returns empty results (no crash) when no spell-check language is installed. Returned `SpellCheckRange` offsets are UTF-8 bytes. |
+| Taskbar identity | ✅ | The first window sets the process AppUserModelID from `WindowConfig::app_id` (seeded from `Application::app_id()`), so taskbar grouping and jump lists are stable. |
+| Accessibility | ❌ | No UI Automation provider yet. The accessibility model (`nk/accessibility`) is populated, but only the Linux AT-SPI and macOS NSAccessibility bridges are wired. This is the largest remaining gap for Windows parity. |
+| Spell checking | ✅ | Windows Spell Checking API (`ISpellCheckerFactory` / `ISpellChecker`) in `src/platform/windows/win32_spell_checker.cpp`. Lazily picks the first supported language; returns empty results (no crash) when no spell-check language is installed. Returned `SpellCheckRange` offsets are UTF-8 bytes. |
 
 ## Release gating
 
-Windows is not a release gate today: CI builds and tests it, but a Windows
-regression does not block a release the way a Linux one does. Treat the 🧪
-rows as "works in our testing, please file issues," not "guaranteed."
+Windows is a release gate: the blocking `build-windows` CI job (x64 debug and
+release) must stay green, and a Windows regression blocks a release the same
+way a Linux one does. The i686 cross-build and the sanitizer build remain
+advisory signal while their coverage matures. Treat remaining 🧪 rows as
+"works in our testing, please file issues."
 
 ## Local verification
 

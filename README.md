@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 [![Meson](https://img.shields.io/badge/Build-Meson-blueviolet.svg)](https://mesonbuild.com/)
-[![Platform status: Linux Wayland primary | macOS secondary | Windows experimental](https://img.shields.io/badge/Platform%20status-Linux%20Wayland%20primary%20%7C%20macOS%20secondary%20%7C%20Windows%20experimental-lightgrey.svg)]()
+[![Platform status: Linux Wayland primary | macOS + Windows secondary](https://img.shields.io/badge/Platform%20status-Linux%20Wayland%20primary%20%7C%20macOS%20%2B%20Windows%20secondary-lightgrey.svg)]()
 
 A C++-first GUI toolkit for modern desktop applications.
 
@@ -35,7 +35,7 @@ The current 0.x support policy is:
 
 - Linux Wayland is the primary release target.
 - macOS is a secondary target while CI stays green.
-- Windows is experimental (Win32, D3D11/D3D12, DirectWrite/GDI) — actively developed, not a release gate.
+- Windows is a secondary target (Win32, D3D11/D3D12, DirectWrite/GDI) — supported while CI stays green; Windows regressions block a release. There is no UI Automation provider yet; see the [Windows support matrix](docs/reference/windows-support-matrix.md) for the granular state.
 - X11 is not a release target yet.
 
 ## Quick Start

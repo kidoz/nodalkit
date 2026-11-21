@@ -4,6 +4,64 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+Promotes Windows from an experimental platform to a secondary supported
+target (like macOS: supported while CI stays green) and closes the native
+integration gaps that kept the backend experimental: native menu accelerators,
+dark-mode window chrome, push-based system preference updates, app-modal file
+dialogs, double-click counting, an explicit AppUserModelID, IMM32 IME
+composition with caret-anchored candidates, and an OLE drag source for text
+and file payloads.
+
+### Support Matrix for Unreleased
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Secondary Release Target (supported while CI remains green).
+    Win32 native integration now covers menus with working keyboard
+    accelerators, IMM32 IME, clipboard, dialogs, drag & drop (both
+    directions), high-DPI, dark-mode chrome, and system preference
+    observation. No UI Automation provider yet, and ARM64, MSVC, and MinGW
+    remain unsupported; see the Windows support matrix.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Accessibility:** Linux AT-SPI and macOS NSAccessibility ship; Windows
+    still has no UI Automation provider.
+
+### Added
+*   **Windows Menu Accelerators:** native menu bars now install a real HACCEL
+    table. Menu shortcuts (e.g. Ctrl+O) are translated in the message loop
+    before key dispatch, so they work without focus quirks and cannot
+    double-activate with `Window::add_shortcut` bindings. Items using native
+    roles (Undo, Redo, Cut, Copy, Paste, Select All, Minimize) are enabled,
+    labeled with their conventional Windows shortcut, and dispatched by
+    replaying the shortcut through the focused widget.
+*   **Windows IME:** IMM32 composition handling turns in-progress IME text
+    into Preedit events (rendered inline by the toolkit), commits finalized
+    text once through GCS_RESULTSTR, and anchors the system composition and
+    candidate windows to the focused editor's caret via
+    `text_input_state_changed`.
+*   **Windows Drag Source:** `Window::start_drag` now prefers a native OLE
+    drag (`DoDragDrop`) for text and file payloads so drags can leave the
+    process; in-process application data keeps using the synthetic drag.
+*   **Windows Dark-Mode Chrome:** window frames (title bar, menu bar) follow
+    the system color scheme through `DwmSetWindowAttribute`
+    (`DWMWA_USE_IMMERSIVE_DARK_MODE`, with the legacy attribute fallback) and
+    re-apply when the theme changes.
+*   **Windows Preference Observation:** the backend observes
+    `WM_SETTINGCHANGE`/`WM_THEMECHANGE` through a hidden utility window and
+    pushes preference updates to `Application`, replacing the one-second
+    registry polling fallback.
+*   **Windows Input Fixes:** mouse events now carry real multi-click counts
+    (double-click activation works), file dialogs are app-modal with the
+    active window as owner, and the first window sets the process
+    AppUserModelID from `WindowConfig::app_id` for taskbar grouping.
+*   **Windows Tests:** the `win32_native` suite grows coverage for the
+    KeyCode-to-virtual-key translation, accelerator building, multi-click
+    counting, IME preedit conversion (BMP and astral characters), the drag
+    data object's CF_HDROP/CF_UNICODETEXT round-trips, and the preference
+    observation lifecycle.
+
 ## [0.5.0] - 2026-11-07
 
 The fifth normal release of the NodalKit framework. 0.5.0 keeps the widget
