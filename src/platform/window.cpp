@@ -3503,6 +3503,12 @@ void Window::start_drag(DragPayload payload, DragOperation operation) {
         operation = DragOperation::Copy;
     }
     cancel_drag();
+    // Prefer a native system drag (OLE DoDragDrop on Windows) so text and file
+    // payloads can leave the process; the synthetic in-process drag stays the
+    // fallback for payloads the OS cannot carry.
+    if (impl_->surface != nullptr && impl_->surface->start_native_drag(payload, operation)) {
+        return;
+    }
     impl_->active_drag_payload = std::make_shared<DragPayload>(std::move(payload));
     impl_->active_drag_operation = operation;
 }

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <nk/foundation/logging.h>
 #include <nk/platform/application.h>
@@ -24,6 +25,7 @@
 
 // windows.h must precede the Windows-specific headers below.
 #include <dwmapi.h>
+#include <imm.h>
 #include <objbase.h>
 #include <ole2.h>
 #include <shellapi.h>
@@ -42,6 +44,29 @@ using Microsoft::WRL::ComPtr;
 
 constexpr UINT kWakeMessage = WM_APP + 1;
 constexpr const wchar_t* kWindowClassName = L"NodalKitWindow";
+constexpr const wchar_t* kPreferencesWindowClassName = L"NodalKitPreferencesWindow";
+// WM_THEMECHANGE (0x031A) is not exposed uniformly across SDK versions.
+constexpr UINT kWmThemeChange = 0x031A;
+// DWMWA_USE_IMMERSIVE_DARK_MODE shipped as attribute 19 on early Windows 10
+// builds and was renumbered to 20 starting with build 19041. Both are tried so
+// the native title bar and menu bar follow the system color scheme on either
+// generation.
+constexpr DWORD kDwmwaImmersiveDarkMode = 20;
+constexpr DWORD kDwmwaImmersiveDarkModeLegacy = 19;
+
+/// Local mirror of the Win32 DROPFILES header layout, since the SDK's
+/// shellapi.h does not expose DROPFILES uniformly across target versions. This
+/// matches the documented CF_HDROP layout DragQueryFileW consumes.
+#pragma pack(push, 1)
+
+struct LocalDropFiles {
+    UINT pFiles;
+    POINT pt;
+    BOOL fNC;
+    BOOL fWide;
+};
+
+#pragma pack(pop)
 
 std::wstring utf8_to_wide(std::string_view text) {
     if (text.empty()) {
@@ -260,11 +285,7 @@ Color query_accent_color() {
     };
 }
 
-SystemPreferences query_system_preferences() {
-    SystemPreferences preferences;
-    preferences.platform_family = PlatformFamily::Windows;
-    preferences.desktop_environment = DesktopEnvironment::Other;
-
+ColorScheme query_color_scheme() {
     DWORD apps_use_light_theme = 1;
     DWORD value_size = sizeof(apps_use_light_theme);
     if (RegGetValueW(HKEY_CURRENT_USER,
@@ -275,8 +296,28 @@ SystemPreferences query_system_preferences() {
                      &apps_use_light_theme,
                      &value_size) == ERROR_SUCCESS &&
         apps_use_light_theme == 0) {
-        preferences.color_scheme = ColorScheme::Dark;
+        return ColorScheme::Dark;
     }
+    return ColorScheme::Light;
+}
+
+/// Match the native window frame (title bar, menu bar) to the system color
+/// scheme. Call after window creation and again whenever the scheme changes.
+void apply_color_scheme_chrome(HWND hwnd, ColorScheme scheme) {
+    if (hwnd == nullptr) {
+        return;
+    }
+    const BOOL dark = scheme == ColorScheme::Dark ? TRUE : FALSE;
+    if (FAILED(DwmSetWindowAttribute(hwnd, kDwmwaImmersiveDarkMode, &dark, sizeof(dark)))) {
+        (void)DwmSetWindowAttribute(hwnd, kDwmwaImmersiveDarkModeLegacy, &dark, sizeof(dark));
+    }
+}
+
+SystemPreferences query_system_preferences() {
+    SystemPreferences preferences;
+    preferences.platform_family = PlatformFamily::Windows;
+    preferences.desktop_environment = DesktopEnvironment::Other;
+    preferences.color_scheme = query_color_scheme();
 
     HIGHCONTRASTW contrast{};
     contrast.cbSize = sizeof(contrast);
@@ -446,7 +487,8 @@ void post_file_dialog_result(const EventLoop::TaskPoster& poster,
 }
 
 OpenFileDialogResult show_modern_open_file_dialog(std::string_view title,
-                                                  const std::vector<std::string>& filters) {
+                                                  const std::vector<std::string>& filters,
+                                                  HWND owner) {
     ComApartment apartment;
     if (!apartment.usable()) {
         return Unexpected(FileDialogError::Failed);
@@ -479,7 +521,9 @@ OpenFileDialogResult show_modern_open_file_dialog(std::string_view title,
         (void)dialog->SetFileTypeIndex(1);
     }
 
-    hr = dialog->Show(nullptr);
+    // Owning the dialog to the app's active window keeps it app-modal, on top
+    // of the application, and grouped with it on the taskbar.
+    hr = dialog->Show(owner);
     if (FAILED(hr)) {
         return Unexpected(file_dialog_error_from_hresult(hr));
     }
@@ -502,7 +546,8 @@ OpenFileDialogResult show_modern_open_file_dialog(std::string_view title,
                           : OpenFileDialogResult(std::move(result));
 }
 
-SaveFileDialogResult show_modern_save_file_dialog(const SaveFileDialogOptions& options) {
+SaveFileDialogResult show_modern_save_file_dialog(const SaveFileDialogOptions& options,
+                                                  HWND owner) {
     ComApartment apartment;
     if (!apartment.usable()) {
         return Unexpected(FileDialogError::Failed);
@@ -548,7 +593,7 @@ SaveFileDialogResult show_modern_save_file_dialog(const SaveFileDialogOptions& o
         (void)dialog->SetDefaultExtension(default_extension.c_str());
     }
 
-    hr = dialog->Show(nullptr);
+    hr = dialog->Show(owner);
     if (FAILED(hr)) {
         return Unexpected(file_dialog_error_from_hresult(hr));
     }
@@ -796,13 +841,58 @@ RECT logical_client_rect_for_window(Size logical_size,
     return L"\t" + parts + label;
 }
 
+/// Standard Windows shortcut for a native menu role, used when the item
+/// declares no explicit shortcut: the label hint and the accelerator table
+/// both synthesize the conventional Ctrl+<key> spelling.
+[[nodiscard]] std::optional<NativeMenuShortcut> role_shortcut_for(NativeMenuRole role) {
+    NativeMenuShortcut shortcut{};
+    shortcut.modifiers = NativeMenuModifier::Ctrl;
+    switch (role) {
+    case NativeMenuRole::Undo:
+        shortcut.key = KeyCode::Z;
+        break;
+    case NativeMenuRole::Redo:
+        shortcut.key = KeyCode::Y;
+        break;
+    case NativeMenuRole::Cut:
+        shortcut.key = KeyCode::X;
+        break;
+    case NativeMenuRole::Copy:
+        shortcut.key = KeyCode::C;
+        break;
+    case NativeMenuRole::Paste:
+        shortcut.key = KeyCode::V;
+        break;
+    case NativeMenuRole::SelectAll:
+        shortcut.key = KeyCode::A;
+        break;
+    case NativeMenuRole::Minimize:
+    case NativeMenuRole::BringAllToFront:
+    case NativeMenuRole::Custom:
+    default:
+        return std::nullopt;
+    }
+    return shortcut;
+}
+
+/// Whether a role has a Windows-side effect (synthetic shortcut keys or a
+/// window action) when its item carries no action_name.
+[[nodiscard]] bool role_dispatchable_on_windows(NativeMenuRole role) {
+    return role == NativeMenuRole::Minimize || role_shortcut_for(role).has_value();
+}
+
 /// Recursively append NativeMenuItem entries to a popup HMENU. Each leaf with an
 /// action_name gets a unique command id recorded in command_actions so WM_COMMAND
-/// can dispatch it through the shared NativeMenuActionHandler.
+/// can dispatch it through the shared NativeMenuActionHandler. Role-only items are
+/// recorded in command_roles instead, and every dispatchable leaf with a
+/// representable shortcut also contributes an accelerator entry sharing the
+/// same command id.
 void build_win32_menu_popup(HMENU popup,
                             std::span<const NativeMenuItem> items,
                             UINT& next_command,
-                            std::unordered_map<UINT, std::string>& command_actions) {
+                            std::unordered_map<UINT, std::string>& command_actions,
+                            std::unordered_map<UINT, NativeMenuRole>& command_roles,
+                            std::vector<ACCEL>& accelerators) {
     for (const auto& item : items) {
         if (item.separator) {
             AppendMenuW(popup, MF_SEPARATOR, 0u, nullptr);
@@ -810,7 +900,8 @@ void build_win32_menu_popup(HMENU popup,
         }
         if (!item.children.empty()) {
             const HMENU submenu = CreatePopupMenu();
-            build_win32_menu_popup(submenu, item.children, next_command, command_actions);
+            build_win32_menu_popup(
+                submenu, item.children, next_command, command_actions, command_roles, accelerators);
             AppendMenuW(popup,
                         MF_POPUP | (item.enabled ? MF_ENABLED : MF_GRAYED),
                         reinterpret_cast<UINT_PTR>(submenu),
@@ -819,14 +910,30 @@ void build_win32_menu_popup(HMENU popup,
         }
         const UINT command_id = next_command++;
         std::wstring label = utf8_to_wide(item.label);
-        if (item.shortcut.has_value()) {
-            label += shortcut_suffix(*item.shortcut);
+        NativeMenuShortcut shortcut = item.shortcut.value_or(NativeMenuShortcut{});
+        if (!item.shortcut.has_value()) {
+            if (const auto role_shortcut = role_shortcut_for(item.native_role)) {
+                shortcut = *role_shortcut;
+            }
         }
-        const UINT flags =
-            MF_STRING | (item.enabled && !item.action_name.empty() ? MF_ENABLED : MF_GRAYED);
+        if (shortcut.key != KeyCode::Unknown) {
+            label += shortcut_suffix(shortcut);
+        }
+        const bool dispatchable =
+            !item.action_name.empty() || role_dispatchable_on_windows(item.native_role);
+        const UINT flags = MF_STRING | (item.enabled && dispatchable ? MF_ENABLED : MF_GRAYED);
         AppendMenuW(popup, flags, command_id, label.c_str());
-        if (!item.action_name.empty()) {
-            command_actions.emplace(command_id, item.action_name);
+        if (dispatchable) {
+            if (!item.action_name.empty()) {
+                command_actions.emplace(command_id, item.action_name);
+            } else {
+                command_roles.emplace(command_id, item.native_role);
+            }
+        }
+        ACCEL accelerator{};
+        if (item.enabled && dispatchable &&
+            detail::win32_accel_for_shortcut(shortcut, command_id, &accelerator)) {
+            accelerators.push_back(accelerator);
         }
     }
 }
@@ -834,13 +941,17 @@ void build_win32_menu_popup(HMENU popup,
 /// Build a menu bar (HMENU) from the app-global NativeMenu model. First command
 /// id is 1 (0 is reserved by Win32).
 [[nodiscard]] HMENU build_win32_menu_bar(std::span<const NativeMenu> menus,
-                                         std::unordered_map<UINT, std::string>& command_actions) {
+                                         std::unordered_map<UINT, std::string>& command_actions,
+                                         std::unordered_map<UINT, NativeMenuRole>& command_roles,
+                                         std::vector<ACCEL>& accelerators) {
     command_actions.clear();
+    command_roles.clear();
     const HMENU bar = CreateMenu();
     UINT next_command = 1;
     for (const auto& menu : menus) {
         const HMENU popup = CreatePopupMenu();
-        build_win32_menu_popup(popup, menu.items, next_command, command_actions);
+        build_win32_menu_popup(
+            popup, menu.items, next_command, command_actions, command_roles, accelerators);
         AppendMenuW(bar,
                     MF_POPUP | MF_STRING,
                     reinterpret_cast<UINT_PTR>(popup),
@@ -1006,6 +1117,62 @@ private:
     DragOperation enter_operation_ = DragOperation::None;
 };
 
+/// Accelerator tables by window, consulted by the backend message loop before
+/// TranslateMessage so accelerator keys never reach the toolkit as raw key
+/// events (which would double-activate actions in apps that also install
+/// shortcut bindings).
+std::unordered_map<HWND, HACCEL>& accelerator_table_registry() {
+    static std::unordered_map<HWND, HACCEL> registry;
+    return registry;
+}
+
+/// Minimal IDropSource: keep dragging while a button stays pressed, cancel on
+/// Escape, and let OLE draw the default drag cursors.
+class Win32DropSource final : public IDropSource {
+public:
+    // IUnknown
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IDropSource) {
+            *out = static_cast<IUnknown*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // IDropSource
+    HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape_pressed, DWORD key_state) override {
+        if (escape_pressed != FALSE) {
+            return DRAGDROP_S_CANCEL;
+        }
+        if ((key_state & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON)) == 0) {
+            return DRAGDROP_S_DROP;
+        }
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD /*effect*/) override {
+        return DRAGDROP_S_USEDEFAULTCURSORS;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+};
+
 class Win32Surface final : public NativeSurface {
 public:
     Win32Surface(HINSTANCE instance, const WindowConfig& config, Window& owner);
@@ -1031,12 +1198,16 @@ public:
     [[nodiscard]] NativeWindowHandle native_handle() const override;
     [[nodiscard]] NativeWindowHandle native_display_handle() const override;
     void set_cursor_shape(CursorShape shape) override;
+    void text_input_state_changed() override;
+    [[nodiscard]] bool start_native_drag(const DragPayload& payload,
+                                         DragOperation operation) override;
     [[nodiscard]] HWND hwnd() const;
 
     /// Build a Win32 menu bar from the app-global menu model and attach it to the
     /// window. The handler pointer points back into Win32Backend::Impl and stays
     /// valid for the backend's lifetime. Called once at surface creation; safe to
-    /// call again to replace an existing menu bar.
+    /// call again to replace an existing menu bar. Also (re)builds the HACCEL
+    /// accelerator table for the menu's dispatchable shortcuts.
     void apply_native_menu(std::span<const NativeMenu> menus,
                            const NativeMenuActionHandler* handler);
 
@@ -1057,6 +1228,9 @@ private:
     void dispatch_mouse_event(MouseEvent event);
     void dispatch_key_event(KeyEvent event);
     void dispatch_text_utf16(wchar_t code_unit);
+    void dispatch_native_menu_role(NativeMenuRole role);
+    void handle_ime_composition(LPARAM lparam);
+    void position_ime_windows();
     LRESULT handle_message(UINT message, WPARAM wparam, LPARAM lparam);
 
     HINSTANCE instance_ = nullptr;
@@ -1077,10 +1251,20 @@ private:
     bool tracking_mouse_ = false;
     bool handling_dpi_change_ = false;
     wchar_t pending_high_surrogate_ = 0;
+    // Multi-click state for button events; the count computed at Press is
+    // mirrored on the matching Release.
+    detail::Win32ClickCounter click_counter_;
+    int press_click_count_ = 1;
+    // True between WM_IME_STARTCOMPOSITION and WM_IME_ENDCOMPOSITION.
+    bool ime_composing_ = false;
     // Native menu bar state. Command ids start at 1 (0 is reserved by Win32).
     HMENU menu_bar_ = nullptr;
     std::unordered_map<UINT, std::string> menu_command_actions_;
+    std::unordered_map<UINT, NativeMenuRole> menu_command_roles_;
     const NativeMenuActionHandler* menu_handler_ = nullptr;
+    // HACCEL table built alongside the menu bar; registered in the backend's
+    // per-window registry so the message loop can translate accelerator keys.
+    HACCEL accelerator_table_ = nullptr;
     // OLE drop target registered on this window. Owned via refcount; we hold one
     // strong reference and revoke it in the destructor before releasing.
     ComPtr<Win32DropTarget> drop_target_;
@@ -1116,6 +1300,9 @@ Win32Surface::Win32Surface(HINSTANCE instance, const WindowConfig& config, Windo
                             this);
     if (hwnd_ != nullptr) {
         update_metrics();
+        // Match the native frame to the system color scheme up front; the
+        // WM_SETTINGCHANGE handler re-applies it when the user switches themes.
+        apply_color_scheme_chrome(hwnd_, query_color_scheme());
         // Register an OLE drop target so external drags (e.g. files from
         // Explorer) reach the widget tree. RegisterDragDrop requires OLE to be
         // initialized on this thread; if it isn't (OleInitialize failed in the
@@ -1143,6 +1330,11 @@ Win32Surface::~Win32Surface() {
             SetMenu(hwnd_, nullptr);
             DestroyMenu(menu_bar_);
             menu_bar_ = nullptr;
+        }
+        if (accelerator_table_ != nullptr) {
+            accelerator_table_registry().erase(hwnd_);
+            DestroyAcceleratorTable(accelerator_table_);
+            accelerator_table_ = nullptr;
         }
         // Detach + revoke the drop target before the HWND and widget tree go
         // away: RevokeDragDrop blocks until in-flight OLE callbacks return, and
@@ -1324,6 +1516,83 @@ HWND Win32Surface::hwnd() const {
     return hwnd_;
 }
 
+void Win32Surface::text_input_state_changed() {
+    position_ime_windows();
+}
+
+void Win32Surface::position_ime_windows() {
+    if (hwnd_ == nullptr) {
+        return;
+    }
+    // Anchor the system composition and candidate windows to the focused
+    // editor's caret so IME UI tracks the text being composed.
+    const auto state = owner_.current_text_input_state();
+    if (!state.has_value() || state->caret_rect.width <= 0.0F || state->caret_rect.height <= 0.0F) {
+        return;
+    }
+    const float scale = scale_factor_ > 0.0F ? scale_factor_ : 1.0F;
+    POINT caret{
+        static_cast<LONG>(std::lround(state->caret_rect.right() * scale)),
+        static_cast<LONG>(std::lround(state->caret_rect.bottom() * scale)),
+    };
+    ClientToScreen(hwnd_, &caret);
+
+    HIMC context = ImmGetContext(hwnd_);
+    if (context == nullptr) {
+        return;
+    }
+    COMPOSITIONFORM composition{};
+    composition.dwStyle = CFS_POINT;
+    composition.ptCurrentPos = caret;
+    (void)ImmSetCompositionWindow(context, &composition);
+    CANDIDATEFORM candidate{};
+    candidate.dwIndex = 0;
+    candidate.dwStyle = CFS_CANDIDATEPOS;
+    candidate.ptCurrentPos = caret;
+    (void)ImmSetCandidateWindow(context, &candidate);
+    ImmReleaseContext(hwnd_, context);
+}
+
+bool Win32Surface::start_native_drag(const DragPayload& payload, DragOperation operation) {
+    if (hwnd_ == nullptr) {
+        return false;
+    }
+    auto* data_object = detail::win32_make_drag_data_object(payload);
+    if (data_object == nullptr) {
+        // In-process application data cannot cross the OLE boundary; the
+        // caller falls back to the synthetic in-process drag.
+        return false;
+    }
+    // DoDragDrop runs a modal OLE loop: the user drops by releasing the button
+    // and cancels with Escape. Windows under the cursor — including this
+    // process's own — receive the normal OLE drop-target events.
+    Win32DropSource drop_source;
+    const DWORD requested = drop_effect_for_operation(operation);
+    const DWORD allowed =
+        requested != DROPEFFECT_NONE ? (requested | DROPEFFECT_COPY) : DROPEFFECT_COPY;
+    DWORD final_effect = DROPEFFECT_NONE;
+    (void)DoDragDrop(data_object, &drop_source, allowed, &final_effect);
+    data_object->Release();
+    return true;
+}
+
+void Win32Surface::dispatch_native_menu_role(NativeMenuRole role) {
+    // Role items without an action_name route to the platform's active
+    // responder: edit roles replay their conventional Ctrl+<key> shortcuts as
+    // synthetic key events into the focused widget (the same channel the
+    // macOS backend uses for native roles); Minimize acts on the window.
+    if (const auto shortcut = role_shortcut_for(role); shortcut.has_value()) {
+        owner_.dispatch_key_event(
+            {.type = KeyEvent::Type::Press, .key = shortcut->key, .modifiers = Modifiers::Ctrl});
+        owner_.dispatch_key_event(
+            {.type = KeyEvent::Type::Release, .key = shortcut->key, .modifiers = Modifiers::Ctrl});
+        return;
+    }
+    if (role == NativeMenuRole::Minimize) {
+        minimize();
+    }
+}
+
 void Win32Surface::apply_native_menu(std::span<const NativeMenu> menus,
                                      const NativeMenuActionHandler* handler) {
     if (hwnd_ == nullptr) {
@@ -1336,14 +1605,29 @@ void Win32Surface::apply_native_menu(std::span<const NativeMenu> menus,
         menu_bar_ = nullptr;
     }
     menu_command_actions_.clear();
+    menu_command_roles_.clear();
     menu_handler_ = handler;
+    if (accelerator_table_ != nullptr) {
+        accelerator_table_registry().erase(hwnd_);
+        DestroyAcceleratorTable(accelerator_table_);
+        accelerator_table_ = nullptr;
+    }
     if (menus.empty()) {
         DrawMenuBar(hwnd_);
         return;
     }
-    menu_bar_ = build_win32_menu_bar(menus, menu_command_actions_);
+    std::vector<ACCEL> accelerators;
+    menu_bar_ =
+        build_win32_menu_bar(menus, menu_command_actions_, menu_command_roles_, accelerators);
     SetMenu(hwnd_, menu_bar_);
     DrawMenuBar(hwnd_);
+    if (!accelerators.empty()) {
+        accelerator_table_ =
+            CreateAcceleratorTableW(accelerators.data(), static_cast<int>(accelerators.size()));
+        if (accelerator_table_ != nullptr) {
+            accelerator_table_registry()[hwnd_] = accelerator_table_;
+        }
+    }
 }
 
 DragOperation Win32Surface::dispatch_drop_event(const DragDropEvent& event) {
@@ -1469,6 +1753,318 @@ HRESULT STDMETHODCALLTYPE Win32DropTarget::Drop(IDataObject* data_object,
     return hr;
 }
 
+// --- OLE drag source ---------------------------------------------------------
+
+/// State carried by the hidden preferences-watch window (GWLP_USERDATA). Owned
+/// by Win32Backend::Impl; pure data so the window procedure needs no access to
+/// the backend itself.
+struct PreferencesWatch {
+    SystemPreferencesObserver observer;
+    std::optional<SystemPreferences> last_observed;
+};
+
+/// Window procedure for the hidden top-level window that receives system
+/// setting broadcasts. A message-only (HWND_MESSAGE) window would NOT receive
+/// the WM_SETTINGCHANGE broadcast, so this must stay a real top-level window
+/// that is simply never shown.
+LRESULT CALLBACK preferences_window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_NCCREATE) {
+        auto* create_struct = reinterpret_cast<CREATESTRUCTW*>(lparam);
+        SetWindowLongPtrW(
+            hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create_struct->lpCreateParams));
+    }
+    auto* watch = reinterpret_cast<PreferencesWatch*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (watch == nullptr) {
+        return DefWindowProcW(hwnd, message, wparam, lparam);
+    }
+    if (message == WM_SETTINGCHANGE || message == kWmThemeChange) {
+        // Broadcasts arrive for many unrelated settings; requery and only
+        // notify when something the toolkit tracks actually changed.
+        const SystemPreferences latest = query_system_preferences();
+        if (!watch->last_observed.has_value() || latest != *watch->last_observed) {
+            watch->last_observed = latest;
+            if (watch->observer) {
+                watch->observer(latest);
+            }
+        }
+        return 0;
+    }
+    return DefWindowProcW(hwnd, message, wparam, lparam);
+}
+
+/// Global allocation holding a double-NUL-terminated wide path list behind a
+/// DROPFILES header — the CF_HDROP layout DragQueryFileW consumes.
+[[nodiscard]] HGLOBAL global_for_file_list(const std::vector<std::filesystem::path>& files) {
+    std::size_t chars = 1; // final terminating NUL
+    for (const auto& file : files) {
+        chars += file.native().size() + 1;
+    }
+    const std::size_t bytes = sizeof(LocalDropFiles) + chars * sizeof(wchar_t);
+    HGLOBAL storage = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (storage == nullptr) {
+        return nullptr;
+    }
+    auto* drop_files = static_cast<LocalDropFiles*>(GlobalLock(storage));
+    if (drop_files == nullptr) {
+        GlobalFree(storage);
+        return nullptr;
+    }
+    drop_files->pFiles = sizeof(LocalDropFiles);
+    drop_files->pt = {};
+    drop_files->fNC = FALSE;
+    drop_files->fWide = TRUE;
+    auto* out = reinterpret_cast<wchar_t*>(reinterpret_cast<std::byte*>(drop_files) +
+                                           sizeof(LocalDropFiles));
+    for (const auto& file : files) {
+        const auto& wide = file.native();
+        std::wmemcpy(out, wide.c_str(), wide.size());
+        out += wide.size();
+        *out++ = L'\0';
+    }
+    *out = L'\0';
+    GlobalUnlock(storage);
+    return storage;
+}
+
+/// Global allocation holding a NUL-terminated wide string (CF_UNICODETEXT).
+[[nodiscard]] HGLOBAL global_for_wide_text(std::wstring_view text) {
+    const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL storage = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (storage == nullptr) {
+        return nullptr;
+    }
+    auto* destination = static_cast<wchar_t*>(GlobalLock(storage));
+    if (destination == nullptr) {
+        GlobalFree(storage);
+        return nullptr;
+    }
+    std::copy(text.begin(), text.end(), destination);
+    destination[text.size()] = L'\0';
+    GlobalUnlock(storage);
+    return storage;
+}
+
+/// Minimal IEnumFORMATETC over the static format list a Win32DragDataObject
+/// offers (DATADIR_GET direction only).
+class Win32EnumFormatEtc final : public IEnumFORMATETC {
+public:
+    explicit Win32EnumFormatEtc(std::vector<FORMATETC> formats) : formats_(std::move(formats)) {}
+
+    // IUnknown
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IEnumFORMATETC) {
+            *out = static_cast<IUnknown*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // IEnumFORMATETC
+    HRESULT STDMETHODCALLTYPE Next(ULONG count, FORMATETC* out, ULONG* fetched) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        ULONG copied = 0;
+        while (copied < count && index_ < formats_.size()) {
+            out[copied++] = formats_[index_++];
+        }
+        if (fetched != nullptr) {
+            *fetched = copied;
+        }
+        return copied == count ? S_OK : S_FALSE;
+    }
+
+    HRESULT STDMETHODCALLTYPE Skip(ULONG count) override {
+        index_ = std::min(index_ + static_cast<std::size_t>(count), formats_.size());
+        return index_ < formats_.size() || count == 0 ? S_OK : S_FALSE;
+    }
+
+    HRESULT STDMETHODCALLTYPE Reset() override {
+        index_ = 0;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE Clone(IEnumFORMATETC** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        auto* clone = new (std::nothrow) Win32EnumFormatEtc(formats_);
+        if (clone == nullptr) {
+            return E_OUTOFMEMORY;
+        }
+        clone->index_ = index_;
+        clone->AddRef();
+        *out = clone;
+        return S_OK;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    std::vector<FORMATETC> formats_;
+    std::size_t index_ = 0;
+};
+
+/// Hand-rolled read-only IDataObject for DoDragDrop: offers CF_HDROP for file
+/// payloads and CF_UNICODETEXT for text payloads, mirroring the formats the
+/// receive side (payload_from_data_object) understands.
+class Win32DragDataObject final : public IDataObject {
+public:
+    explicit Win32DragDataObject(const DragPayload& payload)
+        : text_(utf8_to_wide(payload.text)), files_(payload.files) {
+        if (!files_.empty()) {
+            formats_.push_back({
+                .cfFormat = CF_HDROP,
+                .ptd = nullptr,
+                .dwAspect = DVASPECT_CONTENT,
+                .lindex = -1,
+                .tymed = TYMED_HGLOBAL,
+            });
+        }
+        if (!text_.empty()) {
+            formats_.push_back({
+                .cfFormat = CF_UNICODETEXT,
+                .ptd = nullptr,
+                .dwAspect = DVASPECT_CONTENT,
+                .lindex = -1,
+                .tymed = TYMED_HGLOBAL,
+            });
+        }
+    }
+
+    // IUnknown
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (riid == IID_IUnknown || riid == IID_IDataObject) {
+            *out = static_cast<IUnknown*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_count_; }
+
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG count = --ref_count_;
+        if (count == 0) {
+            delete this;
+        }
+        return count;
+    }
+
+    // IDataObject
+    HRESULT STDMETHODCALLTYPE GetData(FORMATETC* format, STGMEDIUM* medium) override {
+        if (format == nullptr || medium == nullptr) {
+            return E_POINTER;
+        }
+        if ((format->tymed & TYMED_HGLOBAL) == 0 || format->lindex != -1) {
+            return DV_E_TYMED;
+        }
+        if (format->cfFormat == CF_HDROP && !files_.empty()) {
+            medium->tymed = TYMED_HGLOBAL;
+            medium->hGlobal = global_for_file_list(files_);
+            medium->pUnkForRelease = nullptr;
+            return medium->hGlobal != nullptr ? S_OK : E_OUTOFMEMORY;
+        }
+        if (format->cfFormat == CF_UNICODETEXT && !text_.empty()) {
+            medium->tymed = TYMED_HGLOBAL;
+            medium->hGlobal = global_for_wide_text(text_);
+            medium->pUnkForRelease = nullptr;
+            return medium->hGlobal != nullptr ? S_OK : E_OUTOFMEMORY;
+        }
+        return DV_E_FORMATETC;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC* /*format*/, STGMEDIUM* /*medium*/) override {
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* format) override {
+        if (format == nullptr || (format->tymed & TYMED_HGLOBAL) == 0) {
+            return DV_E_TYMED;
+        }
+        for (const auto& offered : formats_) {
+            if (offered.cfFormat == format->cfFormat) {
+                return S_OK;
+            }
+        }
+        return DV_E_FORMATETC;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC* /*format*/,
+                                                    FORMATETC* out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        out->ptd = nullptr;
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE SetData(FORMATETC* /*format*/,
+                                      STGMEDIUM* /*medium*/,
+                                      BOOL /*release*/) override {
+        return E_NOTIMPL;
+    }
+
+    HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** out) override {
+        if (out == nullptr) {
+            return E_POINTER;
+        }
+        if (direction != DATADIR_GET) {
+            *out = nullptr;
+            return E_NOTIMPL;
+        }
+        auto* enumerator = new (std::nothrow) Win32EnumFormatEtc(formats_);
+        if (enumerator == nullptr) {
+            return E_OUTOFMEMORY;
+        }
+        *out = enumerator;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC* /*format*/,
+                                      DWORD /*advf*/,
+                                      IAdviseSink* /*sink*/,
+                                      DWORD* /*connection*/) override {
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+
+    HRESULT STDMETHODCALLTYPE DUnadvise(DWORD /*connection*/) override {
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+
+    HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA** out) override {
+        if (out != nullptr) {
+            *out = nullptr;
+        }
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+
+private:
+    std::atomic<ULONG> ref_count_{1};
+    std::wstring text_;
+    std::vector<std::filesystem::path> files_;
+    std::vector<FORMATETC> formats_;
+};
+
 void Win32Surface::update_metrics(UINT dpi_override) {
     if (hwnd_ == nullptr) {
         return;
@@ -1559,6 +2155,44 @@ void Win32Surface::dispatch_text_utf16(wchar_t code_unit) {
     }
 }
 
+/// Read one string component (composition or result) from an IME context.
+[[nodiscard]] std::wstring ime_composition_string(HIMC context, DWORD index) {
+    const LONG bytes = ImmGetCompositionStringW(context, index, nullptr, 0);
+    if (bytes <= 0 || bytes % static_cast<LONG>(sizeof(wchar_t)) != 0) {
+        return {};
+    }
+    std::wstring buffer(static_cast<std::size_t>(bytes) / sizeof(wchar_t), L'\0');
+    if (ImmGetCompositionStringW(context, index, buffer.data(), bytes) != bytes) {
+        return {};
+    }
+    return buffer;
+}
+
+void Win32Surface::handle_ime_composition(LPARAM lparam) {
+    HIMC context = ImmGetContext(hwnd_);
+    if (context == nullptr) {
+        return;
+    }
+    if ((lparam & GCS_COMPSTR) != 0) {
+        // In-progress composition text becomes a Preedit event (or a clear when
+        // the composition emptied); the toolkit renders it inline.
+        const auto composition = ime_composition_string(context, GCS_COMPSTR);
+        const LONG cursor = ImmGetCompositionStringW(context, GCS_CURSORPOS, nullptr, 0);
+        owner_.dispatch_text_input_event(
+            detail::win32_preedit_event_from_composition(composition, static_cast<int>(cursor)));
+    }
+    if ((lparam & GCS_RESULTSTR) != 0) {
+        // Finalized text commits once, here; WM_IME_CHAR is swallowed so the
+        // per-character translation does not commit it a second time.
+        const auto result = ime_composition_string(context, GCS_RESULTSTR);
+        const auto utf8 = wide_to_utf8(result);
+        if (!utf8.empty()) {
+            owner_.dispatch_text_input_event({.type = TextInputEvent::Type::Commit, .text = utf8});
+        }
+    }
+    ImmReleaseContext(hwnd_, context);
+}
+
 LRESULT CALLBACK Win32Surface::window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     auto* surface = reinterpret_cast<Win32Surface*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -1580,15 +2214,22 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_ERASEBKGND:
         return 1;
     case WM_COMMAND: {
-        // Menu-origin commands: lparam==0 and HIWORD(wparam)==0. Accelerator-
-        // origin commands have HIWORD==1 and are ignored here (full HACCEL wiring
-        // is a follow-up; the toolkit handles keyboard input directly today).
-        const bool from_menu = lparam == 0 && HIWORD(wparam) == 0;
-        if (from_menu && menu_handler_ != nullptr && *menu_handler_) {
-            const UINT command_id = LOWORD(wparam);
+        // Menu-origin commands have HIWORD(wparam)==0; HACCEL-origin commands
+        // have HIWORD==1. Both carry the command id in LOWORD(wparam) with
+        // lparam==0 and dispatch identically.
+        const UINT command_id = LOWORD(wparam);
+        const bool native_command = lparam == 0 && HIWORD(wparam) <= 1;
+        if (native_command && menu_handler_ != nullptr && *menu_handler_) {
             const auto found = menu_command_actions_.find(command_id);
             if (found != menu_command_actions_.end()) {
                 (*menu_handler_)(found->second);
+                return 0;
+            }
+        }
+        if (native_command) {
+            const auto role = menu_command_roles_.find(command_id);
+            if (role != menu_command_roles_.end()) {
+                dispatch_native_menu_role(role->second);
             }
         }
         return 0;
@@ -1640,6 +2281,14 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         dispatch_metric_events(previous_logical_size, previous_scale_factor);
         return 0;
     }
+    case WM_SETTINGCHANGE:
+    case kWmThemeChange:
+        // System visual settings (color scheme, contrast, animation, ...)
+        // changed. Re-apply native chrome immediately; the backend's hidden
+        // preferences window separately notifies Application with the
+        // refreshed preference snapshot.
+        apply_color_scheme_chrome(hwnd_, query_color_scheme());
+        break;
     case WM_MOUSEMOVE: {
         if (!tracking_mouse_) {
             TRACKMOUSEEVENT track_mouse{};
@@ -1663,14 +2312,25 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
         return 0;
     case WM_LBUTTONDOWN:
     case WM_RBUTTONDOWN:
-    case WM_MBUTTONDOWN:
+    case WM_MBUTTONDOWN: {
         SetCapture(hwnd_);
-        dispatch_mouse_event(
-            {.type = MouseEvent::Type::Press,
-             .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
-             .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_,
-             .button = message == WM_LBUTTONDOWN ? 1 : (message == WM_RBUTTONDOWN ? 2 : 3)});
+        const int button = message == WM_LBUTTONDOWN ? 1 : (message == WM_RBUTTONDOWN ? 2 : 3);
+        const int x = GET_X_LPARAM(lparam);
+        const int y = GET_Y_LPARAM(lparam);
+        press_click_count_ = click_counter_.press(button,
+                                                  x,
+                                                  y,
+                                                  GetTickCount64(),
+                                                  GetDoubleClickTime(),
+                                                  GetSystemMetrics(SM_CXDOUBLECLK),
+                                                  GetSystemMetrics(SM_CYDOUBLECLK));
+        dispatch_mouse_event({.type = MouseEvent::Type::Press,
+                              .x = static_cast<float>(x) / scale_factor_,
+                              .y = static_cast<float>(y) / scale_factor_,
+                              .button = button,
+                              .click_count = press_click_count_});
         return 0;
+    }
     case WM_LBUTTONUP:
     case WM_RBUTTONUP:
     case WM_MBUTTONUP:
@@ -1679,7 +2339,8 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
             {.type = MouseEvent::Type::Release,
              .x = static_cast<float>(GET_X_LPARAM(lparam)) / scale_factor_,
              .y = static_cast<float>(GET_Y_LPARAM(lparam)) / scale_factor_,
-             .button = message == WM_LBUTTONUP ? 1 : (message == WM_RBUTTONUP ? 2 : 3)});
+             .button = message == WM_LBUTTONUP ? 1 : (message == WM_RBUTTONUP ? 2 : 3),
+             .click_count = press_click_count_});
         return 0;
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
@@ -1704,6 +2365,28 @@ LRESULT Win32Surface::handle_message(UINT message, WPARAM wparam, LPARAM lparam)
     case WM_SYSKEYUP:
         dispatch_key_event(
             {.type = KeyEvent::Type::Release, .key = translate_key_code(wparam, lparam)});
+        return 0;
+    case WM_IME_SETCONTEXT:
+        // Keep the system candidate window but hide the default composition
+        // window: the toolkit renders preedit text inline from Preedit events.
+        return DefWindowProcW(hwnd_, message, wparam, lparam & ~ISC_SHOWUICOMPOSITIONWINDOW);
+    case WM_IME_STARTCOMPOSITION:
+        ime_composing_ = true;
+        return DefWindowProcW(hwnd_, message, wparam, lparam);
+    case WM_IME_COMPOSITION:
+        handle_ime_composition(lparam);
+        return 0;
+    case WM_IME_ENDCOMPOSITION:
+        if (ime_composing_) {
+            ime_composing_ = false;
+            owner_.dispatch_text_input_event(
+                {.type = TextInputEvent::Type::ClearPreedit, .text = {}});
+        }
+        return DefWindowProcW(hwnd_, message, wparam, lparam);
+    case WM_IME_CHAR:
+        // Composition results are committed through WM_IME_COMPOSITION
+        // (GCS_RESULTSTR); swallow the per-character translation so committed
+        // text is not delivered twice.
         return 0;
     case WM_CHAR:
         dispatch_text_utf16(static_cast<wchar_t>(wparam));
@@ -1748,6 +2431,192 @@ std::optional<std::string> detail::read_global_unicode_text(HGLOBAL data) {
     return wide_to_utf8(buffer.substr(0, end));
 }
 
+int detail::Win32ClickCounter::press(int button,
+                                     int x,
+                                     int y,
+                                     std::uint64_t now_ms,
+                                     std::uint64_t double_click_ms,
+                                     int double_click_width,
+                                     int double_click_height) {
+    // The system double-click rectangle is centered on the previous click.
+    const int half_width = std::max(double_click_width / 2, 1);
+    const int half_height = std::max(double_click_height / 2, 1);
+    const bool same_button = button == last_button_;
+    const bool in_time =
+        count_ > 0 && now_ms >= last_tick_ && now_ms - last_tick_ <= double_click_ms;
+    const bool in_rect =
+        std::abs(x - last_x_) <= half_width && std::abs(y - last_y_) <= half_height;
+    if (same_button && in_time && in_rect && count_ < std::numeric_limits<int>::max()) {
+        ++count_;
+    } else {
+        count_ = 1;
+    }
+    last_button_ = button;
+    last_x_ = x;
+    last_y_ = y;
+    last_tick_ = now_ms;
+    return count_;
+}
+
+UINT detail::win32_virtual_key_for_key(KeyCode key) {
+    const auto value = static_cast<int>(key);
+    if (value >= static_cast<int>(KeyCode::A) && value <= static_cast<int>(KeyCode::Z)) {
+        return static_cast<UINT>('A' + (value - static_cast<int>(KeyCode::A)));
+    }
+    // KeyCode::Num1..Num9 are contiguous but Num0 sits after Num9.
+    if (value >= static_cast<int>(KeyCode::Num1) && value <= static_cast<int>(KeyCode::Num9)) {
+        return static_cast<UINT>('1' + (value - static_cast<int>(KeyCode::Num1)));
+    }
+    if (key == KeyCode::Num0) {
+        return '0';
+    }
+    if (value >= static_cast<int>(KeyCode::F1) && value <= static_cast<int>(KeyCode::F12)) {
+        return static_cast<UINT>(VK_F1 + (value - static_cast<int>(KeyCode::F1)));
+    }
+    // KeyCode::Numpad1..Numpad9 are contiguous but Numpad0 sits after Numpad9.
+    if (value >= static_cast<int>(KeyCode::Numpad1) &&
+        value <= static_cast<int>(KeyCode::Numpad9)) {
+        return static_cast<UINT>(VK_NUMPAD1 + (value - static_cast<int>(KeyCode::Numpad1)));
+    }
+    if (key == KeyCode::Numpad0) {
+        return VK_NUMPAD0;
+    }
+    switch (key) {
+    case KeyCode::Return:
+    case KeyCode::NumpadEnter:
+        return VK_RETURN;
+    case KeyCode::Escape:
+        return VK_ESCAPE;
+    case KeyCode::Backspace:
+        return VK_BACK;
+    case KeyCode::Tab:
+        return VK_TAB;
+    case KeyCode::Space:
+        return VK_SPACE;
+    case KeyCode::Minus:
+        return VK_OEM_MINUS;
+    case KeyCode::Equals:
+        return VK_OEM_PLUS;
+    case KeyCode::LeftBracket:
+        return VK_OEM_4;
+    case KeyCode::RightBracket:
+        return VK_OEM_6;
+    case KeyCode::Backslash:
+        return VK_OEM_5;
+    case KeyCode::Semicolon:
+        return VK_OEM_1;
+    case KeyCode::Apostrophe:
+        return VK_OEM_7;
+    case KeyCode::Grave:
+        return VK_OEM_3;
+    case KeyCode::Comma:
+        return VK_OEM_COMMA;
+    case KeyCode::Period:
+        return VK_OEM_PERIOD;
+    case KeyCode::Slash:
+        return VK_OEM_2;
+    case KeyCode::Insert:
+        return VK_INSERT;
+    case KeyCode::Home:
+        return VK_HOME;
+    case KeyCode::PageUp:
+        return VK_PRIOR;
+    case KeyCode::Delete:
+        return VK_DELETE;
+    case KeyCode::End:
+        return VK_END;
+    case KeyCode::PageDown:
+        return VK_NEXT;
+    case KeyCode::Right:
+        return VK_RIGHT;
+    case KeyCode::Left:
+        return VK_LEFT;
+    case KeyCode::Down:
+        return VK_DOWN;
+    case KeyCode::Up:
+        return VK_UP;
+    case KeyCode::NumpadDivide:
+        return VK_DIVIDE;
+    case KeyCode::NumpadMultiply:
+        return VK_MULTIPLY;
+    case KeyCode::NumpadMinus:
+        return VK_SUBTRACT;
+    case KeyCode::NumpadPlus:
+        return VK_ADD;
+    case KeyCode::NumpadPeriod:
+        return VK_DECIMAL;
+    default:
+        return 0;
+    }
+}
+
+bool detail::win32_accel_for_shortcut(const NativeMenuShortcut& shortcut,
+                                      UINT command,
+                                      ACCEL* out) {
+    if (out == nullptr) {
+        return false;
+    }
+    // Super has no conventional Windows accelerator spelling, and a bare key
+    // would swallow ordinary typing; require a real menu modifier combination.
+    const auto modifiers = shortcut.modifiers;
+    const bool has_ctrl = (modifiers & NativeMenuModifier::Ctrl) != NativeMenuModifier::None;
+    const bool has_alt = (modifiers & NativeMenuModifier::Alt) != NativeMenuModifier::None;
+    if (!has_ctrl && !has_alt) {
+        return false;
+    }
+    if ((modifiers & NativeMenuModifier::Super) != NativeMenuModifier::None) {
+        return false;
+    }
+    const UINT virtual_key = win32_virtual_key_for_key(shortcut.key);
+    if (virtual_key == 0) {
+        return false;
+    }
+    BYTE virt = FVIRTKEY;
+    if (has_ctrl) {
+        virt |= FCONTROL;
+    }
+    if (has_alt) {
+        virt |= FALT;
+    }
+    if ((modifiers & NativeMenuModifier::Shift) != NativeMenuModifier::None) {
+        virt |= FSHIFT;
+    }
+    *out = ACCEL{
+        .fVirt = virt,
+        .key = static_cast<WORD>(virtual_key),
+        .cmd = static_cast<WORD>(command),
+    };
+    return true;
+}
+
+TextInputEvent detail::win32_preedit_event_from_composition(std::wstring_view composition,
+                                                            int cursor_chars) {
+    TextInputEvent event{};
+    if (composition.empty()) {
+        event.type = TextInputEvent::Type::ClearPreedit;
+        return event;
+    }
+    event.type = TextInputEvent::Type::Preedit;
+    event.text = wide_to_utf8(composition);
+    // GCS_CURSORPOS is a wchar offset into the composition (negative when the
+    // IME reports none); convert it to a UTF-8 byte offset so consumers get
+    // the same contract as the Wayland preedit events.
+    const std::size_t cursor =
+        cursor_chars < 0
+            ? composition.size()
+            : std::min<std::size_t>(static_cast<std::size_t>(cursor_chars), composition.size());
+    event.selection_start = wide_to_utf8(composition.substr(0, cursor)).size();
+    event.selection_end = event.selection_start;
+    return event;
+}
+
+IDataObject* detail::win32_make_drag_data_object(const DragPayload& payload) {
+    if (!payload.has_files() && !payload.has_text()) {
+        return nullptr;
+    }
+    return new Win32DragDataObject(payload);
+}
+
 struct Win32Backend::Impl {
     HINSTANCE instance = GetModuleHandleW(nullptr);
     std::atomic<DWORD> event_loop_thread_id{0};
@@ -1755,7 +2624,9 @@ struct Win32Backend::Impl {
     std::atomic<int> exit_code{0};
     std::atomic<bool> quit_requested{false};
     bool window_class_registered = false;
+    bool preferences_window_class_registered = false;
     bool ole_initialized = false;
+    bool app_user_model_id_set = false;
     mutable std::string clipboard_text_cache;
     mutable bool clipboard_text_cache_valid = false;
     mutable bool clipboard_native_write_failed = false;
@@ -1765,6 +2636,10 @@ struct Win32Backend::Impl {
     // app-global NSApp.mainMenu model used by macos_backend.mm.
     std::vector<NativeMenu> app_menu_model;
     NativeMenuActionHandler app_menu_handler;
+    // Hidden top-level window receiving WM_SETTINGCHANGE broadcasts; a real
+    // (never shown) window because message-only windows do not get broadcasts.
+    HWND preferences_window = nullptr;
+    PreferencesWatch* preferences_watch = nullptr;
 };
 
 Win32Backend::Win32Backend() : impl_(std::make_unique<Impl>()) {}
@@ -1794,6 +2669,18 @@ Result<void> Win32Backend::initialize() {
     }
     impl_->window_class_registered = true;
 
+    // The hidden preferences-watch window class; registration failure only
+    // disables native preference observation (Application falls back to
+    // polling), so it is not fatal.
+    WNDCLASSEXW preferences_class{};
+    preferences_class.cbSize = sizeof(preferences_class);
+    preferences_class.lpfnWndProc = &preferences_window_proc;
+    preferences_class.hInstance = impl_->instance;
+    preferences_class.lpszClassName = kPreferencesWindowClassName;
+    if (RegisterClassExW(&preferences_class) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS) {
+        impl_->preferences_window_class_registered = true;
+    }
+
     // OLE is required by the drop-target backend (RegisterDragDrop). OleInitialize
     // layers on top of CoInitializeEx; S_FALSE means the thread was already OLE-
     // initialized, which is fine. We only uninitialize when we own the init.
@@ -1806,11 +2693,16 @@ Result<void> Win32Backend::initialize() {
 }
 
 void Win32Backend::shutdown() {
+    stop_system_preferences_observation();
     impl_->app_menu_handler = {};
     impl_->app_menu_model.clear();
     if (impl_->ole_initialized) {
         OleUninitialize();
         impl_->ole_initialized = false;
+    }
+    if (impl_->preferences_window_class_registered) {
+        UnregisterClassW(kPreferencesWindowClassName, impl_->instance);
+        impl_->preferences_window_class_registered = false;
     }
     if (impl_->window_class_registered) {
         UnregisterClassW(kWindowClassName, impl_->instance);
@@ -1820,6 +2712,12 @@ void Win32Backend::shutdown() {
 
 std::unique_ptr<NativeSurface> Win32Backend::create_surface(const WindowConfig& config,
                                                             Window& owner) {
+    if (!config.app_id.empty() && !impl_->app_user_model_id_set) {
+        // Taskbar grouping and jump lists key off the explicit AppUserModelID;
+        // it must be set before the first window is created to take effect.
+        (void)SetCurrentProcessExplicitAppUserModelID(utf8_to_wide(config.app_id).c_str());
+        impl_->app_user_model_id_set = true;
+    }
     auto surface = std::make_unique<Win32Surface>(impl_->instance, config, owner);
     if (surface->hwnd() == nullptr) {
         NK_LOG_ERROR("Win32Backend", "Failed to create Win32 window surface");
@@ -1845,6 +2743,15 @@ int Win32Backend::run_event_loop(EventLoop& loop) {
                 impl_->quit_requested = true;
                 impl_->exit_code = static_cast<int>(message.wParam);
                 break;
+            }
+            // Translate menu accelerators before normal dispatch: a translated
+            // key becomes WM_COMMAND (already dispatched inside the call) and
+            // must not also reach the toolkit as a raw key event.
+            const auto& accelerators = accelerator_table_registry();
+            if (const auto accelerator = accelerators.find(message.hwnd);
+                accelerator != accelerators.end() &&
+                TranslateAcceleratorW(message.hwnd, accelerator->second, &message) != 0) {
+                continue;
             }
             TranslateMessage(&message);
             DispatchMessageW(&message);
@@ -1883,12 +2790,16 @@ void Win32Backend::show_open_file_dialog_async(std::string_view title,
                                                const std::vector<std::string>& filters,
                                                OpenFileDialogCallback callback) {
     std::string title_str = std::string(title);
+    // Capture the active window on the UI thread so the worker-spawned dialog
+    // is owned by (and modal to) the application window.
+    const HWND owner = GetActiveWindow();
     auto poster = file_dialog_task_poster();
     std::thread([title_str,
                  filters,
+                 owner,
                  poster = std::move(poster),
                  callback = std::move(callback)]() mutable {
-        auto result = show_modern_open_file_dialog(title_str, filters);
+        auto result = show_modern_open_file_dialog(title_str, filters, owner);
         post_file_dialog_result(poster, std::move(callback), std::move(result));
     }).detach();
 }
@@ -1899,11 +2810,13 @@ bool Win32Backend::supports_save_file_dialog() const {
 
 void Win32Backend::show_save_file_dialog_async(SaveFileDialogOptions options,
                                                SaveFileDialogCallback callback) {
+    const HWND owner = GetActiveWindow();
     auto poster = file_dialog_task_poster();
     std::thread([options = std::move(options),
+                 owner,
                  poster = std::move(poster),
                  callback = std::move(callback)]() mutable {
-        auto result = show_modern_save_file_dialog(options);
+        auto result = show_modern_save_file_dialog(options, owner);
         post_file_dialog_result(poster, std::move(callback), std::move(result));
     }).detach();
 }
@@ -1969,6 +2882,51 @@ void Win32Backend::set_clipboard_text(std::string_view text) {
 
 SystemPreferences Win32Backend::system_preferences() const {
     return query_system_preferences();
+}
+
+bool Win32Backend::supports_system_preferences_observation() const {
+    return impl_->preferences_window_class_registered;
+}
+
+void Win32Backend::start_system_preferences_observation(SystemPreferencesObserver observer) {
+    stop_system_preferences_observation();
+    if (!impl_->preferences_window_class_registered || !observer) {
+        return;
+    }
+    // The watch owns the observer and the dedup snapshot; the window procedure
+    // reaches it through GWLP_USERDATA, so the backend itself stays opaque.
+    auto* watch = new PreferencesWatch{};
+    watch->observer = std::move(observer);
+    watch->last_observed = query_system_preferences();
+    impl_->preferences_window =
+        CreateWindowExW(0,
+                        kPreferencesWindowClassName,
+                        L"",
+                        WS_OVERLAPPED, // hidden: never shown, but a real window so
+                                       // it receives WM_SETTINGCHANGE broadcasts
+                        0,
+                        0,
+                        0,
+                        0,
+                        nullptr,
+                        nullptr,
+                        impl_->instance,
+                        watch);
+    if (impl_->preferences_window == nullptr) {
+        delete watch;
+        return;
+    }
+    impl_->preferences_watch = watch;
+}
+
+void Win32Backend::stop_system_preferences_observation() {
+    if (impl_->preferences_window != nullptr) {
+        auto* watch = impl_->preferences_watch;
+        impl_->preferences_watch = nullptr;
+        DestroyWindow(impl_->preferences_window);
+        impl_->preferences_window = nullptr;
+        delete watch;
+    }
 }
 
 SpellChecker* Win32Backend::spell_checker() {

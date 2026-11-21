@@ -11,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <nk/foundation/types.h>
+#include <nk/platform/drag_drop.h>
 #include <nk/platform/events.h>
 #include <nk/platform/file_dialog.h>
 #include <nk/platform/native_menu.h>
@@ -146,6 +147,16 @@ public:
 
     /// Refresh the owning window's focused editor state after focus or text changes.
     virtual void text_input_state_changed() {}
+
+    /// Start a native system drag from this surface. Returns false when the
+    /// backend has no native drag for the payload (e.g. in-process application
+    /// data or no OS drag mechanism), in which case the caller falls back to
+    /// the toolkit's synthetic in-process drag. Implemented with DoDragDrop on
+    /// Windows for file and text payloads.
+    [[nodiscard]] virtual bool start_native_drag(const DragPayload& /*payload*/,
+                                                 DragOperation /*operation*/) {
+        return false;
+    }
 
     /// Apply a titlebar presentation style. Default no-op; macOS implements
     /// full-size content-view and transparent-titlebar variants.
