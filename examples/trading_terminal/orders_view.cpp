@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <nk/accessibility/accessible.h>
 #include <nk/foundation/types.h>
 #include <nk/model/abstract_list_model.h>
 #include <nk/model/selection_model.h>
@@ -128,9 +129,14 @@ void OrdersView::refresh() {
 
 void OrdersView::update_cancel_button() {
     const auto& selected = order_selection_->selected_rows();
-    cancel_button_->set_sensitive(
+    const bool working_selected =
         !selected.empty() && *selected.begin() < model_->orders().size() &&
-        model_->orders()[*selected.begin()].status == OrderStatus::Working);
+        model_->orders()[*selected.begin()].status == OrderStatus::Working;
+    cancel_button_->set_sensitive(working_selected);
+    const std::string hint = working_selected ? "Cancel the selected working order."
+                                              : "Select a working order to enable cancel.";
+    cancel_button_->set_tooltip(hint);
+    cancel_button_->ensure_accessible().set_description(hint);
 }
 
 void OrdersView::update_empty_state() {
