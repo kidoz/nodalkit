@@ -1,11 +1,13 @@
 /// @file win32_native_test.cpp
-/// @brief Windows-only behavioral tests for the native menu, spell checker, and
-/// drag-and-drop payload extraction backends.
+/// @brief Windows-only behavioral tests for the native menu, spell checker,
+/// drag-and-drop, IME conversion, and preference observation backends.
 ///
 /// These tests exercise the public PlatformBackend surface that the Windows
-/// backend overrides, plus the CF_HDROP file-drop parsing path. They run on any
-/// Windows build (no display or interactive drop required). Tagged
-/// `[windows]` so they can be filtered/selectively skipped on other platforms.
+/// backend overrides, plus the CF_HDROP file-drop parsing path and the
+/// testable nk::detail helpers (accelerator building, multi-click counting,
+/// preedit conversion, drag data object). They run on any Windows build (no
+/// display or interactive input required). Tagged `[windows]` so they can be
+/// filtered/selectively skipped on other platforms.
 
 #if defined(_WIN32)
 
@@ -186,6 +188,200 @@ TEST_CASE("DragQueryFileW enumerates a synthesized CF_HDROP payload", "[windows]
     REQUIRE(paths.size() == 2);
     REQUIRE(paths[0] == L"C:\\tmp\\alpha.txt");
     REQUIRE(paths[1] == L"D:\\data\\beta.bin");
+}
+
+TEST_CASE("Win32 virtual-key translation covers accelerator keys", "[windows][native]") {
+    using nk::KeyCode;
+    const auto vk = nk::detail::win32_virtual_key_for_key;
+    CHECK(vk(KeyCode::A) == 'A');
+    CHECK(vk(KeyCode::Z) == 'Z');
+    CHECK(vk(KeyCode::Num1) == '1');
+    // Num0 sits after Num9 in the KeyCode ordering and must not fall through.
+    CHECK(vk(KeyCode::Num0) == '0');
+    CHECK(vk(KeyCode::F1) == VK_F1);
+    CHECK(vk(KeyCode::F12) == VK_F12);
+    CHECK(vk(KeyCode::Return) == VK_RETURN);
+    CHECK(vk(KeyCode::NumpadEnter) == VK_RETURN);
+    CHECK(vk(KeyCode::Space) == VK_SPACE);
+    CHECK(vk(KeyCode::Minus) == VK_OEM_MINUS);
+    CHECK(vk(KeyCode::LeftBracket) == VK_OEM_4);
+    CHECK(vk(KeyCode::Numpad0) == VK_NUMPAD0);
+    CHECK(vk(KeyCode::Numpad9) == VK_NUMPAD9);
+    CHECK(vk(KeyCode::Up) == VK_UP);
+    // Keys without a virtual-code equivalent must map to 0 so accelerator
+    // building can reject them.
+    CHECK(vk(KeyCode::Unknown) == 0);
+    CHECK(vk(KeyCode::LeftCtrl) == 0);
+    CHECK(vk(KeyCode::LeftSuper) == 0);
+}
+
+TEST_CASE("Win32 accelerator building maps menu shortcuts", "[windows][native]") {
+    using nk::KeyCode;
+    using nk::NativeMenuModifier;
+    const auto build = nk::detail::win32_accel_for_shortcut;
+
+    ACCEL accel{};
+    REQUIRE(build({KeyCode::S, NativeMenuModifier::Ctrl | NativeMenuModifier::Shift}, 7, &accel));
+    CHECK(accel.fVirt == (FVIRTKEY | FCONTROL | FSHIFT));
+    CHECK(accel.key == 'S');
+    CHECK(accel.cmd == 7);
+
+    REQUIRE(build({KeyCode::F5, NativeMenuModifier::Alt}, 8, &accel));
+    CHECK(accel.fVirt == (FVIRTKEY | FALT));
+    CHECK(accel.key == VK_F5);
+
+    // Super has no Windows accelerator spelling; a bare key would swallow
+    // ordinary typing; modifier keys and Unknown have no virtual code.
+    CHECK_FALSE(
+        build({KeyCode::S, NativeMenuModifier::Ctrl | NativeMenuModifier::Super}, 7, &accel));
+    CHECK_FALSE(build({KeyCode::S, NativeMenuModifier::None}, 7, &accel));
+    CHECK_FALSE(build({KeyCode::LeftCtrl, NativeMenuModifier::Ctrl}, 7, &accel));
+    CHECK_FALSE(build({KeyCode::Unknown, NativeMenuModifier::Ctrl}, 7, &accel));
+    CHECK_FALSE(build({KeyCode::S, NativeMenuModifier::Ctrl}, 7, nullptr));
+}
+
+TEST_CASE("Win32 multi-click counting follows the double-click window", "[windows][native]") {
+    nk::detail::Win32ClickCounter counter;
+    constexpr std::uint64_t kDoubleMs = 500;
+    constexpr int kWidth = 8; // half-extent used by the counter: 4
+    constexpr int kHeight = 6;
+    constexpr std::uint64_t kStart = 1'000;
+
+    CHECK(counter.press(1, 100, 100, kStart, kDoubleMs, kWidth, kHeight) == 1);
+    CHECK(counter.press(1, 102, 101, kStart + 100, kDoubleMs, kWidth, kHeight) == 2);
+    CHECK(counter.press(1, 102, 101, kStart + 200, kDoubleMs, kWidth, kHeight) == 3);
+    // Too much time elapsed: fresh click.
+    CHECK(counter.press(1, 102, 101, kStart + 200 + kDoubleMs + 1, kDoubleMs, kWidth, kHeight) ==
+          1);
+    // Inside time but outside the double-click rectangle: fresh click.
+    CHECK(counter.press(1, 106, 100, kStart + 1'000, kDoubleMs, kWidth, kHeight) == 2);
+    CHECK(counter.press(1, 100, 100, kStart + 1'100, kDoubleMs, kWidth, kHeight) == 1);
+    CHECK(counter.press(1, 100, 100, kStart + 1'200, kDoubleMs, kWidth, kHeight) == 2);
+    // A different button restarts the sequence.
+    CHECK(counter.press(2, 100, 100, kStart + 1'300, kDoubleMs, kWidth, kHeight) == 1);
+    CHECK(counter.press(1, 100, 100, kStart + 1'400, kDoubleMs, kWidth, kHeight) == 1);
+}
+
+TEST_CASE("Win32 preedit conversion matches the toolkit contract", "[windows][native]") {
+    const auto convert = nk::detail::win32_preedit_event_from_composition;
+    using Type = nk::TextInputEvent::Type;
+
+    // Three BMP characters: cursor offsets are UTF-8 byte offsets.
+    const auto bmp = convert(L"あいう", 1);
+    CHECK(bmp.type == Type::Preedit);
+    CHECK(bmp.text == "あいう");
+    CHECK(bmp.selection_start == 3);
+    CHECK(bmp.selection_end == 3);
+
+    // Astral character: one code point spans two wchars and four UTF-8 bytes.
+    const auto astral = convert(L"𠮷あ", 2);
+    CHECK(astral.type == Type::Preedit);
+    CHECK(astral.selection_start == 4);
+    CHECK(astral.selection_end == 4);
+
+    // Negative or out-of-range cursors clamp to the end; empty clears.
+    const auto clamped = convert(L"あいう", -1);
+    CHECK(clamped.selection_start == 9);
+    CHECK(clamped.selection_end == 9);
+    const auto overflow = convert(L"あいう", 99);
+    CHECK(overflow.selection_start == 9);
+    CHECK(overflow.selection_end == 9);
+    const auto cleared = convert(L"", 0);
+    CHECK(cleared.type == Type::ClearPreedit);
+    CHECK(cleared.text.empty());
+}
+
+TEST_CASE("Win32 drag data object exposes files as CF_HDROP", "[windows][native]") {
+    std::vector<std::filesystem::path> files{L"C:\\tmp\\alpha.txt", L"D:\\data\\beta.bin"};
+    auto* data_object = nk::detail::win32_make_drag_data_object(nk::DragPayload::from_files(files));
+    REQUIRE(data_object != nullptr);
+
+    FORMATETC hdrop{
+        .cfFormat = CF_HDROP,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+    CHECK(data_object->QueryGetData(&hdrop) == S_OK);
+
+    STGMEDIUM medium{};
+    REQUIRE(data_object->GetData(&hdrop, &medium) == S_OK);
+    REQUIRE(medium.tymed == TYMED_HGLOBAL);
+    const UINT count = DragQueryFileW(static_cast<HDROP>(medium.hGlobal), 0xFFFFFFFF, nullptr, 0);
+    REQUIRE(count == 2);
+    std::wstring first(DragQueryFileW(static_cast<HDROP>(medium.hGlobal), 0, nullptr, 0), L'\0');
+    DragQueryFileW(
+        static_cast<HDROP>(medium.hGlobal), 0, first.data(), static_cast<UINT>(first.size()) + 1);
+    CHECK(first == L"C:\\tmp\\alpha.txt");
+    ReleaseStgMedium(&medium);
+
+    // A file payload offers no text format.
+    FORMATETC text{
+        .cfFormat = CF_UNICODETEXT,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+    CHECK(FAILED(data_object->QueryGetData(&text)));
+    data_object->Release();
+}
+
+TEST_CASE("Win32 drag data object exposes text as CF_UNICODETEXT", "[windows][native]") {
+    auto* data_object =
+        nk::detail::win32_make_drag_data_object(nk::DragPayload::from_text("hello win32"));
+    REQUIRE(data_object != nullptr);
+
+    FORMATETC text{
+        .cfFormat = CF_UNICODETEXT,
+        .ptd = nullptr,
+        .dwAspect = DVASPECT_CONTENT,
+        .lindex = -1,
+        .tymed = TYMED_HGLOBAL,
+    };
+    STGMEDIUM medium{};
+    REQUIRE(data_object->GetData(&text, &medium) == S_OK);
+    CHECK(nk::detail::read_global_unicode_text(medium.hGlobal) == "hello win32");
+    ReleaseStgMedium(&medium);
+
+    // The enumerator walks exactly the offered formats, GET direction only.
+    IEnumFORMATETC* enumerator = nullptr;
+    REQUIRE(data_object->EnumFormatEtc(DATADIR_GET, &enumerator) == S_OK);
+    FORMATETC seen[4]{};
+    ULONG fetched = 0;
+    REQUIRE(enumerator->Next(4, seen, &fetched) == S_FALSE);
+    CHECK(fetched == 1);
+    CHECK(seen[0].cfFormat == CF_UNICODETEXT);
+    CHECK(enumerator->Reset() == S_OK);
+    enumerator->Release();
+    data_object->Release();
+
+    // In-process application data cannot cross the OLE boundary.
+    auto* in_process = nk::detail::win32_make_drag_data_object(
+        nk::DragPayload::from_application_data("application/x-test", 7));
+    CHECK(in_process == nullptr);
+}
+
+TEST_CASE("Win32 backend observes system preferences through a hidden window",
+          "[windows][native]") {
+    auto backend = nk::PlatformBackend::create();
+    REQUIRE(backend != nullptr);
+    REQUIRE(backend->initialize());
+
+    REQUIRE(backend->supports_system_preferences_observation());
+    bool notified = false;
+    backend->start_system_preferences_observation(
+        [&notified](const nk::SystemPreferences&) { notified = true; });
+    // Starting observation seeds the snapshot; it must not emit on its own.
+    CHECK_FALSE(notified);
+    // Start/stop cycles must be clean (window destroyed, no leak into a poll).
+    backend->stop_system_preferences_observation();
+    backend->start_system_preferences_observation([](const nk::SystemPreferences&) {});
+    backend->stop_system_preferences_observation();
+    CHECK_FALSE(notified);
+
+    backend->shutdown();
 }
 
 #endif // defined(_WIN32)
