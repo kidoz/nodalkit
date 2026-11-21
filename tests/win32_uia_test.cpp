@@ -694,4 +694,37 @@ TEST_CASE("Win32 UIA exposes editor text through the Text pattern", "[windows][u
     SysFreeString(expanded_text);
 }
 
+TEST_CASE("Win32 UIA resolves labelled-by relations", "[windows][uia]") {
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "UIA relation probe", .width = 360, .height = 240});
+    auto root = probe_box();
+    auto label = nk::Label::create("Search query");
+    label->set_debug_name("search-query-label");
+    auto field = nk::TextField::create();
+    field->set_placeholder("Type here");
+    root->append(label);
+    root->append(field);
+    field->ensure_accessible().set_relation(nk::AccessibleRelationKind::LabelledBy,
+                                            std::string(label->debug_name()));
+    window.set_child(root);
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    UiaClient uia;
+    ComPtr<IUIAutomationElement> element;
+    require_ok(uia.get()->ElementFromHandle(nk::window_hwnd(window), &element));
+    auto field_element = uia.find_by_name(element.Get(), "Type here");
+    REQUIRE(field_element != nullptr);
+
+    VARIANT labeled_by{};
+    require_ok(field_element->GetCurrentPropertyValue(UIA_LabeledByPropertyId, &labeled_by));
+    REQUIRE(labeled_by.vt == VT_UNKNOWN);
+    REQUIRE(labeled_by.punkVal != nullptr);
+    // The resolved target is the label widget's element. VariantClear owns
+    // the single release of the client-side wrapper.
+    const auto label_element = static_cast<IUIAutomationElement*>(labeled_by.punkVal);
+    CHECK(narrow(uia.string_property(label_element, UIA_NamePropertyId)) == "Search query");
+    VariantClear(&labeled_by);
+}
+
 #endif // defined(_WIN32)

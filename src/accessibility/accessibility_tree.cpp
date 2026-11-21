@@ -167,6 +167,7 @@ std::optional<AccessibleNodeInfo> AccessibilityTree::info(AccessibleId id) const
     // Editors report secure (password) input, caret, and selection through
     // their text-input state; other widgets have none.
     const auto text_state = widget->text_input_state();
+    const auto relations = accessible.relations();
     return AccessibleNodeInfo{
         .role = accessible.role(),
         .type_name = widget_type_name(*widget),
@@ -185,6 +186,7 @@ std::optional<AccessibleNodeInfo> AccessibilityTree::info(AccessibleId id) const
         .secure = text_state.has_value() && text_state->secure,
         .text_cursor = text_state.has_value() ? text_state->cursor : std::optional<std::size_t>{},
         .text_anchor = text_state.has_value() ? text_state->anchor : std::optional<std::size_t>{},
+        .relations = {relations.begin(), relations.end()},
     };
 }
 

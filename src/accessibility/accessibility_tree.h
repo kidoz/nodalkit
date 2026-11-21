@@ -48,6 +48,8 @@ struct AccessibleNodeInfo {
     // nullopt for elements without a text-input state.
     std::optional<std::size_t> text_cursor;
     std::optional<std::size_t> text_anchor;
+    // Debug-visible semantic relations to other widgets.
+    std::vector<AccessibleRelation> relations;
 };
 
 // Platform-neutral structure behind native accessibility bridges. UI thread only.

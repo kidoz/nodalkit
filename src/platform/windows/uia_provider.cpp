@@ -216,6 +216,11 @@ struct UiaSite {
     }
 };
 
+/// Provider for the first exposed element matching a debug name (relation
+/// targets); defined below the fragment class.
+[[nodiscard]] IRawElementProviderSimple* find_exposed_by_debug_name(UiaSite& site,
+                                                                    std::string_view name);
+
 // --- Pattern adapters --------------------------------------------------------
 // IValueProvider and IRangeValueProvider both declare get_IsReadOnly(BOOL*),
 // so they cannot be implemented on one C++ class; every pattern is a separate
@@ -1592,6 +1597,22 @@ public:
         case UIA_IsPasswordPropertyId:
             set_bool(variant.get(), info->secure ? TRUE : FALSE);
             break;
+        case UIA_LabeledByPropertyId: {
+            // Resolve the first LabelledBy relation target by debug name —
+            // the shared model stores relations as debug-name references.
+            for (const auto& relation : info->relations) {
+                if (relation.kind != AccessibleRelationKind::LabelledBy) {
+                    continue;
+                }
+                if (const auto target =
+                        find_exposed_by_debug_name(*site_, relation.target_debug_name)) {
+                    variant.get()->vt = VT_UNKNOWN;
+                    variant.get()->punkVal = target;
+                    break; // VARIANT owns this reference
+                }
+            }
+            break;
+        }
         default:
             break; // VT_EMPTY: UIA falls back to its defaults for this element
         }
@@ -2050,7 +2071,6 @@ private:
     UiaLiveness alive_;
 };
 
-namespace {
 UiaFragment* ensure_fragment(UiaSite& site, AccessibleId id) {
     if (const auto found = site.providers.find(id); found != site.providers.end()) {
         return static_cast<UiaFragment*>(found->second);
@@ -2059,7 +2079,33 @@ UiaFragment* ensure_fragment(UiaSite& site, AccessibleId id) {
     site.providers.emplace(id, provider);
     return provider;
 }
-} // namespace
+
+/// Provider for the first exposed element whose debug name matches, with an
+/// extra reference for the caller (relation properties hand the reference to
+/// the receiving VARIANT). Null when nothing matches.
+[[nodiscard]] IRawElementProviderSimple* find_exposed_by_debug_name(UiaSite& site,
+                                                                    std::string_view name) {
+    if (name.empty()) {
+        return nullptr; // unnamed targets cannot be resolved
+    }
+    std::vector<AccessibleId> stack = site.tree->root_children();
+    while (!stack.empty()) {
+        const auto id = stack.back();
+        stack.pop_back();
+        const auto info = site.tree->info(id);
+        if (info.has_value()) {
+            if (info->debug_name == name) {
+                auto* provider = site.fragment_for(id);
+                provider->AddRef();
+                return provider;
+            }
+            for (const auto child : site.tree->children(id)) {
+                stack.push_back(child);
+            }
+        }
+    }
+    return nullptr;
+}
 
 IRawElementProviderSimple* UiaSite::fragment_for(AccessibleId id) {
     return ensure_fragment(*this, id);
