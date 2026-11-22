@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-11-22
+
+The sixth patch release of the NodalKit framework. 0.7.1 keeps the widget
+tree, layout system, theming, diagnostics, and platform integration of 0.7.0
+and fixes overlay hit testing so a painted popup keeps the clicks that land on
+it. Windows that present an overlay resolved pointer input without the
+focused-control priority the plain-window path applies, so a sibling control
+painted after a popup's owner could claim presses that visibly landed on a
+popup row; the focused control now wins inside its own hit area first, and a
+combo box dropdown opened inside a dialog selects its item instead of
+activating the control beneath.
+
+### Support Matrix for 0.7.1
+*   **Linux Wayland:** Primary Release Target, CI-tested against a real
+    headless Wayland compositor with a software Vulkan device.
+*   **macOS:** Secondary Release Target (supported while CI remains green).
+*   **Windows:** Secondary Release Target (supported while CI remains green).
+    Win32 integration covers menus with keyboard accelerators, IMM32 IME
+    (including focus-loss and secure-editor composition cancellation),
+    clipboard, dialogs, drag & drop, high-DPI, dark-mode chrome, system
+    preference observation, and a UI Automation accessibility provider.
+    MSVC (`cl`) builds and passes the full suite under `/W4 /WX` with an
+    advisory CI lane; ARM64 and MinGW remain untested; see the Windows
+    support matrix.
+*   **X11 & OpenGL:** No support claims are made for X11 or OpenGL backends.
+*   **GPU Parity:** Linux Vulkan and macOS Metal remain experimental and
+    earlier in correctness confidence than the software render paths.
+*   **Accessibility:** Linux AT-SPI, macOS NSAccessibility, and Windows UI
+    Automation ship.
+
+### Fixed
+*   **Overlay Hit Testing:** windows presenting an overlay (a dialog, for
+    example) resolved clicks through the overlay hit test, which — unlike the
+    plain-window path — did not give the focused control priority inside its
+    own hit area. A painted popup extends its owner's hit test past the
+    owner's allocation, so a sibling control painted after the owner could
+    claim a click that visually landed on a combo box dropdown row: the row
+    was drawn over the control, but the control received the press and the
+    popup never selected the item. The overlay path now returns the focused
+    control when the point falls inside its own hit area and the control
+    descends from the overlay item under test, matching the plain-window
+    ordering; the control painted beneath the list no longer steals the click.
+
+### Changed
+*   **Test Coverage:** `tests/basic_app_test.cpp` drives a combo box inside a
+    dialog whose popup row overlaps the button that follows it, verifying the
+    popup row is painted over the sibling, the click selects the item, and the
+    button beneath never fires.
+
 ## [0.7.0] - 2026-11-21
 
 The seventh normal release of the NodalKit framework. 0.7.0 keeps the widget
