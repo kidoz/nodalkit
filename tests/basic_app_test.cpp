@@ -2695,6 +2695,59 @@ TEST_CASE("ComboBox resets popup state when the item list is replaced", "[app][c
     REQUIRE(combo->selected_index() == 0);
 }
 
+TEST_CASE("ComboBox popup click selects the item painted over a sibling control",
+          "[app][combo][input]") {
+    ScopedTestEnvVar renderer_backend_override("NK_RENDERER_BACKEND");
+    REQUIRE(renderer_backend_override.set("software") == 0);
+
+    nk::Application app(0, nullptr);
+    nk::Window window({.title = "Combo popup click", .width = 420, .height = 320});
+    window.set_child(nk::Label::create("Root"));
+    window.present();
+    REQUIRE(app.event_loop().poll());
+
+    // Inside a dialog the overlay hit test resolves clicks without the focused
+    // widget priority the plain window path uses. A popup hangs over widgets
+    // appended after the combo, so the hit test must not hand the click to the
+    // control painted beneath the list.
+    auto dialog = nk::Dialog::create("Settings");
+    auto body = TestContainer::create();
+    body->set_layout_manager(std::make_unique<nk::BoxLayout>(nk::Orientation::Vertical));
+
+    auto combo = nk::ComboBox::create();
+    combo->set_items({"Pixel Perfect", "Smooth", "xBRZ 2x", "FSR 2x"});
+    body->append(combo);
+
+    auto beneath = nk::Button::create("Beneath");
+    int beneath_clicks = 0;
+    auto conn = beneath->on_clicked().connect([&] { ++beneath_clicks; });
+    (void)conn;
+    body->append(beneath);
+
+    dialog->set_content(body);
+    dialog->present(window);
+    REQUIRE(app.event_loop().poll());
+
+    const auto field = combo->allocation();
+    REQUIRE(field.height > 0.0F);
+
+    // Opening the popup paints the item list over the widgets below the field.
+    dispatch_click(window, {field.x + 18.0F, field.y + (field.height * 0.5F)});
+    REQUIRE(app.event_loop().poll());
+    REQUIRE(window.inspector().dump_selected_frame_render_snapshot().find("Smooth") !=
+            std::string::npos);
+
+    // Center of the first popup row (popup y offset +4, 1 px inset, 28 px row
+    // height). It paints over the button that follows the combo in the layout.
+    const nk::Point first_row{field.x + 18.0F, field.bottom() + 4.0F + 1.0F + 14.0F};
+    REQUIRE(beneath->allocation().contains(first_row));
+
+    dispatch_click(window, first_row);
+
+    REQUIRE(combo->selected_index() == 0);
+    REQUIRE(beneath_clicks == 0);
+}
+
 TEST_CASE("ImageView measure clamps the natural size to parent constraints", "[app][image]") {
     auto image = nk::ImageView::create();
     std::vector<uint32_t> pixels(800U * 600U, 0xFFAABBCCU);

@@ -3677,6 +3677,16 @@ void Window::dispatch_mouse_event(const MouseEvent& event) {
             if (it->widget == nullptr || !it->widget->is_visible()) {
                 continue;
             }
+            // The focused control owns the pointer inside its own hit area
+            // first, matching the plain-window path below. Painted popups (a
+            // combo box dropdown, for example) extend their owner's hit test
+            // past its allocation, so a sibling painted after the owner must
+            // not steal the click from the list drawn over it.
+            if (impl_->focused_widget != nullptr &&
+                is_descendant_of(impl_->focused_widget, it->widget.get()) &&
+                impl_->focused_widget->hit_test(point)) {
+                return impl_->focused_widget;
+            }
             if (auto* hit = hit_test_widget(it->widget.get(), point)) {
                 return hit;
             }
